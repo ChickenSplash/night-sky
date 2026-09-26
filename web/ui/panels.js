@@ -11,7 +11,6 @@ const RATES = [
 ];
 const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'constellation']];
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Task labels']];
-const STATUS = [['In progress', [92, 213, 242]], ['To do', [169, 154, 238]], ['Complete', [100, 220, 169]]];
 const HELP = [['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Down / up'],
   ['Shift', 'Boost'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 const LIST_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
@@ -38,6 +37,8 @@ const ICONS = {
   menu: 'M4 6h16v2H4zM4 11h16v2H4zM4 16h16v2H4z',
   close: 'M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z',
   chevron: 'M9.3 6.7 10.7 5.3 17.4 12l-6.7 6.7-1.4-1.4 5.3-5.3z',
+  frame: 'M11 2h2v5h-2zM11 17h2v5h-2zM2 11h5v2H2zM17 11h5v2h-5zM12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4z',
+  back: 'M14.7 6.7 13.3 5.3 6.6 12l6.7 6.7 1.4-1.4L9.4 12z',
   gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z',
 };
 const icon = name => {
@@ -84,7 +85,7 @@ function dueShort(ms) {
 }
 
 function loadPrefs() {
-  const defaults = { open: true, tab: 'lists', listSort: 'default', taskSort: 'default', group: true, allLists: false };
+  const defaults = { open: true, tab: 'lists', listSort: 'default', taskSort: 'default', group: true };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(PREFS) || '{}') };
   } catch {
@@ -93,8 +94,8 @@ function loadPrefs() {
 }
 
 function dueText(ms) {
-  const days = (ms - Date.now()) / 86_400_000;
-  return days < 0 ? `Due date: ${(-days).toFixed(1)} days ago` : `Due in ${days.toFixed(1)} days`;
+  const date = new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${date} · ${dueShort(ms)[0].toLowerCase()}`;
 }
 
 // Renders only the rows in view: a live list can hold over a thousand tasks.
@@ -145,15 +146,62 @@ export function mount(bridge, canvas) {
   const prefs = loadPrefs();
   const save = () => localStorage.setItem(PREFS, JSON.stringify(prefs));
   const round = (name, label, className = 'round') => el('button', { className, title: label, ariaLabel: label }, icon(name));
+  // A styled dropdown: the browser's own <select> menu cannot be themed.
+  let openMenu = null;
+  const dropdown = (label, options, onChange) => {
+    const text = el('span');
+    const button = el('button', { className: 'dropdown', title: label, ariaLabel: label }, text, icon('chevron'));
+    button.setAttribute('aria-haspopup', 'listbox');
+    const menu = el('div', { className: 'menu floating', role: 'listbox', hidden: true });
+    const node = el('div', { className: 'dropdown-wrap' }, button, menu);
+    let value;
+    const items = options.map(([label, option]) => {
+      const item = el('button', { role: 'option', textContent: label });
+      item.addEventListener('click', () => {
+        close();
+        if (option !== value) onChange(option);
+      });
+      menu.append(item);
+      return [option, label, item];
+    });
+    const close = () => {
+      menu.hidden = true;
+      button.setAttribute('aria-expanded', false);
+      if (openMenu === close) openMenu = null;
+    };
+    button.addEventListener('click', () => {
+      if (!menu.hidden) return close();
+      openMenu?.();
+      menu.hidden = false;
+      button.setAttribute('aria-expanded', true);
+      openMenu = close;
+    });
+    node.set = next => {
+      value = next;
+      for (const [option, label, item] of items) {
+        item.setAttribute('aria-selected', option === next);
+        if (option === next) text.textContent = label;
+      }
+    };
+    return node;
+  };
+  document.addEventListener('pointerdown', event => {
+    if (openMenu && !event.target.closest?.('.dropdown-wrap')) openMenu();
+  }, true);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      openMenu?.();
+      if (!modal.hidden) setModal(false);
+    }
+  });
   const select = (label, options, key, onChange) => {
-    const node = el('select', { ariaLabel: label, title: label },
-      ...options.map(([text, value]) => el('option', { value, textContent: text })));
-    node.value = prefs[key];
-    node.addEventListener('change', () => {
-      prefs[key] = node.value;
+    const node = dropdown(label, options, value => {
+      prefs[key] = value;
+      node.set(value);
       save();
       onChange();
     });
+    node.set(prefs[key]);
     return node;
   };
   const chip = (label, key) => {
@@ -182,22 +230,20 @@ export function mount(bridge, canvas) {
   const tasksTab = tabButton('tasks', 'Tasks');
   const listFilter = el('input', { type: 'search', placeholder: 'Filter lists…', ariaLabel: 'Filter lists' });
   const listSort = select('Sort lists', LIST_SORTS, 'listSort', () => renderLists());
-  const atlas = el('button', { className: 'item', textContent: 'Interstellar atlas' });
   const lists = el('div', { className: 'lists' });
   const taskTitle = el('p', { className: 'tab-title' });
   const taskSearch = el('input', { type: 'search', placeholder: 'Filter tasks…', ariaLabel: 'Search tasks' });
   const taskSort = select('Sort tasks', TASK_SORTS, 'taskSort', () => renderIndex(true));
   const groupChip = chip('Group by status', 'group');
-  const scopeChip = chip('All lists', 'allLists');
   const taskCount = el('p', { className: 'muted small' });
   const taskBox = el('div', { className: 'tasks' });
   const notice = el('p', { className: 'notice small' });
   const listsBody = el('section', { className: 'tab-body' },
-    el('div', { className: 'toolbar' }, listFilter, listSort), atlas, lists);
+    el('div', { className: 'toolbar' }, listFilter, listSort), lists);
   const tasksBody = el('section', { className: 'tab-body' },
     taskTitle,
     el('div', { className: 'toolbar' }, taskSearch, taskSort),
-    el('div', { className: 'row' }, groupChip, scopeChip),
+    el('div', { className: 'row' }, groupChip),
     taskCount, taskBox);
   const nav = el('aside', { id: 'nav-panel', className: 'panel floating' },
     el('header', {}, el('div', {}, el('h1', { textContent: 'ClickUp / Space' }), source), hide),
@@ -241,24 +287,17 @@ export function mount(bridge, canvas) {
     gear.setAttribute('aria-expanded', open);
   };
 
-  // Inspector: telemetry for the current page and the selected task.
-  const systemName = el('h3');
-  const views = el('div', { className: 'row' }, ...VIEWS.map(([label, view]) => {
-    const button = el('button', { textContent: label });
-    button.dataset.view = view;
-    button.addEventListener('click', () => send({ type: 'set_view', view }));
-    return button;
-  }));
-  const previous = el('button', { textContent: '‹', title: 'Previous page', ariaLabel: 'Previous page' });
-  const next = el('button', { textContent: '›', title: 'Next page', ariaLabel: 'Next page' });
-  const pageLabel = el('span');
-  const stats = el('div', { className: 'stats muted' });
-  const frame = el('button', { textContent: 'Frame orbital system' });
-  const detail = el('div', { className: 'detail' });
-  const inspector = el('aside', { id: 'inspector', className: 'panel' },
-    heading('03 / Telemetry'), systemName, views,
-    el('div', { className: 'row pager' }, previous, pageLabel, next),
-    stats, frame, el('hr'), detail);
+  // Task details: a modal opened from the task pill.
+  const closeModal = round('close', 'Close details', 'round small');
+  const modalBody = el('div', { className: 'modal-body' });
+  const modal = el('div', { id: 'task-modal', hidden: true },
+    el('div', { className: 'panel floating card', role: 'dialog', ariaLabel: 'Task details' }, closeModal, modalBody));
+  let modalKey = null;
+  const setModal = open => {
+    modal.hidden = !open;
+    modalKey = null;
+    if (open) renderModal();
+  };
 
   // Time controls: a pill floating over the bottom of the 3D view.
   const control = (name, label) => el('button', { className: 'round', title: label, ariaLabel: label }, icon(name));
@@ -271,12 +310,43 @@ export function mount(bridge, canvas) {
   const speed = el('span', { className: 'speed' });
   const bar = el('footer', { id: 'time-bar', className: 'panel floating' },
     el('div', { className: 'readout' }, clock, speed), slower, pause, faster, realTime);
+  // Where you are: list and page, view mode with page arrows, selected task.
+  const whereList = el('span', { className: 'name' });
+  const wherePage = el('span', { className: 'meta' });
+  const viewSelect = dropdown('View mode', [...VIEWS, ['Interstellar atlas', 'atlas']], value => send(value === 'atlas'
+    ? { type: 'atlas' } : { type: 'set_view', view: value }));
+  const pageBack = round('back', 'Previous page', 'round small');
+  const pageOn = round('chevron', 'Next page', 'round small');
+  const frame = round('frame', 'Frame orbital system', 'round small');
+  const whereTask = el('span', { className: 'name' });
+  const taskDot = el('span', { className: 'dot' });
+  const where = el('div', { id: 'where' },
+    el('div', { className: 'panel floating pill list-pill' }, whereList, wherePage),
+    el('div', { className: 'panel floating pill view-pill' }, pageBack, viewSelect, pageOn, frame),
+    el('button', { className: 'panel floating pill task-pill', title: 'Show task details' }, taskDot, whereTask));
+  const renderWhere = () => {
+    const pages = state.pages || [];
+    const current = Math.max(0, pages.indexOf(state.page));
+    whereList.textContent = state.atlas ? 'Interstellar atlas' : state.system?.name ?? 'No list';
+    wherePage.textContent = state.atlas || !state.system ? '' : `System ${current + 1} / ${Math.max(pages.length, 1)}`;
+    whereList.parentElement.title = whereList.textContent;
+    viewSelect.set(state.atlas ? 'atlas' : state.view);
+    pageBack.disabled = state.atlas || current <= 0;
+    pageOn.disabled = state.atlas || current + 1 >= pages.length;
+    pageBack.onclick = () => send({ type: 'show_page', page: pages[current - 1] });
+    pageOn.onclick = () => send({ type: 'show_page', page: pages[current + 1] });
+    const task = state.selected;
+    whereTask.textContent = task?.name ?? 'No planet selected';
+    whereTask.parentElement.classList.toggle('none', !task);
+    whereTask.parentElement.disabled = !task;
+    taskDot.style.color = task ? rgb(task.colour) : '';
+  };
   const viewCaption = el('div', { className: 'caption top' });
   const rangeCaption = el('div', { className: 'caption bottom' });
   const empty = el('div', { id: 'empty-universe', hidden: true },
     el('h3', { textContent: 'Loading your universe' }),
     el('p', { className: 'muted', textContent: 'Systems appear as each list finishes loading.' }));
-  hud.append(nav, opener, gear, settings, inspector, bar, viewCaption, rangeCaption, empty);
+  hud.append(nav, opener, gear, settings, where, modal, bar, viewCaption, rangeCaption, empty);
 
   // Rows are reused while their list is unchanged: lists arrive one by one
   // while ClickUp loads, and a rebuilt row would swallow a click in progress.
@@ -311,18 +381,16 @@ export function mount(bridge, canvas) {
     highlightLists();
   };
   const highlightLists = () => {
-    atlas.classList.toggle('active', !!state.atlas);
     for (const [id, { row }] of listRows) row.classList.toggle('active', !state.atlas && id === state.list);
   };
 
-  // Tasks of the current list, or of every list, optionally grouped by status.
+  // Tasks of the current list, optionally grouped by status.
   const collapsed = new Set();
-  const taskRow = ({ list, listName, task }) => {
+  const taskRow = ({ list, task }) => {
     const [due, dueClass] = task.due_date_ms != null ? dueShort(task.due_date_ms) : [null, ''];
-    const meta = prefs.allLists ? listName : due;
     const row = el('button', { className: 'task', title: task.name },
       el('span', { className: 'dot' }), el('span', { className: 'name', textContent: task.name }),
-      meta ? el('span', { className: `meta ${prefs.allLists ? '' : dueClass}`, textContent: meta }) : null);
+      due ? el('span', { className: `meta ${dueClass}`, textContent: due }) : null);
     row.style.color = rgb(task.colour);
     row.dataset.list = list;
     row.dataset.task = task.id;
@@ -345,13 +413,13 @@ export function mount(bridge, canvas) {
   };
   const rowKey = item => (item.group
     ? `group\n${item.key}\n${item.name}\n${item.colour}\n${item.tasks.length}\n${collapsed.has(item.key)}`
-    : [item.list, item.task.id, item.task.name, item.task.colour, item.task.due_date_ms, prefs.allLists && item.listName].join('\n'));
+    : [item.list, item.task.id, item.task.name, item.task.colour, item.task.due_date_ms].join('\n'));
   const index = virtualList(taskBox, item => (item.group ? groupRow(item) : taskRow(item)), rowKey);
   let matches = [];
   let indexKey = null;
   const renderIndex = (force, keepScroll) => {
     const query = taskSearch.value.trim().toLowerCase();
-    const key = [query, prefs.allLists ? '*' : state.list, prefs.taskSort, prefs.group, prefs.allLists].join('\n');
+    const key = [query, state.list, prefs.taskSort, prefs.group].join('\n');
     // Leave the rows in place when only the selection changed, so a click in
     // progress is not lost to a rebuilt row.
     if (!force && key === indexKey) {
@@ -359,11 +427,10 @@ export function mount(bridge, canvas) {
       return;
     }
     indexKey = key;
-    matches = galaxy.lists
-      .filter(list => prefs.allLists || list.id === state.list)
-      .flatMap(list => list.tasks
-        .filter(task => !query || task.name.toLowerCase().includes(query))
-        .map(task => ({ list: list.id, listName: list.name, task })));
+    const current = galaxy.lists.find(list => list.id === state.list);
+    matches = (current?.tasks ?? [])
+      .filter(task => !query || task.name.toLowerCase().includes(query))
+      .map(task => ({ list: current.id, task }));
     const due = item => item.task.due_date_ms ?? Number.MAX_SAFE_INTEGER;
     if (prefs.taskSort === 'name') matches.sort((a, b) => a.task.name.localeCompare(b.task.name));
     if (prefs.taskSort === 'due') matches.sort((a, b) => due(a) - due(b));
@@ -385,8 +452,7 @@ export function mount(bridge, canvas) {
       // Enter picks the first task the user can see.
       matches = items.filter(item => !item.group);
     }
-    const current = galaxy.lists.find(list => list.id === state.list);
-    taskTitle.textContent = prefs.allLists ? 'All lists' : current?.name ?? 'No list selected';
+    taskTitle.textContent = current?.name ?? 'No list selected';
     tasksTab.querySelector('small').textContent = current?.tasks.length ?? '';
     const folded = total - matches.length;
     taskCount.textContent = `${total} task${total === 1 ? '' : 's'}${query ? ' matching' : ''}${folded ? ` · ${folded} folded` : ''}`;
@@ -399,63 +465,51 @@ export function mount(bridge, canvas) {
     }
   };
 
-  const renderInspector = () => {
-    const system = state.system;
-    systemName.textContent = system?.name ?? '';
-    for (const button of views.children) button.classList.toggle('active', !state.atlas && button.dataset.view === state.view);
-    const pages = state.pages || [];
-    const current = Math.max(0, pages.indexOf(state.page));
-    pageLabel.textContent = `Page ${current + 1} / ${Math.max(pages.length, 1)}`;
-    previous.disabled = current <= 0;
-    next.disabled = current + 1 >= pages.length;
-    previous.onclick = () => send({ type: 'show_page', page: pages[current - 1] });
-    next.onclick = () => send({ type: 'show_page', page: pages[current + 1] });
-    if (system) {
-      const [x, y, z] = system.star_ly.map(v => (v >= 0 ? '+' : '') + v.toFixed(2));
-      stats.replaceChildren(
-        el('p', { textContent: `System ${state.page + 1} · ${system.page_tasks} of ${system.tasks} tasks` }),
-        el('p', { textContent: `${system.mass_solar.toFixed(2)} solar masses` }),
-        el('p', { className: 'mono', textContent: `Page star position (ly)\n${x}  ${y}  ${z}` }),
-        el('p', { className: 'mono', textContent: `Page ${state.page + 1} plane tilt ${system.tilt_deg.toFixed(0)}°, node ${system.node_deg.toFixed(0)}°` }));
-    }
+  const facts = rows => el('dl', {}, ...rows.filter(([, value]) => value != null)
+    .flatMap(([label, value]) => [el('dt', { textContent: label }), el('dd', { textContent: value })]));
+  const renderModal = () => {
     const task = state.selected;
-    if (!task) {
-      detail.replaceChildren(
-        el('h3', { textContent: 'Select a planet' }),
-        el('p', { className: 'muted', textContent: 'Click a wireframe, its marker, or a task in the index to inspect it.' }),
-        heading('Status signals'),
-        ...STATUS.map(([text, colour]) => el('p', { textContent: text, style: `color: ${rgb(colour)}` })),
-        el('p', { className: 'muted small', textContent: 'Live lists use their ClickUp status colours.' }));
-      return;
-    }
+    if (!task) return setModal(false);
+    const system = state.system;
+    const key = JSON.stringify([task, system, state.page, state.following]);
+    if (modal.hidden || key === modalKey) return;
+    modalKey = key;
     const follow = el('button', { textContent: state.following ? '◎ Following' : '◎ Follow this planet' });
     follow.classList.toggle('active', !!state.following);
     follow.addEventListener('click', () => send({ type: 'follow' }));
-    const elements = [
-      ['Semi-major axis', `${task.semi_major_au.toFixed(3)} AU`],
-      ['Eccentricity', task.eccentricity.toFixed(3)],
-      ['Orbital period', `${task.period_days.toFixed(1)} days`],
-      ['Physical radius', `${task.radius_km.toFixed(0)} km`],
-    ];
-    detail.replaceChildren(...[
-      heading('Selected task'),
-      el('h3', { textContent: task.name }),
+    const star = system?.star_ly.map(v => (v >= 0 ? '+' : '') + v.toFixed(2)).join('  ');
+    modalBody.replaceChildren(...[
       el('p', { className: 'status', textContent: task.status.toUpperCase(), style: `color: ${rgb(task.colour)}` }),
-      task.description ? el('p', { className: 'description', textContent: task.description }) : null,
-      el('hr'),
-      el('p', { textContent: `Assigned: ${task.assignees.length ? task.assignees.join(', ') : 'Nobody'}` }),
-      task.due_date_ms != null ? el('p', { textContent: dueText(task.due_date_ms) }) : null,
-      heading('Orbital elements'),
-      el('dl', {}, ...elements.flatMap(([label, value]) => [el('dt', { textContent: label }), el('dd', { textContent: value })])),
-      follow,
-      task.url ? el('a', { href: task.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Open task in ClickUp ↗' }) : null,
+      el('h3', { textContent: task.name }),
+      el('p', { className: task.description ? 'description' : 'muted', textContent: task.description || 'No description.' }),
+      el('div', { className: 'columns' },
+        el('section', {}, heading('Task'), facts([
+          ['Assigned', task.assignees.length ? task.assignees.join(', ') : 'Nobody'],
+          ['Due', task.due_date_ms != null ? dueText(task.due_date_ms) : 'No due date'],
+          ['List', system?.name],
+        ])),
+        el('section', {}, heading('Planet'), facts([
+          ['Semi-major axis', `${task.semi_major_au.toFixed(3)} AU`],
+          ['Eccentricity', task.eccentricity.toFixed(3)],
+          ['Orbital period', `${task.period_days.toFixed(1)} days`],
+          ['Physical radius', `${task.radius_km.toFixed(0)} km`],
+        ])),
+        system ? el('section', {}, heading('Host system'), facts([
+          ['Page', `System ${state.page + 1} · ${system.page_tasks} of ${system.tasks} tasks`],
+          ['Star mass', `${system.mass_solar.toFixed(2)} solar masses`],
+          ['Star position', `${star} ly`],
+          ['Orbital plane', `tilt ${system.tilt_deg.toFixed(0)}°, node ${system.node_deg.toFixed(0)}°`],
+        ])) : null),
+      el('div', { className: 'row actions' }, follow,
+        task.url ? el('a', { href: task.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Open in ClickUp ↗' }) : null),
     ].filter(Boolean));
   };
 
   const renderState = () => {
     highlightLists();
     renderIndex(false);
-    renderInspector();
+    renderWhere();
+    renderModal();
     for (const input of settings.querySelectorAll('.toggle input')) input.checked = !!state.display?.[input.dataset.option];
     const step = rateStep(state.rate);
     slower.disabled = step === 0;
@@ -470,8 +524,12 @@ export function mount(bridge, canvas) {
     viewCaption.textContent = caption(state);
   };
 
-  atlas.addEventListener('click', () => send({ type: 'atlas' }));
   frame.addEventListener('click', () => send({ type: 'frame_system' }));
+  whereTask.parentElement.addEventListener('click', () => setModal(true));
+  closeModal.addEventListener('click', () => setModal(false));
+  modal.addEventListener('pointerdown', event => {
+    if (event.target === modal) setModal(false);
+  });
   pause.addEventListener('click', () => send({ type: 'set_paused', paused: !state.paused }));
   const stepRate = by => send({ type: 'set_rate', rate: RATES[rateStep(state.rate) + by][1] });
   slower.addEventListener('click', () => stepRate(-1));
@@ -480,10 +538,6 @@ export function mount(bridge, canvas) {
   listFilter.addEventListener('input', renderLists);
   hide.addEventListener('click', () => setOpen(false));
   opener.addEventListener('click', () => setOpen(true));
-  // The 3D view re-fits once the sidebar has finished sliding.
-  nav.addEventListener('transitionend', event => {
-    if (event.target === nav) report();
-  });
   gear.addEventListener('click', () => setSettings(settings.hidden));
   closeSettings.addEventListener('click', () => setSettings(false));
   // Capture, because the canvas swallows pointer events for the 3D controls.
@@ -528,20 +582,9 @@ export function mount(bridge, canvas) {
     rangeCaption.textContent = `Camera range ${range} / ${mode}`;
   });
 
-  // The 3D view fits the space the side panels leave uncovered; the time bar
-  // floats over it.
-  const report = () => {
-    const box = canvas.getBoundingClientRect();
-    send({
-      type: 'panels',
-      top: 0,
-      left: prefs.open ? Math.max(0, nav.getBoundingClientRect().right - box.left) : 0,
-      right: Math.max(0, box.right - inspector.getBoundingClientRect().left),
-      bottom: 0,
-    });
-  };
+  // Every panel floats over the full-window 3D view. Reporting the insets also
+  // tells Rust to skip its egui panels.
+  send({ type: 'panels', top: 0, right: 0, bottom: 0, left: 0 });
   showTab(prefs.tab);
   setOpen(prefs.open);
-  new ResizeObserver(report).observe(hud);
-  new ResizeObserver(report).observe(canvas);
 }

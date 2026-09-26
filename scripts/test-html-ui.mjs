@@ -84,25 +84,31 @@ try {
     await settle();
     assert.equal(await lists.nth(1).evaluate(b => b.parentElement.classList.contains('active')), true);
   }
-  await page.locator('#inspector button', { hasText: 'Task table' }).click();
+  const view = async name => {
+    await page.locator('#where button[aria-label="View mode"]').click();
+    await page.locator('#where [role=option]', { hasText: name }).click();
+  };
+  await view('Task table');
   await page.waitForFunction(() => window.seen.state.view === 'table');
   await settle();
   await shot('table');
   const pages = (await seen('state')).pages;
   if (pages.length > 1) {
-    await page.locator('#inspector button[aria-label="Next page"]').click();
+    await page.locator('#where button[aria-label="Next page"]').click();
     await page.waitForFunction(p => window.seen.state.page === p, pages[1]);
-    assert.match(await page.locator('#inspector .pager span').textContent(), /Page 2 \//);
+    assert.match(await page.locator('#where .list-pill .meta').textContent(), /System 2 \//);
   }
-  await page.locator('#inspector button', { hasText: /^Orbit$/ }).click();
+  await view(/^Orbit$/);
   await page.waitForFunction(() => window.seen.state.view === 'orbit');
   await settle();
 
   // Lists sort by name.
-  await page.locator('#nav-panel select[aria-label="Sort lists"]').selectOption('name');
+  await page.locator('#nav-panel button[aria-label="Sort lists"]').click();
+  await page.locator('#nav-panel [aria-label="Sort lists"] + [role=listbox] [role=option]', { hasText: 'Name A–Z' }).click();
   const byName = galaxy.lists.map(l => l.name).sort((a, b) => a.localeCompare(b));
   assert.equal(await lists.first().locator('span').textContent(), byName[0]);
-  await page.locator('#nav-panel select[aria-label="Sort lists"]').selectOption('default');
+  await page.locator('#nav-panel button[aria-label="Sort lists"]').click();
+  await page.locator('#nav-panel [aria-label="Sort lists"] + [role=listbox] [role=option]', { hasText: 'ClickUp order' }).click();
 
   // The chevron opens a list's tasks, grouped by status; groups fold.
   const tasksTab = page.locator('#nav-panel [role=tab]', { hasText: 'Tasks' });
@@ -116,21 +122,23 @@ try {
   await group.click();
   assert.doesNotMatch(await count.textContent(), /folded/);
 
-  // Search every list, select a task and follow it.
-  const wanted = galaxy.lists.flatMap(l => l.tasks.map(t => ({ list: l.id, task: t }))).at(-1);
-  await page.locator('#nav-panel .chip', { hasText: 'All lists' }).click();
+  // Search the list, select a task, open its details and follow it.
+  const wanted = { list: galaxy.lists[0].id, task: galaxy.lists[0].tasks.at(-1) };
   const search = page.locator('#nav-panel input[aria-label="Search tasks"]');
   await search.fill(wanted.task.name);
   await page.locator('#nav-panel .task', { hasText: wanted.task.name }).first().click();
   await page.waitForFunction(({ list, id }) => window.seen.state.list === list && window.seen.state.task === id,
     { list: wanted.list, id: wanted.task.id });
   await page.waitForFunction(() => window.seen.state.selected);
-  assert.equal(await page.locator('#inspector .detail h3').textContent(), wanted.task.name);
-  await settle();
-  await page.locator('#inspector button', { hasText: 'Follow this planet' }).click();
+  assert.equal(await page.locator('#where .task-pill .name').textContent(), wanted.task.name);
+  await page.locator('#where .task-pill').click();
+  assert.equal(await page.locator('#task-modal h3').textContent(), wanted.task.name);
+  await page.locator('#task-modal button', { hasText: 'Follow this planet' }).click();
   await page.waitForFunction(() => window.seen.state.following === true);
   await settle();
   await shot('selected');
+  await page.locator('#task-modal button[aria-label="Close details"]').click();
+  assert.equal(await page.locator('#task-modal').isHidden(), true);
   await search.fill('');
   assert.equal(await page.locator('#nav-panel .tasks').evaluate(b => b.querySelectorAll('.task').length > 0), true);
 
@@ -145,7 +153,7 @@ try {
   await shot('settings');
   await page.mouse.click(900, 450);
   assert.equal(await page.locator('#settings').isHidden(), true, 'Clicking the view did not close settings');
-  await page.locator('#inspector button', { hasText: 'Frame orbital system' }).click();
+  await page.locator('#where button[aria-label="Frame orbital system"]').click();
   await page.waitForFunction(() => window.seen.state.following === false && window.seen.state.task === null);
   await settle();
 
