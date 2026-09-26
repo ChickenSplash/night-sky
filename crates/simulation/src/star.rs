@@ -144,6 +144,17 @@ fn isotropic_tilt(rng: &mut Rng) -> f64 {
     (1.0 - 2.0 * rng.unit()).acos()
 }
 
+/// Hot stars in multi-planet systems are mostly aligned. Strong misalignment is
+/// common only where a migrating giant has disturbed the system, as for many
+/// hot-Jupiter hosts.
+fn hot_tilt(rng: &mut Rng) -> f64 {
+    if rng.chance(0.1) {
+        isotropic_tilt(rng)
+    } else {
+        rng.rayleigh(0.2)
+    }
+}
+
 pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
     let mut rng = Rng::new(&format!("{list_id}:page-{page}:star"));
     let mut roll = rng.unit() * 100.0;
@@ -210,7 +221,8 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
                 colour: spectral_colour(kelvin),
                 spin: Spin {
                     period_hours: hours(&mut rng, 0.05, 3.0),
-                    tilt_rad: isotropic_tilt(&mut rng),
+                    // The spin axis keeps its progenitor's direction.
+                    tilt_rad: rng.rayleigh(0.1),
                     azimuth_rad: rng.range(0.0, TAU),
                     phase_rad: rng.range(0.0, TAU),
                     locked: false,
@@ -236,11 +248,11 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
                 Kind::M => (rng.log_range(40.0, 150.0), rng.rayleigh(0.1)),
                 Kind::K => (rng.log_range(15.0, 50.0), rng.rayleigh(0.1)),
                 Kind::G => (rng.log_range(15.0, 35.0), rng.rayleigh(0.1)),
-                // Hot stars lack the magnetic braking of cool ones, and their
-                // spins are often misaligned with their planets' orbits.
+                // Hot stars lack the magnetic braking of cool ones, and are
+                // more often misaligned with their planets' orbits.
                 Kind::F if kelvin < 6_250.0 => (rng.log_range(5.0, 15.0), rng.rayleigh(0.15)),
-                Kind::F => (rng.log_range(1.5, 6.0), rng.rayleigh(0.6)),
-                _ => (rng.log_range(0.5, 2.5), rng.rayleigh(0.6)),
+                Kind::F => (rng.log_range(1.5, 6.0), hot_tilt(&mut rng)),
+                _ => (rng.log_range(0.5, 2.5), hot_tilt(&mut rng)),
             };
             let kind_name = match kind {
                 Kind::M => "Red dwarf",
@@ -341,6 +353,21 @@ mod tests {
                 "Red giant" | "Orange giant" | "Yellow giant" => assert!(days >= 100.0),
                 _ => assert!((0.2..=150.0).contains(&days)),
             }
+        }
+    }
+
+    #[test]
+    fn stars_are_mostly_aligned_with_their_planets() {
+        let stars = stars();
+        let tilted = stars
+            .iter()
+            .filter(|s| s.spin.tilt_rad > 30_f64.to_radians())
+            .count();
+        assert!(tilted < stars.len() / 100, "{tilted} tilted past 30°");
+        for star in stars.iter().filter(|s| {
+            ["Red dwarf", "Orange dwarf", "Yellow dwarf", "White dwarf"].contains(&s.kind.as_str())
+        }) {
+            assert!(star.spin.tilt_rad < 40_f64.to_radians(), "{star:?}");
         }
     }
 
