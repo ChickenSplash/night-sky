@@ -179,7 +179,7 @@ is available it retains its last data, initially the clearly labelled demo.
 ## Project structure
 
 ```text
-crates/client/       Bevy scene, controls and egui mission-control UI
+crates/client/       Bevy scene, controls, web bridge and egui dev UI
 crates/server/       Axum API, ClickUp adapter and SQLite storage
 crates/shared/       Serializable API models and offline demo
 crates/simulation/   Orbital mechanics, clock and deterministic layout
@@ -187,7 +187,7 @@ assets/             Reserved for project assets
 scripts/            Launch and verification commands
 data/               Local database, logs and smoke-test screenshots
 target/             Compiled output
-web/                Browser page and generated dist/ bundle
+web/                Browser page, HTML/CSS panels (ui/) and generated dist/
 deploy/             Docker configuration and generated deployment bundle
 tools/              Project-local build/test tools (ignored by Git)
 vendor/             Documented Bevy renderer surface-timeout fix
@@ -205,6 +205,7 @@ downloads too, set `CARGO_HOME="$PWD/.cargo-home"` before running Cargo.
 ./scripts/build-web.sh
 cargo clippy --locked -p space-client --target wasm32-unknown-unknown -- -D warnings
 node scripts/test-browser.mjs
+node scripts/test-html-ui.mjs
 ```
 
 The graphical smoke test requires a working desktop session. It exercises the
@@ -222,7 +223,19 @@ The browser smoke test uses a locally installed Chromium and
 URL; override `SPACE_URL` or `SPACE_CHROMIUM` when needed. It checks browser boot,
 navigation, resize and private-file isolation, and saves `data/web-*.png`.
 It intercepts the browser's galaxy response with a 50-task fixture to exercise
-table pagination and constellation presets without changing backend data.
+table pagination and constellation presets without changing backend data. It
+drives the egui panels (`?ui=egui`). `test-html-ui.mjs` drives the default HTML
+panels against a local server: lists, views, pages, task search, selection,
+following, display options, keyboard focus and wheel routing. It saves
+`data/html-*.png`.
+
+## Browser UI
+
+The browser is the main client; the native window is a developer fallback that
+keeps the egui panels, smoke test and bug reports. In the browser, HTML/CSS
+panels in `web/ui/` surround the 3D view, and `?ui=egui` brings back the egui
+panels. Run `./scripts/dev-web.sh` to serve the browser client with `web/` linked
+live, so HTML and CSS edits need only a refresh.
 
 ## Next milestones
 

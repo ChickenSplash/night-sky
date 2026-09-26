@@ -32,7 +32,7 @@ try {
   page.on('pageerror', error => {
     if (!String(error).includes('Using exceptions for control flow')) errors.push(String(error));
   });
-  await page.goto(`${base}/?ui=html`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+  await page.goto(`${base}/`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
   await page.waitForFunction(() => document.querySelector('#loading').style.display === 'none', null, { timeout: 120_000 });
   await page.evaluate(() => {
     window.seen = {};
@@ -63,18 +63,52 @@ try {
     await settle();
     assert.equal(await lists.nth(1).evaluate(b => b.classList.contains('active')), true);
   }
-  await page.locator('#nav-panel button', { hasText: 'Task table' }).click();
+  await page.locator('#inspector button', { hasText: 'Task table' }).click();
   await page.waitForFunction(() => window.seen.state.view === 'table');
   await settle();
   await shot('table');
-  await page.locator('#nav-panel button', { hasText: 'Orbit' }).click();
+  const pages = (await seen('state')).pages;
+  if (pages.length > 1) {
+    await page.locator('#inspector button[aria-label="Next page"]').click();
+    await page.waitForFunction(p => window.seen.state.page === p, pages[1]);
+    assert.match(await page.locator('#inspector .pager span').textContent(), /Page 2 \//);
+  }
+  await page.locator('#inspector button', { hasText: /^Orbit$/ }).click();
   await page.waitForFunction(() => window.seen.state.view === 'orbit');
+  await settle();
+
+  // Search every list, select a task and follow it.
+  const wanted = galaxy.lists.flatMap(l => l.tasks.map(t => ({ list: l.id, task: t }))).at(-1);
+  const search = page.locator('#nav-panel input[aria-label="Search tasks"]');
+  await search.fill(wanted.task.name);
+  await page.locator('#nav-panel .task', { hasText: wanted.task.name }).first().click();
+  await page.waitForFunction(({ list, id }) => window.seen.state.list === list && window.seen.state.task === id,
+    { list: wanted.list, id: wanted.task.id });
+  await page.waitForFunction(() => window.seen.state.selected);
+  assert.equal(await page.locator('#inspector .detail h3').textContent(), wanted.task.name);
+  await settle();
+  await page.locator('#inspector button', { hasText: 'Follow this planet' }).click();
+  await page.waitForFunction(() => window.seen.state.following === true);
+  await settle();
+  await shot('selected');
+  await search.fill('');
+  assert.equal(await page.locator('#nav-panel .tasks').evaluate(b => b.querySelectorAll('.task').length > 0), true);
+
+  // Display toggles reach Rust.
+  const labels = page.locator('#nav-panel .toggle', { hasText: 'Task labels' });
+  const labelsOn = (await seen('state')).display.labels;
+  await labels.click();
+  await page.waitForFunction(on => window.seen.state.display.labels === !on, labelsOn);
+  await labels.click();
+  await page.waitForFunction(on => window.seen.state.display.labels === on, labelsOn);
+  await page.locator('#inspector button', { hasText: 'Frame orbital system' }).click();
+  await page.waitForFunction(() => window.seen.state.following === false && window.seen.state.task === null);
   await settle();
 
   // Typing into an HTML field must not move the camera or toggle pause.
   const target = async () => (await seen('tick')).target;
   const before = await target();
-  const filter = page.locator('#nav-panel input');
+  const filter = page.locator('#nav-panel input[aria-label="Filter lists"]');
   await filter.click();
   await page.keyboard.down('w');
   await page.waitForTimeout(600);
@@ -112,7 +146,7 @@ try {
   await settle();
   await shot('resized');
   assert.deepEqual(errors, [], 'Browser runtime errors');
-  console.log('HTML UI bridge passed: commands, state events, keyboard focus, wheel routing, resize.');
+  console.log('HTML UI passed: lists, views, pages, search, selection, follow, display, keyboard focus, wheel routing, resize.');
 } finally {
   writeFileSync(resolve(root, 'data/html-ui-console.log'), [...logs, ...errors].join('\n'));
   await browser.close();

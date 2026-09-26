@@ -99,6 +99,7 @@ pub fn draw_ui(
         &markers,
         &rig,
         &pose,
+        insets.0.is_none(),
         &mut out,
     );
     writer.write_batch(out);
@@ -550,9 +551,11 @@ fn canvas_overlay(
     markers: &Markers,
     rig: &CameraRig,
     pose: &CameraPose,
+    // HTML panels show the loading state and view captions themselves.
+    captions: bool,
     out: &mut Vec<UiCommand>,
 ) {
-    if galaxy.systems.is_empty() {
+    if captions && galaxy.systems.is_empty() {
         egui::Area::new(egui::Id::new("loading-state"))
             .fixed_pos(rect.center() - egui::vec2(160.0, 45.0))
             .show(ctx, |ui| {
@@ -569,42 +572,44 @@ fn canvas_overlay(
             egui::Id::new("annotations"),
         ))
         .with_clip_rect(rect);
-    painter.text(
-        rect.left_top() + egui::vec2(24.0, 24.0),
-        egui::Align2::LEFT_TOP,
-        if nav.atlas {
-            "INTERSTELLAR ATLAS / LIGHT YEARS"
-        } else if nav.view == View::Table {
-            "TASK TABLE / TRUE SIZES · ORBITS CONTINUE"
-        } else if nav.view == View::Constellation {
-            "LIST CONSTELLATION / SELECT A SYSTEM"
-        } else {
-            "SYSTEM VIEW / ASTRONOMICAL UNITS"
-        },
-        egui::FontId::monospace(11.0),
-        MUTED,
-    );
-    let distance = if pose.distance > LY_METRES * 0.01 {
-        format!("{:.3} ly", pose.distance / LY_METRES)
-    } else {
-        format!("{:.4} AU", pose.distance / AU_METRES)
-    };
-    painter.text(
-        rect.left_bottom() + egui::vec2(24.0, -20.0),
-        egui::Align2::LEFT_BOTTOM,
-        format!(
-            "CAMERA RANGE {distance}   /   {}",
-            if nav.following {
-                "TRACKING"
-            } else if nav.view != View::Orbit {
-                "AUTO-FRAMED PRESET"
+    if captions {
+        painter.text(
+            rect.left_top() + egui::vec2(24.0, 24.0),
+            egui::Align2::LEFT_TOP,
+            if nav.atlas {
+                "INTERSTELLAR ATLAS / LIGHT YEARS"
+            } else if nav.view == View::Table {
+                "TASK TABLE / TRUE SIZES · ORBITS CONTINUE"
+            } else if nav.view == View::Constellation {
+                "LIST CONSTELLATION / SELECT A SYSTEM"
             } else {
-                "FREE NAVIGATION"
-            }
-        ),
-        egui::FontId::monospace(11.0),
-        MUTED,
-    );
+                "SYSTEM VIEW / ASTRONOMICAL UNITS"
+            },
+            egui::FontId::monospace(11.0),
+            MUTED,
+        );
+        let distance = if pose.distance > LY_METRES * 0.01 {
+            format!("{:.3} ly", pose.distance / LY_METRES)
+        } else {
+            format!("{:.4} AU", pose.distance / AU_METRES)
+        };
+        painter.text(
+            rect.left_bottom() + egui::vec2(24.0, -20.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!(
+                "CAMERA RANGE {distance}   /   {}",
+                if nav.following {
+                    "TRACKING"
+                } else if nav.view != View::Orbit {
+                    "AUTO-FRAMED PRESET"
+                } else {
+                    "FREE NAVIGATION"
+                }
+            ),
+            egui::FontId::monospace(11.0),
+            MUTED,
+        );
+    }
 
     let pointer = ctx.input(|i| i.pointer.interact_pos());
     let click = ctx.input(|i| i.pointer.primary_clicked());

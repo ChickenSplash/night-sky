@@ -22,8 +22,8 @@
   <div id="hud" hidden></div>
   <script type="module">
     import { createBridge } from './ui/bridge.js';
-    // HTML panels are opt-in while they replace the egui panels.
-    const htmlUi = new URLSearchParams(location.search).get('ui') === 'html';
+    // `?ui=egui` shows the egui panels instead, for debugging.
+    const htmlUi = new URLSearchParams(location.search).get('ui') !== 'egui';
     // Created before the renderer starts, so no state event is missed.
     const bridge = createBridge();
     window.spaceBridge = bridge;

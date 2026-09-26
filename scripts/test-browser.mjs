@@ -47,7 +47,8 @@ try {
     })) }],
   };
   await page.route('**/galaxy', route => route.fulfill({ json: fixture }));
-  await page.goto(base, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+  // Clicks below target the egui panels; test-html-ui.mjs covers the HTML ones.
+  await page.goto(`${base}/?ui=egui`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
   await page.waitForFunction(() => document.querySelector('#loading').style.display === 'none', null, { timeout: 120_000 });
   // Allow the WebGL pipelines to compile and Bevy to produce complete frames.
   await page.waitForTimeout(6000);

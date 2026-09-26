@@ -10,6 +10,7 @@ use crate::views::View;
 use crate::{Clock, Navigation, Universe};
 use bevy::prelude::*;
 use serde::Serialize;
+use space_simulation::{page_tilt, period_seconds};
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
@@ -56,10 +57,18 @@ fn dispatch(name: &str, json: &str) {
 }
 
 #[derive(Serialize)]
+struct TaskSummary<'a> {
+    id: &'a str,
+    name: &'a str,
+    colour: [u8; 3],
+    page: u32,
+}
+
+#[derive(Serialize)]
 struct ListSummary<'a> {
     id: &'a str,
     name: &'a str,
-    tasks: usize,
+    tasks: Vec<TaskSummary<'a>>,
 }
 
 #[derive(Serialize)]
@@ -83,11 +92,54 @@ fn publish_galaxy(universe: Res<Universe>) {
                 .map(|s| ListSummary {
                     id: &s.id,
                     name: &s.name,
-                    tasks: s.tasks.len(),
+                    tasks: s
+                        .tasks
+                        .iter()
+                        .map(|p| TaskSummary {
+                            id: &p.id,
+                            name: &p.name,
+                            colour: p.colour,
+                            page: p.page(),
+                        })
+                        .collect(),
                 })
                 .collect(),
         },
     );
+}
+
+#[derive(Serialize)]
+struct DisplayState {
+    exaggerate: bool,
+    orbits: bool,
+    labels: bool,
+}
+
+/// Telemetry for the current list and page.
+#[derive(Serialize)]
+struct SystemState<'a> {
+    name: &'a str,
+    mass_solar: f64,
+    page_tasks: usize,
+    tasks: usize,
+    star_ly: [f64; 3],
+    tilt_deg: f64,
+    node_deg: f64,
+}
+
+#[derive(Serialize)]
+struct TaskDetail<'a> {
+    name: &'a str,
+    status: &'a str,
+    colour: [u8; 3],
+    description: &'a str,
+    assignees: &'a [String],
+    due_date_ms: Option<i64>,
+    url: Option<&'a str>,
+    semi_major_au: f64,
+    eccentricity: f64,
+    period_days: f64,
+    radius_km: f64,
 }
 
 #[derive(Serialize)]
@@ -102,6 +154,9 @@ struct State<'a> {
     paused: bool,
     rate: f64,
     notice: &'a str,
+    display: DisplayState,
+    system: Option<SystemState<'a>>,
+    selected: Option<TaskDetail<'a>>,
 }
 
 fn publish_state(
@@ -111,19 +166,48 @@ fn publish_state(
     mut last: Local<String>,
 ) {
     let system = universe.0.systems.get(nav.system);
+    let planet = system.and_then(|s| nav.selected.and_then(|i| s.tasks.get(i)));
     let state = State {
         list: system.map(|s| s.id.as_str()),
         page: nav.page,
         pages: system.map(|s| s.pages()).unwrap_or_default(),
         view: nav.view,
         atlas: nav.atlas,
-        task: system
-            .and_then(|s| nav.selected.and_then(|i| s.tasks.get(i)))
-            .map(|p| p.id.as_str()),
+        task: planet.map(|p| p.id.as_str()),
         following: nav.following,
         paused: clock.0.paused,
         rate: clock.0.rate,
         notice: &nav.notice,
+        display: DisplayState {
+            exaggerate: nav.exaggerate,
+            orbits: nav.orbits,
+            labels: nav.labels,
+        },
+        system: system.map(|s| {
+            let [inclination, node, _] = page_tilt(&s.id, nav.page);
+            SystemState {
+                name: &s.name,
+                mass_solar: s.mass_solar,
+                page_tasks: s.on_page(nav.page).count(),
+                tasks: s.tasks.len(),
+                star_ly: crate::scene::page_origin_ly(s, nav.page).to_array(),
+                tilt_deg: inclination.to_degrees(),
+                node_deg: node.to_degrees(),
+            }
+        }),
+        selected: planet.zip(system).map(|(p, s)| TaskDetail {
+            name: &p.name,
+            status: &p.status,
+            colour: p.colour,
+            description: &p.description,
+            assignees: &p.assignees,
+            due_date_ms: p.due_date_ms,
+            url: p.url.as_deref(),
+            semi_major_au: p.orbit.semi_major_au,
+            eccentricity: p.orbit.eccentricity,
+            period_days: period_seconds(&p.orbit, s.mass_solar) / 86_400.0,
+            radius_km: p.radius_km,
+        }),
     };
     // Compare the serialised form, so the event fires only on a real change.
     let Ok(json) = serde_json::to_string(&state) else {

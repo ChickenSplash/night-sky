@@ -8,5 +8,5 @@ rm -rf web/dist/index.html web/dist/ui
 ln -s ../index.html web/dist/index.html
 ln -s ../ui web/dist/ui
 cargo build --locked -p space-server
-echo "Open http://127.0.0.1:4321/?ui=html"
+echo "Open http://127.0.0.1:4321/"
 exec target/debug/space-server
