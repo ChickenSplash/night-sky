@@ -56,7 +56,28 @@ try {
   }
   if (!wasPaused) await pause.click();
   await page.waitForFunction(() => window.seen.state.paused === true);
-  assert.match(await pause.textContent(), /Resume/);
+  assert.equal(await pause.getAttribute('aria-label'), 'Resume');
+
+  // Rate ladder: real time is the floor, a century a second the ceiling.
+  const rateNow = () => page.evaluate(() => window.seen.state.rate);
+  const slower = page.locator('#time-bar button[aria-label="Slow time down"]');
+  const faster = page.locator('#time-bar button[aria-label="Speed time up"]');
+  const startRate = await rateNow();
+  await faster.click();
+  await page.waitForFunction(r => window.seen.state.rate > r, startRate);
+  await page.locator('#time-bar .real-time').click();
+  await page.waitForFunction(() => window.seen.state.rate === 1);
+  assert.equal(await slower.isDisabled(), true);
+  for (let i = 0; i < 12 && !(await faster.isDisabled()); i++) {
+    const before = await rateNow();
+    await faster.click();
+    await page.waitForFunction(r => window.seen.state.rate > r, before);
+  }
+  assert.equal(await rateNow(), 100 * 31_557_600);
+  await slower.click();
+  await page.waitForFunction(() => window.seen.state.rate === 10 * 31_557_600);
+  await page.evaluate(r => window.spaceBridge.command({ type: 'set_rate', rate: r }), startRate);
+  await page.waitForFunction(r => window.seen.state.rate === r, startRate);
   if (galaxy.lists.length > 1) {
     await lists.nth(1).click();
     await page.waitForFunction(id => window.seen.state.list === id, galaxy.lists[1].id);

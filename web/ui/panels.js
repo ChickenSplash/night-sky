@@ -1,7 +1,12 @@
 // The browser UI: HTML panels around the 3D view. Every change goes to Rust as a
 // command, and every panel redraws from the state Rust sends back. Open the
 // client with `?ui=egui` for the old egui panels.
-const RATES = [['Real time', 1], ['1 hr/s', 3600], ['1 day/s', 86400], ['30 days/s', 2592000]];
+const YEAR = 31_557_600;
+// Simulated seconds per real second, from real time up to a century a second.
+const RATES = [
+  ['Real time', 1], ['1 min/s', 60], ['1 hr/s', 3600], ['1 day/s', 86_400], ['1 week/s', 604_800],
+  ['30 days/s', 2_592_000], ['1 yr/s', YEAR], ['10 yr/s', 10 * YEAR], ['100 yr/s', 100 * YEAR],
+];
 const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'constellation']];
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Task labels']];
 const STATUS = [['In progress', [92, 213, 242]], ['To do', [169, 154, 238]], ['Complete', [100, 220, 169]]];
@@ -17,6 +22,35 @@ const el = (tag, props = {}, ...children) => {
 };
 const rgb = ([r, g, b]) => `rgb(${r}, ${g}, ${b})`;
 const heading = text => el('h2', { textContent: text });
+const SVG = 'http://www.w3.org/2000/svg';
+const ICONS = {
+  play: 'M8 5v14l11-7z',
+  pause: 'M7 5h4v14H7zM13 5h4v14h-4z',
+  slower: 'M11 6v12l-8.5-6zM20.5 6v12L12 12z',
+  faster: 'M13 6v12l8.5-6zM3.5 6v12L12 12z',
+};
+const icon = name => {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG, 'path');
+  path.setAttribute('d', ICONS[name]);
+  svg.append(path);
+  return svg;
+};
+
+// The step on the rate ladder nearest to a rate, measured on a log scale.
+function rateStep(rate) {
+  let best = 0;
+  RATES.forEach(([, r], i) => {
+    if (Math.abs(Math.log(r / rate)) < Math.abs(Math.log(RATES[best][1] / rate))) best = i;
+  });
+  return best;
+}
+
+function elapsed(days) {
+  return days >= 365.25 ? `T + ${(days / 365.25).toFixed(2)} yr` : `T + ${days.toFixed(2)} days`;
+}
 
 function caption(state) {
   if (state.atlas) return 'Interstellar atlas / light years';
@@ -105,18 +139,22 @@ export function mount(bridge, canvas) {
     el('div', { className: 'row pager' }, previous, pageLabel, next),
     stats, frame, el('hr'), detail);
 
-  // Time bar and the captions over the 3D view.
-  const pause = el('button', { className: 'primary' });
-  const rates = el('div', { className: 'row' }, ...RATES.map(([label, rate]) => {
-    const button = el('button', { textContent: label });
-    button.dataset.rate = rate;
-    button.addEventListener('click', () => send({ type: 'set_rate', rate }));
-    return button;
-  }));
-  const clock = el('span', { className: 'readout accent' });
-  const notice = el('span', { className: 'notice muted' });
+  // Time controls: a pill floating over the bottom of the 3D view.
+  const control = (name, label) => el('button', { className: 'round', title: label, ariaLabel: label }, icon(name));
+  const slower = control('slower', 'Slow time down');
+  const pause = control('pause', 'Pause');
+  pause.classList.add('primary');
+  const faster = control('faster', 'Speed time up');
+  const realTime = el('button', { className: 'real-time', textContent: 'Real time', title: 'Run at real time' });
+  const clock = el('span', { className: 'clock' });
+  const speed = el('span', { className: 'speed' });
   const bar = el('footer', { id: 'time-bar', className: 'panel' },
-    pause, rates, clock, notice, el('span', { className: 'help muted', textContent: HELP, title: HELP }));
+    el('div', { className: 'readout' }, clock, speed), slower, pause, faster, realTime);
+  // Parked under the navigation panel until they get a proper home.
+  const notice = el('p', { className: 'notice small' });
+  nav.append(el('section', { className: 'status' },
+    notice,
+    el('p', { className: 'muted small', textContent: HELP })));
   const viewCaption = el('div', { className: 'caption top' });
   const rangeCaption = el('div', { className: 'caption bottom' });
   const empty = el('div', { id: 'empty-universe', hidden: true },
@@ -234,8 +272,15 @@ export function mount(bridge, canvas) {
     renderIndex(false);
     renderInspector();
     for (const input of nav.querySelectorAll('.toggle input')) input.checked = !!state.display?.[input.dataset.option];
-    for (const button of rates.children) button.classList.toggle('active', Number(button.dataset.rate) === state.rate);
-    pause.textContent = state.paused ? '▶ Resume' : 'Ⅱ Pause';
+    const step = rateStep(state.rate);
+    slower.disabled = step === 0;
+    faster.disabled = step === RATES.length - 1;
+    realTime.classList.toggle('active', state.rate === 1);
+    speed.textContent = state.paused ? 'Paused' : RATES[step][0];
+    const label = state.paused ? 'Resume' : 'Pause';
+    pause.replaceChildren(icon(state.paused ? 'play' : 'pause'));
+    pause.title = label;
+    pause.ariaLabel = label;
     notice.textContent = state.notice || '';
     viewCaption.textContent = caption(state);
   };
@@ -243,6 +288,10 @@ export function mount(bridge, canvas) {
   atlas.addEventListener('click', () => send({ type: 'atlas' }));
   frame.addEventListener('click', () => send({ type: 'frame_system' }));
   pause.addEventListener('click', () => send({ type: 'set_paused', paused: !state.paused }));
+  const stepRate = by => send({ type: 'set_rate', rate: RATES[rateStep(state.rate) + by][1] });
+  slower.addEventListener('click', () => stepRate(-1));
+  faster.addEventListener('click', () => stepRate(1));
+  realTime.addEventListener('click', () => send({ type: 'set_rate', rate: 1 }));
   listFilter.addEventListener('input', renderLists);
   taskSearch.addEventListener('input', () => renderIndex(false));
   taskSearch.addEventListener('keydown', event => {
@@ -275,13 +324,14 @@ export function mount(bridge, canvas) {
     renderState();
   });
   bridge.on('tick', ({ days, range: metres }) => {
-    clock.textContent = `T + ${days.toFixed(2)} days`;
+    clock.textContent = elapsed(days);
     const range = metres > LY * 0.01 ? `${(metres / LY).toFixed(3)} ly` : `${(metres / AU).toFixed(4)} AU`;
     const mode = state.following ? 'tracking' : state.view !== 'orbit' ? 'auto-framed preset' : 'free navigation';
     rangeCaption.textContent = `Camera range ${range} / ${mode}`;
   });
 
-  // The 3D view fits the space the panels leave uncovered.
+  // The 3D view fits the space the side panels leave uncovered; the time bar
+  // floats over it.
   const report = () => {
     const box = canvas.getBoundingClientRect();
     send({
@@ -289,7 +339,7 @@ export function mount(bridge, canvas) {
       top: 0,
       left: Math.max(0, nav.getBoundingClientRect().right - box.left),
       right: Math.max(0, box.right - inspector.getBoundingClientRect().left),
-      bottom: Math.max(0, box.bottom - bar.getBoundingClientRect().top),
+      bottom: 0,
     });
   };
   new ResizeObserver(report).observe(hud);
