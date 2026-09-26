@@ -4,7 +4,8 @@ use bevy::math::DVec3;
 use space_shared::{Galaxy, PLANETS_PER_SYSTEM, StarSystem, TaskPlanet};
 use space_simulation::{LY_METRES, SUN_RADIUS_METRES, stable_hash};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum View {
     #[default]
     Orbit,

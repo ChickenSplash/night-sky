@@ -4746,9 +4746,13 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "reqwest",
+ "serde",
+ "serde_json",
  "space-shared",
  "space-simulation",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

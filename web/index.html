@@ -14,11 +14,19 @@
     h1 { font-size: 22px; letter-spacing: .18em; font-weight: 500; }
     #status { color: #77a1ba; max-width: 600px; line-height: 1.6; }
   </style>
+  <link rel="stylesheet" href="ui/panels.css">
 </head>
 <body>
   <div id="loading"><h1>CLICKUP / SPACE</h1><div id="status">Loading mission control…</div></div>
   <div id="app"><canvas id="space-canvas" tabindex="0"></canvas></div>
+  <div id="hud" hidden></div>
   <script type="module">
+    import { createBridge } from './ui/bridge.js';
+    // HTML panels are opt-in while they replace the egui panels.
+    const htmlUi = new URLSearchParams(location.search).get('ui') === 'html';
+    // Created before the renderer starts, so no state event is missed.
+    const bridge = createBridge();
+    window.spaceBridge = bridge;
     const canvas = document.querySelector('#space-canvas');
     const loading = document.querySelector('#loading');
     const status = document.querySelector('#status');
@@ -36,8 +44,16 @@
     try {
       const probe = document.createElement('canvas');
       if (!probe.getContext('webgl2')) throw new Error('WebGL 2 is unavailable. Enable browser hardware acceleration.');
-      const { default: init } = await import('./space_client.js');
-      await init();
+      const wasm = await import('./space_client.js');
+      if (htmlUi) {
+        document.querySelector('#hud').hidden = false;
+        (await import('./ui/panels.js')).mount(bridge, canvas);
+      }
+      try {
+        await wasm.default();
+      } finally {
+        bridge.connect(wasm.send_command);
+      }
       loading.style.display = 'none';
       canvas.focus();
     } catch (error) {

@@ -20,7 +20,10 @@ cargo build --locked -p space-client --target wasm32-unknown-unknown --profile w
 mkdir -p web/dist
 "$tool/wasm-bindgen" --target web --no-typescript --out-dir web/dist --out-name space_client \
     target/wasm32-unknown-unknown/web-release/space-client.wasm
+# Replace, not overwrite: dev-web.sh links these to the source files.
+rm -rf web/dist/index.html web/dist/ui
 cp web/index.html web/dist/index.html
+cp -r web/ui web/dist/ui
 # Keep an uncompressed copy for clients without gzip support.
 gzip -9 -k -f web/dist/space_client_bg.wasm web/dist/space_client.js
 echo "Browser client built in web/dist."

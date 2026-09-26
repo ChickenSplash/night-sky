@@ -1,0 +1,212 @@
+//! Every panel action goes through `UiCommand`, whether it comes from egui or the
+//! browser's HTML panels. Lists and tasks are named by ID, so a data refresh that
+//! reorders them cannot redirect a click.
+use crate::{Clock, Navigation, Universe, views::View};
+use bevy::prelude::*;
+use serde::Deserialize;
+
+#[derive(Message, Clone, Debug, PartialEq, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UiCommand {
+    Atlas,
+    /// Fly to a list's first page.
+    Jump {
+        list: String,
+    },
+    /// Fly to a task's page in its list and select it.
+    FindTask {
+        list: String,
+        task: String,
+    },
+    /// Select a task in the current list without moving the camera.
+    Inspect {
+        task: String,
+    },
+    ShowPage {
+        page: u32,
+    },
+    SetView {
+        view: View,
+    },
+    FrameSystem,
+    Follow,
+    SetPaused {
+        paused: bool,
+    },
+    SetRate {
+        rate: f64,
+    },
+    SetDisplay {
+        option: Display,
+        on: bool,
+    },
+    /// Space the HTML panels cover at each edge of the canvas, in CSS pixels. The 3D
+    /// view fits the rest, and the egui panels are not drawn.
+    Panels {
+        top: f32,
+        right: f32,
+        bottom: f32,
+        left: f32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Display {
+    Exaggerate,
+    Orbits,
+    Labels,
+}
+
+/// Set once HTML panels have taken over from egui: top, right, bottom, left.
+#[derive(Resource, Default)]
+pub struct PanelInsets(pub Option<[f32; 4]>);
+
+pub fn apply(
+    mut commands: MessageReader<UiCommand>,
+    universe: Res<Universe>,
+    mut nav: ResMut<Navigation>,
+    mut clock: ResMut<Clock>,
+    mut insets: ResMut<PanelInsets>,
+) {
+    let galaxy = &universe.0;
+    let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
+    for command in commands.read() {
+        match command {
+            UiCommand::Atlas => nav.show_atlas(galaxy),
+            UiCommand::Jump { list: id } => {
+                if let Some(index) = list(id) {
+                    nav.jump(index, galaxy);
+                }
+            }
+            UiCommand::FindTask { list: id, task } => {
+                if let Some(index) = list(id)
+                    && let Some(planet) = galaxy.systems[index]
+                        .tasks
+                        .iter()
+                        .position(|p| &p.id == task)
+                {
+                    nav.select_task(index, planet, galaxy);
+                }
+            }
+            UiCommand::Inspect { task } => {
+                if let Some(planet) = galaxy
+                    .systems
+                    .get(nav.system)
+                    .and_then(|s| s.tasks.iter().position(|p| &p.id == task))
+                {
+                    nav.selected = Some(planet);
+                }
+            }
+            UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
+            UiCommand::SetView { view } => nav.preset(*view, galaxy),
+            UiCommand::FrameSystem => {
+                let system = nav.system;
+                nav.jump(system, galaxy);
+            }
+            UiCommand::Follow => nav.focus_selected(galaxy),
+            UiCommand::SetPaused { paused } => clock.0.paused = *paused,
+            UiCommand::SetRate { rate } => clock.0.rate = *rate,
+            UiCommand::SetDisplay { option, on } => match option {
+                Display::Exaggerate => nav.exaggerate = *on,
+                Display::Orbits => nav.orbits = *on,
+                Display::Labels => nav.labels = *on,
+            },
+            UiCommand::Panels {
+                top,
+                right,
+                bottom,
+                left,
+            } => insets.0 = Some([*top, *right, *bottom, *left].map(|v| v.max(0.0))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(galaxy: space_shared::Galaxy, commands: Vec<UiCommand>) -> App {
+        let mut app = App::new();
+        app.add_message::<UiCommand>()
+            .insert_resource(Universe(galaxy))
+            .init_resource::<Navigation>()
+            .init_resource::<Clock>()
+            .init_resource::<PanelInsets>()
+            .add_systems(Update, apply);
+        for command in commands {
+            app.world_mut().write_message(command);
+        }
+        app.update();
+        app
+    }
+
+    #[test]
+    fn commands_find_lists_and_tasks_by_id_not_position() {
+        let galaxy = space_shared::demo_galaxy();
+        assert!(galaxy.systems.len() > 1);
+        let list = galaxy.systems[1].id.clone();
+        let task = galaxy.systems[1].tasks.last().unwrap().id.clone();
+        let mut reordered = galaxy.clone();
+        reordered.systems.reverse();
+        let expected = reordered.systems.iter().position(|s| s.id == list).unwrap();
+        let app = run(
+            reordered,
+            vec![
+                UiCommand::FindTask {
+                    list: list.clone(),
+                    task: task.clone(),
+                },
+                UiCommand::SetPaused { paused: true },
+                UiCommand::SetDisplay {
+                    option: Display::Labels,
+                    on: false,
+                },
+            ],
+        );
+        let nav = app.world().resource::<Navigation>();
+        let universe = app.world().resource::<Universe>();
+        assert_eq!(nav.system, expected);
+        let selected = nav.selected.map(|i| &universe.0.systems[expected].tasks[i]);
+        assert_eq!(selected.map(|p| &p.id), Some(&task));
+        assert!(!nav.labels);
+        assert!(app.world().resource::<Clock>().0.paused);
+    }
+
+    #[test]
+    fn unknown_ids_are_ignored() {
+        let app = run(
+            space_shared::demo_galaxy(),
+            vec![
+                UiCommand::Jump {
+                    list: "missing".into(),
+                },
+                UiCommand::Inspect {
+                    task: "missing".into(),
+                },
+            ],
+        );
+        let nav = app.world().resource::<Navigation>();
+        assert_eq!(nav.system, 0);
+        assert_eq!(nav.selected, None);
+    }
+
+    #[test]
+    fn browser_json_parses_into_commands() {
+        let parse = |json| serde_json::from_str::<UiCommand>(json).unwrap();
+        assert_eq!(
+            parse(r#"{"type":"set_view","view":"constellation"}"#),
+            UiCommand::SetView {
+                view: View::Constellation
+            }
+        );
+        assert_eq!(
+            parse(r#"{"type":"set_display","option":"orbits","on":true}"#),
+            UiCommand::SetDisplay {
+                option: Display::Orbits,
+                on: true
+            }
+        );
+        assert_eq!(parse(r#"{"type":"atlas"}"#), UiCommand::Atlas);
+    }
+}

@@ -1,3 +1,4 @@
+mod actions;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
 mod flight;
@@ -7,6 +8,8 @@ mod scene;
 mod smoke;
 mod ui;
 mod views;
+#[cfg(target_arch = "wasm32")]
+mod web_bridge;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -173,15 +176,26 @@ fn main() {
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
     .init_resource::<Navigation>()
+    .init_resource::<actions::PanelInsets>()
+    .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
     .add_systems(
         Update,
-        (receive_galaxy, tick, scene::controls, scene::place_camera).chain(),
+        (
+            receive_galaxy,
+            actions::apply,
+            tick,
+            scene::controls,
+            scene::place_camera,
+        )
+            .chain(),
     )
     .add_systems(PostUpdate, scene::draw.after(TransformSystems::Propagate))
     .add_systems(EguiPrimaryContextPass, ui::draw_ui);
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, smoke::exercise);
+    #[cfg(target_arch = "wasm32")]
+    web_bridge::install(&mut app);
     app.run();
 }
 

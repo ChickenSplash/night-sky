@@ -21,6 +21,14 @@
 - The native **Save bug report** control captures state, recent client log lines and
   a screenshot under `data/logs/bug-*` for visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
+- The browser is the main target; native is a dev fallback. HTML/CSS panels
+  (`web/ui/`) are replacing egui on the web, opt-in with `?ui=html` until done.
+  Every panel action is an ID-based `UiCommand` (`actions.rs`), shared by egui and
+  `web_bridge.rs`; Rust reports back with `space:galaxy`/`space:state`/`space:tick`
+  window events. Canvas labels and clicks stay in egui on every target.
+- `./scripts/dev-web.sh`: web build plus server with `web/` linked live, so
+  HTML/CSS edits need only a refresh. `node scripts/test-html-ui.mjs` checks the
+  bridge, keyboard focus and wheel routing against `SPACE_URL` (default local).
 - `./scripts/deploy-homelab.sh`: build locally and deploy to the homelab's
   `~/homelab/clickup-space`. URL: `http://192.168.1.90:4321/`. Demo data only
   by default; `--with-clickup` publishes credentials and cached tasks, so only use
