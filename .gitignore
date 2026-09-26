@@ -1,0 +1,9 @@
+/target/
+/data/*
+!/data/.gitkeep
+/.env
+/.cargo-home/
+*.log
+/web/dist/
+/tools/
+/deploy/bundle/

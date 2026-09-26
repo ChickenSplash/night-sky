@@ -1,0 +1,8 @@
+[package]
+name = "space-simulation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+space-shared.workspace = true

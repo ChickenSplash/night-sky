@@ -1,0 +1,70 @@
+# ClickUp Space
+
+## Scope and architecture
+
+- Native Linux and browser/WASM clients. Rust workspace: `client` (Bevy/egui), `server` (Axum),
+  `shared` (wire models), `simulation` (engine-independent orbital maths).
+- Lists are constellations of ten-slot system pages; tasks are planets. Deep navy background and line-based
+  wireframe bodies. Preserve real distances, with explicit visual size exaggeration.
+- Keep ClickUp access read-only until a write workflow is explicitly requested.
+- Credentials belong only in the backend. Do not expose them in API models or logs.
+- All runtime files belong in project-local `data/`; compiled output in `target/`.
+
+## Development
+
+- `./scripts/run.sh`: build and start both processes, clean up backend on exit.
+- `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
+- `./scripts/run.sh --smoke-test`: desktop rendering check with eleven screenshots, including a 50-task pagination fixture and mid-flight captures of a list jump and a page jump.
+- Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
+  run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
+  documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
+- The native **Save bug report** control captures state, recent client log lines and
+  a screenshot under `data/logs/bug-*` for visual bugs without a panic.
+- `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
+- `./scripts/deploy-homelab.sh`: build locally and deploy to the homelab's
+  `~/homelab/clickup-space`. URL: `http://192.168.1.90:4321/`. Demo data only
+  by default; `--with-clickup` publishes credentials and cached tasks, so only use
+  it when the user explicitly asks.
+- Docker's restart policy manages the remote service, independently of SSH sessions.
+- Keep native threading/reqwest and browser fetch/timers behind target-specific code.
+- Browser requests use same-origin `/galaxy`. Never bake a LAN IP or token into WASM.
+- Bevy, big_space and bevy_egui are pinned as a compatible set. Check compatibility
+  before upgrading any one of them.
+- No global desktop or Cargo configuration changes are needed.
+
+## Invariants
+
+- Use `f64` for physics and local camera positions. Subtract the camera before
+  converting positions to `f32`; do not add interstellar offsets to GPU floats.
+- Divide render positions and radii by `CameraPose::render_scale()` (displayed camera
+  about 1,000 units from target). `Navigation` holds the destination; `CameraRig`
+  flies the displayed pose there. Discrete camera changes set `Navigation::fly`.
+  `Navigation` and orbital positions use the page's plane axes;
+  `scene::page_frame` rotates them into galactic axes, which `CameraPose` and star
+  offsets use. Each page star has its own stable position (`views::page_position`)
+  and page changes use the same `Flight` as list jumps; no page-swap animation.
+  Raw metres push clip-space values to ~1e13 and the gizmo line shader then drops
+  or fragments segments.
+- Pick wireframe line density from on-screen radius; dense rings on small bodies
+  merge into blobs.
+- Integrate simulation time. Never multiply lifetime elapsed time by a mutable rate.
+- Keep orbital identity stable across API reordering and edits. SQLite slots are
+  append-only per list, including when tasks disappear from a snapshot.
+- Changing task status or deadline must not change orbital elements.
+- Task pages use append-only slots divided by ten; orbital radius follows the slot
+  within its page. Table layout is presentation-only; leaving it restores current
+  simulated positions. The table keeps physical radii.
+- Constellation view never moves stars: it keeps the current page's frame, fits
+  all page stars from the current angle and draws links between them.
+- Each page has its own deterministic orbital-plane tilt (`page_tilt(list_id, page)`),
+  including pages in one constellation. Page stars are scattered at random at
+  real local star density (`views::page_position(list_id, page)`); never lay them
+  on a grid, cluster or plane.
+- Explain demo, live, cached and failed-sync states in the interface.
+
+## Current limitations
+
+- No N-body simulation, moons, workspace discovery or OAuth.
+- The client draws the active system procedurally with gizmos. Per-body ECS
+  entities and GPU batching can be introduced when dataset size warrants them.
+- Live ClickUp access needs the user's own `.env`; demo data is the default.

@@ -1,0 +1,29 @@
+[package]
+name = "space-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+space-shared.workspace = true
+space-simulation.workspace = true
+bevy = { version = "=0.18.1", default-features = false, features = [
+    "std", "async_executor", "bevy_asset", "bevy_color",
+    "bevy_core_pipeline", "bevy_render", "bevy_camera", "bevy_image",
+    "bevy_mesh", "bevy_shader", "bevy_window", "bevy_winit", "bevy_log",
+    "bevy_gizmos", "bevy_gizmos_render", "bevy_pbr", "default_font",
+    "tonemapping_luts", "png", "zstd_rust"
+] }
+big_space = "=0.12.0"
+bevy_egui = { version = "=0.39.1", default-features = false, features = ["default_fonts", "render", "open_url"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { workspace = true, features = ["blocking"] }
+bevy = { version = "=0.18.1", default-features = false, features = ["multi_threaded", "wayland", "x11"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { version = "=0.18.1", default-features = false, features = ["webgl2", "web"] }
+gloo-net = "0.6"
+gloo-timers = { version = "0.3", features = ["futures"] }
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"

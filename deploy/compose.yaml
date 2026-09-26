@@ -1,0 +1,26 @@
+services:
+  clickup-space:
+    build: ./bundle
+    image: clickup-space:local
+    container_name: clickup-space
+    restart: unless-stopped
+    ports:
+      - "192.168.1.90:4321:4321"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/app/data
+    networks: [default, edge]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  # Created by the cloudflared stack. The tunnel's public hostname points at
+  # http://clickup-space:4321, which cloudflared resolves on this network.
+  edge:
+    name: edge
+    external: true
