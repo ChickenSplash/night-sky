@@ -628,8 +628,9 @@ fn canvas_overlay(
         let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
         let radius = (marker.radius / scale).max(7.0);
         let hovered = pointer.is_some_and(|p| rect.contains(p) && p.distance(point) < radius + 8.0);
+        let star = matches!(marker.kind, MarkerKind::Star { .. });
         let selected = matches!(marker.kind, MarkerKind::Planet(i) if nav.selected == Some(i))
-            || matches!(marker.kind, MarkerKind::Page(page) if nav.page == page);
+            || matches!(marker.kind, MarkerKind::Star { system, page } if nav.picked == Some((system, page)));
         if selected || hovered {
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }
@@ -637,11 +638,13 @@ fn canvas_overlay(
         if marker.radius < 6.0 {
             painter.circle_stroke(point, 4.0, egui::Stroke::new(1.0, tint));
         }
-        // Task labels would smear across the screen mid-flight.
+        // Task labels would smear across the screen mid-flight. Stars are
+        // labelled only when picked or hovered.
         if (selected || hovered)
-            || (!dense_constellation
-                && (((nav.labels || nav.view != View::Orbit) && !rig.flying())
-                    || matches!(marker.kind, MarkerKind::Star(_))))
+            || (!star
+                && !dense_constellation
+                && (nav.labels || nav.view != View::Orbit)
+                && !rig.flying())
         {
             let text = painter.layout(
                 marker.label.clone(),
@@ -670,14 +673,14 @@ fn canvas_overlay(
                         });
                     }
                 }
-                MarkerKind::Star(index) => {
-                    if let Some(list) = galaxy.systems.get(index) {
-                        out.push(UiCommand::Jump {
+                MarkerKind::Star { system, page } => {
+                    if let Some(list) = galaxy.systems.get(system) {
+                        out.push(UiCommand::Pick {
                             list: list.id.clone(),
+                            page,
                         });
                     }
                 }
-                MarkerKind::Page(page) => out.push(UiCommand::ShowPage { page }),
             }
         }
     }

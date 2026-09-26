@@ -96,7 +96,7 @@ try {
   if (pages.length > 1) {
     await page.locator('#where button[aria-label="Next page"]').click();
     await page.waitForFunction(p => window.seen.state.page === p, pages[1]);
-    assert.match(await page.locator('#where .list-pill .meta').textContent(), /System 2 \//);
+    assert.match(await page.locator('#where .view-pill .meta').textContent(), /System 2 \//);
   }
   await view(/^Orbit$/);
   await page.waitForFunction(() => window.seen.state.view === 'orbit');
@@ -131,11 +131,11 @@ try {
     { list: wanted.list, id: wanted.task.id });
   await page.waitForFunction(() => window.seen.state.selected);
   assert.equal(await page.locator('#where .task-pill .name').textContent(), wanted.task.name);
-  await page.locator('#where .task-pill').click();
-  assert.equal(await page.locator('#task-modal h3').textContent(), wanted.task.name);
-  await page.locator('#task-modal button', { hasText: 'Follow this planet' }).click();
+  await page.locator('#where button[aria-label="Frame this planet"]').click();
   await page.waitForFunction(() => window.seen.state.following === true);
   await settle();
+  await page.locator('#where .task-pill .details').click();
+  assert.equal(await page.locator('#task-modal h3').textContent(), wanted.task.name);
   await shot('selected');
   await page.locator('#task-modal button[aria-label="Close details"]').click();
   assert.equal(await page.locator('#task-modal').isHidden(), true);

@@ -28,6 +28,12 @@ pub enum UiCommand {
     SetView {
         view: View,
     },
+    /// Picks a star without moving the camera.
+    Pick {
+        list: String,
+        page: u32,
+    },
+    /// Flies to the picked star, or re-frames the current system.
     FrameSystem,
     Follow,
     SetPaused {
@@ -100,8 +106,17 @@ pub fn apply(
             }
             UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
             UiCommand::SetView { view } => nav.preset(*view, galaxy),
+            UiCommand::Pick { list: id, page } => {
+                if let Some(index) = list(id) {
+                    nav.picked = Some((index, *page));
+                }
+            }
             UiCommand::FrameSystem => {
-                let system = nav.system;
+                let (system, page) = nav.picked.unwrap_or((nav.system, nav.page));
+                if system != nav.system {
+                    nav.jump(system, galaxy);
+                }
+                nav.page = page;
                 nav.jump(system, galaxy);
             }
             UiCommand::Follow => nav.focus_selected(galaxy),

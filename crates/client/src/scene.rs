@@ -74,8 +74,7 @@ pub struct Marker {
 #[derive(Clone, Copy)]
 pub enum MarkerKind {
     Planet(usize),
-    Star(usize),
-    Page(u32),
+    Star { system: usize, page: u32 },
 }
 
 #[derive(Resource, Default)]
@@ -157,6 +156,7 @@ pub fn controls(
             clock.0.paused = !clock.0.paused;
         }
         if keys.just_pressed(KeyCode::Escape) {
+            nav.picked = None;
             nav.selected = None;
             nav.following = false;
         }
@@ -361,7 +361,7 @@ fn orbit_point(orbit: &Orbit, step: usize, steps: usize) -> DVec3 {
 const STAR: Color = Color::srgb(1.0, 0.72, 0.36);
 const ORBIT: Color = Color::srgb(0.075, 0.17, 0.25);
 const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
-const SKY: Color = Color::srgb(0.22, 0.32, 0.48);
+
 /// Close up, distant stars sit on a shell at four camera ranges, so they stay
 /// visible. The shell grows with the zoom and a star joins its true position
 /// once the shell reaches it. There is no zoom threshold, so no star jumps or
@@ -401,9 +401,14 @@ impl Canvas<'_> {
     }
 
     /// On-screen radius in logical pixels, or `None` when the centre is off-screen.
+    /// Measured as if the body sat at the screen centre: perspective stretches
+    /// bodies towards the edges, which would switch their line density there.
     fn pixels(&self, centre: Vec3, radius: f32) -> Option<f32> {
-        let point = self.screen(centre)?;
-        let edge = self.screen(centre + self.view.right() * radius)?;
+        self.screen(centre)?;
+        let eye = self.view.translation();
+        let ahead = eye + self.view.forward() * centre.distance(eye);
+        let point = self.screen(ahead)?;
+        let edge = self.screen(ahead + self.view.right() * radius)?;
         Some(edge.distance(point))
     }
 
@@ -468,22 +473,6 @@ impl Canvas<'_> {
         pixels
     }
 
-    /// Purely decorative sky directions, not additional task systems.
-    fn sky(&self, gizmos: &mut Gizmos) {
-        let radius = self.pose.distance * 8.0 / self.scale;
-        for i in 0..420 {
-            let z = 1.0 - 2.0 * (i as f64 + 0.5) / 420.0;
-            let phi = i as f64 * 2.399_963_229_728_653;
-            let r = (1.0 - z * z).sqrt();
-            let direction = DVec3::new(r * phi.cos(), z, r * phi.sin());
-            let point = self.origin + (direction * radius).as_vec3();
-            // At least a few pixels long: sub-pixel segments give the line shader an
-            // unstable direction and render as streaks.
-            let width = radius as f32 * if i % 9 == 0 { 0.006 } else { 0.0035 };
-            gizmos.line(point, point + self.view.right() * width, SKY);
-        }
-    }
-
     /// Joins the current list's page stars where they already are, like a star
     /// chart: each star links to its nearest neighbour in a minimum spanning tree.
     fn constellation(&self, gizmos: &mut Gizmos) {
@@ -523,13 +512,11 @@ impl Canvas<'_> {
     }
 
     /// Every list draws all its page stars, so no stars appear or vanish when a
-    /// jump changes list. Other lists expose only their first page as a target.
+    /// jump changes list. Every star can be picked.
     fn stars(&self, gizmos: &mut Gizmos, galaxy: &Galaxy, markers: &mut Vec<Marker>) {
         for (index, star) in galaxy.systems.iter().enumerate() {
-            let first = star.first_page();
             for page in star.pages() {
-                let target = index == self.nav.system || page == first;
-                self.star(gizmos, markers, star, index, page, target);
+                self.star(gizmos, markers, star, index, page);
             }
         }
     }
@@ -541,7 +528,6 @@ impl Canvas<'_> {
         star: &StarSystem,
         index: usize,
         page: u32,
-        target: bool,
     ) {
         let (nav, pose) = (self.nav, self.pose);
         let wide = pose.distance > WIDE_METRES;
@@ -588,7 +574,7 @@ impl Canvas<'_> {
         } else {
             centre
         };
-        if target && let Some(point) = self.screen(anchor) {
+        if let Some(point) = self.screen(anchor) {
             markers.push(Marker {
                 point,
                 radius: pixels.min(9.0),
@@ -604,10 +590,9 @@ impl Canvas<'_> {
                     star.name.clone()
                 },
                 colour: [255, 192, 108],
-                kind: if index == nav.system && !current {
-                    MarkerKind::Page(page)
-                } else {
-                    MarkerKind::Star(index)
+                kind: MarkerKind::Star {
+                    system: index,
+                    page,
                 },
             });
         }
@@ -685,7 +670,6 @@ pub fn draw(
         frame: page_frame(system, pose.page),
     };
     let markers = &mut markers.0;
-    canvas.sky(&mut gizmos);
     if nav.view == View::Constellation {
         canvas.constellation(&mut gizmos);
     }

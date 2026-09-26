@@ -30,6 +30,9 @@ pub struct Navigation {
     pub viewport: Option<bevy::camera::Viewport>,
     pub system: usize,
     pub selected: Option<usize>,
+    /// A star clicked on screen: its list index and page. Picking never moves
+    /// the camera; framing the system flies there.
+    pub picked: Option<(usize, u32)>,
     pub following: bool,
     pub atlas: bool,
     pub target: DVec3,
@@ -53,6 +56,7 @@ impl Default for Navigation {
             viewport: None,
             system: 0,
             selected: None,
+            picked: None,
             following: false,
             atlas: false,
             target: DVec3::ZERO,
@@ -107,6 +111,7 @@ impl Navigation {
         self.pitch = 0.85;
         self.system = system;
         self.selected = None;
+        self.picked = None;
         self.following = false;
         self.atlas = false;
         self.target = DVec3::ZERO;

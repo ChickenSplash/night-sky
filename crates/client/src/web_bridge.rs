@@ -165,6 +165,14 @@ struct State<'a> {
     display: DisplayState,
     system: Option<SystemState<'a>>,
     selected: Option<TaskDetail<'a>>,
+    picked: Option<Picked<'a>>,
+}
+
+#[derive(Serialize)]
+struct Picked<'a> {
+    name: &'a str,
+    page: u32,
+    pages: usize,
 }
 
 fn publish_state(
@@ -175,7 +183,16 @@ fn publish_state(
 ) {
     let system = universe.0.systems.get(nav.system);
     let planet = system.and_then(|s| nav.selected.and_then(|i| s.tasks.get(i)));
+    let picked = nav.picked.and_then(|(index, page)| {
+        let star = universe.0.systems.get(index)?;
+        Some(Picked {
+            name: &star.name,
+            page,
+            pages: star.pages().len(),
+        })
+    });
     let state = State {
+        picked,
         list: system.map(|s| s.id.as_str()),
         page: nav.page,
         pages: system.map(|s| s.pages()).unwrap_or_default(),

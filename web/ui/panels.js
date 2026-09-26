@@ -311,7 +311,6 @@ export function mount(bridge, canvas) {
   const bar = el('footer', { id: 'time-bar', className: 'panel floating' },
     el('div', { className: 'readout' }, clock, speed), slower, pause, faster, realTime);
   // Where you are: list and page, view mode with page arrows, selected task.
-  const whereList = el('span', { className: 'name' });
   const wherePage = el('span', { className: 'meta' });
   const viewSelect = dropdown('View mode', [...VIEWS, ['Interstellar atlas', 'atlas']], value => send(value === 'atlas'
     ? { type: 'atlas' } : { type: 'set_view', view: value }));
@@ -319,26 +318,34 @@ export function mount(bridge, canvas) {
   const pageOn = round('chevron', 'Next page', 'round small');
   const frame = round('frame', 'Frame orbital system', 'round small');
   const whereTask = el('span', { className: 'name' });
+  const framePlanet = round('frame', 'Frame this planet', 'round small');
   const taskDot = el('span', { className: 'dot' });
   const where = el('div', { id: 'where' },
-    el('div', { className: 'panel floating pill list-pill' }, whereList, wherePage),
-    el('div', { className: 'panel floating pill view-pill' }, pageBack, viewSelect, pageOn, frame),
-    el('button', { className: 'panel floating pill task-pill', title: 'Show task details' }, taskDot, whereTask));
+    el('div', { className: 'panel floating pill view-pill' }, pageBack, viewSelect, wherePage, pageOn, frame),
+    el('div', { className: 'panel floating pill task-pill' },
+      el('button', { className: 'details', title: 'Show task details' }, taskDot, whereTask), framePlanet));
   const renderWhere = () => {
     const pages = state.pages || [];
     const current = Math.max(0, pages.indexOf(state.page));
-    whereList.textContent = state.atlas ? 'Interstellar atlas' : state.system?.name ?? 'No list';
-    wherePage.textContent = state.atlas || !state.system ? '' : `System ${current + 1} / ${Math.max(pages.length, 1)}`;
-    whereList.parentElement.title = whereList.textContent;
+    const picked = state.picked;
+    wherePage.textContent = picked ? `System ${picked.page + 1} / ${picked.pages}`
+      : state.atlas || !state.system ? '' : `System ${current + 1} / ${Math.max(pages.length, 1)}`;
+    // The view menu is labelled with where you are; the menu marks the view.
     viewSelect.set(state.atlas ? 'atlas' : state.view);
+    const name = picked?.name ?? (state.atlas ? 'Interstellar atlas' : state.system?.name ?? 'No list');
+    wherePage.closest('.view-pill').classList.toggle('picked', !!picked);
+    frame.title = picked ? `Fly to ${picked.name}, system ${picked.page + 1}` : 'Frame orbital system';
+    viewSelect.querySelector('.dropdown span').textContent = name;
+    viewSelect.querySelector('.dropdown').title = `${name} · change view`;
     pageBack.disabled = state.atlas || current <= 0;
     pageOn.disabled = state.atlas || current + 1 >= pages.length;
     pageBack.onclick = () => send({ type: 'show_page', page: pages[current - 1] });
     pageOn.onclick = () => send({ type: 'show_page', page: pages[current + 1] });
     const task = state.selected;
     whereTask.textContent = task?.name ?? 'No planet selected';
-    whereTask.parentElement.classList.toggle('none', !task);
+    whereTask.closest('.task-pill').classList.toggle('none', !task);
     whereTask.parentElement.disabled = !task;
+    framePlanet.hidden = !task;
     taskDot.style.color = task ? rgb(task.colour) : '';
   };
   const viewCaption = el('div', { className: 'caption top' });
@@ -471,12 +478,9 @@ export function mount(bridge, canvas) {
     const task = state.selected;
     if (!task) return setModal(false);
     const system = state.system;
-    const key = JSON.stringify([task, system, state.page, state.following]);
+    const key = JSON.stringify([task, system, state.page]);
     if (modal.hidden || key === modalKey) return;
     modalKey = key;
-    const follow = el('button', { textContent: state.following ? '◎ Following' : '◎ Follow this planet' });
-    follow.classList.toggle('active', !!state.following);
-    follow.addEventListener('click', () => send({ type: 'follow' }));
     const star = system?.star_ly.map(v => (v >= 0 ? '+' : '') + v.toFixed(2)).join('  ');
     modalBody.replaceChildren(...[
       el('p', { className: 'status', textContent: task.status.toUpperCase(), style: `color: ${rgb(task.colour)}` }),
@@ -500,8 +504,8 @@ export function mount(bridge, canvas) {
           ['Star position', `${star} ly`],
           ['Orbital plane', `tilt ${system.tilt_deg.toFixed(0)}°, node ${system.node_deg.toFixed(0)}°`],
         ])) : null),
-      el('div', { className: 'row actions' }, follow,
-        task.url ? el('a', { href: task.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Open in ClickUp ↗' }) : null),
+      task.url ? el('div', { className: 'row actions' },
+        el('a', { href: task.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Open in ClickUp ↗' })) : null,
     ].filter(Boolean));
   };
 
@@ -526,6 +530,7 @@ export function mount(bridge, canvas) {
 
   frame.addEventListener('click', () => send({ type: 'frame_system' }));
   whereTask.parentElement.addEventListener('click', () => setModal(true));
+  framePlanet.addEventListener('click', () => send({ type: 'follow' }));
   closeModal.addEventListener('click', () => setModal(false));
   modal.addEventListener('pointerdown', event => {
     if (event.target === modal) setModal(false);
