@@ -690,7 +690,14 @@ fn canvas_overlay(
             };
             painter.galley(egui::pos2(x, point.y - text.size().y * 0.5), text, tint);
         }
-        if hovered && click {
+        // A second click on the selected body flies to it.
+        if hovered && click && selected {
+            out.push(if star {
+                UiCommand::FrameSystem
+            } else {
+                UiCommand::Follow
+            });
+        } else if hovered && click {
             match marker.kind {
                 MarkerKind::Planet(index) => {
                     if let Some(task) = system.and_then(|s| s.tasks.get(index)) {
