@@ -336,9 +336,15 @@ impl Panels<'_> {
             ))
             .color(MUTED),
         );
-        ui.label(
-            egui::RichText::new(format!("{:.2} solar masses", system.mass_solar)).color(MUTED),
-        );
+        if let Some(star) = system.star(nav.page) {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} · {}\n{:.2} solar masses · {:.0} K",
+                    star.kind, star.spectral, star.mass_solar, star.temperature_k
+                ))
+                .color(MUTED),
+            );
+        }
         let p = crate::scene::page_origin_ly(system, nav.page);
         ui.label(
             egui::RichText::new(format!(
@@ -410,12 +416,24 @@ impl Panels<'_> {
                         "Orbital period",
                         format!(
                             "{:.1} days",
-                            period_seconds(&planet.orbit, system.mass_solar) / 86400.0
+                            period_seconds(&planet.orbit, system.mass(planet.page())) / 86400.0
                         ),
                     ),
                     ("Physical radius", format!("{:.0} km", planet.radius_km)),
                     ("Type", planet.class.clone()),
                     ("Mass", format!("{:.4} Earth masses", planet.mass_earth)),
+                    (
+                        "Rotation",
+                        if planet.spin.locked {
+                            "Tidally locked".into()
+                        } else {
+                            format!("{:.1} hours", planet.spin.period_hours)
+                        },
+                    ),
+                    (
+                        "Axial tilt",
+                        format!("{:.1}°", planet.spin.tilt_rad.to_degrees()),
+                    ),
                     (
                         "Resonance",
                         planet.resonance.map_or("None".into(), |[p, q]| {

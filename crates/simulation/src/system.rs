@@ -11,9 +11,13 @@
 //! - Some pairs sit in mean-motion resonances, with phases that keep their
 //!   conjunctions away from the outer planet's periapsis, as for Neptune and Pluto.
 
-use crate::stable_hash;
-use space_shared::{Galaxy, MAX_PLANETS, MIN_PLANETS, Orbit, StarSystem};
-use std::{collections::HashMap, f64::consts::TAU};
+use crate::star::formation;
+use crate::{period_seconds, stable_hash};
+use space_shared::{Galaxy, MAX_PLANETS, MIN_PLANETS, Orbit, Spin, StarSystem};
+use std::{
+    collections::HashMap,
+    f64::consts::{PI, TAU},
+};
 
 pub const EARTH_MASS_SOLAR: f64 = 3.003_489e-6;
 pub const EARTH_RADIUS_KM: f64 = 6_371.0;
@@ -22,6 +26,9 @@ pub const JUPITER_MASS_EARTH: f64 = 317.83;
 /// Adjacent planets closer than this many mutual Hill radii tend to destabilise
 /// within the age of their star (Chambers et al. 1996; Pu & Wu 2015).
 const MIN_HILL_SPACING: f64 = 10.0;
+/// Heaviest planet as a share of its star. Keeps a pair's mutual Hill radius small
+/// enough that the spacing above can always be met further out.
+const MAX_MASS_RATIO: f64 = 0.004;
 /// Period ratios offered for resonant pairs, outer:inner.
 const RESONANCES: [[u32; 2]; 6] = [[2, 1], [3, 2], [4, 3], [5, 4], [5, 3], [3, 1]];
 
@@ -54,17 +61,18 @@ pub struct Body {
     pub radius_km: f64,
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
+    pub spin: Spin,
 }
 
 /// SplitMix64: small, fast and identical on every platform.
-struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    fn new(key: &str) -> Self {
+    pub(crate) fn new(key: &str) -> Self {
         Self(stable_hash(key))
     }
 
-    fn unit(&mut self) -> f64 {
+    pub(crate) fn unit(&mut self) -> f64 {
         self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -72,20 +80,20 @@ impl Rng {
         ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
     }
 
-    fn range(&mut self, low: f64, high: f64) -> f64 {
+    pub(crate) fn range(&mut self, low: f64, high: f64) -> f64 {
         low + (high - low) * self.unit()
     }
 
-    fn log_range(&mut self, low: f64, high: f64) -> f64 {
+    pub(crate) fn log_range(&mut self, low: f64, high: f64) -> f64 {
         (low.ln() + (high.ln() - low.ln()) * self.unit()).exp()
     }
 
-    fn chance(&mut self, p: f64) -> bool {
+    pub(crate) fn chance(&mut self, p: f64) -> bool {
         self.unit() < p
     }
 
     /// Eccentricities and inclinations of real systems are close to Rayleigh.
-    fn rayleigh(&mut self, sigma: f64) -> f64 {
+    pub(crate) fn rayleigh(&mut self, sigma: f64) -> f64 {
         sigma * (-2.0 * (1.0 - self.unit()).ln()).sqrt()
     }
 }
@@ -110,15 +118,6 @@ pub fn page_of_slot(list_id: &str, slot: u32) -> (u32, u32) {
     }
 }
 
-/// Main-sequence luminosity in solar units.
-pub fn luminosity(mass_solar: f64) -> f64 {
-    if mass_solar < 0.43 {
-        0.23 * mass_solar.powf(2.3)
-    } else {
-        mass_solar.powi(4)
-    }
-}
-
 /// Empirical radius for a mass in Earth masses, in Earth radii.
 fn radius_earth(mass_earth: f64, class: Class) -> f64 {
     match class {
@@ -130,7 +129,22 @@ fn radius_earth(mass_earth: f64, class: Class) -> f64 {
     }
 }
 
-fn draw_body(rng: &mut Rng, distance_au: f64, snow_au: f64) -> (Class, f64) {
+/// Giant planets are rarer around lighter stars, roughly in proportion to their
+/// mass (Johnson et al. 2010), and no planet exceeds `MAX_MASS_RATIO` of its star.
+fn draw_body(rng: &mut Rng, distance_au: f64, snow_au: f64, star_mass: f64) -> (Class, f64) {
+    let (class, mass) = draw_class(rng, distance_au, snow_au);
+    let (class, mass) = if class == Class::GasGiant && !rng.chance(star_mass.min(1.0)) {
+        (Class::IceGiant, rng.log_range(8.0, 25.0))
+    } else {
+        (class, mass)
+    };
+    (
+        class,
+        mass.min(MAX_MASS_RATIO * star_mass / EARTH_MASS_SOLAR),
+    )
+}
+
+fn draw_class(rng: &mut Rng, distance_au: f64, snow_au: f64) -> (Class, f64) {
     let x = distance_au / snow_au;
     let roll = rng.unit();
     if x < 1.0 {
@@ -181,10 +195,13 @@ fn stable(inner: &Body, outer_au: f64, outer_e: f64, outer_mass: f64, star: f64)
 }
 
 /// The whole planetary system of one page, innermost first.
-pub fn planetary_system(list_id: &str, page: u32, mass_solar: f64) -> Vec<Body> {
+pub fn planetary_system(list_id: &str, page: u32) -> Vec<Body> {
     let mut rng = Rng::new(&format!("{list_id}:page-{page}:system"));
-    let light = luminosity(mass_solar).sqrt();
-    let snow = 2.7 * light;
+    // Spins draw from their own sequence, so they never move an orbit.
+    let mut spins = Rng::new(&format!("{list_id}:page-{page}:spins"));
+    let formed = formation(list_id, page);
+    let (mass_solar, snow) = (formed.star.mass_solar, formed.snow_au);
+    let light = snow / 2.7;
     // A few systems form tight resonant chains, like TRAPPIST-1 or Kepler-223.
     let chain = rng.chance(0.12);
     let mut bodies: Vec<Body> = Vec::new();
@@ -192,9 +209,10 @@ pub fn planetary_system(list_id: &str, page: u32, mass_solar: f64) -> Vec<Body> 
         let previous = bodies.last();
         let tentative = match previous {
             Some(p) => p.orbit.semi_major_au * rng.log_range(1.2, 1.9),
-            None => rng.log_range(0.04, 0.4) * light.max(0.1),
+            None => (rng.log_range(0.04, 0.4) * light.max(0.1))
+                .max(formed.inner_au * rng.range(1.0, 1.4)),
         };
-        let (class, mass) = draw_body(&mut rng, tentative, snow);
+        let (class, mass) = draw_body(&mut rng, tentative, snow, mass_solar);
         let (e_sigma, i_sigma) = if class == Class::Dwarf {
             (0.12, 0.1)
         } else {
@@ -236,14 +254,16 @@ pub fn planetary_system(list_id: &str, page: u32, mass_solar: f64) -> Vec<Body> 
             }
         }
         let radius = radius_earth(mass, class) * rng.range(0.92, 1.1);
+        let orbit = Orbit {
+            semi_major_au: semi_major,
+            eccentricity,
+            inclination_rad: inclination,
+            ascending_node_rad: node,
+            phase_rad: phase,
+        };
         bodies.push(Body {
-            orbit: Orbit {
-                semi_major_au: semi_major,
-                eccentricity,
-                inclination_rad: inclination,
-                ascending_node_rad: node,
-                phase_rad: phase,
-            },
+            spin: planet_spin(&mut spins, class, &orbit, mass_solar),
+            orbit,
             class,
             mass_earth: mass,
             radius_km: radius * EARTH_RADIUS_KM,
@@ -251,6 +271,69 @@ pub fn planetary_system(list_id: &str, page: u32, mass_solar: f64) -> Vec<Body> 
         });
     }
     bodies
+}
+
+/// Rotation and axial tilt, after the Solar System and exoplanet tidal theory.
+///
+/// - Tides lock close-in planets within a few billion years. The locking distance
+///   grows as the cube root of the star's mass (Gladman et al. 1996), which is why
+///   planets in red dwarfs' habitable zones are locked and Earth is not.
+/// - Just beyond it, tides still slow rotation: eccentric orbits settle into a 3:2
+///   spin-orbit resonance like Mercury, circular ones spin slowly either way like Venus.
+/// - Free planets keep their birth spin: about a day for rocky worlds, ten to twenty
+///   hours for giants. Giant impacts leave some tilted far over, like Uranus.
+fn planet_spin(rng: &mut Rng, class: Class, orbit: &Orbit, star_mass: f64) -> Spin {
+    let orbital_hours = period_seconds(orbit, star_mass) / 3_600.0;
+    let a = orbit.semi_major_au;
+    let reach = star_mass.cbrt();
+    let lock = match class {
+        Class::GasGiant | Class::IceGiant => 0.1 * reach,
+        Class::SubNeptune => 0.24 * reach,
+        Class::Rocky => 0.3 * reach,
+        Class::Dwarf => 0.0,
+    };
+    let isotropic = |rng: &mut Rng| (1.0 - 2.0 * rng.unit()).acos();
+    let (period_hours, tilt, locked) = if a < lock {
+        (orbital_hours, rng.rayleigh(0.5_f64.to_radians()), true)
+    } else if matches!(class, Class::Rocky | Class::SubNeptune) && a < 2.5 * lock {
+        if orbit.eccentricity > 0.1 {
+            (
+                orbital_hours * 2.0 / 3.0,
+                rng.rayleigh(0.5_f64.to_radians()),
+                false,
+            )
+        } else {
+            let tilt = rng.rayleigh(3_f64.to_radians());
+            let tilt = if rng.chance(0.5) { PI - tilt } else { tilt };
+            (rng.log_range(1_000.0, 6_000.0), tilt, false)
+        }
+    } else {
+        let hours = match class {
+            Class::Rocky => rng.log_range(10.0, 60.0),
+            Class::SubNeptune => rng.log_range(10.0, 40.0),
+            Class::IceGiant => rng.log_range(12.0, 20.0),
+            Class::GasGiant => rng.log_range(9.0, 15.0),
+            Class::Dwarf => rng.log_range(4.0, 400.0),
+        };
+        let tilt = match class {
+            Class::Dwarf => isotropic(rng),
+            Class::GasGiant | Class::IceGiant if rng.chance(0.85) => {
+                rng.rayleigh(18_f64.to_radians())
+            }
+            Class::Rocky | Class::SubNeptune if rng.chance(0.75) => {
+                rng.rayleigh(22_f64.to_radians())
+            }
+            _ => isotropic(rng),
+        };
+        (hours, tilt, false)
+    };
+    Spin {
+        period_hours,
+        tilt_rad: tilt.min(PI),
+        azimuth_rad: rng.range(0.0, TAU),
+        phase_rad: rng.range(0.0, TAU),
+        locked,
+    }
 }
 
 /// Gives every task the page, orbit and physical body of its slot. Deterministic,
@@ -262,8 +345,7 @@ pub fn shape(system: &mut StarSystem) {
         let (page, index) = page_of_slot(&system.id, slot);
         let body = &systems
             .entry(page)
-            .or_insert_with(|| planetary_system(&system.id, page, system.mass_solar))
-            [index as usize];
+            .or_insert_with(|| planetary_system(&system.id, page))[index as usize];
         task.slot = Some(slot);
         task.page = page;
         task.orbit_index = index;
@@ -272,7 +354,13 @@ pub fn shape(system: &mut StarSystem) {
         task.mass_earth = body.mass_earth;
         task.class = body.class.name().into();
         task.resonance = body.resonance;
+        task.spin = body.spin;
     }
+    system.stars = system
+        .pages()
+        .into_iter()
+        .map(|page| crate::star(&system.id, page))
+        .collect();
 }
 
 pub fn shape_galaxy(galaxy: &mut Galaxy) {
@@ -288,10 +376,9 @@ pub fn demo_galaxy() -> Galaxy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::period_seconds;
 
     fn systems() -> impl Iterator<Item = Vec<Body>> {
-        (0..400).map(|page| planetary_system("list", page, 1.0))
+        (0..400).map(|page| planetary_system("list", page))
     }
 
     #[test]
@@ -331,7 +418,8 @@ mod tests {
 
     #[test]
     fn neighbours_are_hill_stable_and_never_cross() {
-        for bodies in systems() {
+        for (page, bodies) in systems().enumerate() {
+            let star = formation("list", page as u32).star.mass_solar;
             for pair in bodies.windows(2) {
                 let (inner, outer) = (&pair[0], &pair[1]);
                 assert!(outer.orbit.semi_major_au > inner.orbit.semi_major_au);
@@ -340,7 +428,7 @@ mod tests {
                     outer.orbit.semi_major_au,
                     outer.orbit.eccentricity,
                     outer.mass_earth,
-                    1.0
+                    star
                 ));
             }
         }
@@ -370,10 +458,40 @@ mod tests {
 
     #[test]
     fn composition_follows_the_snow_line() {
-        for body in systems().flatten() {
-            if body.orbit.semi_major_au < 2.0 {
-                assert!(matches!(body.class, Class::Rocky | Class::SubNeptune));
+        for (page, bodies) in systems().enumerate() {
+            let formed = formation("list", page as u32);
+            for body in bodies {
+                if body.orbit.semi_major_au < 0.7 * formed.snow_au {
+                    assert!(matches!(body.class, Class::Rocky | Class::SubNeptune));
+                }
+                assert!(body.orbit.semi_major_au >= formed.inner_au);
             }
         }
+    }
+
+    #[test]
+    fn spins_follow_tides_and_class() {
+        let (mut locked, mut retrograde, mut total) = (0, 0, 0);
+        for bodies in systems() {
+            for body in bodies {
+                total += 1;
+                let spin = body.spin;
+                assert!(spin.period_hours > 0.0 && (0.0..=PI).contains(&spin.tilt_rad));
+                if spin.locked {
+                    locked += 1;
+                    assert!(spin.tilt_rad < 0.1);
+                } else if matches!(body.class, Class::GasGiant | Class::IceGiant) {
+                    assert!((9.0..=20.0).contains(&spin.period_hours));
+                }
+                if spin.tilt_rad > PI / 2.0 {
+                    retrograde += 1;
+                }
+            }
+        }
+        assert!(
+            locked > total / 20 && locked < total / 2,
+            "{locked} of {total} locked"
+        );
+        assert!(retrograde > 0 && retrograde < total / 4);
     }
 }

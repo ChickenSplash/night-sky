@@ -71,7 +71,7 @@ impl ClickUp {
             id: id.to_owned(),
             name: list.name,
             position_ly: star_position(id),
-            mass_solar: 1.0,
+            stars: Vec::new(),
             tasks: tasks
                 .into_iter()
                 .zip(slots)
@@ -84,6 +84,7 @@ impl ClickUp {
                     mass_earth: 0.0,
                     class: String::new(),
                     resonance: None,
+                    spin: Default::default(),
                     colour: parse_colour(&task.status.color),
                     status_order: task
                         .status

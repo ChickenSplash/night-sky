@@ -11,8 +11,40 @@ pub struct StarSystem {
     pub id: String,
     pub name: String,
     pub position_ly: [f64; 3],
-    pub mass_solar: f64,
     pub tasks: Vec<TaskPlanet>,
+    /// One star per page, derived from the list and page.
+    #[serde(default)]
+    pub stars: Vec<Star>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Star {
+    pub page: u32,
+    /// Spectral type, such as "G2 V".
+    pub spectral: String,
+    /// Plain name, such as "Yellow dwarf".
+    pub kind: String,
+    pub mass_solar: f64,
+    pub radius_solar: f64,
+    pub luminosity_solar: f64,
+    pub temperature_k: f64,
+    /// Blackbody colour of the photosphere.
+    pub colour: [u8; 3],
+    pub spin: Spin,
+}
+
+/// Rotation about an axis tilted from the orbital plane's pole. A tilt past 90°
+/// is retrograde rotation, as for Venus and Uranus.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Spin {
+    pub period_hours: f64,
+    pub tilt_rad: f64,
+    /// Direction the axis leans towards, around the orbital pole.
+    pub azimuth_rad: f64,
+    pub phase_rad: f64,
+    /// Rotation synchronised with the orbit: one face always towards the star.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -49,6 +81,8 @@ pub struct TaskPlanet {
     /// Period ratio with the next planet in, outer:inner.
     #[serde(default)]
     pub resonance: Option<[u32; 2]>,
+    #[serde(default)]
+    pub spin: Spin,
 }
 
 pub const MIN_PLANETS: u32 = 7;
@@ -81,6 +115,15 @@ impl StarSystem {
         self.tasks.iter().map(TaskPlanet::page).min().unwrap_or(0)
     }
 
+    pub fn star(&self, page: u32) -> Option<&Star> {
+        self.stars.iter().find(|s| s.page == page)
+    }
+
+    /// Mass of the page's star, in solar masses.
+    pub fn mass(&self, page: u32) -> f64 {
+        self.star(page).map_or(1.0, |s| s.mass_solar)
+    }
+
     pub fn on_page(&self, page: u32) -> impl Iterator<Item = &TaskPlanet> {
         self.tasks.iter().filter(move |p| p.page() == page)
     }
@@ -102,7 +145,6 @@ pub fn demo_fixture() -> Galaxy {
             "demo-flight",
             "Flight Operations",
             [0.0, 0.0, 0.0],
-            1.0,
             [
                 "Design the navigation console",
                 "Map the outer systems",
@@ -116,7 +158,6 @@ pub fn demo_fixture() -> Galaxy {
             "demo-research",
             "Deep Space Research",
             [3.7, 0.65, -2.1],
-            0.82,
             [
                 "Survey a new exoplanet",
                 "Analyse stellar spectra",
@@ -129,9 +170,9 @@ pub fn demo_fixture() -> Galaxy {
     ];
     Galaxy {
         source: "Demo · fixture tasks".into(),
-        systems: lists.into_iter().map(|(id, name, position_ly, mass_solar, names)| {
+        systems: lists.into_iter().map(|(id, name, position_ly, names)| {
             StarSystem {
-                id: id.into(), name: name.into(), position_ly, mass_solar,
+                id: id.into(), name: name.into(), position_ly, stars: Vec::new(),
                 tasks: names.into_iter().enumerate().map(|(i, name)| {
                     let (status, status_type, status_order, colour) = match i % 3 {
                         0 => ("in progress", "custom", 1, [92, 213, 242]),
@@ -144,7 +185,7 @@ pub fn demo_fixture() -> Galaxy {
                         description: "A fictional task for exploring ClickUp Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".into(),
                         status: status.into(), status_type: status_type.into(), status_order, colour, assignees: vec!["Mission control".into()],
                         due_date_ms: None, url: None, radius_km: 0.0, orbit: Orbit::default(),
-                        page: 0, orbit_index: 0, mass_earth: 0.0, class: String::new(), resonance: None,
+                        page: 0, orbit_index: 0, mass_earth: 0.0, class: String::new(), resonance: None, spin: Spin::default(),
                     }
                 }).collect(),
             }

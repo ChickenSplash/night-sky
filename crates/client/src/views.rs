@@ -59,13 +59,16 @@ impl TableLayout {
             .map(|p| p.orbit_index)
             .max()
             .unwrap_or(0);
+        let star = system
+            .star(page)
+            .map_or(SUN_RADIUS_METRES, |s| s.radius_solar * SUN_RADIUS_METRES);
         let pitch = 3.2 * unit;
-        let first = SUN_RADIUS_METRES + 3.0 * unit;
+        let first = star + 3.0 * unit;
         let bottom = first + f64::from(rows) * pitch + 2.0 * unit;
-        let top = if SUN_RADIUS_METRES < 5.0 * unit {
-            -SUN_RADIUS_METRES - unit
+        let top = if star < 5.0 * unit {
+            -star - unit
         } else {
-            SUN_RADIUS_METRES - 2.0 * unit
+            star - 2.0 * unit
         };
         Self {
             unit,
@@ -270,16 +273,22 @@ mod tests {
     }
 
     #[test]
-    fn table_uses_true_sizes_and_shows_only_the_suns_limb() {
+    fn table_uses_true_sizes_and_fits_the_star() {
         let galaxy = large_galaxy();
         let system = &galaxy.systems[0];
         let layout = TableLayout::new(system, 1);
         let rows: Vec<_> = system.on_page(1).map(|p| layout.position(p).z).collect();
         assert_eq!(rows.len() as u32, page_capacity(&system.id, 1));
         assert!(rows.windows(2).all(|r| r[1] - r[0] > 2.0 * layout.unit));
-        // Frame starts inside the star, which ends above the first planet.
-        assert!(layout.top > 0.0 && layout.top < SUN_RADIUS_METRES);
-        assert!(rows[0] - layout.unit > SUN_RADIUS_METRES);
+        // A large star shows only its limb above the first planet; a small one
+        // fits whole.
+        let star = system.star(1).unwrap().radius_solar * SUN_RADIUS_METRES;
+        if star >= 5.0 * layout.unit {
+            assert!(layout.top > 0.0 && layout.top < star);
+        } else {
+            assert!(layout.top < -star);
+        }
+        assert!(rows[0] - layout.unit > star);
         assert!(rows[rows.len() - 1] + layout.unit < layout.bottom);
         let mut nav = Navigation {
             page: 1,

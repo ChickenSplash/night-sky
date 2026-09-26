@@ -106,6 +106,23 @@ function massText(earths) {
     : `${earths < 0.1 ? earths.toFixed(4) : earths.toFixed(2)} Earth masses`;
 }
 
+function rotationText(hours) {
+  return hours >= 48 ? periodText(hours / 24) : hours >= 2 ? `${hours.toFixed(1)} hours` : `${(hours * 60).toFixed(0)} minutes`;
+}
+
+function tiltText(rad) {
+  const deg = rad * 180 / Math.PI;
+  return `${deg.toFixed(1)}°${deg > 90 ? ' · retrograde' : ''}`;
+}
+
+function starRadiusText(solar) {
+  return solar < 0.05 ? `${Math.round(solar * 695700).toLocaleString('en-GB')} km` : `${solar.toFixed(2)} solar radii`;
+}
+
+function luminosityText(solar) {
+  return solar < 0.01 ? solar.toExponential(1) : solar < 10 ? solar.toFixed(3) : Math.round(solar).toLocaleString('en-GB');
+}
+
 function periodText(days) {
   return days >= 730 ? `${(days / 365.25).toFixed(1)} years` : `${days.toFixed(1)} days`;
 }
@@ -511,11 +528,21 @@ export function mount(bridge, canvas) {
           ['Semi-major axis', `${task.semi_major_au.toFixed(3)} AU`],
           ['Eccentricity', task.eccentricity.toFixed(3)],
           ['Orbital period', periodText(task.period_days)],
+          ['Rotation', task.spin.locked ? `Tidally locked · ${periodText(task.period_days)}` : rotationText(task.spin.period_hours)],
+          ['Axial tilt', tiltText(task.spin.tilt_rad)],
           ['Resonance', task.resonance ? `${task.resonance[0]}:${task.resonance[1]} with inner neighbour` : 'None'],
         ])),
+        system?.star ? el('section', {}, heading('Star'), facts([
+          ['Type', `${system.star.kind} · ${system.star.spectral}`],
+          ['Mass', `${system.star.mass_solar.toFixed(2)} solar masses`],
+          ['Radius', `${starRadiusText(system.star.radius_solar)}`],
+          ['Temperature', `${Math.round(system.star.temperature_k).toLocaleString('en-GB')} K`],
+          ['Luminosity', `${luminosityText(system.star.luminosity_solar)} solar`],
+          ['Rotation', rotationText(system.star.spin.period_hours)],
+          ['Axial tilt', tiltText(system.star.spin.tilt_rad)],
+        ])) : null,
         system ? el('section', {}, heading('Host system'), facts([
           ['Page', `System ${state.page + 1} · ${system.page_tasks} of ${system.tasks} tasks`],
-          ['Star mass', `${system.mass_solar.toFixed(2)} solar masses`],
           ['Star position', `${star} ly`],
           ['Orbital plane', `tilt ${system.tilt_deg.toFixed(0)}°, node ${system.node_deg.toFixed(0)}°`],
         ])) : null),

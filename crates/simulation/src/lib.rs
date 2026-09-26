@@ -1,6 +1,8 @@
+mod star;
 mod system;
 
 use space_shared::Orbit;
+pub use star::{blackbody, luminosity, spin_angle, star};
 use std::f64::consts::TAU;
 pub use system::*;
 

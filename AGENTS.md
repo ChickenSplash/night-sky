@@ -67,8 +67,16 @@
   once (`space_simulation::planetary_system`): masses, radii and orbits follow the
   snow line, neighbours stay Hill-stable and some pairs are resonant. The slot's
   index within its page picks its body. `shape` applies this on the server and
-  again on the client, so fixtures need only slots. Table layout is presentation-only; leaving it restores current
-  simulated positions. The table keeps physical radii.
+  again on the client, so fixtures need only slots. Table layout is
+  presentation-only; leaving it restores current simulated positions. The table
+  keeps physical radii.
+- Each page has its own star (`space_simulation::star(list_id, page)`), drawn in
+  solar-neighbourhood proportions (mostly red dwarfs, a few giants and white
+  dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its radius
+  and blackbody colour are drawn, and it shapes planet formation. Stars and
+  planets carry a `Spin`; planets and star spins draw from their own seeds, so
+  they never move an orbit. Planet mass is capped at 0.4% of the star's, or
+  Hill spacing cannot converge.
 - Constellation view never moves stars: it keeps the current page's frame, fits
   all page stars from the current angle and draws links between them.
 - Each page has its own deterministic orbital-plane tilt (`page_tilt(list_id, page)`),

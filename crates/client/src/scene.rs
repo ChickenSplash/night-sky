@@ -8,9 +8,9 @@ use bevy::{
 };
 use bevy_egui::EguiContexts;
 use big_space::prelude::*;
-use space_shared::{Galaxy, Orbit, StarSystem};
+use space_shared::{Galaxy, Orbit, Spin, StarSystem};
 use space_simulation::{
-    LY_METRES, SUN_RADIUS_METRES, page_tilt, position, position_at_eccentric_anomaly,
+    LY_METRES, SUN_RADIUS_METRES, page_tilt, position, position_at_eccentric_anomaly, spin_angle,
 };
 use std::f64::consts::TAU;
 
@@ -214,7 +214,11 @@ pub fn place_camera(
         && !nav.atlas
         && let Some(planet) = nav.selected.and_then(|i| system.tasks.get(i))
     {
-        nav.target = DVec3::from_array(position(&planet.orbit, system.mass_solar, clock.0.seconds));
+        nav.target = DVec3::from_array(position(
+            &planet.orbit,
+            system.mass(planet.page()),
+            clock.0.seconds,
+        ));
     }
     // Navigation, including the constellation, works in the shown page's own plane,
     // and the atlas in galactic axes. Changing frame flies the camera round.
@@ -338,6 +342,15 @@ pub fn page_frame(system: &StarSystem, page: u32) -> DQuat {
     rotation(page_tilt(&system.id, page))
 }
 
+/// A body's wireframe orientation in its system's plane: its axis tilted, then
+/// turned to its current rotation angle.
+fn spin_basis(frame: DQuat, spin: &Spin, seconds: f64) -> DQuat {
+    frame
+        * DQuat::from_rotation_y(spin.azimuth_rad)
+        * DQuat::from_rotation_x(spin.tilt_rad)
+        * DQuat::from_rotation_y(spin_angle(spin, seconds))
+}
+
 /// Galactic offset of a page star from its list's anchor, in metres.
 pub fn page_offset(system: &StarSystem, page: u32) -> DVec3 {
     page_position(&system.id, page)
@@ -358,7 +371,6 @@ fn orbit_point(orbit: &Orbit, step: usize, steps: usize) -> DVec3 {
     ))
 }
 
-const STAR: Color = Color::srgb(1.0, 0.72, 0.36);
 const ORBIT: Color = Color::srgb(0.075, 0.17, 0.25);
 const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
 
@@ -383,6 +395,7 @@ struct Canvas<'a> {
     system: &'a StarSystem,
     /// Plane of the page on display.
     frame: DQuat,
+    seconds: f64,
 }
 
 impl Canvas<'_> {
@@ -548,14 +561,21 @@ impl Canvas<'_> {
         };
         let centre =
             self.origin + (relative.normalize_or_zero() * visible_distance / self.scale).as_vec3();
+        let body = star.star(page);
+        let physical = body.map_or(SUN_RADIUS_METRES, |b| b.radius_solar * SUN_RADIUS_METRES);
+        let tint = body.map_or([255, 192, 108], |b| b.colour);
+        let basis = match body {
+            Some(b) => spin_basis(page_frame(star, page), &b.spin, self.seconds),
+            None => page_frame(star, page),
+        };
         let radius = if !current {
             visible_distance * 0.004
         } else if wide {
             relative.length() * 0.004
         } else if nav.exaggerate && !table {
-            (pose.distance * 0.008).max(SUN_RADIUS_METRES)
+            (pose.distance * 0.008).max(physical)
         } else {
-            SUN_RADIUS_METRES
+            physical
         };
         let limb = current && table && !wide;
         let pixels = self
@@ -563,14 +583,14 @@ impl Canvas<'_> {
                 gizmos,
                 centre,
                 self.units(radius),
-                STAR,
-                page_frame(star, page),
+                colour(tint),
+                basis,
                 limb,
             )
             .unwrap_or(0.0);
         let anchor = if limb {
             let unit = TableLayout::new(self.system, pose.page).unit;
-            self.world(self.frame * DVec3::new(0.0, 0.0, SUN_RADIUS_METRES + unit))
+            self.world(self.frame * DVec3::new(0.0, 0.0, physical + unit))
         } else {
             centre
         };
@@ -589,7 +609,7 @@ impl Canvas<'_> {
                 } else {
                     star.name.clone()
                 },
-                colour: [255, 192, 108],
+                colour: tint,
                 kind: MarkerKind::Star {
                     system: index,
                     page,
@@ -616,7 +636,8 @@ impl Canvas<'_> {
             if planet.page() != pose.page {
                 continue;
             }
-            let orbital = DVec3::from_array(position(&planet.orbit, system.mass_solar, seconds));
+            let orbital =
+                DVec3::from_array(position(&planet.orbit, system.mass(pose.page), seconds));
             let galactic = place(orbital.lerp(layout.position(planet), pose.layout));
             let centre = self.world(galactic);
             let physical = planet.radius_km * 1000.0;
@@ -630,7 +651,8 @@ impl Canvas<'_> {
             };
             let radius = orbital_radius + (physical - orbital_radius) * pose.layout;
             let tint = colour(planet.colour);
-            let pixels = self.sphere(gizmos, centre, self.units(radius), tint, self.frame, false);
+            let basis = spin_basis(self.frame, &planet.spin, seconds);
+            let pixels = self.sphere(gizmos, centre, self.units(radius), tint, basis, false);
             if let Some(point) = self.screen(centre) {
                 markers.push(Marker {
                     point,
@@ -671,6 +693,7 @@ pub fn draw(
         flying: rig.flying(),
         system,
         frame: page_frame(system, pose.page),
+        seconds: clock.0.seconds,
     };
     let markers = &mut markers.0;
     if nav.view == View::Constellation {

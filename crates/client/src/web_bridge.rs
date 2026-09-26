@@ -127,7 +127,7 @@ struct DisplayState {
 #[derive(Serialize)]
 struct SystemState<'a> {
     name: &'a str,
-    mass_solar: f64,
+    star: Option<&'a space_shared::Star>,
     page_tasks: usize,
     tasks: usize,
     star_ly: [f64; 3],
@@ -151,6 +151,7 @@ struct TaskDetail<'a> {
     mass_earth: f64,
     class: &'a str,
     resonance: Option<[u32; 2]>,
+    spin: space_shared::Spin,
 }
 
 #[derive(Serialize)]
@@ -215,7 +216,7 @@ fn publish_state(
             let [inclination, node, _] = page_tilt(&s.id, nav.page);
             SystemState {
                 name: &s.name,
-                mass_solar: s.mass_solar,
+                star: s.star(nav.page),
                 page_tasks: s.on_page(nav.page).count(),
                 tasks: s.tasks.len(),
                 star_ly: crate::scene::page_origin_ly(s, nav.page).to_array(),
@@ -233,11 +234,12 @@ fn publish_state(
             url: p.url.as_deref(),
             semi_major_au: p.orbit.semi_major_au,
             eccentricity: p.orbit.eccentricity,
-            period_days: period_seconds(&p.orbit, s.mass_solar) / 86_400.0,
+            period_days: period_seconds(&p.orbit, s.mass(p.page())) / 86_400.0,
             radius_km: p.radius_km,
             mass_earth: p.mass_earth,
             class: &p.class,
             resonance: p.resonance,
+            spin: p.spin,
         }),
     };
     // Compare the serialised form, so the event fires only on a real change.
