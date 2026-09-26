@@ -178,7 +178,7 @@ is available it retains its last data, initially the clearly labelled demo.
   into resonances (2:1, 3:2, 4:3, 5:4, 5:3, 3:1).
 - Each system's star follows the solar neighbourhood census: about 72% red
   dwarfs, 12% orange, 7% yellow, 5% white dwarfs, 3% F, and rare A, B and giant
-  stars. Wireframes use the star's radius and blackbody colour.
+  stars. Wireframes use the star's radius and spectral colour (deep red to blue by temperature).
 - Stars and planets rotate about tilted axes. Close-in planets are tidally
   locked, some near the locking distance settle into a Mercury-like 3:2
   spin-orbit state or a slow Venus-like spin, and a few are knocked far over like

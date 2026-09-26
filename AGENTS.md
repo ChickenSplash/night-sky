@@ -73,7 +73,7 @@
 - Each page has its own star (`space_simulation::star(list_id, page)`), drawn in
   solar-neighbourhood proportions (mostly red dwarfs, a few giants and white
   dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its radius
-  and blackbody colour are drawn, and it shapes planet formation. Stars and
+  and temperature colour (`spectral_colour`) are drawn, and it shapes planet formation. Stars and
   planets carry a `Spin`; planets and star spins draw from their own seeds, so
   they never move an orbit. Planet mass is capped at 0.4% of the star's, or
   Hill spacing cannot converge.

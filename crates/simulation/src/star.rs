@@ -5,6 +5,7 @@
 //!   gives it, so the spectral type, mass, radius and luminosity always agree.
 //! - Giants and white dwarfs are evolved stars. Their planets formed around the
 //!   younger main-sequence star, and inner ones were swallowed as it swelled.
+//! - Colours follow temperature along the spectral sequence.
 //! - Rotation follows each class's observed range, including the fast rotation of
 //!   stars hotter than the Kraft break (about 6,250 K).
 
@@ -83,27 +84,33 @@ fn mass_for_temperature(kelvin: f64) -> f64 {
     (low * high).sqrt()
 }
 
-/// Blackbody colour of a temperature (Tanner Helland's fit to CIE data).
-pub fn blackbody(kelvin: f64) -> [u8; 3] {
-    let t = kelvin / 100.0;
-    let red = if t <= 66.0 {
-        255.0
-    } else {
-        329.698_727_446 * (t - 60.0).powf(-0.133_204_759_2)
-    };
-    let green = if t <= 66.0 {
-        99.470_802_586_1 * t.ln() - 161.119_568_166_1
-    } else {
-        288.122_169_528_3 * (t - 60.0).powf(-0.075_514_849_2)
-    };
-    let blue = if t >= 66.0 {
-        255.0
-    } else if t <= 19.0 {
-        0.0
-    } else {
-        138.517_731_223_1 * (t - 10.0).ln() - 305.044_792_730_7
-    };
-    [red, green, blue].map(|c| c.clamp(0.0, 255.0) as u8)
+/// Display colour by temperature, from deep red M dwarfs through orange, yellow
+/// and white to blue B stars. True blackbody colours are nearly all pale orange
+/// below 5,000 K, which would make most stars look alike, so the red-to-yellow
+/// range is stretched while keeping the order of the spectral sequence.
+const SPECTRAL_SCALE: [(f64, [f64; 3]); 11] = [
+    (2_400.0, [255.0, 60.0, 45.0]),
+    (3_200.0, [255.0, 95.0, 55.0]),
+    (3_700.0, [255.0, 130.0, 60.0]),
+    (4_500.0, [255.0, 165.0, 70.0]),
+    (5_200.0, [255.0, 200.0, 90.0]),
+    (5_800.0, [255.0, 232.0, 140.0]),
+    (6_500.0, [255.0, 246.0, 215.0]),
+    (7_500.0, [238.0, 240.0, 255.0]),
+    (10_000.0, [190.0, 210.0, 255.0]),
+    (20_000.0, [145.0, 175.0, 255.0]),
+    (30_000.0, [120.0, 150.0, 255.0]),
+];
+
+pub fn spectral_colour(kelvin: f64) -> [u8; 3] {
+    let t = kelvin.clamp(SPECTRAL_SCALE[0].0, SPECTRAL_SCALE[10].0);
+    let i = SPECTRAL_SCALE
+        .windows(2)
+        .position(|w| t <= w[1].0)
+        .unwrap_or(9);
+    let ((t0, c0), (t1, c1)) = (SPECTRAL_SCALE[i], SPECTRAL_SCALE[i + 1]);
+    let f = (t / t0).ln() / (t1 / t0).ln();
+    std::array::from_fn(|k| (c0[k] + (c1[k] - c0[k]) * f).round() as u8)
 }
 
 /// Spectral letter for a temperature.
@@ -171,7 +178,7 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
                 radius_solar: radius,
                 luminosity_solar: light,
                 temperature_k: kelvin,
-                colour: blackbody(kelvin),
+                colour: spectral_colour(kelvin),
                 spin: Spin {
                     period_hours: hours(&mut rng, 100.0, 1_000.0),
                     tilt_rad: rng.rayleigh(0.15),
@@ -200,7 +207,7 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
                 radius_solar: radius,
                 luminosity_solar: light,
                 temperature_k: kelvin,
-                colour: blackbody(kelvin),
+                colour: spectral_colour(kelvin),
                 spin: Spin {
                     period_hours: hours(&mut rng, 0.05, 3.0),
                     tilt_rad: isotropic_tilt(&mut rng),
@@ -251,7 +258,7 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
                 radius_solar: radius,
                 luminosity_solar: light,
                 temperature_k: kelvin,
-                colour: blackbody(kelvin),
+                colour: spectral_colour(kelvin),
                 spin: Spin {
                     period_hours: period_days * 24.0,
                     tilt_rad: tilt.min(PI),
@@ -339,7 +346,14 @@ mod tests {
 
     #[test]
     fn colours_run_from_red_to_blue() {
-        assert!(blackbody(3_000.0)[2] < 140 && blackbody(3_000.0)[0] == 255);
-        assert!(blackbody(20_000.0)[2] == 255 && blackbody(20_000.0)[0] < 200);
+        let [red, sun, blue] = [3_000.0, 5_772.0, 20_000.0].map(spectral_colour);
+        assert!(red[0] == 255 && red[1] < 100 && red[2] < 60);
+        assert!(sun[0] == 255 && sun[1] > 220 && sun[2] < 160);
+        assert!(blue[2] == 255 && blue[0] < 150);
+        // Hotter is never redder.
+        let greens: Vec<_> = (26..60)
+            .map(|t| spectral_colour(t as f64 * 100.0)[1])
+            .collect();
+        assert!(greens.windows(2).all(|g| g[1] >= g[0]));
     }
 }
