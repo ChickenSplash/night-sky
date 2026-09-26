@@ -50,7 +50,7 @@ pub fn start() -> mpsc::Receiver<Update> {
     use reqwest::{StatusCode, header};
     let (tx, rx) = mpsc::channel();
     if std::env::args().any(|arg| arg == "--smoke-test") {
-        let _ = tx.send(Update::Galaxy(space_shared::demo_galaxy()));
+        let _ = tx.send(Update::Galaxy(space_simulation::demo_galaxy()));
         return rx;
     }
     let poll = move || {

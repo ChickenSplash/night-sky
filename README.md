@@ -69,7 +69,7 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Return to orbital view | **Orbit** or **Frame orbital system** |
 | Align ten task-planets in a top-down table | **Task table** |
 | Frame the list's systems, click one to enter | **Constellation** |
-| Browse ten-task pages | **‹ / ›** in the inspector |
+| Browse system pages | **‹ / ›** in the inspector |
 | Jump between systems | Click list in sidebar or a star marker |
 | View light-year distances | **Interstellar atlas** |
 
@@ -171,8 +171,11 @@ is available it retains its last data, initially the clearly labelled demo.
   angle until every page star fits and joins them with lines. Orbit and Task table
   retain physical orbital distances. Camera flights roll between planes; the atlas
   uses galactic axes.
-- Each ten-slot page is its own system: a planet's orbital radius follows its slot
-  within the page, so every page spans the same 0.55 to 6.4 AU.
+- Each page is its own planetary system of 7 to 14 slots, generated as a whole:
+  rocky worlds and sub-Neptunes inside the snow line, giants beyond it, dwarf
+  planets far out. Sizes run from Pluto to just past Jupiter. Neighbours sit at
+  least ten mutual Hill radii apart without crossing orbits, and some pairs lock
+  into resonances (2:1, 3:2, 4:3, 5:4, 5:3, 3:1).
 - Wireframes use latitude/longitude line geometry, not native polygon wireframe
   mode. Decorative background points are not additional lists.
 

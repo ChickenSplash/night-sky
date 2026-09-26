@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn commands_find_lists_and_tasks_by_id_not_position() {
-        let galaxy = space_shared::demo_galaxy();
+        let galaxy = space_simulation::demo_galaxy();
         assert!(galaxy.systems.len() > 1);
         let list = galaxy.systems[1].id.clone();
         let task = galaxy.systems[1].tasks.last().unwrap().id.clone();
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn unknown_ids_are_ignored() {
         let app = run(
-            space_shared::demo_galaxy(),
+            space_simulation::demo_galaxy(),
             vec![
                 UiCommand::Jump {
                     list: "missing".into(),

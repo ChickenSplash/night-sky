@@ -414,6 +414,14 @@ impl Panels<'_> {
                         ),
                     ),
                     ("Physical radius", format!("{:.0} km", planet.radius_km)),
+                    ("Type", planet.class.clone()),
+                    ("Mass", format!("{:.4} Earth masses", planet.mass_earth)),
+                    (
+                        "Resonance",
+                        planet.resonance.map_or("None".into(), |[p, q]| {
+                            format!("{p}:{q} with inner neighbour")
+                        }),
+                    ),
                 ] {
                     ui.label(egui::RichText::new(label).color(MUTED));
                     ui.label(value);

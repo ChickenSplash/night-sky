@@ -9,7 +9,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use space_shared::{Galaxy, demo_galaxy};
+use space_shared::Galaxy;
+use space_simulation::demo_galaxy;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
 use tower_http::{compression::CompressionLayer, services::ServeDir};
@@ -57,12 +58,8 @@ async fn main() -> Result<()> {
     } else {
         storage::load(&db_path, &cache_key)?
             .map(|mut g| {
-                // Older caches used whole-list orbital radii; derive them from slots again.
-                for task in g.systems.iter_mut().flat_map(|s| s.tasks.iter_mut()) {
-                    let slot = task.stable_slot();
-                    task.slot = Some(slot);
-                    task.orbit = space_simulation::orbit_for_slot(&task.id, slot);
-                }
+                // Older caches used other layouts; derive bodies from slots again.
+                space_simulation::shape_galaxy(&mut g);
                 g.source = "ClickUp · cached, awaiting sync".into();
                 g
             })

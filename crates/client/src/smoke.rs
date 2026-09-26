@@ -84,7 +84,7 @@ pub fn exercise(
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(50)
                 .clamp(50, 1500);
-            universe.0 = space_shared::demo_galaxy();
+            universe.0 = space_simulation::demo_galaxy();
             let system = &mut universe.0.systems[0];
             let template = system.tasks[0].clone();
             system.tasks = (0..count)
@@ -94,11 +94,10 @@ pub fn exercise(
                     task.name =
                         format!("Task {}: review the mission navigation checklist", slot + 1);
                     task.slot = Some(slot);
-                    task.radius_km = 4000.0 + f64::from(slot % 7) * 1000.0;
-                    task.orbit = space_simulation::orbit_for_slot(&task.id, slot);
                     task
                 })
                 .collect();
+            space_simulation::shape(system);
             nav.jump(0, &universe.0);
             nav.show_page(0, &universe.0);
             nav.preset(View::Table, &universe.0);

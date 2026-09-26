@@ -61,7 +61,7 @@ try {
   await page.mouse.click(1440, 156); // Task table preset.
   await page.waitForTimeout(2500);
   await page.screenshot({ path: resolve(root, 'data/web-table.png') });
-  await page.mouse.click(1470, 239); // Next ten-task page.
+  await page.mouse.click(1470, 239); // Next system page.
   await page.waitForTimeout(2500);
   await page.screenshot({ path: resolve(root, 'data/web-table-next-page.png') });
   await page.mouse.click(1410, 197); // Constellation preset.

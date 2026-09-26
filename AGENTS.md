@@ -4,7 +4,7 @@
 
 - Native Linux and browser/WASM clients. Rust workspace: `client` (Bevy/egui), `server` (Axum),
   `shared` (wire models), `simulation` (engine-independent orbital maths).
-- Lists are constellations of ten-slot system pages; tasks are planets. Deep navy background and line-based
+- Lists are constellations of system pages (7 to 14 slots each); tasks are planets. Deep navy background and line-based
   wireframe bodies. Preserve real distances, with explicit visual size exaggeration.
 - Keep ClickUp access read-only until a write workflow is explicitly requested.
 - Credentials belong only in the backend. Do not expose them in API models or logs.
@@ -62,8 +62,12 @@
 - Keep orbital identity stable across API reordering and edits. SQLite slots are
   append-only per list, including when tasks disappear from a snapshot.
 - Changing task status or deadline must not change orbital elements.
-- Task pages use append-only slots divided by ten; orbital radius follows the slot
-  within its page. Table layout is presentation-only; leaving it restores current
+- Task pages are filled in order from append-only slots; each page's capacity is
+  `page_capacity(list_id, page)`. A page's whole planetary system is generated at
+  once (`space_simulation::planetary_system`): masses, radii and orbits follow the
+  snow line, neighbours stay Hill-stable and some pairs are resonant. The slot's
+  index within its page picks its body. `shape` applies this on the server and
+  again on the client, so fixtures need only slots. Table layout is presentation-only; leaving it restores current
   simulated positions. The table keeps physical radii.
 - Constellation view never moves stars: it keeps the current page's frame, fits
   all page stars from the current angle and draws links between them.

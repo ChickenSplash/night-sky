@@ -37,9 +37,22 @@ pub struct TaskPlanet {
     pub url: Option<String>,
     pub radius_km: f64,
     pub orbit: Orbit,
+    /// Page (star system) and orbit index within it, derived from the slot.
+    #[serde(default)]
+    pub page: u32,
+    #[serde(default)]
+    pub orbit_index: u32,
+    #[serde(default)]
+    pub mass_earth: f64,
+    #[serde(default)]
+    pub class: String,
+    /// Period ratio with the next planet in, outer:inner.
+    #[serde(default)]
+    pub resonance: Option<[u32; 2]>,
 }
 
-pub const PLANETS_PER_SYSTEM: u32 = 10;
+pub const MIN_PLANETS: u32 = 7;
+pub const MAX_PLANETS: u32 = 14;
 
 impl TaskPlanet {
     pub fn stable_slot(&self) -> u32 {
@@ -48,7 +61,7 @@ impl TaskPlanet {
     }
 
     pub fn page(&self) -> u32 {
-        self.stable_slot() / PLANETS_PER_SYSTEM
+        self.page
     }
 }
 
@@ -73,7 +86,7 @@ impl StarSystem {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Orbit {
     pub semi_major_au: f64,
     pub eccentricity: f64,
@@ -82,7 +95,8 @@ pub struct Orbit {
     pub phase_rad: f64,
 }
 
-pub fn demo_galaxy() -> Galaxy {
+/// Demo tasks without bodies; `space_simulation::demo_galaxy` shapes them.
+pub fn demo_fixture() -> Galaxy {
     let lists = [
         (
             "demo-flight",
@@ -129,14 +143,8 @@ pub fn demo_galaxy() -> Galaxy {
                         id: format!("{id}-{i}"), name: name.into(),
                         description: "A fictional task for exploring ClickUp Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".into(),
                         status: status.into(), status_type: status_type.into(), status_order, colour, assignees: vec!["Mission control".into()],
-                        due_date_ms: None, url: None, radius_km: 4800.0 + i as f64 * 1100.0,
-                        orbit: Orbit {
-                            semi_major_au: 0.65 * 1.55_f64.powi(i as i32),
-                            eccentricity: 0.025 + i as f64 * 0.022,
-                            inclination_rad: (i as f64 - 2.0) * 0.028,
-                            ascending_node_rad: i as f64 * 0.7,
-                            phase_rad: i as f64 * 2.399_963,
-                        },
+                        due_date_ms: None, url: None, radius_km: 0.0, orbit: Orbit::default(),
+                        page: 0, orbit_index: 0, mass_earth: 0.0, class: String::new(), resonance: None,
                     }
                 }).collect(),
             }

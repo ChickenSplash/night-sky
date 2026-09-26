@@ -620,8 +620,11 @@ impl Canvas<'_> {
             let galactic = place(orbital.lerp(layout.position(planet), pose.layout));
             let centre = self.world(galactic);
             let physical = planet.radius_km * 1000.0;
+            // Exaggerated sizes keep the cube root of the real ratio, so giants still
+            // dwarf rocky planets without hiding their neighbours.
             let orbital_radius = if nav.exaggerate {
-                physical.max((galactic - pose.eye).length() * 0.018)
+                let size = (planet.radius_km / space_simulation::EARTH_RADIUS_KM).cbrt();
+                physical.max((galactic - pose.eye).length() * 0.012 * size)
             } else {
                 physical
             };
@@ -688,7 +691,7 @@ mod tests {
 
     #[test]
     fn constellation_pages_have_independent_planes_and_local_coordinates() {
-        let system = &space_shared::demo_galaxy().systems[0];
+        let system = &space_simulation::demo_galaxy().systems[0];
         let poles: Vec<_> = (0..5)
             .map(|page| page_frame(system, page) * DVec3::Y)
             .collect();
@@ -708,7 +711,7 @@ mod tests {
 
     #[test]
     fn constellation_markers_and_camera_destinations_are_the_same_stars() {
-        let system = &space_shared::demo_galaxy().systems[0];
+        let system = &space_simulation::demo_galaxy().systems[0];
         for page in 0..10 {
             let origin = (page_origin_ly(system, page) - page_origin_ly(system, 0)) * LY_METRES;
             let marker = page_offset(system, page) - page_offset(system, 0);

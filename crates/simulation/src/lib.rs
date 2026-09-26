@@ -1,5 +1,8 @@
-use space_shared::{Orbit, PLANETS_PER_SYSTEM};
+mod system;
+
+use space_shared::Orbit;
 use std::f64::consts::TAU;
+pub use system::*;
 
 pub const AU_METRES: f64 = 149_597_870_700.0;
 pub const SUN_RADIUS_METRES: f64 = 695_700_000.0;
@@ -90,21 +93,9 @@ pub fn plane_tilt(key: &str) -> [f64; 3] {
     [(1.0 - 2.0 * unit(0)).acos(), unit(16) * TAU, unit(32) * TAU]
 }
 
-/// Each ten-task page is its own star system, with its own orbital plane.
+/// Each page is its own star system, with its own orbital plane.
 pub fn page_tilt(list_id: &str, page: u32) -> [f64; 3] {
     plane_tilt(&format!("{list_id}:page-{page}"))
-}
-
-/// Each ten-slot page is its own system, so the orbit follows the slot within the page.
-pub fn orbit_for_slot(id: &str, slot: u32) -> Orbit {
-    let h = stable_hash(id);
-    Orbit {
-        semi_major_au: 0.55 + f64::from(slot % PLANETS_PER_SYSTEM) * 0.65,
-        eccentricity: (h % 120) as f64 / 1000.0,
-        inclination_rad: ((h >> 8) % 100) as f64 / 1000.0 - 0.05,
-        ascending_node_rad: ((h >> 16) % 6283) as f64 / 1000.0,
-        phase_rad: ((h >> 32) % 6283) as f64 / 1000.0,
-    }
 }
 
 #[cfg(test)]
@@ -175,15 +166,6 @@ mod tests {
         let mean = tilts.iter().map(|t| t[0].cos()).sum::<f64>() / 4000.0;
         let square = tilts.iter().map(|t| t[0].cos().powi(2)).sum::<f64>() / 4000.0;
         assert!(mean.abs() < 0.05 && (square - 1.0 / 3.0).abs() < 0.03);
-    }
-
-    #[test]
-    fn every_page_spans_the_same_orbits() {
-        for slot in 0..10 {
-            let first = orbit_for_slot("task", slot).semi_major_au;
-            assert_eq!(first, orbit_for_slot("task", slot + 40).semi_major_au);
-        }
-        assert!(orbit_for_slot("task", 49).semi_major_au < 7.0);
     }
 
     #[test]

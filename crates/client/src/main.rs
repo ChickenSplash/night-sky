@@ -14,7 +14,8 @@ mod web_bridge;
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 use big_space::prelude::*;
-use space_shared::{Galaxy, StarSystem, demo_galaxy};
+use space_shared::{Galaxy, StarSystem};
+use space_simulation::demo_galaxy;
 use space_simulation::{AU_METRES, SimulationClock};
 use std::sync::{Mutex, mpsc};
 
@@ -216,7 +217,9 @@ fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: Re
         match update {
             network::Update::Unchanged => nav.notice = CONNECTED.into(),
             network::Update::Offline(message) => nav.notice = message,
-            network::Update::Galaxy(galaxy) => {
+            network::Update::Galaxy(mut galaxy) => {
+                // Bodies are deterministic from slots, so fixtures need only slots.
+                space_simulation::shape_galaxy(&mut galaxy);
                 let old_system = universe.0.systems.get(nav.system).map(|s| s.id.clone());
                 let old_task = universe
                     .0

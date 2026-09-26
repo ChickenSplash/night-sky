@@ -98,6 +98,18 @@ function dueText(ms) {
   return `${date} · ${dueShort(ms)[0].toLowerCase()}`;
 }
 
+const JUPITER_MASSES = 317.83;
+
+function massText(earths) {
+  return earths >= 0.1 * JUPITER_MASSES
+    ? `${(earths / JUPITER_MASSES).toFixed(2)} Jupiter masses`
+    : `${earths < 0.1 ? earths.toFixed(4) : earths.toFixed(2)} Earth masses`;
+}
+
+function periodText(days) {
+  return days >= 730 ? `${(days / 365.25).toFixed(1)} years` : `${days.toFixed(1)} days`;
+}
+
 // Renders only the rows in view: a live list can hold over a thousand tasks.
 // `keyOf` names everything a row shows, so unchanged rows are reused rather
 // than rebuilt under the pointer.
@@ -493,10 +505,13 @@ export function mount(bridge, canvas) {
           ['List', system?.name],
         ])),
         el('section', {}, heading('Planet'), facts([
+          ['Type', task.class],
+          ['Mass', massText(task.mass_earth)],
+          ['Physical radius', `${task.radius_km.toFixed(0)} km`],
           ['Semi-major axis', `${task.semi_major_au.toFixed(3)} AU`],
           ['Eccentricity', task.eccentricity.toFixed(3)],
-          ['Orbital period', `${task.period_days.toFixed(1)} days`],
-          ['Physical radius', `${task.radius_km.toFixed(0)} km`],
+          ['Orbital period', periodText(task.period_days)],
+          ['Resonance', task.resonance ? `${task.resonance[0]}:${task.resonance[1]} with inner neighbour` : 'None'],
         ])),
         system ? el('section', {}, heading('Host system'), facts([
           ['Page', `System ${state.page + 1} · ${system.page_tasks} of ${system.tasks} tasks`],

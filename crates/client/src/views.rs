@@ -1,7 +1,7 @@
 //! Presentation layouts never modify orbital elements or simulation time.
 use crate::Navigation;
 use bevy::math::DVec3;
-use space_shared::{Galaxy, PLANETS_PER_SYSTEM, StarSystem, TaskPlanet};
+use space_shared::{Galaxy, StarSystem, TaskPlanet};
 use space_simulation::{LY_METRES, SUN_RADIUS_METRES, stable_hash};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -54,9 +54,14 @@ impl TableLayout {
             .on_page(page)
             .map(|p| p.radius_km * 1000.0)
             .fold(1.0e6, f64::max);
+        let rows = system
+            .on_page(page)
+            .map(|p| p.orbit_index)
+            .max()
+            .unwrap_or(0);
         let pitch = 3.2 * unit;
         let first = SUN_RADIUS_METRES + 3.0 * unit;
-        let bottom = first + f64::from(PLANETS_PER_SYSTEM - 1) * pitch + 2.0 * unit;
+        let bottom = first + f64::from(rows) * pitch + 2.0 * unit;
         let top = if SUN_RADIUS_METRES < 5.0 * unit {
             -SUN_RADIUS_METRES - unit
         } else {
@@ -72,7 +77,7 @@ impl TableLayout {
     }
 
     pub fn position(&self, task: &TaskPlanet) -> DVec3 {
-        let row = f64::from(task.stable_slot() % PLANETS_PER_SYSTEM);
+        let row = f64::from(task.orbit_index);
         DVec3::new(0.0, 0.0, self.first + row * self.pitch)
     }
 }
@@ -185,37 +190,48 @@ impl Navigation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use space_simulation::{page_capacity, page_of_slot};
 
     fn large_galaxy() -> Galaxy {
-        let mut galaxy = space_shared::demo_galaxy();
+        let mut galaxy = space_simulation::demo_galaxy();
         let template = galaxy.systems[0].tasks[0].clone();
         galaxy.systems[0].tasks = (0..50)
             .map(|slot| {
                 let mut task = template.clone();
                 task.id = format!("task-{slot}");
                 task.slot = Some(slot);
-                task.orbit = space_simulation::orbit_for_slot(&task.id, slot);
                 task
             })
             .collect();
+        space_simulation::shape(&mut galaxy.systems[0]);
         galaxy
     }
 
     #[test]
-    fn fifty_tasks_have_five_stable_pages_after_edits_and_removals() {
+    fn fifty_tasks_have_stable_pages_after_edits_and_removals() {
         let mut galaxy = large_galaxy();
         let system = &mut galaxy.systems[0];
-        assert_eq!(system.pages(), vec![0, 1, 2, 3, 4]);
-        for page in system.pages() {
-            assert_eq!(system.on_page(page).count(), 10);
+        let last = page_of_slot(&system.id, 49).0;
+        assert_eq!(system.pages(), (0..=last).collect::<Vec<_>>());
+        for page in 0..last {
+            assert_eq!(
+                system.on_page(page).count() as u32,
+                page_capacity(&system.id, page)
+            );
         }
+        let before = system.tasks.clone();
         system.tasks.reverse();
         system.tasks.retain(|p| p.stable_slot() != 12);
         for task in &mut system.tasks {
             task.status = "complete".into();
             task.due_date_ms = Some(123);
+        }
+        space_simulation::shape(system);
+        for task in &mut system.tasks {
+            let original = before.iter().find(|p| p.id == task.id).unwrap();
+            assert_eq!((task.orbit, task.page), (original.orbit, original.page));
             let slot: u32 = task.id.strip_prefix("task-").unwrap().parse().unwrap();
-            assert_eq!(task.page(), slot / 10);
+            assert_eq!(task.page(), page_of_slot("demo-flight", slot).0);
             // Snapshots older than slots used whole-list orbital radii.
             task.slot = None;
             task.orbit.semi_major_au = 0.55 + f64::from(slot) * 0.65;
@@ -249,7 +265,7 @@ mod tests {
         let mut galaxy = large_galaxy();
         let page_four = page_position("list", 4);
         galaxy.systems[0].tasks.retain(|task| task.page() != 1);
-        assert_eq!(galaxy.systems[0].pages(), vec![0, 2, 3, 4]);
+        assert_eq!(galaxy.systems[0].pages()[..2], [0, 2]);
         assert_eq!(page_position("list", 4), page_four);
     }
 
@@ -259,19 +275,21 @@ mod tests {
         let system = &galaxy.systems[0];
         let layout = TableLayout::new(system, 1);
         let rows: Vec<_> = system.on_page(1).map(|p| layout.position(p).z).collect();
-        assert_eq!(rows.len(), 10);
+        assert_eq!(rows.len() as u32, page_capacity(&system.id, 1));
         assert!(rows.windows(2).all(|r| r[1] - r[0] > 2.0 * layout.unit));
         // Frame starts inside the star, which ends above the first planet.
         assert!(layout.top > 0.0 && layout.top < SUN_RADIUS_METRES);
         assert!(rows[0] - layout.unit > SUN_RADIUS_METRES);
-        assert!(rows[9] + layout.unit < layout.bottom);
+        assert!(rows[rows.len() - 1] + layout.unit < layout.bottom);
         let mut nav = Navigation {
             page: 1,
             ..Navigation::default()
         };
         nav.preset(View::Table, &galaxy);
         nav.fit_preset(system);
-        assert!(nav.distance < SUN_RADIUS_METRES && nav.distance > 10.0 * layout.unit);
+        assert!(
+            nav.distance < 3.0 * (layout.bottom - layout.top) && nav.distance > 10.0 * layout.unit
+        );
     }
 
     #[test]
@@ -280,13 +298,15 @@ mod tests {
         let mut nav = Navigation::default();
         nav.preset(View::Constellation, &galaxy);
         nav.select_task(0, 42, &galaxy);
-        assert_eq!(nav.page, 4);
+        let page = galaxy.systems[0].tasks[42].page;
+        assert!(page > 0);
+        assert_eq!(nav.page, page);
         assert_eq!(nav.selected, Some(42));
         assert!(nav.view == View::Table);
         nav.fit_preset(&galaxy.systems[0]);
         assert!(nav.distance.is_finite());
         nav.preset(View::Orbit, &galaxy);
-        assert_eq!(nav.page, 4);
+        assert_eq!(nav.page, page);
         assert!(!nav.following);
     }
 }

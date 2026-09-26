@@ -5,7 +5,7 @@ use reqwest::{
 };
 use serde::Deserialize;
 use space_shared::{StarSystem, TaskPlanet};
-use space_simulation::{orbit_for_slot, stable_hash, star_position};
+use space_simulation::star_position;
 use std::{path::Path, time::Duration};
 
 pub struct ClickUp {
@@ -67,7 +67,7 @@ impl ClickUp {
         tasks.dedup_by(|a, b| a.id == b.id);
         let ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
         let slots = crate::storage::assign_slots(db, id, &ids)?;
-        Ok(StarSystem {
+        let mut system = StarSystem {
             id: id.to_owned(),
             name: list.name,
             position_ly: star_position(id),
@@ -77,8 +77,13 @@ impl ClickUp {
                 .zip(slots)
                 .map(|(task, slot)| TaskPlanet {
                     slot: Some(slot),
-                    orbit: orbit_for_slot(&task.id, slot),
-                    radius_km: 4000.0 + (stable_hash(&task.id) % 6000) as f64,
+                    orbit: Default::default(),
+                    radius_km: 0.0,
+                    page: 0,
+                    orbit_index: 0,
+                    mass_earth: 0.0,
+                    class: String::new(),
+                    resonance: None,
                     colour: parse_colour(&task.status.color),
                     status_order: task
                         .status
@@ -100,7 +105,9 @@ impl ClickUp {
                     description: task.description.unwrap_or_default(),
                 })
                 .collect(),
-        })
+        };
+        space_simulation::shape(&mut system);
+        Ok(system)
     }
 }
 

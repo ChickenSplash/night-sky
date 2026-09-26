@@ -148,6 +148,9 @@ struct TaskDetail<'a> {
     eccentricity: f64,
     period_days: f64,
     radius_km: f64,
+    mass_earth: f64,
+    class: &'a str,
+    resonance: Option<[u32; 2]>,
 }
 
 #[derive(Serialize)]
@@ -232,6 +235,9 @@ fn publish_state(
             eccentricity: p.orbit.eccentricity,
             period_days: period_seconds(&p.orbit, s.mass_solar) / 86_400.0,
             radius_km: p.radius_km,
+            mass_earth: p.mass_earth,
+            class: &p.class,
+            resonance: p.resonance,
         }),
     };
     // Compare the serialised form, so the event fires only on a real change.
