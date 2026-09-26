@@ -25,6 +25,12 @@ pub struct TaskPlanet {
     pub name: String,
     pub description: String,
     pub status: String,
+    /// ClickUp status group: "open", "custom", "done" or "closed".
+    #[serde(default)]
+    pub status_type: String,
+    /// The status's position on the list's board.
+    #[serde(default)]
+    pub status_order: u32,
     pub colour: [u8; 3],
     pub assignees: Vec<String>,
     pub due_date_ms: Option<i64>,
@@ -113,16 +119,16 @@ pub fn demo_galaxy() -> Galaxy {
             StarSystem {
                 id: id.into(), name: name.into(), position_ly, mass_solar,
                 tasks: names.into_iter().enumerate().map(|(i, name)| {
-                    let (status, colour) = match i % 3 {
-                        0 => ("in progress", [92, 213, 242]),
-                        1 => ("to do", [169, 154, 238]),
-                        _ => ("complete", [100, 220, 169]),
+                    let (status, status_type, status_order, colour) = match i % 3 {
+                        0 => ("in progress", "custom", 1, [92, 213, 242]),
+                        1 => ("to do", "open", 0, [169, 154, 238]),
+                        _ => ("complete", "done", 2, [100, 220, 169]),
                     };
                     TaskPlanet {
                         slot: Some(i as u32),
                         id: format!("{id}-{i}"), name: name.into(),
                         description: "A fictional task for exploring ClickUp Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".into(),
-                        status: status.into(), colour, assignees: vec!["Mission control".into()],
+                        status: status.into(), status_type: status_type.into(), status_order, colour, assignees: vec!["Mission control".into()],
                         due_date_ms: None, url: None, radius_km: 4800.0 + i as f64 * 1100.0,
                         orbit: Orbit {
                             semi_major_au: 0.65 * 1.55_f64.powi(i as i32),

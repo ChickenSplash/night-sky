@@ -68,21 +68,21 @@ try {
   await page.locator('#time-bar .real-time').click();
   await page.waitForFunction(() => window.seen.state.rate === 1);
   assert.equal(await slower.isDisabled(), true);
-  for (let i = 0; i < 12 && !(await faster.isDisabled()); i++) {
+  for (let i = 0; i < 20 && !(await faster.isDisabled()); i++) {
     const before = await rateNow();
     await faster.click();
     await page.waitForFunction(r => window.seen.state.rate > r, before);
   }
   assert.equal(await rateNow(), 100 * 31_557_600);
   await slower.click();
-  await page.waitForFunction(() => window.seen.state.rate === 10 * 31_557_600);
+  await page.waitForFunction(() => window.seen.state.rate === 30 * 31_557_600);
   await page.evaluate(r => window.spaceBridge.command({ type: 'set_rate', rate: r }), startRate);
   await page.waitForFunction(r => window.seen.state.rate === r, startRate);
   if (galaxy.lists.length > 1) {
     await lists.nth(1).click();
     await page.waitForFunction(id => window.seen.state.list === id, galaxy.lists[1].id);
     await settle();
-    assert.equal(await lists.nth(1).evaluate(b => b.classList.contains('active')), true);
+    assert.equal(await lists.nth(1).evaluate(b => b.parentElement.classList.contains('active')), true);
   }
   await page.locator('#inspector button', { hasText: 'Task table' }).click();
   await page.waitForFunction(() => window.seen.state.view === 'table');
@@ -98,8 +98,27 @@ try {
   await page.waitForFunction(() => window.seen.state.view === 'orbit');
   await settle();
 
+  // Lists sort by name.
+  await page.locator('#nav-panel select[aria-label="Sort lists"]').selectOption('name');
+  const byName = galaxy.lists.map(l => l.name).sort((a, b) => a.localeCompare(b));
+  assert.equal(await lists.first().locator('span').textContent(), byName[0]);
+  await page.locator('#nav-panel select[aria-label="Sort lists"]').selectOption('default');
+
+  // The chevron opens a list's tasks, grouped by status; groups fold.
+  const tasksTab = page.locator('#nav-panel [role=tab]', { hasText: 'Tasks' });
+  await page.locator('#nav-panel .open-tasks').first().click();
+  assert.equal(await tasksTab.getAttribute('aria-selected'), 'true');
+  await page.waitForFunction(id => window.seen.state.list === id, galaxy.lists[0].id);
+  const group = page.locator('#nav-panel .group').first();
+  const count = page.locator('#nav-panel .tab-body:not([hidden]) > p.muted');
+  await group.click();
+  assert.match(await count.textContent(), /folded/, 'Folding a status group hid no tasks');
+  await group.click();
+  assert.doesNotMatch(await count.textContent(), /folded/);
+
   // Search every list, select a task and follow it.
   const wanted = galaxy.lists.flatMap(l => l.tasks.map(t => ({ list: l.id, task: t }))).at(-1);
+  await page.locator('#nav-panel .chip', { hasText: 'All lists' }).click();
   const search = page.locator('#nav-panel input[aria-label="Search tasks"]');
   await search.fill(wanted.task.name);
   await page.locator('#nav-panel .task', { hasText: wanted.task.name }).first().click();
@@ -115,13 +134,17 @@ try {
   await search.fill('');
   assert.equal(await page.locator('#nav-panel .tasks').evaluate(b => b.querySelectorAll('.task').length > 0), true);
 
-  // Display toggles reach Rust.
-  const labels = page.locator('#nav-panel .toggle', { hasText: 'Task labels' });
+  // Display toggles live in the settings popover and reach Rust.
+  await page.locator('#settings-button').click();
+  const labels = page.locator('#settings .toggle', { hasText: 'Task labels' });
   const labelsOn = (await seen('state')).display.labels;
   await labels.click();
   await page.waitForFunction(on => window.seen.state.display.labels === !on, labelsOn);
   await labels.click();
   await page.waitForFunction(on => window.seen.state.display.labels === on, labelsOn);
+  await shot('settings');
+  await page.mouse.click(900, 450);
+  assert.equal(await page.locator('#settings').isHidden(), true, 'Clicking the view did not close settings');
   await page.locator('#inspector button', { hasText: 'Frame orbital system' }).click();
   await page.waitForFunction(() => window.seen.state.following === false && window.seen.state.task === null);
   await settle();
@@ -129,6 +152,7 @@ try {
   // Typing into an HTML field must not move the camera or toggle pause.
   const target = async () => (await seen('tick')).target;
   const before = await target();
+  await page.locator('#nav-panel [role=tab]', { hasText: 'Lists' }).click();
   const filter = page.locator('#nav-panel input[aria-label="Filter lists"]');
   await filter.click();
   await page.keyboard.down('w');
@@ -162,12 +186,20 @@ try {
   await page.waitForTimeout(1200);
   assert.notEqual(await range(), steady, 'Scrolling the canvas did not zoom');
 
+  // The sidebar slides away and back.
+  await page.locator('#nav-panel button[aria-label="Hide sidebar"]').click();
+  await page.waitForFunction(() => document.querySelector('#nav-panel').getBoundingClientRect().right <= 0);
+  await settle();
+  await shot('sidebar-closed');
+  await page.locator('#nav-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#nav-panel').getBoundingClientRect().left >= 16);
+
   // The 3D viewport follows the panel layout after a resize.
   await page.setViewportSize({ width: 1280, height: 800 });
   await settle();
   await shot('resized');
   assert.deepEqual(errors, [], 'Browser runtime errors');
-  console.log('HTML UI passed: lists, views, pages, search, selection, follow, display, keyboard focus, wheel routing, resize.');
+  console.log('HTML UI passed: lists, sorting, tabs, status groups, views, pages, search, selection, follow, settings, sidebar, keyboard focus, wheel routing, resize.');
 } finally {
   writeFileSync(resolve(root, 'data/html-ui-console.log'), [...logs, ...errors].join('\n'));
   await browser.close();

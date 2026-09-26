@@ -62,6 +62,10 @@ struct TaskSummary<'a> {
     name: &'a str,
     colour: [u8; 3],
     page: u32,
+    status: &'a str,
+    status_type: &'a str,
+    status_order: u32,
+    due_date_ms: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -100,6 +104,10 @@ fn publish_galaxy(universe: Res<Universe>) {
                             name: &p.name,
                             colour: p.colour,
                             page: p.page(),
+                            status: &p.status,
+                            status_type: &p.status_type,
+                            status_order: p.status_order,
+                            due_date_ms: p.due_date_ms,
                         })
                         .collect(),
                 })

@@ -80,6 +80,13 @@ impl ClickUp {
                     orbit: orbit_for_slot(&task.id, slot),
                     radius_km: 4000.0 + (stable_hash(&task.id) % 6000) as f64,
                     colour: parse_colour(&task.status.color),
+                    status_order: task
+                        .status
+                        .orderindex
+                        .as_u64()
+                        .or_else(|| task.status.orderindex.as_str()?.parse().ok())
+                        .unwrap_or_default() as u32,
+                    status_type: task.status.kind,
                     status: task.status.status,
                     assignees: task
                         .assignees
@@ -121,6 +128,10 @@ struct Status {
     status: String,
     #[serde(default)]
     color: String,
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    orderindex: serde_json::Value,
 }
 #[derive(Deserialize)]
 struct Assignee {
