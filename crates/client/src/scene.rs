@@ -384,6 +384,8 @@ fn orbit_point(orbit: &Orbit, step: usize, steps: usize) -> DVec3 {
 }
 
 const ORBIT: Color = Color::srgb(0.075, 0.17, 0.25);
+/// Bodies below this on-screen radius, in logical pixels, draw as a single ring.
+const RING_PIXELS: f32 = 6.0;
 const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
 
 /// Close up, distant stars sit on a shell at four camera ranges, so they stay
@@ -481,7 +483,7 @@ impl Canvas<'_> {
         // Line density follows on-screen size, so small bodies stay legible instead of
         // collapsing into a solid blob of overlapping rings.
         let (latitudes, longitudes, steps) = match pixels.unwrap_or(0.0) {
-            p if p < 6.0 => (0, 0, 24),
+            p if p < RING_PIXELS => (0, 0, 24),
             p if p < 24.0 => (1, 3, 24),
             p if p < 90.0 => (2, 6, 40),
             p => (4, 12, (p as usize / 4).clamp(96, 1024)),
@@ -520,6 +522,22 @@ impl Canvas<'_> {
             );
         }
         pixels
+    }
+
+    /// A dot about two pixels across: a ring too small to have a hole.
+    fn dot(&self, gizmos: &mut Gizmos, centre: Vec3, tint: Color) {
+        use std::f32::consts::TAU;
+        let Some(per_pixel) = self.per_pixel(centre) else {
+            return;
+        };
+        let (right, up) = (self.view.right().as_vec3(), self.view.up().as_vec3());
+        gizmos.linestrip(
+            (0..=8).map(|i| {
+                let a = i as f32 / 8.0 * TAU;
+                centre + (right * a.cos() + up * a.sin()) * 0.5 * per_pixel
+            }),
+            tint,
+        );
     }
 
     /// A body's wireframe, unless realistic bodies are drawn without them, and its
@@ -667,16 +685,16 @@ impl Canvas<'_> {
                 subject: current && self.subject,
             });
         }
-        let pixels = self
-            .outline(
-                gizmos,
-                centre,
-                self.units(radius),
-                colour(tint),
-                basis,
-                limb,
-            )
-            .unwrap_or(0.0);
+        let units = self.units(radius);
+        // Without realistic lighting a small star is a dot: its marker is the ring.
+        let pixels = match self.pixels(centre, units) {
+            Some(p) if !self.nav.realistic && p < RING_PIXELS => {
+                self.dot(gizmos, centre, colour(tint));
+                Some(p)
+            }
+            _ => self.outline(gizmos, centre, units, colour(tint), basis, limb),
+        }
+        .unwrap_or(0.0);
         let anchor = if limb {
             let unit = TableLayout::new(self.system, pose.page).unit;
             self.world(self.frame * DVec3::new(0.0, 0.0, physical + unit))
