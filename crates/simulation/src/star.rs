@@ -20,7 +20,7 @@ use crate::system::Rng;
 use space_shared::{Spin, Star};
 use std::f64::consts::{PI, TAU};
 
-const SUN_TEMPERATURE_K: f64 = 5772.0;
+pub(crate) const SUN_TEMPERATURE_K: f64 = 5772.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -57,10 +57,14 @@ const IMF_BREAK: f64 = 0.5;
 const IMF_HIGH: f64 = 100.0;
 /// Time after the main sequence spent as a subgiant, giant and on the horizontal
 /// and asymptotic branches, as a share of the main-sequence lifetime.
-const GIANT_SHARE: f64 = 0.1;
+pub(crate) const GIANT_SHARE: f64 = 0.1;
 /// Heaviest birth mass that ends as a white dwarf; heavier stars leave neutron
 /// stars or black holes, which are not counted as stars.
-const WHITE_DWARF_LIMIT: f64 = 8.0;
+pub(crate) const WHITE_DWARF_LIMIT: f64 = 8.0;
+/// Lightest white dwarf a star can have left in the age of the galaxy.
+pub(crate) const WHITE_DWARF_LIGHTEST: f64 = 0.46;
+/// Share of supergiants that are red.
+const RED_SUPERGIANT_SHARE: f64 = 0.7;
 
 /// How the star shaped its planets, in addition to the star itself.
 pub(crate) struct Formation {
@@ -83,11 +87,11 @@ pub fn luminosity(mass_solar: f64) -> f64 {
     }
 }
 
-fn main_sequence_radius(mass_solar: f64) -> f64 {
+pub(crate) fn main_sequence_radius(mass_solar: f64) -> f64 {
     mass_solar.powf(0.8)
 }
 
-fn temperature(luminosity: f64, radius: f64) -> f64 {
+pub(crate) fn temperature(luminosity: f64, radius: f64) -> f64 {
     SUN_TEMPERATURE_K * (luminosity / radius.powi(2)).powf(0.25)
 }
 
@@ -213,16 +217,41 @@ pub(crate) fn formation(id: &str) -> Formation {
 
 /// Birth mass for a uniform draw, by inverting the initial mass function.
 fn initial_mass(u: f64) -> f64 {
+    imf_inverse(u * imf_cumulative(IMF_HIGH))
+}
+
+/// Initial mass function per solar mass, unnormalised. Continuous at the break:
+/// M^-2.3 carries a factor of 0.5 there.
+pub(crate) fn imf_density(mass: f64) -> f64 {
+    if mass < IMF_BREAK {
+        mass.powf(-1.3)
+    } else {
+        IMF_BREAK * mass.powf(-2.3)
+    }
+}
+
+/// Stars born below this mass, in the units of `imf_density`.
+pub(crate) fn imf_cumulative(mass: f64) -> f64 {
+    let mass = mass.clamp(IMF_LOW, IMF_HIGH);
     let low = (IMF_LOW.powf(-0.3) - IMF_BREAK.powf(-0.3)) / 0.3;
-    // Continuous at the break: M^-2.3 carries a factor of 0.5 there.
-    let high = IMF_BREAK * (IMF_BREAK.powf(-1.3) - IMF_HIGH.powf(-1.3)) / 1.3;
-    let x = u * (low + high);
+    if mass < IMF_BREAK {
+        (IMF_LOW.powf(-0.3) - mass.powf(-0.3)) / 0.3
+    } else {
+        low + IMF_BREAK * (IMF_BREAK.powf(-1.3) - mass.powf(-1.3)) / 1.3
+    }
+}
+
+pub(crate) fn imf_inverse(x: f64) -> f64 {
+    let low = (IMF_LOW.powf(-0.3) - IMF_BREAK.powf(-0.3)) / 0.3;
     if x < low {
         (IMF_LOW.powf(-0.3) - 0.3 * x).powf(-1.0 / 0.3)
     } else {
         (IMF_BREAK.powf(-1.3) - 1.3 * (x - low) / IMF_BREAK).powf(-1.0 / 1.3)
     }
 }
+
+/// Birth masses of stars, lightest to heaviest.
+pub(crate) const IMF_RANGE: (f64, f64) = (IMF_LOW, IMF_HIGH);
 
 /// Main-sequence lifetime in billions of years: the Sun's ten, shorter for
 /// heavier stars, and never under the few million years of the heaviest.
@@ -232,7 +261,7 @@ pub fn lifetime_gyr(mass_solar: f64) -> f64 {
 
 /// White dwarf temperature after cooling this long, after Mestel's law: about
 /// 20,000 K at 100 million years, 9,000 K at a billion and 4,000 K at ten.
-fn cooled_kelvin(cooling_gyr: f64) -> f64 {
+pub(crate) fn cooled_kelvin(cooling_gyr: f64) -> f64 {
     (9_000.0 * cooling_gyr.max(1e-6).powf(-0.35)).clamp(3_500.0, 100_000.0)
 }
 
@@ -263,39 +292,105 @@ fn hours(rng: &mut Rng, low_days: f64, high_days: f64) -> f64 {
     rng.log_range(low_days, high_days) * 24.0
 }
 
+pub(crate) fn white_dwarf_radius(mass: f64) -> f64 {
+    0.0126 * (0.6 / mass).cbrt()
+}
+
+/// Evolved stars after the main sequence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Branch {
+    /// The red giant branch, or the red clump after it.
+    Giant,
+    RedSupergiant,
+    BlueSupergiant,
+}
+
+/// Ranges of radius (log-uniform) and temperature an evolved branch spans.
+pub(crate) struct Envelope {
+    pub radius: (f64, f64),
+    pub kelvin: (f64, f64),
+    pub log_kelvin: bool,
+}
+
+impl Branch {
+    pub(crate) fn envelope(self) -> Envelope {
+        match self {
+            Branch::Giant => Envelope {
+                radius: (8.0, 40.0),
+                kelvin: (3_500.0, 5_400.0),
+                log_kelvin: false,
+            },
+            Branch::RedSupergiant => Envelope {
+                radius: (200.0, 1_000.0),
+                kelvin: (3_500.0, 4_500.0),
+                log_kelvin: false,
+            },
+            Branch::BlueSupergiant => Envelope {
+                radius: (20.0, 80.0),
+                kelvin: (10_000.0, 25_000.0),
+                log_kelvin: true,
+            },
+        }
+    }
+
+    /// Share of stars leaving the main sequence at this mass that join the branch.
+    pub(crate) fn share(self, mass: f64) -> f64 {
+        match (self, mass < WHITE_DWARF_LIMIT) {
+            (Branch::Giant, true) => 1.0,
+            (Branch::RedSupergiant, false) => RED_SUPERGIANT_SHARE,
+            (Branch::BlueSupergiant, false) => 1.0 - RED_SUPERGIANT_SHARE,
+            _ => 0.0,
+        }
+    }
+}
+
+impl Envelope {
+    pub(crate) fn kelvin(&self, rng: &mut Rng) -> f64 {
+        let (low, high) = self.kelvin;
+        if self.log_kelvin {
+            rng.log_range(low, high)
+        } else {
+            rng.range(low, high)
+        }
+    }
+}
+
 /// An evolved star of this mass. Its planets formed around it on the main
 /// sequence, and it has since swallowed any within a few radii.
 fn giant(id: &str, rng: &mut Rng, mass: f64) -> Formation {
-    let (radius, kelvin, kind, class, period_hours) = if mass < WHITE_DWARF_LIMIT {
-        // The red giant branch, or the red clump after it.
-        let radius = rng.log_range(8.0, 40.0);
-        let kelvin = rng.range(3_500.0, 5_400.0);
-        let kind = match letter(kelvin).0 {
-            'M' => "Red giant",
-            'K' => "Orange giant",
-            _ => "Yellow giant",
-        };
-        (radius, kelvin, kind, "III", hours(rng, 100.0, 1_000.0))
-    } else if rng.chance(0.7) {
-        let radius = rng.log_range(200.0, 1_000.0);
-        let kelvin = rng.range(3_500.0, 4_500.0);
-        (
-            radius,
-            kelvin,
-            "Red supergiant",
-            "I",
-            hours(rng, 1_000.0, 10_000.0),
-        )
+    let branch = if mass < WHITE_DWARF_LIMIT {
+        Branch::Giant
+    } else if rng.chance(RED_SUPERGIANT_SHARE) {
+        Branch::RedSupergiant
     } else {
-        let radius = rng.log_range(20.0, 80.0);
-        let kelvin = rng.log_range(10_000.0, 25_000.0);
-        (
-            radius,
-            kelvin,
-            "Blue supergiant",
-            "I",
-            hours(rng, 5.0, 50.0),
-        )
+        Branch::BlueSupergiant
+    };
+    let envelope = branch.envelope();
+    let radius = rng.log_range(envelope.radius.0, envelope.radius.1);
+    let kelvin = envelope.kelvin(rng);
+    evolved(id, rng, mass, branch, radius, kelvin)
+}
+
+/// An evolved star of this shape.
+pub(crate) fn evolved(
+    id: &str,
+    rng: &mut Rng,
+    mass: f64,
+    branch: Branch,
+    radius: f64,
+    kelvin: f64,
+) -> Formation {
+    let (kind, class, period_hours) = match branch {
+        Branch::Giant => {
+            let kind = match letter(kelvin).0 {
+                'M' => "Red giant",
+                'K' => "Orange giant",
+                _ => "Yellow giant",
+            };
+            (kind, "III", hours(rng, 100.0, 1_000.0))
+        }
+        Branch::RedSupergiant => ("Red supergiant", "I", hours(rng, 1_000.0, 10_000.0)),
+        Branch::BlueSupergiant => ("Blue supergiant", "I", hours(rng, 5.0, 50.0)),
     };
     let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
     let star = Star {
@@ -326,13 +421,18 @@ fn giant(id: &str, rng: &mut Rng, mass: f64) -> Formation {
 
 /// The white dwarf left by a star of this birth mass, at this temperature or a
 /// random one.
-fn white_dwarf(id: &str, rng: &mut Rng, progenitor: f64, kelvin: Option<f64>) -> Formation {
+pub(crate) fn white_dwarf(
+    id: &str,
+    rng: &mut Rng,
+    progenitor: f64,
+    kelvin: Option<f64>,
+) -> Formation {
     // The progenitor lost over half its mass, so surviving orbits widened by the
     // ratio of masses. Planets inside its giant phase were engulfed.
     let mass = 0.5 + 0.3 * (progenitor - 1.0) / 3.0 + rng.range(-0.03, 0.03);
     let widening = progenitor / mass;
     let kelvin = kelvin.unwrap_or_else(|| rng.log_range(4_500.0, 25_000.0));
-    let radius = 0.0126 * (0.6 / mass).cbrt();
+    let radius = white_dwarf_radius(mass);
     let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
     let star = Star {
         id: id.into(),
@@ -360,7 +460,7 @@ fn white_dwarf(id: &str, rng: &mut Rng, progenitor: f64, kelvin: Option<f64>) ->
     }
 }
 
-fn main_sequence(id: &str, rng: &mut Rng, kelvin: f64, mass: f64) -> Formation {
+pub(crate) fn main_sequence(id: &str, rng: &mut Rng, kelvin: f64, mass: f64) -> Formation {
     let kind = CENSUS
         .iter()
         .filter(|c| c.3 > 0.0 && kelvin >= c.2)

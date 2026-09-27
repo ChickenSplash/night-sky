@@ -52,7 +52,7 @@ impl Component {
         }
     }
 
-    fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         self as usize
     }
 
@@ -82,6 +82,34 @@ impl Component {
             .unwrap_or(&history[history.len() - 1]);
         rng.range(young, old)
     }
+
+    /// Share of the component's stars younger than this, in billions of years.
+    pub(crate) fn age_cdf(self, age: f64) -> f64 {
+        self.history()
+            .iter()
+            .map(|&(share, young, old)| share * ((age - young) / (old - young)).clamp(0.0, 1.0))
+            .sum()
+    }
+
+    /// An age between these two, drawn from the formation history.
+    pub(crate) fn age_between(self, rng: &mut Rng, young: f64, old: f64) -> f64 {
+        let (low, high) = (self.age_cdf(young), self.age_cdf(old));
+        let target = low + rng.unit() * (high - low);
+        let (mut young, mut old) = (young, old.min(self.oldest()));
+        for _ in 0..60 {
+            let mid = 0.5 * (young + old);
+            if self.age_cdf(mid) < target {
+                young = mid;
+            } else {
+                old = mid;
+            }
+        }
+        0.5 * (young + old)
+    }
+
+    fn oldest(self) -> f64 {
+        self.history().iter().map(|b| b.2).fold(0.0, f64::max)
+    }
 }
 
 /// An exponential disc, or a ring that peaks at twice its scale length.
@@ -98,14 +126,43 @@ pub struct Disc {
 
 impl Disc {
     fn density(&self, stars: f64, radius: f64, height: f64) -> f64 {
-        let (l, h) = (self.scale_length_pc, self.scale_height_pc);
+        let h = self.scale_height_pc;
+        self.surface(stars, radius) * (-height.abs() / h).exp() / (2.0 * h)
+    }
+
+    /// Stars per square parsec, seen face on.
+    pub(crate) fn surface(&self, stars: f64, radius: f64) -> f64 {
+        let l = self.scale_length_pc;
         let x = radius / l;
         let surface = if self.ring {
             x * x * (-x).exp() / (12.0 * PI * l * l)
         } else {
             (-x).exp() / (TAU * l * l)
         };
-        stars * surface * (-height.abs() / h).exp() / (2.0 * h)
+        stars * surface
+    }
+
+    /// Share of the disc's stars at this height or below.
+    fn vertical_cdf(&self, y: f64) -> f64 {
+        let e = (-y.abs() / self.scale_height_pc).exp();
+        if y < 0.0 { e / 2.0 } else { 1.0 - e / 2.0 }
+    }
+
+    /// Share of the disc's stars between two heights.
+    pub(crate) fn vertical(&self, low: f64, high: f64) -> f64 {
+        self.vertical_cdf(high) - self.vertical_cdf(low)
+    }
+
+    /// A height between two, drawn from the vertical profile.
+    pub(crate) fn height_between(&self, low: f64, high: f64, u: f64) -> f64 {
+        let target = self.vertical_cdf(low) + u * self.vertical(low, high);
+        let h = self.scale_height_pc;
+        let y = if target < 0.5 {
+            h * (2.0 * target).ln()
+        } else {
+            -h * (2.0 * (1.0 - target)).ln()
+        };
+        y.clamp(low, high)
     }
 }
 
@@ -135,7 +192,7 @@ impl Spiral {
 
     /// Density factor around the circle for this arm strength. It averages to one
     /// around every circle, so arms never change a disc's total.
-    fn modulation(&self, strength: f64, x: f64, z: f64) -> f64 {
+    pub(crate) fn modulation(&self, strength: f64, x: f64, z: f64) -> f64 {
         let radius = x.hypot(z);
         if strength <= 0.0 || radius <= 0.0 {
             return 1.0;
@@ -236,6 +293,24 @@ impl GalaxyModel {
 
     pub fn stars_in(&self, component: Component) -> f64 {
         self.stars * self.shares[component.index()]
+    }
+
+    /// The disc a component is spread over, if it is one.
+    pub(crate) fn disc(&self, component: Component) -> Option<&Disc> {
+        match component {
+            Component::ThinDisc => Some(&self.thin),
+            Component::Arms => Some(&self.arms),
+            Component::ThickDisc => Some(&self.thick),
+            _ => None,
+        }
+    }
+
+    /// Stars per square parsec of a disc component, seen face on.
+    pub(crate) fn disc_surface(&self, component: Component, x: f64, z: f64) -> f64 {
+        self.disc(component).map_or(0.0, |disc| {
+            disc.surface(self.stars_in(component), x.hypot(z))
+                * self.spiral.modulation(disc.arm_strength, x, z)
+        })
     }
 
     pub fn black_hole_radius_metres(&self) -> f64 {

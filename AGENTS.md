@@ -113,6 +113,22 @@
 - Page stars (`star(id)`) keep the fixed solar-neighbourhood census until
   lists move onto galactic stars. Both share the builders in `star.rs`; census
   draws must keep their order, or every page star changes.
+- Galactic stars are generated from cells (`space_simulation::cells`), never
+  stored. `Cell` is a locational code (a leading 1, then octant bits x, y, z per
+  level); the root is `ROOT_PC` (131,072 pc) across, centred on the black hole.
+- `population` sorts stars into `TIERS` brightness bands, four times dimmer per
+  tier (`tier_limit`). Tier t's stars belong to level-t cells, so cell size and
+  reach (`reach_pc`) both halve per tier. Tiered stars are sampled directly
+  within their band; together they match `galactic_star`'s mix (tested).
+- `Sky` holds the root's exact counts per component and tier and splits each
+  cell's finer counts among its children by a seeded multinomial, weighted by
+  the model's stars in each child (`child_masses`). Children always add up to
+  their parent, and the galaxy holds exactly 2e11 stars. Seeds depend only on
+  cell codes, so results never depend on visiting order or the cache
+  (`Sky::retain` only drops cached work).
+- A cell star's ID is `g{cell hex}.{component}.{index}`. `cell_star(id)` and
+  `cell_planetary_system(id)` rebuild it from the ID alone; its position needs
+  `Sky::star(id)`.
 
 ## Realistic rendering
 
@@ -155,8 +171,7 @@
 ## Current limitations
 
 - No N-body simulation, moons, workspace discovery or OAuth.
-- The galaxy model is not yet sampled into cells, streamed or drawn, and has
-  no rotation.
+- Galaxy cells are not yet streamed or drawn, and the galaxy has no rotation.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.

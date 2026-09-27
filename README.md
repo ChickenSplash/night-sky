@@ -193,7 +193,13 @@ is available it retains its last data, initially the clearly labelled demo.
   a bar and bulge, a thin disc with four spiral arms, a thick disc and a halo.
   Near home it gives about 0.18 stars per cubic parsec. Star types follow each
   region's age: young arms have O and B stars and supergiants; the old bulge
-  and halo have no hot stars left and more white dwarfs. It is not drawn yet.
+  and halo have no hot stars left and more white dwarfs.
+- Its stars are generated cell by cell (`crates/simulation/src/cells.rs`), so
+  none are stored. An octree hands exactly 200 billion stars down from the root
+  in seeded draws, and each brightness tier lives in cells of its own size:
+  bright stars in large cells that can be loaded from far away, faint ones in
+  small cells nearby. Any cell gives the same stars every time. They are not
+  streamed or drawn yet.
 
 ## Project structure
 
@@ -235,7 +241,8 @@ assisted and physical exposure, a lit planet close-up, a constellation and a
 star close-up in both exposures. Each capture waits for camera flights to finish. It saves seventeen
 screenshots under `data/`
 and exits automatically. Unit tests cover physical orbit invariants, clock
-continuity, the galaxy's star count, profile and regional star mix, persistent orbital-slot allocation, table layout and camera flights.
+continuity, the galaxy's star count, profile and regional star mix, cell counts
+and repeatable cell stars, persistent orbital-slot allocation, table layout and camera flights.
 Set `SPACE_SMOKE_TASKS=1400` to exercise a 140-page constellation instead of
 the default 50-task fixture.
 

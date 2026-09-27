@@ -1,5 +1,7 @@
+pub mod cells;
 pub mod galaxy;
 pub mod light;
+pub mod population;
 mod star;
 mod system;
 

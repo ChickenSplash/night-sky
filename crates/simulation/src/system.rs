@@ -76,6 +76,10 @@ impl Rng {
         Self(stable_hash(key))
     }
 
+    pub(crate) fn seeded(seed: u64) -> Self {
+        Self(seed)
+    }
+
     pub(crate) fn unit(&mut self) -> f64 {
         self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
         let mut z = self.0;
@@ -100,6 +104,13 @@ impl Rng {
     pub(crate) fn rayleigh(&mut self, sigma: f64) -> f64 {
         sigma * (-2.0 * (1.0 - self.unit()).ln()).sqrt()
     }
+}
+
+/// The SplitMix64 finaliser: spreads every input bit over the output.
+pub(crate) fn mix(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
 }
 
 /// ID of a list page's star, which seeds the star and its planets.
@@ -218,7 +229,7 @@ pub fn galactic_planetary_system(star: &str, component: Component) -> Vec<Body> 
     system_around(star, &galactic_formation(star, component))
 }
 
-fn system_around(star: &str, formed: &Formation) -> Vec<Body> {
+pub(crate) fn system_around(star: &str, formed: &Formation) -> Vec<Body> {
     let ordinary = generate_system(star, formed, false);
     if ordinary.last().is_none_or(|body| {
         body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity) <= MAX_SYSTEM_APOAPSIS_AU
