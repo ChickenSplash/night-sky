@@ -554,7 +554,14 @@ impl Canvas<'_> {
         flat: bool,
     ) -> Option<f32> {
         match (self.nav.realistic, self.nav.wireframe) {
-            (false, _) => self.sphere(gizmos, centre, radius, tint, basis, flat),
+            // Without realistic lighting a small body is a dot: its marker is the ring.
+            (false, _) => match self.pixels(centre, radius) {
+                Some(p) if p < RING_PIXELS => {
+                    self.dot(gizmos, centre, tint);
+                    Some(p)
+                }
+                _ => self.sphere(gizmos, centre, radius, tint, basis, flat),
+            },
             (true, true) => self.sphere(gizmos, centre, radius * 1.01, tint, basis, flat),
             (true, false) => self.pixels(centre, radius),
         }
@@ -685,16 +692,16 @@ impl Canvas<'_> {
                 subject: current && self.subject,
             });
         }
-        let units = self.units(radius);
-        // Without realistic lighting a small star is a dot: its marker is the ring.
-        let pixels = match self.pixels(centre, units) {
-            Some(p) if !self.nav.realistic && p < RING_PIXELS => {
-                self.dot(gizmos, centre, colour(tint));
-                Some(p)
-            }
-            _ => self.outline(gizmos, centre, units, colour(tint), basis, limb),
-        }
-        .unwrap_or(0.0);
+        let pixels = self
+            .outline(
+                gizmos,
+                centre,
+                self.units(radius),
+                colour(tint),
+                basis,
+                limb,
+            )
+            .unwrap_or(0.0);
         let anchor = if limb {
             let unit = TableLayout::new(self.system, pose.page).unit;
             self.world(self.frame * DVec3::new(0.0, 0.0, physical + unit))
