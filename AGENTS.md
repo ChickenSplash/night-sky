@@ -14,7 +14,7 @@
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
-- `./scripts/run.sh --smoke-test`: desktop rendering check with fifteen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and four realistic-rendering captures (assisted, physical, lit planet close-up, constellation).
+- `./scripts/run.sh --smoke-test`: desktop rendering check with sixteen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and five realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
   run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
   documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
@@ -109,6 +109,12 @@
   disc (`Exposure::point`), so it matches the sphere it replaces and physical
   stays linear. Point planets dim with phase (`render::phase`). Assisted floors
   apply to points, not to dim spheres.
+- Close star discs have per-channel limb darkening and procedural granulation
+  in `body.wgsl`, fixed to the star's spin. Granule size follows the pressure
+  scale height (`render::granules`); patterns fade out before their cells reach
+  a pixel, and hot stars have none. Assisted exposure eases large discs down to
+  `DISC_KEY` so the surface survives tone mapping. Coronas are additive sprites
+  (`Frame::coronas`, `point.wgsl`) at a millionth of the disc when physical.
 - Cameras sharing the window must agree on `Hdr`: the egui overlay camera switches
   with the 3D camera (without tone mapping), or it presents a stale frame.
 - The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh

@@ -9,6 +9,8 @@
 //! - Bodies smaller than a point on screen are drawn as point sprites: a sharp
 //!   core and a faint halo carrying the body's whole light, so distant stars
 //!   keep their true relative brightness.
+//! - Close up, a star is a disc with limb darkening, granulation and a corona.
+//!   Assisted exposure eases large discs down so their surface stays readable.
 //! - Colours reach the GPU already exposed, so half-float HDR targets never see
 //!   raw radiance.
 
@@ -61,6 +63,18 @@ pub const POINT_PIXELS: f32 = 1.5;
 const CORE_SIGMA: f32 = 0.8;
 const HALO_SIGMA: f32 = 3.0;
 const HALO_SHARE: f32 = 0.12;
+/// Assisted exposure eases star discs between these on-screen radii down to
+/// `DISC_KEY`, so their limb and granulation are not lost to white.
+const DISC_NEAR: f32 = 12.0;
+const DISC_FAR: f32 = 160.0;
+const DISC_KEY: f64 = 0.8;
+/// Corona brightness just outside the limb, relative to the disc: the real
+/// inner corona is about a millionth, so a physical camera shows only bloom.
+const CORONA_SHARE: f64 = 0.2;
+const PHYSICAL_CORONA_SHARE: f64 = 1e-6;
+/// Corona sprite half side and falloff, in disc radii.
+const CORONA_EXTENT: f32 = 4.0;
+const CORONA_FALLOFF: f32 = 3.0;
 
 pub struct RenderPlugin;
 
@@ -95,6 +109,13 @@ pub struct BodyMaterial {
     colour: Vec4,
     #[uniform(0)]
     light: Vec4,
+    /// Rotation of the body's surface, as a quaternion.
+    #[uniform(0)]
+    spin: Vec4,
+    /// Granules per disc radius, on-screen radius in pixels and granulation
+    /// contrast; zero for planets.
+    #[uniform(0)]
+    surface: Vec4,
 }
 
 impl Material for BodyMaterial {
@@ -109,6 +130,9 @@ pub struct PointMaterial {
     colour: Vec4,
     #[uniform(0)]
     shape: Vec4,
+    /// Disc radius in pixels and falloff for a corona; zero for a point.
+    #[uniform(0)]
+    corona: Vec4,
 }
 
 impl Material for PointMaterial {
@@ -135,6 +159,10 @@ pub struct StarLight {
     pub kelvin: f64,
     /// The current page's star while its planets are on screen.
     pub subject: bool,
+    /// Orientation of the surface, in world axes.
+    pub spin: Quat,
+    /// Granules per disc radius (`granules`).
+    pub granules: f64,
 }
 
 /// How a planet is lit, before exposure.
@@ -232,6 +260,21 @@ pub fn phase(angle: f32) -> f64 {
     2.0 / 3.0 * (angle.sin() + (std::f64::consts::PI - angle) * angle.cos()) / std::f64::consts::PI
 }
 
+/// Granules across one radius of a star. Granules scale with the pressure scale
+/// height, which grows with temperature and falls with surface gravity: about
+/// 700 per radius on the Sun, a handful on a giant.
+pub fn granules(star: &Star) -> f64 {
+    let gravity = star.mass_solar / star.radius_solar.powi(2);
+    let height = (star.temperature_k / 5772.0) / gravity;
+    (700.0 * star.radius_solar / height).clamp(3.0, 5000.0)
+}
+
+/// Granulation contrast: convection reaches the surface only of cool stars.
+fn granulation_contrast(kelvin: f64) -> f32 {
+    let hot = ((kelvin - 6500.0) / 1500.0).clamp(0.0, 1.0);
+    (1.0 - hot * hot * (3.0 - 2.0 * hot)) as f32
+}
+
 /// Star colour and visual efficiency by temperature, cached: both integrate a
 /// spectrum.
 #[derive(Resource, Default)]
@@ -305,6 +348,9 @@ pub struct Shaded {
     pub colour: Vec3,
     /// Direction to the star and night-side ambient; negative ambient for stars.
     pub light: Vec4,
+    pub rotation: Quat,
+    /// Granules per radius, on-screen radius and contrast; zero for planets.
+    pub surface: Vec4,
 }
 
 /// A point sprite ready for the GPU.
@@ -317,6 +363,8 @@ pub struct Point {
     pub colour: Vec3,
     /// Half side in pixels, core and halo spread in pixels, and the halo's share.
     pub shape: Vec4,
+    /// Disc radius in pixels and falloff for a corona; zero for a point.
+    pub corona: Vec4,
 }
 
 impl Point {
@@ -329,7 +377,31 @@ impl Point {
             half: half * per_pixel,
             colour: (colour * light.min(MAX_VALUE)).as_vec3(),
             shape: Vec4::new(half, core, HALO_SIGMA, HALO_SHARE),
+            corona: Vec4::ZERO,
         }
+    }
+
+    /// A glow around a star's disc, `colour` its brightness just outside the limb.
+    fn corona(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3) -> Self {
+        let half = CORONA_EXTENT * pixels;
+        Self {
+            centre,
+            half: half * per_pixel,
+            colour: colour.min(DVec3::splat(MAX_VALUE)).as_vec3(),
+            shape: Vec4::new(half, 0.0, 0.0, 0.0),
+            corona: Vec4::new(pixels, CORONA_FALLOFF, 0.0, 0.0),
+        }
+    }
+}
+
+/// Assisted display value of a star disc, eased down as it grows on screen.
+fn ease_disc(value: f64, pixels: f32) -> f64 {
+    let t = ((pixels - DISC_NEAR) / (DISC_FAR - DISC_NEAR)).clamp(0.0, 1.0);
+    let close = f64::from(t * t * (3.0 - 2.0 * t));
+    if value > DISC_KEY {
+        (value.ln() * (1.0 - close) + DISC_KEY.ln() * close).exp()
+    } else {
+        value
     }
 }
 
@@ -337,6 +409,7 @@ impl Point {
 pub struct Frame {
     pub bodies: Vec<Shaded>,
     pub points: Vec<Point>,
+    pub coronas: Vec<Point>,
 }
 
 pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool) -> Frame {
@@ -391,14 +464,35 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool) -> Fram
         }
         let mut value = exposure.value(star.radiance);
         if !physical {
-            value = value.max(ASSISTED_STAR_FLOOR);
+            value = ease_disc(value.max(ASSISTED_STAR_FLOOR), star.pixels);
         }
         frame.bodies.push(Shaded {
             centre: star.centre,
             radius: star.radius,
             colour: (colour * value).as_vec3(),
             light: Vec4::new(0.0, 0.0, 0.0, -1.0),
+            rotation: star.spin,
+            surface: Vec4::new(
+                star.granules as f32,
+                star.pixels,
+                granulation_contrast(star.kelvin),
+                0.0,
+            ),
         });
+        // The corona grows in from a point, and is whiter than the surface.
+        let share = if physical {
+            PHYSICAL_CORONA_SHARE
+        } else {
+            CORONA_SHARE
+        };
+        let fade = f64::from(((star.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0));
+        let pearl = (colour + DVec3::splat(colour.max_element())) * 0.5;
+        frame.coronas.push(Point::corona(
+            star.centre,
+            star.pixels,
+            star.per_pixel,
+            pearl * value * share * fade,
+        ));
     }
     let Some(subject) = subject else {
         return frame;
@@ -434,6 +528,8 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool) -> Fram
             light: planet
                 .towards_star
                 .extend(if physical { 0.0 } else { ASSISTED_AMBIENT }),
+            rotation: Quat::IDENTITY,
+            surface: Vec4::ZERO,
         });
     }
     frame
@@ -617,14 +713,18 @@ fn sync_bodies(
             Transform::from_translation(body.centre).with_scale(Vec3::splat(body.radius)),
         );
         // Only touch changed materials: every change re-uploads the bind group.
-        let colour = body.colour.extend(1.0);
-        if materials
-            .get(material)
-            .is_some_and(|m| m.colour != colour || m.light != body.light)
-            && let Some(m) = materials.get_mut(material)
+        let changed = BodyMaterial {
+            colour: body.colour.extend(1.0),
+            light: body.light,
+            spin: Vec4::from(body.rotation),
+            surface: body.surface,
+        };
+        if materials.get(material).is_some_and(|m| {
+            (m.colour, m.light, m.spin, m.surface)
+                != (changed.colour, changed.light, changed.spin, changed.surface)
+        }) && let Some(m) = materials.get_mut(material)
         {
-            m.colour = colour;
-            m.light = body.light;
+            *m = changed;
         }
     }
 }
@@ -641,7 +741,7 @@ fn sync_points(
     let Ok((cell, parent, view)) = camera.single() else {
         return;
     };
-    let count = frame.points.len();
+    let count = frame.points.len() + frame.coronas.len();
     grow(
         &mut commands,
         &mut pool,
@@ -657,7 +757,7 @@ fn sync_points(
         let Ok((transform, global, point_cell, visibility)) = points.get_mut(*entity) else {
             continue;
         };
-        let Some(point) = frame.points.get(index) else {
+        let Some(point) = frame.points.iter().chain(&frame.coronas).nth(index) else {
             hide(visibility);
             continue;
         };
@@ -671,11 +771,12 @@ fn sync_points(
         let colour = point.colour.extend(1.0);
         if materials
             .get(material)
-            .is_some_and(|m| m.colour != colour || m.shape != point.shape)
+            .is_some_and(|m| (m.colour, m.shape, m.corona) != (colour, point.shape, point.corona))
             && let Some(m) = materials.get_mut(material)
         {
             m.colour = colour;
             m.shape = point.shape;
+            m.corona = point.corona;
         }
     }
 }
@@ -693,6 +794,8 @@ mod tests {
             radiance,
             kelvin: 5772.0,
             subject,
+            spin: Quat::IDENTITY,
+            granules: 700.0,
         }
     }
 
@@ -810,6 +913,47 @@ mod tests {
         };
         let ratio = physical.point(1.0, 0.1) / physical.point(1.0, 0.01);
         assert!((ratio - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn close_star_discs_stay_readable_with_a_corona() {
+        let photometry = Photometry::default();
+        let mut near = lights();
+        near.stars[0].pixels = 400.0;
+        let assisted = resolve(&near, &photometry, false);
+        let physical = resolve(&near, &photometry, true);
+        // Assisted eases a large disc down to the disc key; physical does not.
+        let disc = brightness(&assisted.bodies[0]);
+        assert!(disc <= DISC_KEY as f32 * 1.01 && disc > 0.5);
+        assert!(brightness(&physical.bodies[0]) > 100.0);
+        // A small disc keeps its exposure.
+        assert!((ease_disc(300.0, DISC_NEAR) - 300.0).abs() < 1e-9);
+        // The corona is visible assisted, and all but invisible physically.
+        let corona = |f: &Frame| f.coronas[0].colour.max_element() / brightness(&f.bodies[0]);
+        assert!((corona(&assisted) - CORONA_SHARE as f32).abs() < 0.05);
+        assert!(corona(&physical) < 1e-5);
+        // Only discs have coronas, and they fade in from a point.
+        assert_eq!(assisted.coronas.len(), 1);
+        near.stars[0].pixels = POINT_PIXELS;
+        let edge = resolve(&near, &photometry, false);
+        assert!(edge.coronas[0].colour.max_element() < 1e-6);
+    }
+
+    #[test]
+    fn granules_follow_the_pressure_scale_height() {
+        let star = |mass_solar, radius_solar, temperature_k| Star {
+            mass_solar,
+            radius_solar,
+            temperature_k,
+            ..space_simulation::demo_galaxy().systems[0].stars[0].clone()
+        };
+        let sun = granules(&star(1.0, 1.0, 5772.0));
+        assert!((sun - 700.0).abs() < 1.0);
+        // A red giant shows a handful of huge cells, a red dwarf finer ones.
+        assert!(granules(&star(1.0, 50.0, 4000.0)) < 30.0);
+        assert!(granules(&star(0.13, 0.16, 2800.0)) > sun);
+        assert!(granulation_contrast(5772.0) > 0.99);
+        assert!(granulation_contrast(9000.0) < 1e-6);
     }
 
     #[test]

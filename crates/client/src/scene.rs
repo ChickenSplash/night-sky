@@ -694,6 +694,8 @@ impl Canvas<'_> {
                 radiance,
                 kelvin: body.temperature_k,
                 subject: current && self.subject,
+                spin: basis.as_quat(),
+                granules: render::granules(body),
             });
         }
         let pixels = self

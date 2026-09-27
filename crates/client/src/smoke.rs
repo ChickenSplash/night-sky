@@ -138,6 +138,15 @@ pub fn exercise(
             nav.preset(View::Constellation, &universe.0);
         }
         27 => capture(&mut commands, "realistic-constellation"),
+        28 => {
+            nav.jump(0, &universe.0);
+            let radius = universe.0.systems[0]
+                .star(nav.page)
+                .map_or(1.0, |s| s.radius_solar);
+            nav.distance = 5.0 * radius * space_simulation::SUN_RADIUS_METRES;
+            nav.pitch = 0.2;
+        }
+        29 => capture(&mut commands, "realistic-star"),
         _ => {
             exit.write(AppExit::Success);
         }

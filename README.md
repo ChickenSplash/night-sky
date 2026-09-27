@@ -223,8 +223,9 @@ The graphical smoke test requires a working desktop session. It exercises the
 system view, close tracking, atlas, interstellar jumps (one captured mid-flight),
 a 50-task table fixture, its last page, constellation framing, restored orbits
 and a second orbital page (one captured mid-flight), then realistic rendering in
-assisted and physical exposure, a lit planet close-up and a constellation. Each
-capture waits for camera flights to finish. It saves fifteen screenshots under `data/`
+assisted and physical exposure, a lit planet close-up, a constellation and a
+star close-up. Each capture waits for camera flights to finish. It saves sixteen
+screenshots under `data/`
 and exits automatically. Unit tests cover physical orbit invariants, clock
 continuity, persistent orbital-slot allocation, table layout and camera flights.
 Set `SPACE_SMOKE_TASKS=1400` to exercise a 140-page constellation instead of
