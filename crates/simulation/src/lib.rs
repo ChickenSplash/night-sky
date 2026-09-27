@@ -1,3 +1,4 @@
+pub mod light;
 mod star;
 mod system;
 
