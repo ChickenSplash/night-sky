@@ -67,6 +67,7 @@ function elapsed(days) {
 }
 
 function caption(state) {
+  if (state.galactic) return state.system ? 'Generated system / no tasks' : 'Galaxy / generated stars';
   if (state.atlas) return 'Interstellar atlas / light years';
   if (state.view === 'table') return 'Task table / true sizes · orbits continue';
   if (state.view === 'constellation') return 'List constellation / select a system';
@@ -259,6 +260,8 @@ export function mount(bridge, canvas) {
   opener.id = 'nav-toggle';
   const listsTab = tabButton('lists', 'Lists');
   const tasksTab = tabButton('tasks', 'Tasks');
+  const galaxyMode = el('button', { className: 'chip', textContent: 'Generated galaxy (G)' });
+  galaxyMode.addEventListener('click', () => send({ type: state.galactic ? 'return_to_lists' : 'galaxy_view' }));
   const listFilter = el('input', { type: 'search', placeholder: 'Filter lists…', ariaLabel: 'Filter lists' });
   const listSort = select('Sort lists', LIST_SORTS, 'listSort', () => renderLists());
   const lists = el('div', { className: 'lists' });
@@ -279,6 +282,7 @@ export function mount(bridge, canvas) {
   const nav = el('aside', { id: 'nav-panel', className: 'panel floating' },
     el('header', {}, el('div', {}, el('h1', { textContent: 'Task / Space' }), source), hide),
     el('div', { className: 'tabs', role: 'tablist' }, listsTab, tasksTab),
+    el('div', { className: 'row' }, galaxyMode),
     listsBody, tasksBody, notice);
 
   const showTab = tab => {
@@ -560,6 +564,8 @@ export function mount(bridge, canvas) {
   };
 
   const renderState = () => {
+    galaxyMode.textContent = state.galactic ? 'Return to lists (G)' : 'Generated galaxy (G)';
+    galaxyMode.setAttribute('aria-pressed', !!state.galactic);
     highlightLists();
     renderIndex(false);
     renderWhere();

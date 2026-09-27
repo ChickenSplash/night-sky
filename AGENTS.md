@@ -155,6 +155,14 @@
   glow behind the points, with no dust or extinction. The central black hole
   is an opaque sphere at its physical Schwarzschild radius; it is not visible
   from home. No accretion disc or lensing yet.
+- `galaxy_nav.rs` owns the galaxy overview, selected cell-star ID and optional
+  generated `StarSystem`. It never adds generated systems to the ClickUp
+  `Universe`. The overview uses the home origin; entering a star changes the
+  camera frame to that star's position in f64 and builds task-free planets
+  from its ID. The same `Flight` shifts the displayed pose across frames.
+  G enters/leaves galaxy mode, F picks a visible star at the view centre,
+  Enter visits it, Backspace returns to overview. Scroll zooms as far as
+  40,000 ly in the overview; movement scales with the displayed distance.
 
 ## Realistic rendering
 
@@ -200,9 +208,9 @@
 ## Current limitations
 
 - No N-body simulation, moons, workspace discovery or OAuth.
-- Galaxy stars are drawn, but galactic flight/navigation, dust, lensing and
-  rotation are not yet implemented. The glow is approximate, not a radiative
-  transfer simulation.
+- Galaxy travel and visits to generated systems work, but dust, lensing,
+  rotation and mapping ClickUp lists onto galactic stars are not implemented.
+  The glow is approximate, not a radiative transfer simulation.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.

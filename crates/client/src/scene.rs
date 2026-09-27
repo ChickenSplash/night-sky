@@ -64,6 +64,10 @@ impl CameraRig {
         self.frame_ly + pose.eye / LY_METRES
     }
 
+    pub fn rotation(&self) -> Quat {
+        self.shown.map_or(Quat::IDENTITY, |pose| pose.rotation)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn progress(&self) -> Option<f64> {
         self.flight.as_ref().map(Flight::progress)
@@ -132,6 +136,10 @@ pub fn controls(
     mut wheel: MessageReader<MouseWheel>,
     mut contexts: EguiContexts,
     rig: Res<CameraRig>,
+    pose: Res<CameraPose>,
+    universe: Res<Universe>,
+    field: Res<crate::stream::Starfield>,
+    mut galactic: ResMut<crate::galaxy_nav::Galactic>,
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
 ) {
@@ -157,16 +165,38 @@ pub fn controls(
             nav.pitch = (nav.pitch + motion.delta.y * 0.005).clamp(-1.48, 1.48);
         }
         if free {
-            let min = if nav.atlas {
+            let min = if nav.atlas || (nav.galactic && galactic.system.is_none()) {
                 0.1 * LY_METRES
             } else {
                 20_000_000.0
             };
-            nav.distance =
-                (nav.distance * (-f64::from(scroll) * 0.12).exp()).clamp(min, 200.0 * LY_METRES);
+            let max = if nav.galactic && galactic.system.is_none() {
+                40_000.0 * LY_METRES
+            } else {
+                200.0 * LY_METRES
+            };
+            nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp()).clamp(min, max);
         }
     }
     if !keyboard {
+        if keys.just_pressed(KeyCode::KeyG) {
+            if nav.galactic {
+                let system = nav.system;
+                nav.jump(system, &universe.0);
+                galactic.system = None;
+            } else {
+                crate::galaxy_nav::overview(&mut nav, &mut galactic, rig.galactic_ly(&pose));
+            }
+        }
+        if nav.galactic && galactic.system.is_none() && keys.just_pressed(KeyCode::KeyF) {
+            galactic.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
+        }
+        if nav.galactic && galactic.system.is_none() && keys.just_pressed(KeyCode::Enter) {
+            crate::galaxy_nav::enter(&mut nav, &mut galactic);
+        }
+        if nav.galactic && galactic.system.is_some() && keys.just_pressed(KeyCode::Backspace) {
+            crate::galaxy_nav::exit(&mut nav, &mut galactic);
+        }
         if keys.just_pressed(KeyCode::Space) {
             clock.0.paused = !clock.0.paused;
         }
@@ -205,6 +235,7 @@ pub fn controls(
 pub fn place_camera(
     time: Res<Time>,
     universe: Res<Universe>,
+    galactic: Res<crate::galaxy_nav::Galactic>,
     clock: Res<Clock>,
     mut nav: ResMut<Navigation>,
     mut rig: ResMut<CameraRig>,
@@ -221,12 +252,20 @@ pub fn place_camera(
         With<SpaceCamera>,
     >,
 ) {
-    let Some(system) = universe.0.systems.get(nav.system) else {
-        return;
+    let system = if nav.galactic {
+        galactic.system.as_ref()
+    } else {
+        universe.0.systems.get(nav.system)
     };
-    nav.fit_preset(system);
+    if !nav.galactic && system.is_none() {
+        return;
+    }
+    if let Some(system) = system {
+        nav.fit_preset(system);
+    }
     if nav.following
         && !nav.atlas
+        && let Some(system) = system
         && let Some(planet) = nav.selected.and_then(|i| system.planets.get(i))
     {
         nav.target = DVec3::from_array(position(
@@ -237,16 +276,18 @@ pub fn place_camera(
     }
     // The constellation uses one page's frame for the whole list; page selection
     // does not move the camera. Other views use the selected page's plane.
-    let frame_page = nav.frame_page(system);
+    let frame_page = system.map_or(0, |system| nav.frame_page(system));
     let frame_tilt = if nav.atlas {
         DQuat::IDENTITY
     } else {
-        page_frame(system, frame_page)
+        system.map_or(DQuat::IDENTITY, |system| page_frame(system, frame_page))
     };
     let desired = Pose {
-        target: if nav.atlas {
+        target: if nav.galactic && system.is_none() {
+            nav.target
+        } else if nav.atlas {
             // The atlas target is in galactic axes relative to the list anchor.
-            nav.target - page_offset(system, nav.page)
+            nav.target - page_offset(system.expect("list atlas"), nav.page)
         } else {
             frame_tilt * nav.target
         },
@@ -256,7 +297,7 @@ pub fn place_camera(
             * Quat::from_rotation_x(-nav.pitch),
         layout: f64::from(u8::from(nav.view == View::Table)),
     };
-    let frame = page_origin_ly(system, frame_page);
+    let frame = system.map_or(DVec3::ZERO, |system| page_origin_ly(system, frame_page));
     let mut shown = rig.shown.unwrap_or(desired);
     let frame_shift_ly = (frame - rig.frame_ly).length();
     if rig.shown.is_some() && frame != rig.frame_ly {
@@ -283,7 +324,7 @@ pub fn place_camera(
         if let Some(flight) = &rig.flight {
             info!(
                 "Flight started: list={} page={} view={:?} star travel={:.3} ly duration={:.3} s",
-                system.id,
+                system.map_or("galaxy", |s| s.id.as_str()),
                 nav.page + 1,
                 nav.view,
                 frame_shift_ly,
@@ -295,7 +336,7 @@ pub fn place_camera(
         warn!(
             "Flight frame delayed by {:.0} ms (list={}, page={})",
             time.delta_secs_f64() * 1000.0,
-            system.id,
+            system.map_or("galaxy", |s| s.id.as_str()),
             nav.page + 1,
         );
         rig.warned_stall = true;
@@ -314,7 +355,7 @@ pub fn place_camera(
     if rig.flight.as_ref().is_some_and(Flight::finished) {
         info!(
             "Flight landed: list={} page={} view={:?}",
-            system.id,
+            system.map_or("galaxy", |s| s.id.as_str()),
             nav.page + 1,
             nav.view
         );
@@ -820,6 +861,7 @@ impl Canvas<'_> {
 pub fn draw(
     mut gizmos: Gizmos,
     universe: Res<Universe>,
+    galactic: Res<crate::galaxy_nav::Galactic>,
     navigation: (Res<Navigation>, Res<CameraRig>),
     clock: Res<Clock>,
     pose: Res<CameraPose>,
@@ -835,7 +877,12 @@ pub fn draw(
         return;
     };
     lights.eye = view.translation();
-    let Some(system) = universe.0.systems.get(nav.system) else {
+    let system = if nav.galactic {
+        galactic.system.as_ref()
+    } else {
+        universe.0.systems.get(nav.system)
+    };
+    let Some(system) = system else {
         return;
     };
     // During a page-to-page flight the camera may still be near the departure
@@ -860,7 +907,11 @@ pub fn draw(
     if nav.view == View::Constellation {
         canvas.constellation(&mut gizmos);
     }
-    canvas.stars(&mut gizmos, &universe.0, markers, &mut lights);
+    if nav.galactic {
+        canvas.star(&mut gizmos, markers, &mut lights, system, nav.system, 0);
+    } else {
+        canvas.stars(&mut gizmos, &universe.0, markers, &mut lights);
+    }
     if planets_shown {
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
         let luminosity = system

@@ -28,6 +28,7 @@ pub fn draw_ui(
         Res<CameraRig>,
         Res<CameraPose>,
         Res<crate::stream::Starfield>,
+        Res<crate::galaxy_nav::Galactic>,
     ),
     mut styled: Local<bool>,
 ) {
@@ -35,7 +36,7 @@ pub fn draw_ui(
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
     let (markers, insets, lights) = overlay;
-    let (rig, pose, starfield) = camera_state;
+    let (rig, pose, starfield, galactic) = camera_state;
     #[cfg(target_arch = "wasm32")]
     let _ = &starfield;
     let Ok(ctx) = contexts.ctx_mut() else {
@@ -67,6 +68,7 @@ pub fn draw_ui(
     } else {
         let mut panels = Panels {
             galaxy: &universe.0,
+            generated: galactic.system.as_ref(),
             nav: &mut nav,
             clock: &clock.0,
             out: &mut out,
@@ -113,6 +115,7 @@ pub fn draw_ui(
         &markers,
         &rig,
         &pose,
+        &galactic,
         &exposure_caption(&nav, &lights),
         insets.0.is_none(),
         &mut out,
@@ -124,6 +127,7 @@ pub fn draw_ui(
 /// take over. They only read state; every change is a `UiCommand`.
 struct Panels<'a> {
     galaxy: &'a Galaxy,
+    generated: Option<&'a space_shared::StarSystem>,
     nav: &'a mut Navigation,
     clock: &'a SimulationClock,
     out: &'a mut Vec<UiCommand>,
@@ -205,6 +209,12 @@ impl Panels<'_> {
             .clicked()
         {
             self.out.push(UiCommand::Atlas);
+        }
+        if ui
+            .selectable_label(nav.galactic, "Generated galaxy")
+            .clicked()
+        {
+            self.out.push(UiCommand::GalaxyView);
         }
         egui::ScrollArea::vertical()
             .id_salt("systems")
@@ -329,7 +339,11 @@ impl Panels<'_> {
         let (galaxy, nav) = (self.galaxy, &*self.nav);
         heading(ui, "03 / TELEMETRY");
         ui.add_space(8.0);
-        let Some(system) = galaxy.systems.get(nav.system) else {
+        let Some(system) = (if nav.galactic {
+            self.generated
+        } else {
+            galaxy.systems.get(nav.system)
+        }) else {
             return;
         };
         ui.heading(&system.name);
@@ -638,11 +652,36 @@ fn canvas_overlay(
     markers: &Markers,
     rig: &CameraRig,
     pose: &CameraPose,
+    galactic: &crate::galaxy_nav::Galactic,
     exposure: &str,
     // HTML panels show the loading state and view captions themselves.
     captions: bool,
     out: &mut Vec<UiCommand>,
 ) {
+    if nav.galactic {
+        egui::Area::new(egui::Id::new("galaxy-controls"))
+            .fixed_pos(rect.right_bottom() - egui::vec2(470.0, 135.0))
+            .show(ctx, |ui| {
+                egui::Frame::new().fill(PANEL).inner_margin(8).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if galactic.system.is_some() {
+                            if ui.button("Back to galaxy").clicked() { out.push(UiCommand::LeaveGalactic); }
+                        } else {
+                            if ui.button("Pick centre star (F)").clicked() { out.push(UiCommand::PickGalactic); }
+                            if ui.add_enabled(galactic.picked.is_some(), egui::Button::new("Enter star (Enter)")).clicked() {
+                                out.push(UiCommand::EnterGalactic);
+                            }
+                        }
+                        if ui.button("Lists (G)").clicked() { out.push(UiCommand::ReturnToLists); }
+                    });
+                    if let Some(star) = &galactic.picked {
+                        ui.label(format!("Selected {}", star.id));
+                    } else if galactic.system.is_none() {
+                        ui.label("Aim at a visible star, then pick it. WASD/QE travel, scroll zoom, Shift boost.");
+                    }
+                });
+            });
+    }
     if captions && galaxy.systems.is_empty() {
         egui::Area::new(egui::Id::new("loading-state"))
             .fixed_pos(rect.center() - egui::vec2(160.0, 45.0))
@@ -664,7 +703,11 @@ fn canvas_overlay(
         painter.text(
             rect.left_top() + egui::vec2(24.0, 24.0),
             egui::Align2::LEFT_TOP,
-            if nav.atlas {
+            if nav.galactic && galactic.system.is_none() {
+                "GALAXY / GENERATED STARS"
+            } else if nav.galactic {
+                "GENERATED SYSTEM / NO TASKS"
+            } else if nav.atlas {
                 "INTERSTELLAR ATLAS / LIGHT YEARS"
             } else if nav.view == View::Table {
                 "TASK TABLE / TRUE SIZES · ORBITS CONTINUE"

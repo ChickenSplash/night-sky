@@ -166,6 +166,8 @@ struct State<'a> {
     pages: Vec<u32>,
     view: View,
     atlas: bool,
+    galactic: bool,
+    generated_star: Option<&'a str>,
     task: Option<&'a str>,
     following: bool,
     paused: bool,
@@ -186,27 +188,40 @@ struct Picked<'a> {
 
 fn publish_state(
     universe: Res<Universe>,
+    galactic: Res<crate::galaxy_nav::Galactic>,
     nav: Res<Navigation>,
     clock: Res<Clock>,
     mut last: Local<String>,
 ) {
-    let system = universe.0.systems.get(nav.system);
+    let system = if nav.galactic {
+        galactic.system.as_ref()
+    } else {
+        universe.0.systems.get(nav.system)
+    };
     let planet = system.and_then(|s| nav.selected.and_then(|i| s.planets.get(i)));
-    let picked = nav.picked.and_then(|(index, page)| {
-        let star = universe.0.systems.get(index)?;
-        Some(Picked {
-            name: &star.name,
-            page,
-            pages: star.pages().len(),
-        })
-    });
+    let picked = (!nav.galactic)
+        .then_some(nav.picked)
+        .flatten()
+        .and_then(|(index, page)| {
+            let star = universe.0.systems.get(index)?;
+            Some(Picked {
+                name: &star.name,
+                page,
+                pages: star.pages().len(),
+            })
+        });
     let state = State {
         picked,
-        list: system.map(|s| s.id.as_str()),
+        list: (!nav.galactic)
+            .then(|| universe.0.systems.get(nav.system))
+            .flatten()
+            .map(|s| s.id.as_str()),
         page: nav.page,
         pages: system.map(|s| s.pages()).unwrap_or_default(),
         view: nav.view,
         atlas: nav.atlas,
+        galactic: nav.galactic,
+        generated_star: galactic.picked.as_ref().map(|star| star.id.as_str()),
         task: planet.and_then(|p| Some(p.task.as_ref()?.id.as_str())),
         following: nav.following,
         paused: clock.0.paused,

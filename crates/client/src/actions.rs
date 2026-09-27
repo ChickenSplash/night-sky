@@ -9,6 +9,11 @@ use serde::Deserialize;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiCommand {
     Atlas,
+    GalaxyView,
+    PickGalactic,
+    EnterGalactic,
+    LeaveGalactic,
+    ReturnToLists,
     /// Open a list's constellation from any view.
     Jump {
         list: String,
@@ -72,18 +77,43 @@ pub enum Display {
 #[derive(Resource, Default)]
 pub struct PanelInsets(pub Option<[f32; 4]>);
 
+#[allow(clippy::too_many_arguments)]
 pub fn apply(
     mut commands: MessageReader<UiCommand>,
     universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     mut insets: ResMut<PanelInsets>,
+    mut galactic: ResMut<crate::galaxy_nav::Galactic>,
+    field: Res<crate::stream::Starfield>,
+    rig: Res<crate::scene::CameraRig>,
+    pose: Res<crate::scene::CameraPose>,
 ) {
     let galaxy = &universe.0;
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
     for command in commands.read() {
         match command {
             UiCommand::Atlas => nav.show_atlas(galaxy),
+            UiCommand::GalaxyView => {
+                crate::galaxy_nav::overview(&mut nav, &mut galactic, rig.galactic_ly(&pose))
+            }
+            UiCommand::PickGalactic => {
+                if nav.galactic && galactic.system.is_none() {
+                    galactic.picked =
+                        crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
+                }
+            }
+            UiCommand::EnterGalactic => {
+                if nav.galactic {
+                    crate::galaxy_nav::enter(&mut nav, &mut galactic);
+                }
+            }
+            UiCommand::LeaveGalactic => crate::galaxy_nav::exit(&mut nav, &mut galactic),
+            UiCommand::ReturnToLists => {
+                let system = nav.system;
+                nav.jump(system, galaxy);
+                galactic.system = None;
+            }
             UiCommand::Jump { list: id } => {
                 if let Some(index) = list(id) {
                     nav.select_list(index, galaxy);
@@ -97,22 +127,53 @@ pub fn apply(
                 }
             }
             UiCommand::Inspect { planet } => {
-                if let Some(index) = galaxy
-                    .systems
-                    .get(nav.system)
-                    .and_then(|s| s.planets.iter().position(|p| &p.id == planet))
+                let active = if nav.galactic {
+                    galactic.system.as_ref()
+                } else {
+                    galaxy.systems.get(nav.system)
+                };
+                if let Some(index) =
+                    active.and_then(|s| s.planets.iter().position(|p| &p.id == planet))
                 {
                     nav.selected = Some(index);
                 }
             }
-            UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
-            UiCommand::SetView { view } => nav.preset(*view, galaxy),
+            UiCommand::ShowPage { page } => {
+                if !nav.galactic {
+                    nav.show_page(*page, galaxy);
+                }
+            }
+            UiCommand::SetView { view } => {
+                if nav.galactic {
+                    if galactic.system.is_some() {
+                        nav.view = *view;
+                        nav.fly = true;
+                    }
+                } else {
+                    nav.preset(*view, galaxy);
+                }
+            }
             UiCommand::Pick { list: id, page } => {
                 if let Some(index) = list(id) {
                     nav.picked = Some((index, *page));
                 }
             }
             UiCommand::FrameSystem => {
+                if nav.galactic {
+                    if let Some(system) = &galactic.system {
+                        nav.view = View::Orbit;
+                        nav.target = bevy::math::DVec3::ZERO;
+                        nav.distance = system
+                            .planets
+                            .iter()
+                            .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
+                            .fold(3.0, f64::max)
+                            * 3.1
+                            * space_simulation::AU_METRES;
+                        nav.fly = true;
+                    }
+                    continue;
+                }
                 let (system, page) = nav.picked.unwrap_or((nav.system, nav.page));
                 if system != nav.system {
                     nav.jump(system, galaxy);
@@ -120,7 +181,22 @@ pub fn apply(
                 nav.page = page;
                 nav.jump(system, galaxy);
             }
-            UiCommand::Follow => nav.focus_selected(galaxy),
+            UiCommand::Follow => {
+                if nav.galactic {
+                    if let Some(planet) = galactic
+                        .system
+                        .as_ref()
+                        .and_then(|s| nav.selected.and_then(|i| s.planets.get(i)))
+                    {
+                        nav.view = View::Orbit;
+                        nav.following = true;
+                        nav.fly = true;
+                        nav.distance = planet.radius_km * 12_000.0;
+                    }
+                } else {
+                    nav.focus_selected(galaxy);
+                }
+            }
             UiCommand::SetPaused { paused } => clock.0.paused = *paused,
             UiCommand::SetRate { rate } => clock.0.rate = *rate,
             UiCommand::SetDisplay { option, on } => match option {
@@ -153,12 +229,33 @@ mod tests {
             .init_resource::<Navigation>()
             .init_resource::<Clock>()
             .init_resource::<PanelInsets>()
+            .init_resource::<crate::galaxy_nav::Galactic>()
+            .init_resource::<crate::stream::Starfield>()
+            .init_resource::<crate::scene::CameraRig>()
+            .init_resource::<crate::scene::CameraPose>()
             .add_systems(Update, apply);
         for command in commands {
             app.world_mut().write_message(command);
         }
         app.update();
         app
+    }
+
+    #[test]
+    fn galaxy_mode_remains_separate_from_list_view_controls() {
+        let mut app = run(space_simulation::demo_galaxy(), vec![UiCommand::GalaxyView]);
+        assert!(app.world().resource::<Navigation>().galactic);
+        app.world_mut()
+            .write_message(UiCommand::SetView { view: View::Orbit });
+        app.world_mut()
+            .write_message(UiCommand::ShowPage { page: 1 });
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert!(nav.galactic);
+        assert_eq!(nav.page, 0);
+        app.world_mut().write_message(UiCommand::ReturnToLists);
+        app.update();
+        assert!(!app.world().resource::<Navigation>().galactic);
     }
 
     #[test]

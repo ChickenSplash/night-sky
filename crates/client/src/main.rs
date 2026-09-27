@@ -3,6 +3,7 @@ mod actions;
 mod diagnostics;
 mod diffuse;
 mod flight;
+mod galaxy_nav;
 mod network;
 mod render;
 mod scene;
@@ -40,6 +41,8 @@ pub struct Navigation {
     pub picked: Option<(usize, u32)>,
     pub following: bool,
     pub atlas: bool,
+    /// Galaxy overview or a generated star system, independent of list pages.
+    pub galactic: bool,
     pub target: DVec3,
     pub distance: f64,
     pub yaw: f32,
@@ -72,6 +75,7 @@ impl Default for Navigation {
             picked: None,
             following: false,
             atlas: false,
+            galactic: false,
             target: DVec3::ZERO,
             distance: 20.0 * AU_METRES,
             yaw: 0.3,
@@ -97,12 +101,14 @@ impl Navigation {
             return;
         };
         self.jump(system, galaxy);
+        self.galactic = false;
         self.page = first_page;
         self.preset(views::View::Constellation, galaxy);
         self.picked = Some((system, first_page));
     }
 
     pub fn show_atlas(&mut self, galaxy: &Galaxy) {
+        self.galactic = false;
         self.fly = true;
         self.view = views::View::Orbit;
         self.yaw = 0.3;
@@ -138,6 +144,7 @@ impl Navigation {
         self.yaw = 0.3;
         self.pitch = 0.85;
         self.system = system;
+        self.galactic = false;
         self.selected = None;
         self.picked = None;
         self.following = false;
@@ -213,6 +220,7 @@ fn main() {
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
     .init_resource::<Navigation>()
+    .init_resource::<galaxy_nav::Galactic>()
     .init_resource::<actions::PanelInsets>()
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
@@ -286,8 +294,10 @@ fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: Re
                     } else if system.on_page(nav.page).next().is_none() {
                         nav.page = system.first_page();
                     }
-                } else {
+                } else if !nav.galactic {
                     nav.jump(0, &galaxy);
+                } else {
+                    nav.system = 0;
                 }
                 universe.0 = galaxy;
             }
