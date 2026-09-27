@@ -198,8 +198,11 @@ is available it retains its last data, initially the clearly labelled demo.
   none are stored. An octree hands exactly 200 billion stars down from the root
   in seeded draws, and each brightness tier lives in cells of its own size:
   bright stars in large cells that can be loaded from far away, faint ones in
-  small cells nearby. Any cell gives the same stars every time. They are not
-  streamed or drawn yet.
+  small cells nearby. Any cell gives the same stars every time.
+- The client streams the cells around the camera down to naked-eye magnitude
+  (about a million stars near home, most visible first) on a worker thread
+  natively and in a 4 ms slice of each frame in the browser, and drops cells
+  left behind. The stars are not drawn yet.
 
 ## Project structure
 
@@ -242,7 +245,7 @@ star close-up in both exposures. Each capture waits for camera flights to finish
 screenshots under `data/`
 and exits automatically. Unit tests cover physical orbit invariants, clock
 continuity, the galaxy's star count, profile and regional star mix, cell counts
-and repeatable cell stars, persistent orbital-slot allocation, table layout and camera flights.
+and repeatable cell stars, streaming in any slices, persistent orbital-slot allocation, table layout and camera flights.
 Set `SPACE_SMOKE_TASKS=1400` to exercise a 140-page constellation instead of
 the default 50-task fixture.
 

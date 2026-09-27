@@ -3,6 +3,7 @@ pub mod galaxy;
 pub mod light;
 pub mod population;
 mod star;
+pub mod stream;
 mod system;
 
 use space_shared::Orbit;

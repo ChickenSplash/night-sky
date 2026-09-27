@@ -15,6 +15,7 @@
 
 use crate::galaxy::{Component, GalaxyModel};
 use crate::population::{TIERS, tiered_formation};
+use crate::stream::StarPoint;
 use crate::system::{Body, Rng, system_around};
 use space_shared::Star;
 use std::collections::HashMap;
@@ -323,6 +324,10 @@ pub struct Sky {
     counts: HashMap<Cell, Box<Counts>>,
     /// Stars of a component in each child of a cell, by octant.
     masses: HashMap<(Cell, Component), [f64; 8]>,
+    /// Children integrated so far, for masses not yet complete.
+    partial: HashMap<(Cell, Component), Vec<f64>>,
+    /// Rejection bound of a component's density in the cells stars end in.
+    bounds: HashMap<(Cell, Component), f64>,
 }
 
 impl Sky {
@@ -331,6 +336,8 @@ impl Sky {
             model,
             counts: HashMap::new(),
             masses: HashMap::new(),
+            partial: HashMap::new(),
+            bounds: HashMap::new(),
         }
     }
 
@@ -360,16 +367,34 @@ impl Sky {
 
     /// Mean stars of a component in each child of a cell, by octant.
     pub fn child_masses(&mut self, cell: Cell, component: Component) -> [f64; 8] {
-        if let Some(masses) = self.masses.get(&(cell, component)) {
-            return *masses;
+        loop {
+            if let Some(masses) = self.masses.get(&(cell, component)) {
+                return *masses;
+            }
+            self.integrate(cell, component);
         }
+    }
+
+    /// Integrates one more child of a cell for `child_masses`: the most work
+    /// done in one go while loading.
+    pub(crate) fn integrate(&mut self, cell: Cell, component: Component) {
+        if self.masses.contains_key(&(cell, component)) {
+            return;
+        }
+        let octant = self.partial.get(&(cell, component)).map_or(0, Vec::len);
         let half = cell.size_pc() / 2.0;
-        let min = cell.min_pc();
-        let masses = std::array::from_fn(|octant| {
-            stars_in_box(&self.model, component, corner(min, half, octant), half)
-        });
-        self.masses.insert((cell, component), masses);
-        masses
+        let stars = stars_in_box(
+            &self.model,
+            component,
+            corner(cell.min_pc(), half, octant),
+            half,
+        );
+        let partial = self.partial.entry((cell, component)).or_default();
+        partial.push(stars);
+        if let Ok(masses) = <[f64; 8]>::try_from(partial.as_slice()) {
+            self.partial.remove(&(cell, component));
+            self.masses.insert((cell, component), masses);
+        }
     }
 
     /// Mean stars of a component in a cell, integrated from the model.
@@ -416,6 +441,31 @@ impl Sky {
         children[cell.octant()]
     }
 
+    /// Masses `counts` still needs for a cell, if any, working out the counts
+    /// on the way down that need nothing more.
+    pub(crate) fn counts_need(&mut self, cell: Cell) -> Option<(Cell, Component)> {
+        let mut path = Vec::new();
+        let mut next = Some(cell);
+        while let Some(cell) = next.filter(|c| !self.counts.contains_key(c)) {
+            path.push(cell);
+            next = cell.parent();
+        }
+        for cell in path.into_iter().rev() {
+            if let Some(parent) = cell.parent() {
+                let above = self.counts(parent);
+                let missing = Component::ALL.into_iter().find(|c| {
+                    above[c.index()][cell.level()..].iter().any(|&n| n > 0)
+                        && !self.masses.contains_key(&(parent, *c))
+                });
+                if let Some(component) = missing {
+                    return Some((parent, component));
+                }
+            }
+            self.counts(cell);
+        }
+        None
+    }
+
     /// Stars in each tier within a cell, of every component.
     pub fn tier_counts(&mut self, cell: Cell) -> [u64; TIERS] {
         let counts = self.counts(cell);
@@ -458,15 +508,67 @@ impl Sky {
         }
     }
 
+    /// One cell star, as `build` makes it, without its names.
+    pub(crate) fn point(&mut self, cell: Cell, component: Component, index: u64) -> StarPoint {
+        let star = self.build(cell, component, index);
+        StarPoint {
+            position_pc: star.position_pc,
+            luminosity_solar: star.star.luminosity_solar as f32,
+            temperature_k: star.star.temperature_k as f32,
+            radius_solar: star.star.radius_solar as f32,
+            component,
+            index: index as u32,
+        }
+    }
+
     /// Where a star lies in its cell: down through the children in proportion
     /// to their stars, then by rejection once the density is smooth.
     fn place(&mut self, id: &str, cell: Cell, component: Component) -> [f64; 3] {
+        loop {
+            let mut rng = Rng::new(&format!("{id}:place"));
+            match self.descend(&mut rng, cell, component) {
+                Ok(cell) => {
+                    let model = &self.model;
+                    let bound = *self
+                        .bounds
+                        .entry((cell, component))
+                        .or_insert_with(|| bound(model, component, cell));
+                    return within(model, component, cell, bound, &mut rng);
+                }
+                Err((cell, component)) => {
+                    self.child_masses(cell, component);
+                }
+            }
+        }
+    }
+
+    /// Masses placing a cell star still needs, if any.
+    pub(crate) fn place_need(
+        &self,
+        cell: Cell,
+        component: Component,
+        index: u64,
+    ) -> Option<(Cell, Component)> {
+        let id = cell_star_id(cell, component, index);
         let mut rng = Rng::new(&format!("{id}:place"));
+        self.descend(&mut rng, cell, component).err()
+    }
+
+    /// The cell a star's descent ends in, or the masses it needs first.
+    fn descend(
+        &self,
+        rng: &mut Rng,
+        cell: Cell,
+        component: Component,
+    ) -> Result<Cell, (Cell, Component)> {
         let mut cell = cell;
         while cell.level() < DEEPEST
             && cell.size_pc() > resolution(&self.model, component, cell.min_pc(), cell.size_pc())
         {
-            let weights = self.child_masses(cell, component);
+            let weights = self
+                .masses
+                .get(&(cell, component))
+                .ok_or((cell, component))?;
             let total: f64 = weights.iter().sum();
             if total <= 0.0 {
                 break;
@@ -481,7 +583,7 @@ impl Sky {
                 .unwrap_or(7);
             cell = cell.child(octant);
         }
-        within(&self.model, component, cell, &mut rng)
+        Ok(cell)
     }
 
     /// Drops cached cells, keeping those asked for. Nothing is lost: dropped
@@ -489,10 +591,12 @@ impl Sky {
     pub fn retain(&mut self, keep: impl Fn(Cell) -> bool) {
         self.counts.retain(|&cell, _| keep(cell));
         self.masses.retain(|&(cell, _), _| keep(cell));
+        self.partial.retain(|&(cell, _), _| keep(cell));
+        self.bounds.retain(|&(cell, _), _| keep(cell));
     }
 
     pub fn cached(&self) -> usize {
-        self.counts.len() + self.masses.len()
+        self.counts.len() + self.masses.len() + self.partial.len() + self.bounds.len()
     }
 }
 
@@ -502,23 +606,44 @@ impl Default for Sky {
     }
 }
 
-/// A point in a cell with the component's density there, by rejection against
-/// the largest density at its corners and centre.
-fn within(model: &GalaxyModel, component: Component, cell: Cell, rng: &mut Rng) -> [f64; 3] {
-    let (min, size) = (cell.min_pc(), cell.size_pc());
-    let disc = model.disc(component);
-    let density = |p: [f64; 3]| match disc {
+/// Density a star is placed by: face-on for discs, whose heights are drawn
+/// exactly.
+fn placement_density(model: &GalaxyModel, component: Component, p: [f64; 3]) -> f64 {
+    match model.disc(component) {
         Some(_) => model.disc_surface(component, p[0], p[2]),
         None => model.component_density(component, p),
-    };
-    let bound = (0..27)
+    }
+}
+
+/// Rejection bound in a cell: the largest density at its corners, edges and
+/// centre, with a margin.
+fn bound(model: &GalaxyModel, component: Component, cell: Cell) -> f64 {
+    let (min, size) = (cell.min_pc(), cell.size_pc());
+    (0..27)
         .map(|i| {
-            density(std::array::from_fn(|axis| {
-                min[axis] + size * ((i / 3usize.pow(axis as u32)) % 3) as f64 / 2.0
-            }))
+            placement_density(
+                model,
+                component,
+                std::array::from_fn(|axis| {
+                    min[axis] + size * ((i / 3usize.pow(axis as u32)) % 3) as f64 / 2.0
+                }),
+            )
         })
         .fold(0.0, f64::max)
-        * 1.5;
+        * 1.5
+}
+
+/// A point in a cell with the component's density there, by rejection.
+fn within(
+    model: &GalaxyModel,
+    component: Component,
+    cell: Cell,
+    bound: f64,
+    rng: &mut Rng,
+) -> [f64; 3] {
+    let (min, size) = (cell.min_pc(), cell.size_pc());
+    let disc = model.disc(component);
+    let density = |p: [f64; 3]| placement_density(model, component, p);
     let mut p = cell.centre_pc();
     for _ in 0..256 {
         p = std::array::from_fn(|axis| min[axis] + size * rng.unit());

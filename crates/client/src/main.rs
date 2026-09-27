@@ -7,6 +7,7 @@ mod render;
 mod scene;
 #[cfg(not(target_arch = "wasm32"))]
 mod smoke;
+mod stream;
 mod ui;
 mod views;
 #[cfg(target_arch = "wasm32")]
@@ -196,6 +197,7 @@ fn main() {
         BigSpaceDefaultPlugins,
         EguiPlugin::default(),
         render::RenderPlugin,
+        stream::StreamPlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {

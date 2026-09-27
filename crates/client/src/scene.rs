@@ -58,6 +58,12 @@ impl CameraRig {
         self.flight.is_some()
     }
 
+    /// The displayed camera in galactic axes, in light years from the lists'
+    /// shared origin.
+    pub fn galactic_ly(&self, pose: &CameraPose) -> DVec3 {
+        self.frame_ly + pose.eye / LY_METRES
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn progress(&self) -> Option<f64> {
         self.flight.as_ref().map(Flight::progress)

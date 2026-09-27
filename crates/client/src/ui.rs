@@ -24,14 +24,20 @@ pub fn draw_ui(
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
     overlay: (Res<Markers>, Res<PanelInsets>, Res<Lights>),
-    camera_state: (Res<CameraRig>, Res<CameraPose>),
+    camera_state: (
+        Res<CameraRig>,
+        Res<CameraPose>,
+        Res<crate::stream::Starfield>,
+    ),
     mut styled: Local<bool>,
 ) {
     let (mut commands, mut contexts, mut writer) = interaction;
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
     let (markers, insets, lights) = overlay;
-    let (rig, pose) = camera_state;
+    let (rig, pose, starfield) = camera_state;
+    #[cfg(target_arch = "wasm32")]
+    let _ = &starfield;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -71,7 +77,14 @@ pub fn draw_ui(
         rect = ctx.available_rect();
         #[cfg(not(target_arch = "wasm32"))]
         if report {
-            nav.notice = save_bug_report(&mut commands, &universe.0, &nav, &clock.0, &rig, &pose);
+            nav.notice = save_bug_report(
+                &mut commands,
+                &universe.0,
+                &nav,
+                &clock.0,
+                (&rig, &pose),
+                &starfield,
+            );
         }
         #[cfg(target_arch = "wasm32")]
         let _ = report;
@@ -568,15 +581,15 @@ fn save_bug_report(
     galaxy: &Galaxy,
     nav: &Navigation,
     clock: &SimulationClock,
-    rig: &CameraRig,
-    pose: &CameraPose,
+    (rig, pose): (&CameraRig, &CameraPose),
+    starfield: &crate::stream::Starfield,
 ) -> String {
     let id = galaxy
         .systems
         .get(nav.system)
         .map_or("none", |s| s.id.as_str());
     let state = format!(
-        "List ID: {}\nPage: {}\nView: {:?}\nAtlas: {}\nFollowing: {}\nSelected task index: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\n",
+        "List ID: {}\nPage: {}\nView: {:?}\nAtlas: {}\nFollowing: {}\nSelected task index: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
         id,
         nav.page,
         nav.view,
@@ -598,6 +611,7 @@ fn save_bug_report(
         pose.eye,
         pose.distance,
         rig.progress(),
+        starfield.summary(),
     );
     match crate::diagnostics::save_bug_report(&state) {
         Ok(path) => {

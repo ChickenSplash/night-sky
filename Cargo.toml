@@ -31,3 +31,7 @@ debug = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Galaxy generation runs in the client and in tests; unoptimised, it is slow.
+[profile.dev.package.space-simulation]
+opt-level = 3

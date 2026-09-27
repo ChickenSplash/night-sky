@@ -129,6 +129,19 @@
 - A cell star's ID is `g{cell hex}.{component}.{index}`. `cell_star(id)` and
   `cell_planetary_system(id)` rebuild it from the ID alone; its position needs
   `Sky::star(id)`.
+- `space_simulation::stream`: `wanted(camera, magnitude)` lists, per tier, the
+  level-t cells within `reach_pc`, most visible first. `Loader` builds them one
+  unit at a time (one child box integrated, via `Sky::integrate`, or one star)
+  and stops when the caller's `more()` says so, so no step blocks for long.
+  `counts_need`/`place_need` report the masses a step still needs; they share
+  `Sky::descend` with `place`, so sliced loading gives the same stars. Loaded
+  cells drop beyond `KEEP` × reach. Stars stream as compact `StarPoint`s.
+- `crates/client/src/stream.rs` aims the loader at the camera
+  (`CameraRig::galactic_ly`, lists anchored at home) to `MAGNITUDE` 6.5: a
+  worker thread natively, a 4 ms slice per frame in the browser, into the
+  `Starfield` resource. About 1.06 million stars in 175 cells near home: 2.3 s
+  native, about 8 to 14 s in the browser. `space-simulation` builds at
+  opt-level 3 in dev, or loading and tests crawl.
 
 ## Realistic rendering
 
@@ -171,7 +184,7 @@
 ## Current limitations
 
 - No N-body simulation, moons, workspace discovery or OAuth.
-- Galaxy cells are not yet streamed or drawn, and the galaxy has no rotation.
+- Galaxy stars are streamed but not yet drawn, and the galaxy has no rotation.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.
