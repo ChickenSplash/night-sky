@@ -202,7 +202,11 @@ is available it retains its last data, initially the clearly labelled demo.
 - The client streams the cells around the camera down to naked-eye magnitude
   (about a million stars near home, most visible first) on a worker thread
   natively and in a 4 ms slice of each frame in the browser, and drops cells
-  left behind. The stars are not drawn yet.
+  left behind. Batched point meshes show stars actually bright enough to see,
+  in both the wireframe and realistic views. A faint approximate glow traces
+  unresolved disc and spiral-arm light; the central black hole is modelled at
+  its physical horizon radius. There is no galactic navigation, dust or
+  gravitational lensing yet.
 
 ## Project structure
 

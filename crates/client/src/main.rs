@@ -1,12 +1,14 @@
 mod actions;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
+mod diffuse;
 mod flight;
 mod network;
 mod render;
 mod scene;
 #[cfg(not(target_arch = "wasm32"))]
 mod smoke;
+mod starfield;
 mod stream;
 mod ui;
 mod views;
@@ -198,6 +200,8 @@ fn main() {
         EguiPlugin::default(),
         render::RenderPlugin,
         stream::StreamPlugin,
+        starfield::StarfieldRenderPlugin,
+        diffuse::DiffusePlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {

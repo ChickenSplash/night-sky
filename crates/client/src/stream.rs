@@ -1,5 +1,5 @@
 //! Streams the galaxy's stars around the camera: on a worker thread natively,
-//! in a slice of each frame in the browser. Nothing draws them yet.
+//! in a slice of each frame in the browser.
 
 use crate::scene::{CameraPose, CameraRig};
 use bevy::{
@@ -13,7 +13,7 @@ use space_simulation::{
     galaxy::{GalaxyModel, PC_METRES},
     stream::{Event, Loader, StarCell},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// Faintest apparent magnitude loaded: the naked-eye limit.
 pub const MAGNITUDE: f64 = 6.5;
@@ -25,6 +25,10 @@ const AIM_PC: f64 = 0.01;
 #[derive(Resource, Default)]
 pub struct Starfield {
     pub cells: HashMap<Cell, StarCell>,
+    /// Newly loaded cells awaiting upload to the point-cloud renderer.
+    pub added: VecDeque<Cell>,
+    /// Cells whose GPU batches should be removed.
+    pub removed: VecDeque<Cell>,
     pub stars: usize,
     /// Cells wanted and not loaded yet.
     pub pending: usize,
@@ -40,12 +44,14 @@ impl Starfield {
             match event {
                 Event::Loaded(cell) => {
                     self.stars += cell.stars.len();
+                    self.added.push_back(cell.cell);
                     if let Some(old) = self.cells.insert(cell.cell, cell) {
                         warn!("Galaxy cell {:x} loaded twice", old.cell.0);
                         self.stars -= old.stars.len();
                     }
                 }
                 Event::Dropped(cell) => {
+                    self.removed.push_back(cell);
                     if let Some(old) = self.cells.remove(&cell) {
                         self.stars -= old.stars.len();
                     }

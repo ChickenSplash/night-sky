@@ -142,19 +142,35 @@
   `Starfield` resource. About 1.06 million stars in 175 cells near home: 2.3 s
   native, about 8 to 14 s in the browser. `space-simulation` builds at
   opt-level 3 in dev, or loading and tests crawl.
+- `starfield.rs` draws one oversized triangle per visible star in mesh batches
+  of at most 4,096 source stars (never an entity per star). Star positions are
+  local to the owning cell; per-frame transforms subtract the camera in f64,
+  then scale to render units. Filter points beyond 1.25 times their apparent
+  magnitude reach before upload; the shader applies the exact cutoff. Rebuild
+  retained cells after the camera travels 0.2 of the tier's reach. New entities
+  start hidden for one frame, avoiding Bevy's material specialization race.
+  Galactic points use apparent flux; `sky_dimming` also stops their display
+  brightness down with the close-star physical exposure (as it does the glow).
+- `diffuse.rs` adds an approximate, faint ray-integrated disc and spiral-arm
+  glow behind the points, with no dust or extinction. The central black hole
+  is an opaque sphere at its physical Schwarzschild radius; it is not visible
+  from home. No accretion disc or lensing yet.
 
 ## Realistic rendering
 
-- Optional (`Navigation::realistic`); the wireframe look is the default and must
-  stay unchanged when it is off. Photometry lives in `space_simulation::light`;
+- Optional (`Navigation::realistic`); the wireframe bodies are the default and
+  must stay unchanged when it is off (galactic stars appear in both modes).
+  Photometry lives in `space_simulation::light`;
   exposure, the pools and the HDR camera in `crates/client/src/render.rs`,
   with the shaders in `body.wgsl` and `point.wgsl`.
 - Bodies are plain spheres under the wireframes. `scene::draw` gathers `Lights`
   while drawing gizmos; `render::sync_bodies`/`sync_points` place pooled mesh
   entities in the camera's cell and write `GlobalTransform` directly, because
   they run after propagation.
-- Colours reach the GPU pre-exposed on the CPU. Never send raw radiance: star
-  surfaces reach 1e10 W m⁻² sr⁻¹ and HDR targets are half-float.
+- Body colours reach the GPU pre-exposed on the CPU. Never send raw radiance:
+  star surfaces reach 1e10 W m⁻² sr⁻¹ and HDR targets are half-float. The
+  galactic point shader instead computes bounded display light from luminosity
+  and camera distance.
 - Star colours are blackbody spectra white-balanced to the Sun. True colours make
   red dwarfs orange; assisted exposure saturates them (`light::saturate`) so they
   read red. Brightness is visual, not bolometric.
@@ -184,7 +200,9 @@
 ## Current limitations
 
 - No N-body simulation, moons, workspace discovery or OAuth.
-- Galaxy stars are streamed but not yet drawn, and the galaxy has no rotation.
+- Galaxy stars are drawn, but galactic flight/navigation, dust, lensing and
+  rotation are not yet implemented. The glow is approximate, not a radiative
+  transfer simulation.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.

@@ -271,6 +271,24 @@ impl Exposure {
     }
 }
 
+/// The galaxy shares the physical camera's stop-down near a star disc. The
+/// point and diffuse shaders use display-relative units, but must not remain
+/// bright while the local star drives the physical exposure down.
+pub fn sky_dimming(nav: &Navigation, lights: &Lights) -> f32 {
+    if !nav.realistic || !nav.physical {
+        return 1.0;
+    }
+    let Some(key) = lights.subject_key else {
+        return 1.0;
+    };
+    let normal = Exposure {
+        key,
+        target: KEY,
+        physical: true,
+    };
+    (key / normal.adapt(&lights.stars).key).clamp(0.0, 1.0) as f32
+}
+
 fn disc_area(pixels: f32) -> f64 {
     std::f64::consts::PI * f64::from(pixels).powi(2)
 }
@@ -1005,6 +1023,13 @@ mod tests {
         let ratio = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
         assert!((ratio(&close) / ratio(&far) - 1.0).abs() < 1e-3);
         assert!(brightness(&close.bodies[1]) < brightness(&far.bodies[1]) * 1e-3);
+        let mut nav = Navigation {
+            realistic: true,
+            ..default()
+        };
+        assert!(sky_dimming(&nav, &near) < 1e-3);
+        nav.physical = false;
+        assert_eq!(sky_dimming(&nav, &near), 1.0);
         // A dim disc is never brightened.
         near.stars[0].radiance = 1e-9;
         let dim = resolve(&near, &photometry, true);
