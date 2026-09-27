@@ -86,6 +86,15 @@ impl TableLayout {
 }
 
 impl Navigation {
+    /// Constellation pages are selections within one shared camera frame.
+    pub fn frame_page(&self, system: &StarSystem) -> u32 {
+        if self.view == View::Constellation {
+            system.first_page()
+        } else {
+            self.page
+        }
+    }
+
     pub fn focus_selected(&mut self, galaxy: &Galaxy) {
         let Some(planet) = galaxy
             .systems
@@ -106,14 +115,23 @@ impl Navigation {
     }
 
     pub fn show_page(&mut self, page: u32, galaxy: &Galaxy) {
+        if !galaxy
+            .systems
+            .get(self.system)
+            .is_some_and(|system| system.pages().contains(&page))
+        {
+            return;
+        }
+        if self.view == View::Constellation {
+            self.page = page;
+            self.picked = Some((self.system, page));
+            self.selected = None;
+            return;
+        }
         let view = self.view;
         self.page = page;
         self.jump(self.system, galaxy);
-        self.view = if view == View::Constellation {
-            View::Table
-        } else {
-            view
-        };
+        self.view = view;
     }
 
     pub fn select_task(&mut self, system: usize, task: usize, galaxy: &Galaxy) {
@@ -128,6 +146,7 @@ impl Navigation {
         } else {
             view
         };
+        self.picked = None;
         self.selected = Some(task);
     }
 
@@ -139,6 +158,9 @@ impl Navigation {
             self.following = false;
             self.fly = true;
             self.view = view;
+            if view != View::Constellation {
+                self.picked = None;
+            }
         }
     }
 
@@ -154,10 +176,11 @@ impl Navigation {
                 )
             }
             View::Constellation => {
-                // Stars stay where they are: frame all page stars from the current
-                // camera angle. Bounds are in the shown page's plane, like Orbit.
-                let into_page = crate::scene::page_frame(system, self.page).inverse();
-                let here = crate::scene::page_offset(system, self.page);
+                // One fixed frame for the entire list. Changing which star is
+                // selected must not re-centre or rotate the constellation.
+                let frame_page = self.frame_page(system);
+                let into_page = crate::scene::page_frame(system, frame_page).inverse();
+                let here = crate::scene::page_offset(system, frame_page);
                 let stars: Vec<_> = system
                     .pages()
                     .iter()
@@ -194,6 +217,31 @@ impl Navigation {
 mod tests {
     use super::*;
     use space_simulation::{page_capacity, page_of_slot};
+
+    #[test]
+    fn constellation_pages_share_one_frame_without_reframing() {
+        let galaxy = space_simulation::demo_galaxy();
+        let system = &galaxy.systems[0];
+        let pages = system.pages();
+        assert!(pages.len() > 2);
+        let mut nav = Navigation::default();
+        nav.select_list(0, &galaxy);
+        nav.fit_preset(system);
+        let (target, distance, frame) = (nav.target, nav.distance, nav.frame_page(system));
+        nav.yaw = 0.7;
+        nav.pitch = 0.4;
+        nav.fly = false;
+        for &page in pages.iter().skip(1).take(2) {
+            nav.show_page(page, &galaxy);
+            nav.fit_preset(system);
+            assert_eq!(nav.view, View::Constellation);
+            assert_eq!(nav.picked, Some((0, page)));
+            assert_eq!(nav.frame_page(system), frame);
+            assert_eq!((nav.target, nav.distance), (target, distance));
+            assert_eq!((nav.yaw, nav.pitch), (0.7, 0.4));
+            assert!(!nav.fly);
+        }
+    }
 
     fn large_galaxy() -> Galaxy {
         let mut galaxy = space_simulation::demo_galaxy();

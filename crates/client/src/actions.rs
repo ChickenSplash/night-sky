@@ -9,7 +9,7 @@ use serde::Deserialize;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiCommand {
     Atlas,
-    /// Fly to a list's first page.
+    /// Open a list's constellation from any view.
     Jump {
         list: String,
     },
@@ -82,7 +82,7 @@ pub fn apply(
             UiCommand::Atlas => nav.show_atlas(galaxy),
             UiCommand::Jump { list: id } => {
                 if let Some(index) = list(id) {
-                    nav.jump(index, galaxy);
+                    nav.select_list(index, galaxy);
                 }
             }
             UiCommand::FindTask { list: id, task } => {
@@ -204,6 +204,66 @@ mod tests {
         let nav = app.world().resource::<Navigation>();
         assert_eq!(nav.system, 0);
         assert_eq!(nav.selected, None);
+    }
+
+    #[test]
+    fn list_selection_always_opens_constellation() {
+        let galaxy = space_simulation::demo_galaxy();
+        let list = galaxy.systems[1].id.clone();
+        for start in [
+            UiCommand::Atlas,
+            UiCommand::SetView {
+                view: View::Constellation,
+            },
+            UiCommand::SetView { view: View::Table },
+            UiCommand::SetView { view: View::Orbit },
+        ] {
+            let app = run(
+                galaxy.clone(),
+                vec![start, UiCommand::Jump { list: list.clone() }],
+            );
+            let nav = app.world().resource::<Navigation>();
+            assert_eq!(nav.system, 1);
+            assert_eq!(nav.page, galaxy.systems[1].first_page());
+            assert_eq!(nav.view, View::Constellation);
+            assert_eq!(nav.picked, Some((1, galaxy.systems[1].first_page())));
+            assert!(!nav.atlas);
+            assert!(nav.fly);
+        }
+        let app = run(
+            galaxy.clone(),
+            vec![
+                UiCommand::ShowPage { page: 2 },
+                UiCommand::Jump {
+                    list: galaxy.systems[0].id.clone(),
+                },
+            ],
+        );
+        let nav = app.world().resource::<Navigation>();
+        assert_eq!(nav.page, galaxy.systems[0].first_page());
+        assert_eq!(nav.picked, Some((0, nav.page)));
+    }
+
+    #[test]
+    fn page_navigation_selects_constellation_stars_and_keeps_other_views() {
+        let galaxy = space_simulation::demo_galaxy();
+        for (start, expected) in [
+            (View::Constellation, View::Constellation),
+            (View::Table, View::Table),
+            (View::Orbit, View::Orbit),
+        ] {
+            let app = run(
+                galaxy.clone(),
+                vec![
+                    UiCommand::SetView { view: start },
+                    UiCommand::ShowPage { page: 1 },
+                ],
+            );
+            let nav = app.world().resource::<Navigation>();
+            assert_eq!(nav.page, 1);
+            assert_eq!(nav.view, expected);
+            assert_eq!(nav.picked, (start == View::Constellation).then_some((0, 1)));
+        }
     }
 
     #[test]

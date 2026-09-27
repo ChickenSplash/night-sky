@@ -31,8 +31,8 @@ pub struct Navigation {
     pub viewport: Option<bevy::camera::Viewport>,
     pub system: usize,
     pub selected: Option<usize>,
-    /// A star clicked on screen: its list index and page. Picking never moves
-    /// the camera; framing the system flies there.
+    /// Selected star, by click, list selection or page controls. Picking never
+    /// moves the camera; framing the system flies there.
     pub picked: Option<(usize, u32)>,
     pub following: bool,
     pub atlas: bool,
@@ -75,6 +75,17 @@ impl Default for Navigation {
 }
 
 impl Navigation {
+    /// A list opens as a constellation regardless of the previous view.
+    pub fn select_list(&mut self, system: usize, galaxy: &Galaxy) {
+        let Some(first_page) = galaxy.systems.get(system).map(StarSystem::first_page) else {
+            return;
+        };
+        self.jump(system, galaxy);
+        self.page = first_page;
+        self.preset(views::View::Constellation, galaxy);
+        self.picked = Some((system, first_page));
+    }
+
     pub fn show_atlas(&mut self, galaxy: &Galaxy) {
         self.fly = true;
         self.view = views::View::Orbit;

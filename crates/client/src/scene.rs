@@ -14,7 +14,8 @@ use space_simulation::{
 };
 use std::f64::consts::TAU;
 
-/// Beyond this camera range stars draw at their true separation and planets are hidden.
+/// Beyond this camera range stars draw at their true separation. Planet
+/// visibility also depends on the actual size of the current page's system.
 const WIDE_METRES: f64 = 0.02 * LY_METRES;
 
 #[derive(Component)]
@@ -28,7 +29,7 @@ pub struct CameraPose {
     pub distance: f64,
     /// 0 for orbital positions, 1 for the task table layout.
     pub layout: f64,
-    /// Page currently at the camera destination.
+    /// Page anchoring the camera (the list's first page in constellation view).
     pub page: u32,
 }
 
@@ -136,20 +137,24 @@ pub fn controls(
         .ctx_mut()
         .map(|ctx| (ctx.is_pointer_over_area(), ctx.wants_keyboard_input()))
         .unwrap_or_default();
-    // Flights are short; camera input resumes when they land.
+    // Flights are short; camera input resumes when they land. Constellations
+    // rotate around their auto-framed centre, but cannot zoom or translate.
     let free = nav.view == View::Orbit && !rig.flying();
-    if !pointer && free {
+    let rotating = matches!(nav.view, View::Orbit | View::Constellation) && !rig.flying();
+    if !pointer && rotating {
         if buttons.pressed(MouseButton::Right) {
             nav.yaw -= motion.delta.x * 0.005;
             nav.pitch = (nav.pitch + motion.delta.y * 0.005).clamp(-1.48, 1.48);
         }
-        let min = if nav.atlas {
-            0.1 * LY_METRES
-        } else {
-            20_000_000.0
-        };
-        nav.distance =
-            (nav.distance * (-f64::from(scroll) * 0.12).exp()).clamp(min, 200.0 * LY_METRES);
+        if free {
+            let min = if nav.atlas {
+                0.1 * LY_METRES
+            } else {
+                20_000_000.0
+            };
+            nav.distance =
+                (nav.distance * (-f64::from(scroll) * 0.12).exp()).clamp(min, 200.0 * LY_METRES);
+        }
     }
     if !keyboard {
         if keys.just_pressed(KeyCode::Space) {
@@ -220,12 +225,13 @@ pub fn place_camera(
             clock.0.seconds,
         ));
     }
-    // Navigation, including the constellation, works in the shown page's own plane,
-    // and the atlas in galactic axes. Changing frame flies the camera round.
+    // The constellation uses one page's frame for the whole list; page selection
+    // does not move the camera. Other views use the selected page's plane.
+    let frame_page = nav.frame_page(system);
     let frame_tilt = if nav.atlas {
         DQuat::IDENTITY
     } else {
-        page_frame(system, nav.page)
+        page_frame(system, frame_page)
     };
     let desired = Pose {
         target: if nav.atlas {
@@ -240,7 +246,7 @@ pub fn place_camera(
             * Quat::from_rotation_x(-nav.pitch),
         layout: f64::from(u8::from(nav.view == View::Table)),
     };
-    let frame = page_origin_ly(system, nav.page);
+    let frame = page_origin_ly(system, frame_page);
     let mut shown = rig.shown.unwrap_or(desired);
     let frame_shift_ly = (frame - rig.frame_ly).length();
     if rig.shown.is_some() && frame != rig.frame_ly {
@@ -305,7 +311,7 @@ pub fn place_camera(
         rig.flight = None;
     }
     rig.shown = Some(shown);
-    pose.page = nav.page;
+    pose.page = frame_page;
 
     let rotation = shown.rotation;
     pose.eye = shown.target + (rotation * Vec3::Z).as_dvec3() * shown.distance;
@@ -348,7 +354,9 @@ fn spin_basis(frame: DQuat, spin: &Spin, seconds: f64) -> DQuat {
     frame
         * DQuat::from_rotation_y(spin.azimuth_rad)
         * DQuat::from_rotation_x(spin.tilt_rad)
-        * DQuat::from_rotation_y(spin_angle(spin, seconds))
+        // Orbit positions progress from +X towards +Z; positive Y rotation
+        // turns +X towards -Z. Negate the spin to match orbital direction.
+        * DQuat::from_rotation_y(-spin_angle(spin, seconds))
 }
 
 /// Galactic offset of a page star from its list's anchor, in metres.
@@ -380,6 +388,16 @@ const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
 /// races across the screen, however far away its list is.
 fn visible_star_distance(real: f64, camera_range: f64) -> f64 {
     real.min(camera_range * 4.0)
+}
+
+/// Keep even unusually wide systems visible at their initial fitted range and
+/// while following an outer planet. Small systems retain the original cutoff.
+fn planet_visibility_range(system: &StarSystem, page: u32) -> f64 {
+    let outer_apoapsis = system
+        .on_page(page)
+        .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
+        .fold(0.0, f64::max);
+    WIDE_METRES.max(4.0 * outer_apoapsis * space_simulation::AU_METRES)
 }
 
 /// One frame's projection from f64 metres relative to the current star into render
@@ -490,7 +508,7 @@ impl Canvas<'_> {
     /// chart: each star links to its nearest neighbour in a minimum spanning tree.
     fn constellation(&self, gizmos: &mut Gizmos) {
         let system = self.system;
-        let here = page_offset(system, self.nav.page);
+        let here = page_offset(system, self.pose.page);
         let stars: Vec<_> = system
             .pages()
             .iter()
@@ -545,12 +563,12 @@ impl Canvas<'_> {
         let (nav, pose) = (self.nav, self.pose);
         let wide = pose.distance > WIDE_METRES;
         let table = pose.layout > 0.5;
-        let current = index == nav.system && page == nav.page;
+        let current = index == nav.system && page == pose.page;
         if nav.view == View::Table && !current && (!self.flying || index != nav.system) {
             return;
         }
         let offset =
-            (page_origin_ly(star, page) - page_origin_ly(self.system, nav.page)) * LY_METRES;
+            (page_origin_ly(star, page) - page_origin_ly(self.system, pose.page)) * LY_METRES;
         let relative = offset - pose.eye;
         // Both the position and the angular size transition continuously from
         // the close-up marker to the star's real interstellar position.
@@ -702,7 +720,8 @@ pub fn draw(
     canvas.stars(&mut gizmos, &universe.0, markers);
     // During a page-to-page flight the camera may still be near the departure
     // star. Do not draw the destination's AU-scale orbits from interstellar range.
-    if pose.distance <= WIDE_METRES && pose.eye.length() <= WIDE_METRES {
+    let planet_range = planet_visibility_range(system, pose.page);
+    if pose.distance <= planet_range && pose.eye.length() <= planet_range {
         canvas.planets(&mut gizmos, clock.0.seconds, markers);
     }
 }
@@ -711,6 +730,46 @@ pub fn draw(
 mod tests {
     use super::*;
     use space_simulation::AU_METRES;
+
+    #[test]
+    fn synchronous_spin_keeps_one_face_towards_star() {
+        let orbit = Orbit {
+            semi_major_au: 0.1,
+            eccentricity: 0.0,
+            inclination_rad: 0.0,
+            ascending_node_rad: 0.0,
+            phase_rad: 0.0,
+        };
+        let period = space_simulation::period_seconds(&orbit, 1.0);
+        let spin = Spin {
+            period_hours: period / 3_600.0,
+            tilt_rad: 0.0,
+            azimuth_rad: 0.0,
+            phase_rad: 0.0,
+            locked: true,
+        };
+        let facing = -DVec3::X;
+        for fraction in [0.0, 0.125, 0.25, 0.5, 0.75] {
+            let seconds = fraction * period;
+            let towards_star = -DVec3::from_array(position(&orbit, 1.0, seconds)).normalize();
+            let surface = spin_basis(DQuat::IDENTITY, &spin, seconds) * facing;
+            assert!(surface.dot(towards_star) > 1.0 - 1e-12);
+        }
+    }
+
+    #[test]
+    fn wide_orbits_remain_visible_at_their_fitted_camera_range() {
+        let mut system = space_simulation::demo_galaxy().systems.remove(0);
+        let page = system.first_page();
+        let normal = planet_visibility_range(&system, page);
+        system.tasks[0].orbit.semi_major_au = 5_183.534;
+        system.tasks[0].orbit.eccentricity = 0.057;
+        let apoapsis = 5_183.534 * 1.057 * AU_METRES;
+        let wide = planet_visibility_range(&system, page);
+        assert!(wide > 0.02 * LY_METRES);
+        assert!(wide >= 3.1 * apoapsis);
+        assert!(wide > normal);
+    }
 
     #[test]
     fn constellation_pages_have_independent_planes_and_local_coordinates() {

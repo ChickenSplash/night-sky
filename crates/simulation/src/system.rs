@@ -29,6 +29,9 @@ const MIN_HILL_SPACING: f64 = 10.0;
 /// Heaviest planet as a share of its star. Keeps a pair's mutual Hill radius small
 /// enough that the spacing above can always be met further out.
 const MAX_MASS_RATIO: f64 = 0.004;
+/// Generously beyond the known planets, but short of a loosely bound Oort-cloud
+/// object. A full page should not become an interstellar-scale planetary system.
+const MAX_SYSTEM_APOAPSIS_AU: f64 = 1_000.0;
 /// Period ratios offered for resonant pairs, outer:inner.
 const RESONANCES: [[u32; 2]; 6] = [[2, 1], [3, 2], [4, 3], [5, 4], [5, 3], [3, 1]];
 
@@ -196,24 +199,54 @@ fn stable(inner: &Body, outer_au: f64, outer_e: f64, outer_mass: f64, star: f64)
 
 /// The whole planetary system of one page, innermost first.
 pub fn planetary_system(list_id: &str, page: u32) -> Vec<Body> {
-    let mut rng = Rng::new(&format!("{list_id}:page-{page}:system"));
+    let formed = formation(list_id, page);
+    let ordinary = generate_system(list_id, page, &formed, false);
+    if ordinary.last().is_none_or(|body| {
+        body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity) <= MAX_SYSTEM_APOAPSIS_AU
+    }) {
+        ordinary
+    } else {
+        // A crowded page around an evolved star can otherwise push its outer
+        // bodies thousands of AU out. Form a compact, low-mass system instead;
+        // reducing mass makes Hill-stable spacing possible within the disc.
+        generate_system(list_id, page, &formed, true)
+    }
+}
+
+fn generate_system(
+    list_id: &str,
+    page: u32,
+    formed: &crate::star::Formation,
+    compact: bool,
+) -> Vec<Body> {
+    let suffix = if compact { ":compact" } else { "" };
+    let mut rng = Rng::new(&format!("{list_id}:page-{page}:system{suffix}"));
     // Spins draw from their own sequence, so they never move an orbit.
     let mut spins = Rng::new(&format!("{list_id}:page-{page}:spins"));
-    let formed = formation(list_id, page);
     let (mass_solar, snow) = (formed.star.mass_solar, formed.snow_au);
     let light = snow / 2.7;
     // A few systems form tight resonant chains, like TRAPPIST-1 or Kepler-223.
-    let chain = rng.chance(0.12);
+    let chain = !compact && rng.chance(0.12);
     let mut bodies: Vec<Body> = Vec::new();
     for _ in 0..page_capacity(list_id, page) {
         let previous = bodies.last();
         let tentative = match previous {
+            Some(p) if compact => p.orbit.semi_major_au * rng.log_range(1.12, 1.22),
             Some(p) => p.orbit.semi_major_au * rng.log_range(1.2, 1.9),
+            None if compact => formed.inner_au.max(0.04) * rng.range(1.0, 1.2),
             None => (rng.log_range(0.04, 0.4) * light.max(0.1))
                 .max(formed.inner_au * rng.range(1.0, 1.4)),
         };
-        let (class, mass) = draw_body(&mut rng, tentative, snow, mass_solar);
-        let (e_sigma, i_sigma) = if class == Class::Dwarf {
+        let (class, mass) = if compact && tentative < snow {
+            (Class::Rocky, rng.log_range(0.02, 0.2))
+        } else if compact {
+            (Class::Dwarf, rng.log_range(0.0022, 0.01))
+        } else {
+            draw_body(&mut rng, tentative, snow, mass_solar)
+        };
+        let (e_sigma, i_sigma) = if compact {
+            (0.015, 0.025)
+        } else if class == Class::Dwarf {
             (0.12, 0.1)
         } else {
             (0.035, 0.025)
@@ -534,6 +567,43 @@ mod tests {
                 ));
             }
         }
+    }
+
+    #[test]
+    fn crowded_pages_stay_within_the_planetary_system_limit() {
+        let mut compact_count = 0;
+        for list in ["list", "demo-flight", "demo-research"] {
+            for page in 0..1_000 {
+                let formed = formation(list, page);
+                let ordinary = generate_system(list, page, &formed, false);
+                if ordinary.last().is_some_and(|body| {
+                    body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity)
+                        > MAX_SYSTEM_APOAPSIS_AU
+                }) {
+                    compact_count += 1;
+                }
+                let bodies = planetary_system(list, page);
+                assert_eq!(bodies.len(), page_capacity(list, page) as usize);
+                for body in &bodies {
+                    let apoapsis = body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity);
+                    assert!(
+                        apoapsis <= MAX_SYSTEM_APOAPSIS_AU,
+                        "{list} page {page}: {apoapsis} AU"
+                    );
+                    assert!(body.orbit.semi_major_au >= formed.inner_au);
+                }
+                for pair in bodies.windows(2) {
+                    assert!(stable(
+                        &pair[0],
+                        pair[1].orbit.semi_major_au,
+                        pair[1].orbit.eccentricity,
+                        pair[1].mass_earth,
+                        formed.star.mass_solar
+                    ));
+                }
+            }
+        }
+        assert!(compact_count > 0, "compact generation was never exercised");
     }
 
     #[test]
