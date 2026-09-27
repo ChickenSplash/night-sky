@@ -89,11 +89,12 @@
 
 - Optional (`Navigation::realistic`); the wireframe look is the default and must
   stay unchanged when it is off. Photometry lives in `space_simulation::light`;
-  exposure, the body pool and the HDR camera in `crates/client/src/render.rs`,
-  with the shader in `body.wgsl`.
+  exposure, the pools and the HDR camera in `crates/client/src/render.rs`,
+  with the shaders in `body.wgsl` and `point.wgsl`.
 - Bodies are plain spheres under the wireframes. `scene::draw` gathers `Lights`
-  while drawing gizmos; `render::sync` places pooled mesh entities in the camera's
-  cell and writes `GlobalTransform` directly, because it runs after propagation.
+  while drawing gizmos; `render::sync_bodies`/`sync_points` place pooled mesh
+  entities in the camera's cell and write `GlobalTransform` directly, because
+  they run after propagation.
 - Colours reach the GPU pre-exposed on the CPU. Never send raw radiance: star
   surfaces reach 1e10 W m⁻² sr⁻¹ and HDR targets are half-float.
 - Star colours are blackbody spectra white-balanced to the Sun. True colours make
@@ -101,8 +102,13 @@
   read red. Brightness is visual, not bolometric.
 - Assisted exposure (default) compresses contrast around the planets, exposes the
   star field on its own and floors planet brightness. Physical exposure is one
-  linear exposure per frame. Bodies below a point on screen are enlarged with flux
-  conserved (`render::enlarge`).
+  linear exposure per frame.
+- Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
+  over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
+  spread integrates to its whole light, exposed as if spread over a point-sized
+  disc (`Exposure::point`), so it matches the sphere it replaces and physical
+  stays linear. Point planets dim with phase (`render::phase`). Assisted floors
+  apply to points, not to dim spheres.
 - Cameras sharing the window must agree on `Hdr`: the egui overlay camera switches
   with the 3D camera (without tone mapping), or it presents a stale frame.
 - The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh

@@ -115,7 +115,10 @@ pub fn exercise(
         17 => nav.show_page(1, &universe.0),
         19 => capture(&mut commands, "orbit-page-2"),
         20 => {
+            // Bodies alone, so the points are not hidden under their outlines.
             nav.realistic = true;
+            nav.wireframe = false;
+            nav.markers = false;
             nav.jump(0, &universe.0);
         }
         21 => capture(&mut commands, "realistic"),
@@ -123,6 +126,7 @@ pub fn exercise(
         23 => capture(&mut commands, "realistic-physical"),
         24 => {
             nav.physical = false;
+            nav.wireframe = true;
             nav.exaggerate = true;
             nav.selected = Some(0);
             nav.focus_selected(&universe.0);
@@ -130,6 +134,7 @@ pub fn exercise(
         25 => capture(&mut commands, "realistic-planet"),
         26 => {
             nav.exaggerate = false;
+            nav.wireframe = false;
             nav.preset(View::Constellation, &universe.0);
         }
         27 => capture(&mut commands, "realistic-constellation"),

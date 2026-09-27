@@ -450,6 +450,17 @@ impl Canvas<'_> {
         Some(edge.distance(point))
     }
 
+    /// Render units per logical pixel at a point's depth, on or off screen.
+    fn per_pixel(&self, centre: Vec3) -> Option<f32> {
+        let eye = self.view.translation();
+        let probe = centre.distance(eye) * 0.01;
+        let ahead = eye + self.view.forward() * centre.distance(eye);
+        let pixels = self
+            .screen(ahead)?
+            .distance(self.screen(ahead + self.view.right() * probe)?);
+        (pixels > 0.0).then(|| probe / pixels)
+    }
+
     /// Draws a wireframe body and returns its on-screen radius.
     /// `basis` orients the latitude rings, so bodies share their system's plane.
     /// `flat` projects the sphere onto its equatorial plane, as seen from directly
@@ -632,23 +643,26 @@ impl Canvas<'_> {
         let limb = current && table && !wide;
         if self.nav.realistic
             && let Some(body) = body
+            && let Some(per_pixel) = self.per_pixel(centre)
         {
-            // Flux uses the true distance, even for a star drawn on the near shell.
-            let (drawn, kept) = render::enlarge(radius, visible_distance, render::STAR_POINT);
-            let flux = space_simulation::light::flux(
-                self.photometry.visual_luminosity(body),
-                relative.length(),
-            );
-            let surface = if current {
-                self.photometry.surface_radiance(body) * (physical / radius).powi(2)
+            let surface = self.photometry.surface_radiance(body);
+            // An enlarged current star dims to keep its light. Any other keeps its
+            // true angular size, even drawn on the near shell.
+            let (disc, radiance) = if current && !wide {
+                (radius, surface * (physical / radius).powi(2))
             } else {
-                // A distant star's disc is its point: spread its flux over it.
-                flux / (std::f64::consts::PI * (radius / visible_distance).powi(2))
+                (
+                    visible_distance * physical / relative.length().max(1.0),
+                    surface,
+                )
             };
+            let disc = self.units(disc);
             lights.stars.push(StarLight {
                 centre,
-                radius: self.units(drawn),
-                radiance: surface * kept,
+                radius: disc,
+                pixels: disc / per_pixel,
+                per_pixel,
+                radiance,
                 kelvin: body.temperature_k,
                 subject: current && self.subject,
             });
@@ -733,20 +747,22 @@ impl Canvas<'_> {
             let radius = orbital_radius + (physical - orbital_radius) * pose.layout;
             let tint = colour(planet.colour);
             let basis = spin_basis(self.frame, &planet.spin, seconds);
-            if nav.realistic {
+            if nav.realistic
+                && let Some(per_pixel) = self.per_pixel(centre)
+            {
                 let luminosity = system
                     .star(pose.page)
                     .map_or(1.0, |s| self.photometry.visual_luminosity(s));
-                let (drawn, kept) =
-                    render::enlarge(radius, (galactic - pose.eye).length(), render::PLANET_POINT);
+                let disc = self.units(radius);
                 lights.planets.push(PlanetLight {
                     centre,
-                    radius: self.units(drawn),
+                    radius: disc,
+                    pixels: disc / per_pixel,
+                    per_pixel,
                     // Lit from the star even in the table, which is only a layout.
                     towards_star: (-galactic).normalize_or_zero().as_vec3(),
                     flux: space_simulation::light::flux(luminosity, orbital.length()),
                     surface: space_simulation::light::surface(&planet.class),
-                    conserved: kept,
                 });
             }
             let pixels = self.outline(gizmos, centre, self.units(radius), tint, basis, false);
@@ -781,6 +797,7 @@ pub fn draw(
     let Ok((camera, view)) = camera.single() else {
         return;
     };
+    lights.eye = view.translation();
     let Some(system) = universe.0.systems.get(nav.system) else {
         return;
     };
