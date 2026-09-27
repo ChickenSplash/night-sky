@@ -1,5 +1,11 @@
-//! Host stars, one per page, drawn in the proportions of the solar neighbourhood
-//! (RECONS census of stars within 10 pc): about three in four are red dwarfs.
+//! Stars, drawn two ways:
+//!
+//! - Page stars (`star`) follow the census of the solar neighbourhood (RECONS,
+//!   stars within 10 pc): about three in four are red dwarfs.
+//! - Galactic stars (`galactic_star`) draw a birth mass from the Kroupa (2001)
+//!   initial mass function and an age from their galactic component, then
+//!   evolve: main sequence, giant, then white dwarf. Old components have no hot
+//!   stars left and many white dwarfs; young spiral arms have O and B stars.
 //!
 //! - Main-sequence stars pick a temperature within their class, then the mass that
 //!   gives it, so the spectral type, mass, radius and luminosity always agree.
@@ -9,6 +15,7 @@
 //! - Rotation follows each class's observed range, including the fast rotation of
 //!   stars hotter than the Kraft break (about 6,250 K).
 
+use crate::galaxy::Component;
 use crate::system::Rng;
 use space_shared::{Spin, Star};
 use std::f64::consts::{PI, TAU};
@@ -17,6 +24,7 @@ const SUN_TEMPERATURE_K: f64 = 5772.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
+    O,
     B,
     A,
     F,
@@ -28,8 +36,9 @@ enum Kind {
 }
 
 /// Share of stars, in per cent, and main-sequence temperature range in kelvin.
-/// O stars (about 0.00003%) are too rare to include.
-const CENSUS: [(Kind, f64, f64, f64); 8] = [
+/// O stars (about 0.00003%) are too rare for the census, but galactic stars
+/// reach them.
+const CENSUS: [(Kind, f64, f64, f64); 9] = [
     (Kind::M, 72.0, 2_600.0, 3_700.0),
     (Kind::K, 12.0, 3_700.0, 5_200.0),
     (Kind::G, 7.0, 5_200.0, 6_000.0),
@@ -38,7 +47,20 @@ const CENSUS: [(Kind, f64, f64, f64); 8] = [
     (Kind::A, 0.6, 7_500.0, 10_000.0),
     (Kind::Giant, 0.3, 0.0, 0.0),
     (Kind::B, 0.1, 10_000.0, 30_000.0),
+    (Kind::O, 0.0, 30_000.0, 60_000.0),
 ];
+
+/// Kroupa (2001) initial mass function: dN/dM ∝ M^-1.3 from the hydrogen-burning
+/// limit to 0.5 M☉, and M^-2.3 above. Brown dwarfs are not counted as stars.
+const IMF_LOW: f64 = 0.08;
+const IMF_BREAK: f64 = 0.5;
+const IMF_HIGH: f64 = 100.0;
+/// Time after the main sequence spent as a subgiant, giant and on the horizontal
+/// and asymptotic branches, as a share of the main-sequence lifetime.
+const GIANT_SHARE: f64 = 0.1;
+/// Heaviest birth mass that ends as a white dwarf; heavier stars leave neutron
+/// stars or black holes, which are not counted as stars.
+const WHITE_DWARF_LIMIT: f64 = 8.0;
 
 /// How the star shaped its planets, in addition to the star itself.
 pub(crate) struct Formation {
@@ -120,6 +142,7 @@ fn letter(kelvin: f64) -> (char, f64, f64) {
         .filter(|c| c.3 > 0.0 && kelvin >= c.2)
         .map(|c| {
             let name = match c.0 {
+                Kind::O => 'O',
                 Kind::B => 'B',
                 Kind::A => 'A',
                 Kind::F => 'F',
@@ -155,6 +178,7 @@ fn hot_tilt(rng: &mut Rng) -> f64 {
     }
 }
 
+/// A page star, in the proportions of the solar neighbourhood.
 pub(crate) fn formation(id: &str) -> Formation {
     let mut rng = Rng::new(&format!("{id}:star"));
     let mut roll = rng.unit() * 100.0;
@@ -165,73 +189,14 @@ pub(crate) fn formation(id: &str) -> Formation {
             roll < 0.0
         })
         .unwrap_or(&CENSUS[0]);
-    let hours =
-        |rng: &mut Rng, low_days: f64, high_days: f64| rng.log_range(low_days, high_days) * 24.0;
-    let (star, snow_au, inner_au) = match kind {
+    match kind {
         Kind::Giant => {
-            // A red-giant-branch star: its planets formed around the same mass on
-            // the main sequence, and it has since swallowed any within a few radii.
             let mass = rng.log_range(0.9, 3.0);
-            let radius = rng.log_range(8.0, 40.0);
-            let kelvin = rng.range(3_500.0, 5_400.0);
-            let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
-            let (name, _, _) = letter(kelvin);
-            let star = Star {
-                id: id.into(),
-                page: 0,
-                spectral: format!("{} III", subclass(kelvin)),
-                kind: match name {
-                    'M' => "Red giant",
-                    'K' => "Orange giant",
-                    _ => "Yellow giant",
-                }
-                .into(),
-                mass_solar: mass,
-                radius_solar: radius,
-                luminosity_solar: light,
-                temperature_k: kelvin,
-                colour: spectral_colour(kelvin),
-                spin: Spin {
-                    period_hours: hours(&mut rng, 100.0, 1_000.0),
-                    tilt_rad: rng.rayleigh(0.15),
-                    azimuth_rad: rng.range(0.0, TAU),
-                    phase_rad: rng.range(0.0, TAU),
-                    locked: false,
-                },
-            };
-            let swallowed = 3.0 * radius * crate::SUN_RADIUS_METRES / crate::AU_METRES;
-            (star, 2.7 * luminosity(mass).sqrt(), swallowed)
+            giant(id, &mut rng, mass)
         }
         Kind::WhiteDwarf => {
-            // The progenitor lost over half its mass, so surviving orbits widened
-            // by the ratio of masses. Planets inside its giant phase were engulfed.
             let progenitor = rng.log_range(1.0, 4.0);
-            let mass = 0.5 + 0.3 * (progenitor - 1.0) / 3.0 + rng.range(-0.03, 0.03);
-            let widening = progenitor / mass;
-            let kelvin = rng.log_range(4_500.0, 25_000.0);
-            let radius = 0.0126 * (0.6 / mass).cbrt();
-            let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
-            let star = Star {
-                id: id.into(),
-                page: 0,
-                spectral: format!("DA{}", (50_400.0 / kelvin).round().clamp(1.0, 9.0)),
-                kind: "White dwarf".into(),
-                mass_solar: mass,
-                radius_solar: radius,
-                luminosity_solar: light,
-                temperature_k: kelvin,
-                colour: spectral_colour(kelvin),
-                spin: Spin {
-                    period_hours: hours(&mut rng, 0.05, 3.0),
-                    // The spin axis keeps its progenitor's direction.
-                    tilt_rad: rng.rayleigh(0.1),
-                    azimuth_rad: rng.range(0.0, TAU),
-                    phase_rad: rng.range(0.0, TAU),
-                    locked: false,
-                },
-            };
-            let snow = 2.7 * luminosity(progenitor).sqrt() * widening;
-            (star, snow, 1.5 * progenitor * widening)
+            white_dwarf(id, &mut rng, progenitor, None)
         }
         _ => {
             // Cool stars are far more common within each class too; B stars skew
@@ -241,62 +206,223 @@ pub(crate) fn formation(id: &str) -> Formation {
             } else {
                 rng.range(cool, hot)
             };
-            let mass = mass_for_temperature(kelvin);
-            let radius = main_sequence_radius(mass);
-            let light = luminosity(mass);
-            let (period_days, tilt) = match kind {
-                // Young or fully convective M dwarfs spin fast; most have slowed.
-                Kind::M if rng.chance(0.3) => (rng.log_range(0.2, 10.0), rng.rayleigh(0.1)),
-                Kind::M => (rng.log_range(40.0, 150.0), rng.rayleigh(0.1)),
-                Kind::K => (rng.log_range(15.0, 50.0), rng.rayleigh(0.1)),
-                Kind::G => (rng.log_range(15.0, 35.0), rng.rayleigh(0.1)),
-                // Hot stars lack the magnetic braking of cool ones, and are
-                // more often misaligned with their planets' orbits.
-                Kind::F if kelvin < 6_250.0 => (rng.log_range(5.0, 15.0), rng.rayleigh(0.15)),
-                Kind::F => (rng.log_range(1.5, 6.0), hot_tilt(&mut rng)),
-                _ => (rng.log_range(0.5, 2.5), hot_tilt(&mut rng)),
-            };
-            let kind_name = match kind {
-                Kind::M => "Red dwarf",
-                Kind::K => "Orange dwarf",
-                Kind::G => "Yellow dwarf",
-                Kind::F => "Yellow-white dwarf",
-                Kind::A => "White main-sequence star",
-                _ => "Blue-white main-sequence star",
-            };
-            let star = Star {
-                id: id.into(),
-                page: 0,
-                spectral: format!("{} V", subclass(kelvin)),
-                kind: kind_name.into(),
-                mass_solar: mass,
-                radius_solar: radius,
-                luminosity_solar: light,
-                temperature_k: kelvin,
-                colour: spectral_colour(kelvin),
-                spin: Spin {
-                    period_hours: period_days * 24.0,
-                    tilt_rad: tilt.min(PI),
-                    azimuth_rad: rng.range(0.0, TAU),
-                    phase_rad: rng.range(0.0, TAU),
-                    locked: false,
-                },
-            };
-            // The disc's inner edge, where dust sublimates.
-            let inner = 0.04 * light.sqrt();
-            (star, 2.7 * light.sqrt(), inner)
+            main_sequence(id, &mut rng, kelvin, mass_for_temperature(kelvin))
         }
-    };
-    Formation {
-        star,
-        snow_au,
-        inner_au,
     }
 }
 
-/// The star with this ID, on page 0.
+/// Birth mass for a uniform draw, by inverting the initial mass function.
+fn initial_mass(u: f64) -> f64 {
+    let low = (IMF_LOW.powf(-0.3) - IMF_BREAK.powf(-0.3)) / 0.3;
+    // Continuous at the break: M^-2.3 carries a factor of 0.5 there.
+    let high = IMF_BREAK * (IMF_BREAK.powf(-1.3) - IMF_HIGH.powf(-1.3)) / 1.3;
+    let x = u * (low + high);
+    if x < low {
+        (IMF_LOW.powf(-0.3) - 0.3 * x).powf(-1.0 / 0.3)
+    } else {
+        (IMF_BREAK.powf(-1.3) - 1.3 * (x - low) / IMF_BREAK).powf(-1.0 / 1.3)
+    }
+}
+
+/// Main-sequence lifetime in billions of years: the Sun's ten, shorter for
+/// heavier stars, and never under the few million years of the heaviest.
+pub fn lifetime_gyr(mass_solar: f64) -> f64 {
+    (10.0 * mass_solar.powf(-2.5)).max(0.003)
+}
+
+/// White dwarf temperature after cooling this long, after Mestel's law: about
+/// 20,000 K at 100 million years, 9,000 K at a billion and 4,000 K at ten.
+fn cooled_kelvin(cooling_gyr: f64) -> f64 {
+    (9_000.0 * cooling_gyr.max(1e-6).powf(-0.35)).clamp(3_500.0, 100_000.0)
+}
+
+/// A star of a galactic component: a birth mass and age, evolved to today.
+pub(crate) fn galactic_formation(id: &str, component: Component) -> Formation {
+    let mut rng = Rng::new(&format!("{id}:star"));
+    // Neutron stars and black holes are drawn again, so the count is of stars.
+    for _ in 0..32 {
+        let mass = initial_mass(rng.unit());
+        let age = component.age_gyr(&mut rng);
+        let life = lifetime_gyr(mass);
+        if age < life {
+            let kelvin = temperature(luminosity(mass), main_sequence_radius(mass));
+            return main_sequence(id, &mut rng, kelvin, mass);
+        }
+        if age < life * (1.0 + GIANT_SHARE) {
+            return giant(id, &mut rng, mass);
+        }
+        if mass < WHITE_DWARF_LIMIT {
+            let kelvin = cooled_kelvin(age - life * (1.0 + GIANT_SHARE));
+            return white_dwarf(id, &mut rng, mass, Some(kelvin));
+        }
+    }
+    main_sequence(id, &mut rng, 3_200.0, mass_for_temperature(3_200.0))
+}
+
+fn hours(rng: &mut Rng, low_days: f64, high_days: f64) -> f64 {
+    rng.log_range(low_days, high_days) * 24.0
+}
+
+/// An evolved star of this mass. Its planets formed around it on the main
+/// sequence, and it has since swallowed any within a few radii.
+fn giant(id: &str, rng: &mut Rng, mass: f64) -> Formation {
+    let (radius, kelvin, kind, class, period_hours) = if mass < WHITE_DWARF_LIMIT {
+        // The red giant branch, or the red clump after it.
+        let radius = rng.log_range(8.0, 40.0);
+        let kelvin = rng.range(3_500.0, 5_400.0);
+        let kind = match letter(kelvin).0 {
+            'M' => "Red giant",
+            'K' => "Orange giant",
+            _ => "Yellow giant",
+        };
+        (radius, kelvin, kind, "III", hours(rng, 100.0, 1_000.0))
+    } else if rng.chance(0.7) {
+        let radius = rng.log_range(200.0, 1_000.0);
+        let kelvin = rng.range(3_500.0, 4_500.0);
+        (
+            radius,
+            kelvin,
+            "Red supergiant",
+            "I",
+            hours(rng, 1_000.0, 10_000.0),
+        )
+    } else {
+        let radius = rng.log_range(20.0, 80.0);
+        let kelvin = rng.log_range(10_000.0, 25_000.0);
+        (
+            radius,
+            kelvin,
+            "Blue supergiant",
+            "I",
+            hours(rng, 5.0, 50.0),
+        )
+    };
+    let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
+    let star = Star {
+        id: id.into(),
+        page: 0,
+        spectral: format!("{} {class}", subclass(kelvin)),
+        kind: kind.into(),
+        mass_solar: mass,
+        radius_solar: radius,
+        luminosity_solar: light,
+        temperature_k: kelvin,
+        colour: spectral_colour(kelvin),
+        spin: Spin {
+            period_hours,
+            tilt_rad: rng.rayleigh(0.15),
+            azimuth_rad: rng.range(0.0, TAU),
+            phase_rad: rng.range(0.0, TAU),
+            locked: false,
+        },
+    };
+    let swallowed = 3.0 * radius * crate::SUN_RADIUS_METRES / crate::AU_METRES;
+    Formation {
+        star,
+        snow_au: 2.7 * luminosity(mass).sqrt(),
+        inner_au: swallowed,
+    }
+}
+
+/// The white dwarf left by a star of this birth mass, at this temperature or a
+/// random one.
+fn white_dwarf(id: &str, rng: &mut Rng, progenitor: f64, kelvin: Option<f64>) -> Formation {
+    // The progenitor lost over half its mass, so surviving orbits widened by the
+    // ratio of masses. Planets inside its giant phase were engulfed.
+    let mass = 0.5 + 0.3 * (progenitor - 1.0) / 3.0 + rng.range(-0.03, 0.03);
+    let widening = progenitor / mass;
+    let kelvin = kelvin.unwrap_or_else(|| rng.log_range(4_500.0, 25_000.0));
+    let radius = 0.0126 * (0.6 / mass).cbrt();
+    let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
+    let star = Star {
+        id: id.into(),
+        page: 0,
+        spectral: format!("DA{}", (50_400.0 / kelvin).round().clamp(1.0, 9.0)),
+        kind: "White dwarf".into(),
+        mass_solar: mass,
+        radius_solar: radius,
+        luminosity_solar: light,
+        temperature_k: kelvin,
+        colour: spectral_colour(kelvin),
+        spin: Spin {
+            period_hours: hours(rng, 0.05, 3.0),
+            // The spin axis keeps its progenitor's direction.
+            tilt_rad: rng.rayleigh(0.1),
+            azimuth_rad: rng.range(0.0, TAU),
+            phase_rad: rng.range(0.0, TAU),
+            locked: false,
+        },
+    };
+    Formation {
+        star,
+        snow_au: 2.7 * luminosity(progenitor).sqrt() * widening,
+        inner_au: 1.5 * progenitor * widening,
+    }
+}
+
+fn main_sequence(id: &str, rng: &mut Rng, kelvin: f64, mass: f64) -> Formation {
+    let kind = CENSUS
+        .iter()
+        .filter(|c| c.3 > 0.0 && kelvin >= c.2)
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .map_or(Kind::M, |c| c.0);
+    let radius = main_sequence_radius(mass);
+    let light = luminosity(mass);
+    let (period_days, tilt) = match kind {
+        // Young or fully convective M dwarfs spin fast; most have slowed.
+        Kind::M if rng.chance(0.3) => (rng.log_range(0.2, 10.0), rng.rayleigh(0.1)),
+        Kind::M => (rng.log_range(40.0, 150.0), rng.rayleigh(0.1)),
+        Kind::K => (rng.log_range(15.0, 50.0), rng.rayleigh(0.1)),
+        Kind::G => (rng.log_range(15.0, 35.0), rng.rayleigh(0.1)),
+        // Hot stars lack the magnetic braking of cool ones, and are more often
+        // misaligned with their planets' orbits.
+        Kind::F if kelvin < 6_250.0 => (rng.log_range(5.0, 15.0), rng.rayleigh(0.15)),
+        Kind::F => (rng.log_range(1.5, 6.0), hot_tilt(rng)),
+        _ => (rng.log_range(0.5, 2.5), hot_tilt(rng)),
+    };
+    let kind_name = match kind {
+        Kind::M => "Red dwarf",
+        Kind::K => "Orange dwarf",
+        Kind::G => "Yellow dwarf",
+        Kind::F => "Yellow-white dwarf",
+        Kind::A => "White main-sequence star",
+        Kind::O => "Blue main-sequence star",
+        _ => "Blue-white main-sequence star",
+    };
+    let star = Star {
+        id: id.into(),
+        page: 0,
+        spectral: format!("{} V", subclass(kelvin)),
+        kind: kind_name.into(),
+        mass_solar: mass,
+        radius_solar: radius,
+        luminosity_solar: light,
+        temperature_k: kelvin,
+        colour: spectral_colour(kelvin),
+        spin: Spin {
+            period_hours: period_days * 24.0,
+            tilt_rad: tilt.min(PI),
+            azimuth_rad: rng.range(0.0, TAU),
+            phase_rad: rng.range(0.0, TAU),
+            locked: false,
+        },
+    };
+    // The disc's inner edge, where dust sublimates.
+    Formation {
+        star,
+        snow_au: 2.7 * light.sqrt(),
+        inner_au: 0.04 * light.sqrt(),
+    }
+}
+
+/// The page star with this ID, on page 0.
 pub fn star(id: &str) -> Star {
     formation(id).star
+}
+
+/// A star of this galactic component, on page 0.
+pub fn galactic_star(id: &str, component: Component) -> Star {
+    galactic_formation(id, component).star
 }
 
 /// Rotation angle about the spin axis at a simulation time.

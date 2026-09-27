@@ -188,6 +188,12 @@ is available it retains its last data, initially the clearly labelled demo.
   Uranus.
 - Wireframes use latitude/longitude line geometry, not native polygon wireframe
   mode. Decorative background points are not additional lists.
+- A Milky Way-like galaxy model (`crates/simulation/src/galaxy.rs`) holds 200
+  billion stars: a nuclear cluster around a 4.3 million solar-mass black hole,
+  a bar and bulge, a thin disc with four spiral arms, a thick disc and a halo.
+  Near home it gives about 0.18 stars per cubic parsec. Star types follow each
+  region's age: young arms have O and B stars and supergiants; the old bulge
+  and halo have no hot stars left and more white dwarfs. It is not drawn yet.
 
 ## Project structure
 
@@ -195,7 +201,7 @@ is available it retains its last data, initially the clearly labelled demo.
 crates/client/       Bevy scene, controls, web bridge and egui dev UI
 crates/server/       Axum API, ClickUp adapter and SQLite storage
 crates/shared/       Serializable API models and offline demo
-crates/simulation/   Orbital mechanics, clock and deterministic layout
+crates/simulation/   Orbital mechanics, clock, galaxy model and deterministic layout
 assets/             Reserved for project assets
 scripts/            Launch and verification commands
 data/               Local database, logs and smoke-test screenshots
@@ -229,7 +235,7 @@ assisted and physical exposure, a lit planet close-up, a constellation and a
 star close-up in both exposures. Each capture waits for camera flights to finish. It saves seventeen
 screenshots under `data/`
 and exits automatically. Unit tests cover physical orbit invariants, clock
-continuity, persistent orbital-slot allocation, table layout and camera flights.
+continuity, the galaxy's star count, profile and regional star mix, persistent orbital-slot allocation, table layout and camera flights.
 Set `SPACE_SMOKE_TASKS=1400` to exercise a 140-page constellation instead of
 the default 50-task fixture.
 

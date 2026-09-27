@@ -11,7 +11,8 @@
 //! - Some pairs sit in mean-motion resonances, with phases that keep their
 //!   conjunctions away from the outer planet's periapsis, as for Neptune and Pluto.
 
-use crate::star::formation;
+use crate::galaxy::Component;
+use crate::star::{Formation, formation, galactic_formation};
 use crate::{period_seconds, stable_hash};
 use space_shared::{Galaxy, MAX_PLANETS, MIN_PLANETS, Orbit, Planet, Spin, StarSystem, Task};
 use std::{
@@ -207,10 +208,18 @@ fn stable(inner: &Body, outer_au: f64, outer_e: f64, outer_mass: f64, star: f64)
             >= 2.0 * 3f64.sqrt() * hill
 }
 
-/// The whole planetary system of one star, innermost first.
+/// The whole planetary system of one page star, innermost first.
 pub fn planetary_system(star: &str) -> Vec<Body> {
-    let formed = formation(star);
-    let ordinary = generate_system(star, &formed, false);
+    system_around(star, &formation(star))
+}
+
+/// The whole planetary system of a galactic star, innermost first.
+pub fn galactic_planetary_system(star: &str, component: Component) -> Vec<Body> {
+    system_around(star, &galactic_formation(star, component))
+}
+
+fn system_around(star: &str, formed: &Formation) -> Vec<Body> {
+    let ordinary = generate_system(star, formed, false);
     if ordinary.last().is_none_or(|body| {
         body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity) <= MAX_SYSTEM_APOAPSIS_AU
     }) {
@@ -219,11 +228,11 @@ pub fn planetary_system(star: &str) -> Vec<Body> {
         // A crowded page around an evolved star can otherwise push its outer
         // bodies thousands of AU out. Form a compact, low-mass system instead;
         // reducing mass makes Hill-stable spacing possible within the disc.
-        generate_system(star, &formed, true)
+        generate_system(star, formed, true)
     }
 }
 
-fn generate_system(star: &str, formed: &crate::star::Formation, compact: bool) -> Vec<Body> {
+fn generate_system(star: &str, formed: &Formation, compact: bool) -> Vec<Body> {
     let suffix = if compact { ":compact" } else { "" };
     let mut rng = Rng::new(&format!("{star}:system{suffix}"));
     // Spins draw from their own sequence, so they never move an orbit.
@@ -748,6 +757,50 @@ mod tests {
             }
         }
         assert!(compact_count > 0, "compact generation was never exercised");
+    }
+
+    #[test]
+    fn galactic_stars_of_every_kind_have_stable_bounded_systems() {
+        // A sample of every component, and the rare massive stars of the arms.
+        let rare = (0..300_000)
+            .map(|i| format!("Arms:{i}"))
+            .filter(|star| {
+                let kind = galactic_formation(star, Component::Arms).star.kind;
+                kind.starts_with("Blue") || kind.contains("supergiant")
+            })
+            .map(|star| (star, Component::Arms));
+        let sample = Component::ALL
+            .into_iter()
+            .flat_map(|c| (0..2_000).map(move |i| (format!("{c:?}:{i}"), c)));
+        let mut kinds = std::collections::HashSet::new();
+        for (star, component) in sample.chain(rare) {
+            let formed = galactic_formation(&star, component);
+            kinds.insert(formed.star.kind.clone());
+            let bodies = galactic_planetary_system(&star, component);
+            assert_eq!(bodies.len() as u32, planet_count(&star));
+            for body in &bodies {
+                let apoapsis = body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity);
+                assert!(apoapsis <= MAX_SYSTEM_APOAPSIS_AU, "{star}: {apoapsis} AU");
+                assert!(body.orbit.semi_major_au >= formed.inner_au);
+            }
+            for pair in bodies.windows(2) {
+                assert!(stable(
+                    &pair[0],
+                    pair[1].orbit.semi_major_au,
+                    pair[1].orbit.eccentricity,
+                    pair[1].mass_earth,
+                    formed.star.mass_solar
+                ));
+            }
+        }
+        for kind in [
+            "Blue main-sequence star",
+            "Blue supergiant",
+            "Red supergiant",
+            "White dwarf",
+        ] {
+            assert!(kinds.contains(kind), "no {kind} among {kinds:?}");
+        }
     }
 
     #[test]

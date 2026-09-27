@@ -1,9 +1,10 @@
+pub mod galaxy;
 pub mod light;
 mod star;
 mod system;
 
 use space_shared::Orbit;
-pub use star::{luminosity, spectral_colour, spin_angle, star};
+pub use star::{galactic_star, lifetime_gyr, luminosity, spectral_colour, spin_angle, star};
 use std::f64::consts::TAU;
 pub use system::*;
 

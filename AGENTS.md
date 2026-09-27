@@ -94,6 +94,26 @@
   on a grid, cluster or plane.
 - Explain demo, live, cached and failed-sync states in the interface.
 
+## Galaxy model
+
+- `space_simulation::galaxy::GalaxyModel` (parameterised, `milky_way()` by
+  default) gives stars per cubic parsec at any point, per `Component`: nuclear
+  cluster, bar and bulge, thin disc, young arm stars, thick disc and halo. Axes
+  are parsecs from the central black hole, disc in XZ, Y to the north pole;
+  home is 8.2 kpc out on +X, between arms.
+- Every profile has a closed-form integral, so components hold exactly their
+  share of `stars` (2e11). Spiral modulation averages to one around every
+  circle; keep it that way, or the totals drift. The test integrates the
+  density numerically to within 1%.
+- Galactic stars (`galactic_star(id, component)`, `GalaxyModel::star(id, p)`)
+  draw a Kroupa birth mass and an age from the component's formation history,
+  then evolve (main sequence, giant or supergiant, white dwarf). Neutron stars
+  and stellar black holes are redrawn: `stars` counts stars only. Their systems
+  come from `galactic_planetary_system(id, component)`.
+- Page stars (`star(id)`) keep the fixed solar-neighbourhood census until
+  lists move onto galactic stars. Both share the builders in `star.rs`; census
+  draws must keep their order, or every page star changes.
+
 ## Realistic rendering
 
 - Optional (`Navigation::realistic`); the wireframe look is the default and must
@@ -135,6 +155,8 @@
 ## Current limitations
 
 - No N-body simulation, moons, workspace discovery or OAuth.
+- The galaxy model is not yet sampled into cells, streamed or drawn, and has
+  no rotation.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.
