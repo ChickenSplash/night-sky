@@ -629,11 +629,11 @@ export function mount(bridge, canvas) {
     state = detail;
     renderState();
   });
-  bridge.on('tick', ({ days, range: metres }) => {
+  bridge.on('tick', ({ days, range: metres, exposure }) => {
     clock.textContent = elapsed(days);
     const range = metres > LY * 0.01 ? `${(metres / LY).toFixed(3)} ly` : `${(metres / AU).toFixed(4)} AU`;
     const mode = state.following ? 'tracking' : state.view !== 'orbit' ? 'auto-framed preset' : 'free navigation';
-    rangeCaption.textContent = `Camera range ${range} / ${mode}`;
+    rangeCaption.textContent = `${exposure}\nCamera range ${range} / ${mode}`;
   });
 
   // Every panel floats over the full-window 3D view. Reporting the insets also

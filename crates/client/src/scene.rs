@@ -823,6 +823,7 @@ pub fn draw(
             });
         let reference = render::reference_distance(system, pose.page, followed, luminosity);
         lights.subject_key = Some(render::subject_key(luminosity, reference));
+        lights.metered = Some((reference, followed.is_some()));
         lights.kelvin = system.star(pose.page).map_or(5772.0, |s| s.temperature_k);
     }
 }

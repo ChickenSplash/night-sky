@@ -2,6 +2,7 @@ use crate::actions::{Display, PanelInsets, UiCommand};
 use crate::views::View;
 use crate::{
     Clock, Navigation, Universe,
+    render::{Lights, exposure_caption},
     scene::{CameraPose, CameraRig, MarkerKind, Markers},
 };
 use bevy::prelude::*;
@@ -22,14 +23,14 @@ pub fn draw_ui(
     universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
-    overlay: (Res<Markers>, Res<PanelInsets>),
+    overlay: (Res<Markers>, Res<PanelInsets>, Res<Lights>),
     camera_state: (Res<CameraRig>, Res<CameraPose>),
     mut styled: Local<bool>,
 ) {
     let (mut commands, mut contexts, mut writer) = interaction;
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
-    let (markers, insets) = overlay;
+    let (markers, insets, lights) = overlay;
     let (rig, pose) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -99,6 +100,7 @@ pub fn draw_ui(
         &markers,
         &rig,
         &pose,
+        &exposure_caption(&nav, &lights),
         insets.0.is_none(),
         &mut out,
     );
@@ -604,6 +606,7 @@ fn canvas_overlay(
     markers: &Markers,
     rig: &CameraRig,
     pose: &CameraPose,
+    exposure: &str,
     // HTML panels show the loading state and view captions themselves.
     captions: bool,
     out: &mut Vec<UiCommand>,
@@ -650,7 +653,8 @@ fn canvas_overlay(
             rect.left_bottom() + egui::vec2(24.0, -20.0),
             egui::Align2::LEFT_BOTTOM,
             format!(
-                "CAMERA RANGE {distance}   /   {}",
+                "{}\nCAMERA RANGE {distance}   /   {}",
+                exposure.to_uppercase(),
                 if nav.following {
                     "TRACKING"
                 } else if nav.view != View::Orbit {

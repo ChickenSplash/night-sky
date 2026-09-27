@@ -188,7 +188,7 @@
   font: 11px ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
 }
 #hud .caption.top { top: 80px; }
-#hud .caption.bottom { bottom: calc(var(--bar-height) + 12px); }
+#hud .caption.bottom { bottom: calc(var(--bar-height) + 12px); white-space: pre-line; line-height: 1.6; }
 #empty-universe {
   position: absolute; top: 45%; left: 50%;
   transform: translateX(-50%); text-align: center; display: grid; gap: 8px;

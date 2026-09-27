@@ -266,6 +266,8 @@ struct Tick {
     range: f64,
     /// Destination camera target relative to the page star, in metres.
     target: [f64; 3],
+    /// The camera's exposure in words.
+    exposure: String,
 }
 
 fn publish_tick(
@@ -273,6 +275,7 @@ fn publish_tick(
     clock: Res<Clock>,
     pose: Res<CameraPose>,
     nav: Res<Navigation>,
+    lights: Res<crate::render::Lights>,
     mut next: Local<f64>,
 ) {
     let now = time.elapsed_secs_f64();
@@ -286,6 +289,7 @@ fn publish_tick(
             days: clock.0.seconds / 86_400.0,
             range: pose.distance,
             target: nav.target.to_array(),
+            exposure: crate::render::exposure_caption(&nav, &lights),
         },
     );
 }

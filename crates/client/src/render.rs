@@ -117,6 +117,9 @@ pub struct Lights {
     pub planets: Vec<PlanetLight>,
     /// Radiance metered for the planets, when they are on screen.
     pub subject_key: Option<f64>,
+    /// Distance from the star the planets are metered at, and whether it is the
+    /// followed planet's.
+    pub metered: Option<(f64, bool)>,
     /// Temperature of the star lighting the planets.
     pub kelvin: f64,
 }
@@ -126,7 +129,22 @@ impl Lights {
         self.stars.clear();
         self.planets.clear();
         self.subject_key = None;
+        self.metered = None;
     }
+}
+
+/// The camera's exposure in words, for the caption under the 3D view.
+pub fn exposure_caption(nav: &Navigation, lights: &Lights) -> String {
+    if !nav.realistic {
+        return "Exposure off / wireframe".into();
+    }
+    let mode = if nav.physical { "physical" } else { "assisted" };
+    let metering = match lights.metered {
+        Some((metres, true)) => format!("followed planet at {:.3} AU", metres / AU_METRES),
+        Some((metres, false)) => format!("typical orbit at {:.3} AU", metres / AU_METRES),
+        None => "brightest star".into(),
+    };
+    format!("Exposure {mode} / metered on {metering}")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -447,6 +465,7 @@ mod tests {
             stars: vec![star(2.0e7, true), star(1e-3, false), star(1e-5, false)],
             planets: vec![planet(sun, 1.0), planet(sun / 100.0, 1.0)],
             subject_key: Some(subject_key(1.0, AU_METRES)),
+            metered: Some((AU_METRES, false)),
             kelvin: 5772.0,
         }
     }
