@@ -562,7 +562,11 @@ impl Canvas<'_> {
                 }
                 _ => self.sphere(gizmos, centre, radius, tint, basis, flat),
             },
-            (true, true) => self.sphere(gizmos, centre, radius * 1.01, tint, basis, flat),
+            // A small realistic body is its own point: a ring would only hide it.
+            (true, true) => match self.pixels(centre, radius) {
+                Some(p) if p < RING_PIXELS => Some(p),
+                _ => self.sphere(gizmos, centre, radius * 1.01, tint, basis, flat),
+            },
             (true, false) => self.pixels(centre, radius),
         }
     }

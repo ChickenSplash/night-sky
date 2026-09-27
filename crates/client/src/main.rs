@@ -223,8 +223,10 @@ fn main() {
     )
     .add_systems(
         PostUpdate,
+        // Before the egui pass, so markers use this frame's camera like the bodies.
         scene::draw
             .after(TransformSystems::Propagate)
+            .before(bevy_egui::EguiPostUpdateSet::EndPass)
             .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
     )
     .add_systems(EguiPrimaryContextPass, ui::draw_ui);
