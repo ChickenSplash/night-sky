@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
                     println!("Loading list {}/{} ({id})", index + 1, lists.len());
                     match client.system(id, &db_path).await {
                         Ok(system) => {
-                            println!("Loaded {}: {} tasks", system.name, system.tasks.len());
+                            println!("Loaded {}: {} tasks", system.name, system.tasks().count());
                             let snapshot = {
                                 let mut snapshot = state.write().await;
                                 let galaxy = &mut snapshot.galaxy;

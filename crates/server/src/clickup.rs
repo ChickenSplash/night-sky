@@ -4,7 +4,7 @@ use reqwest::{
     header::{AUTHORIZATION, HeaderMap, HeaderValue},
 };
 use serde::Deserialize;
-use space_shared::{StarSystem, TaskPlanet};
+use space_shared::StarSystem;
 use space_simulation::star_position;
 use std::{path::Path, time::Duration};
 
@@ -67,47 +67,40 @@ impl ClickUp {
         tasks.dedup_by(|a, b| a.id == b.id);
         let ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
         let slots = crate::storage::assign_slots(db, id, &ids)?;
+        let tasks = tasks
+            .into_iter()
+            .zip(slots)
+            .map(|(task, slot)| space_shared::Task {
+                slot,
+                colour: parse_colour(&task.status.color),
+                status_order: task
+                    .status
+                    .orderindex
+                    .as_u64()
+                    .or_else(|| task.status.orderindex.as_str()?.parse().ok())
+                    .unwrap_or_default() as u32,
+                status_type: task.status.kind,
+                status: task.status.status,
+                assignees: task
+                    .assignees
+                    .into_iter()
+                    .map(|a| a.username.unwrap_or_else(|| "Unassigned name".into()))
+                    .collect(),
+                due_date_ms: task.due_date.and_then(|d| d.parse().ok()),
+                url: Some(format!("https://app.clickup.com/t/{}", task.id)),
+                id: task.id,
+                name: task.name,
+                description: task.description.unwrap_or_default(),
+            })
+            .collect();
         let mut system = StarSystem {
             id: id.to_owned(),
             name: list.name,
             position_ly: star_position(id),
+            planets: Vec::new(),
             stars: Vec::new(),
-            tasks: tasks
-                .into_iter()
-                .zip(slots)
-                .map(|(task, slot)| TaskPlanet {
-                    slot: Some(slot),
-                    orbit: Default::default(),
-                    radius_km: 0.0,
-                    page: 0,
-                    orbit_index: 0,
-                    mass_earth: 0.0,
-                    class: String::new(),
-                    resonance: None,
-                    spin: Default::default(),
-                    colour: parse_colour(&task.status.color),
-                    status_order: task
-                        .status
-                        .orderindex
-                        .as_u64()
-                        .or_else(|| task.status.orderindex.as_str()?.parse().ok())
-                        .unwrap_or_default() as u32,
-                    status_type: task.status.kind,
-                    status: task.status.status,
-                    assignees: task
-                        .assignees
-                        .into_iter()
-                        .map(|a| a.username.unwrap_or_else(|| "Unassigned name".into()))
-                        .collect(),
-                    due_date_ms: task.due_date.and_then(|d| d.parse().ok()),
-                    url: Some(format!("https://app.clickup.com/t/{}", task.id)),
-                    id: task.id,
-                    name: task.name,
-                    description: task.description.unwrap_or_default(),
-                })
-                .collect(),
         };
-        space_simulation::shape(&mut system);
+        space_simulation::place(&mut system, tasks);
         Ok(system)
     }
 }

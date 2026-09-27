@@ -18,9 +18,9 @@ pub enum UiCommand {
         list: String,
         task: String,
     },
-    /// Select a task in the current list without moving the camera.
+    /// Select a planet in the current list without moving the camera.
     Inspect {
-        task: String,
+        planet: String,
     },
     ShowPage {
         page: u32,
@@ -91,21 +91,18 @@ pub fn apply(
             }
             UiCommand::FindTask { list: id, task } => {
                 if let Some(index) = list(id)
-                    && let Some(planet) = galaxy.systems[index]
-                        .tasks
-                        .iter()
-                        .position(|p| &p.id == task)
+                    && let Some(planet) = galaxy.systems[index].task_planet(task)
                 {
                     nav.select_task(index, planet, galaxy);
                 }
             }
-            UiCommand::Inspect { task } => {
-                if let Some(planet) = galaxy
+            UiCommand::Inspect { planet } => {
+                if let Some(index) = galaxy
                     .systems
                     .get(nav.system)
-                    .and_then(|s| s.tasks.iter().position(|p| &p.id == task))
+                    .and_then(|s| s.planets.iter().position(|p| &p.id == planet))
                 {
-                    nav.selected = Some(planet);
+                    nav.selected = Some(index);
                 }
             }
             UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
@@ -169,7 +166,7 @@ mod tests {
         let galaxy = space_simulation::demo_galaxy();
         assert!(galaxy.systems.len() > 1);
         let list = galaxy.systems[1].id.clone();
-        let task = galaxy.systems[1].tasks.last().unwrap().id.clone();
+        let task = galaxy.systems[1].tasks().last().unwrap().1.id.clone();
         let mut reordered = galaxy.clone();
         reordered.systems.reverse();
         let expected = reordered.systems.iter().position(|s| s.id == list).unwrap();
@@ -190,8 +187,13 @@ mod tests {
         let nav = app.world().resource::<Navigation>();
         let universe = app.world().resource::<Universe>();
         assert_eq!(nav.system, expected);
-        let selected = nav.selected.map(|i| &universe.0.systems[expected].tasks[i]);
-        assert_eq!(selected.map(|p| &p.id), Some(&task));
+        let selected = nav
+            .selected
+            .map(|i| &universe.0.systems[expected].planets[i]);
+        assert_eq!(
+            selected.and_then(|p| Some(&p.task.as_ref()?.id)),
+            Some(&task)
+        );
         assert!(!nav.labels);
         assert!(app.world().resource::<Clock>().0.paused);
     }
@@ -205,7 +207,7 @@ mod tests {
                     list: "missing".into(),
                 },
                 UiCommand::Inspect {
-                    task: "missing".into(),
+                    planet: "missing".into(),
                 },
             ],
         );

@@ -11,7 +11,8 @@ pub struct StarSystem {
     pub id: String,
     pub name: String,
     pub position_ly: [f64; 3],
-    pub tasks: Vec<TaskPlanet>,
+    /// Every planet of each page with tasks, innermost first; some carry a task.
+    pub planets: Vec<Planet>,
     /// One star per page, derived from the list and page.
     #[serde(default)]
     pub stars: Vec<Star>,
@@ -19,6 +20,8 @@ pub struct StarSystem {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Star {
+    /// Stable key that seeds the star and its planetary system.
+    pub id: String,
     pub page: u32,
     /// Spectral type, such as "G2 V".
     pub spectral: String,
@@ -47,61 +50,68 @@ pub struct Spin {
     pub locked: bool,
 }
 
+/// A generated planet, with the task mapped onto it, if any.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Planet {
+    /// Stable body ID: its star's ID and orbit index.
+    pub id: String,
+    /// Catalogue name, such as "Flight Operations 2c".
+    pub designation: String,
+    /// Page (star system) and orbit index within it.
+    pub page: u32,
+    pub orbit_index: u32,
+    pub orbit: Orbit,
+    pub radius_km: f64,
+    pub mass_earth: f64,
+    pub class: String,
+    /// Period ratio with the next planet in, outer:inner.
+    pub resonance: Option<[u32; 2]>,
+    pub spin: Spin,
+    pub task: Option<Task>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TaskPlanet {
-    /// Append-only list slot. Snapshots older than slots derive it from the
-    /// original whole-list orbit.
-    #[serde(default)]
-    pub slot: Option<u32>,
+pub struct Task {
+    /// Append-only list slot; it picks the task's page and planet.
+    pub slot: u32,
     pub id: String,
     pub name: String,
     pub description: String,
     pub status: String,
     /// ClickUp status group: "open", "custom", "done" or "closed".
-    #[serde(default)]
     pub status_type: String,
     /// The status's position on the list's board.
-    #[serde(default)]
     pub status_order: u32,
     pub colour: [u8; 3],
     pub assignees: Vec<String>,
     pub due_date_ms: Option<i64>,
     pub url: Option<String>,
-    pub radius_km: f64,
-    pub orbit: Orbit,
-    /// Page (star system) and orbit index within it, derived from the slot.
-    #[serde(default)]
-    pub page: u32,
-    #[serde(default)]
-    pub orbit_index: u32,
-    #[serde(default)]
-    pub mass_earth: f64,
-    #[serde(default)]
-    pub class: String,
-    /// Period ratio with the next planet in, outer:inner.
-    #[serde(default)]
-    pub resonance: Option<[u32; 2]>,
-    #[serde(default)]
-    pub spin: Spin,
 }
 
 pub const MIN_PLANETS: u32 = 7;
 pub const MAX_PLANETS: u32 = 14;
 
-impl TaskPlanet {
-    pub fn stable_slot(&self) -> u32 {
-        self.slot
-            .unwrap_or_else(|| ((self.orbit.semi_major_au - 0.55) / 0.65).round().max(0.0) as u32)
-    }
+/// Colour of a planet without a task.
+pub const UNTASKED_COLOUR: [u8; 3] = [150, 160, 180];
 
+impl Planet {
     pub fn page(&self) -> u32 {
         self.page
+    }
+
+    /// The task's name, else the designation.
+    pub fn label(&self) -> &str {
+        self.task.as_ref().map_or(&self.designation, |t| &t.name)
+    }
+
+    pub fn colour(&self) -> [u8; 3] {
+        self.task.as_ref().map_or(UNTASKED_COLOUR, |t| t.colour)
     }
 }
 
 impl StarSystem {
     pub fn pages(&self) -> Vec<u32> {
-        let mut pages: Vec<_> = self.tasks.iter().map(TaskPlanet::page).collect();
+        let mut pages: Vec<_> = self.planets.iter().map(Planet::page).collect();
         pages.sort_unstable();
         pages.dedup();
         if pages.is_empty() {
@@ -112,7 +122,7 @@ impl StarSystem {
 
     /// The page shown on arrival, without collecting every page.
     pub fn first_page(&self) -> u32 {
-        self.tasks.iter().map(TaskPlanet::page).min().unwrap_or(0)
+        self.planets.iter().map(Planet::page).min().unwrap_or(0)
     }
 
     pub fn star(&self, page: u32) -> Option<&Star> {
@@ -124,8 +134,21 @@ impl StarSystem {
         self.star(page).map_or(1.0, |s| s.mass_solar)
     }
 
-    pub fn on_page(&self, page: u32) -> impl Iterator<Item = &TaskPlanet> {
-        self.tasks.iter().filter(move |p| p.page() == page)
+    pub fn on_page(&self, page: u32) -> impl Iterator<Item = &Planet> {
+        self.planets.iter().filter(move |p| p.page() == page)
+    }
+
+    /// Tasks with their planets' indices.
+    pub fn tasks(&self) -> impl Iterator<Item = (usize, &Task)> {
+        self.planets
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| Some((i, p.task.as_ref()?)))
+    }
+
+    /// Index of the planet carrying a task.
+    pub fn task_planet(&self, task_id: &str) -> Option<usize> {
+        self.tasks().find(|(_, t)| t.id == task_id).map(|(i, _)| i)
     }
 }
 
@@ -136,59 +159,4 @@ pub struct Orbit {
     pub inclination_rad: f64,
     pub ascending_node_rad: f64,
     pub phase_rad: f64,
-}
-
-/// Demo tasks without bodies; `space_simulation::demo_galaxy` shapes them.
-pub fn demo_fixture() -> Galaxy {
-    let lists = [
-        (
-            "demo-flight",
-            "Flight Operations",
-            [0.0, 0.0, 0.0],
-            [
-                "Design the navigation console",
-                "Map the outer systems",
-                "Calibrate orbital telemetry",
-                "Test the jump drive",
-                "Review the mission briefing",
-                "Prepare launch checklist",
-            ],
-        ),
-        (
-            "demo-research",
-            "Deep Space Research",
-            [3.7, 0.65, -2.1],
-            [
-                "Survey a new exoplanet",
-                "Analyse stellar spectra",
-                "Deploy the sensor array",
-                "Chart the debris field",
-                "Process observatory data",
-                "Publish the expedition log",
-            ],
-        ),
-    ];
-    Galaxy {
-        source: "Demo · fixture tasks".into(),
-        systems: lists.into_iter().map(|(id, name, position_ly, names)| {
-            StarSystem {
-                id: id.into(), name: name.into(), position_ly, stars: Vec::new(),
-                tasks: names.into_iter().enumerate().map(|(i, name)| {
-                    let (status, status_type, status_order, colour) = match i % 3 {
-                        0 => ("in progress", "custom", 1, [92, 213, 242]),
-                        1 => ("to do", "open", 0, [169, 154, 238]),
-                        _ => ("complete", "done", 2, [100, 220, 169]),
-                    };
-                    TaskPlanet {
-                        slot: Some(i as u32),
-                        id: format!("{id}-{i}"), name: name.into(),
-                        description: "A fictional task for exploring Task Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".into(),
-                        status: status.into(), status_type: status_type.into(), status_order, colour, assignees: vec!["Mission control".into()],
-                        due_date_ms: None, url: None, radius_km: 0.0, orbit: Orbit::default(),
-                        page: 0, orbit_index: 0, mass_earth: 0.0, class: String::new(), resonance: None, spin: Spin::default(),
-                    }
-                }).collect(),
-            }
-        }).collect(),
-    }
 }

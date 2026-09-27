@@ -1,7 +1,7 @@
 //! Presentation layouts never modify orbital elements or simulation time.
 use crate::Navigation;
 use bevy::math::DVec3;
-use space_shared::{Galaxy, StarSystem, TaskPlanet};
+use space_shared::{Galaxy, Planet, StarSystem};
 use space_simulation::{LY_METRES, SUN_RADIUS_METRES, stable_hash};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -79,7 +79,7 @@ impl TableLayout {
         }
     }
 
-    pub fn position(&self, task: &TaskPlanet) -> DVec3 {
+    pub fn position(&self, task: &Planet) -> DVec3 {
         let row = f64::from(task.orbit_index);
         DVec3::new(0.0, 0.0, self.first + row * self.pitch)
     }
@@ -99,7 +99,7 @@ impl Navigation {
         let Some(planet) = galaxy
             .systems
             .get(self.system)
-            .and_then(|s| self.selected.and_then(|i| s.tasks.get(i)))
+            .and_then(|s| self.selected.and_then(|i| s.planets.get(i)))
         else {
             return;
         };
@@ -135,7 +135,7 @@ impl Navigation {
     }
 
     pub fn select_task(&mut self, system: usize, task: usize, galaxy: &Galaxy) {
-        let Some(planet) = galaxy.systems.get(system).and_then(|s| s.tasks.get(task)) else {
+        let Some(planet) = galaxy.systems.get(system).and_then(|s| s.planets.get(task)) else {
             return;
         };
         let view = self.view;
@@ -245,16 +245,15 @@ mod tests {
 
     fn large_galaxy() -> Galaxy {
         let mut galaxy = space_simulation::demo_galaxy();
-        let template = galaxy.systems[0].tasks[0].clone();
-        galaxy.systems[0].tasks = (0..50)
-            .map(|slot| {
-                let mut task = template.clone();
-                task.id = format!("task-{slot}");
-                task.slot = Some(slot);
-                task
+        let template = galaxy.systems[0].planets[0].task.clone().unwrap();
+        let tasks = (0..50)
+            .map(|slot| space_shared::Task {
+                id: format!("task-{slot}"),
+                slot,
+                ..template.clone()
             })
             .collect();
-        space_simulation::shape(&mut galaxy.systems[0]);
+        space_simulation::place(&mut galaxy.systems[0], tasks);
         galaxy
     }
 
@@ -270,23 +269,31 @@ mod tests {
                 page_capacity(&system.id, page)
             );
         }
-        let before = system.tasks.clone();
-        system.tasks.reverse();
-        system.tasks.retain(|p| p.stable_slot() != 12);
-        for task in &mut system.tasks {
+        let before = system.planets.clone();
+        system.planets.reverse();
+        system
+            .planets
+            .retain(|p| p.task.as_ref().is_none_or(|t| t.slot != 12));
+        for task in system.planets.iter_mut().filter_map(|p| p.task.as_mut()) {
             task.status = "complete".into();
             task.due_date_ms = Some(123);
         }
         space_simulation::shape(system);
-        for task in &mut system.tasks {
-            let original = before.iter().find(|p| p.id == task.id).unwrap();
-            assert_eq!((task.orbit, task.page), (original.orbit, original.page));
+        // Every planet keeps its body; the removed task leaves a bare planet.
+        assert_eq!(system.planets.len(), before.len());
+        for planet in &system.planets {
+            let original = before.iter().find(|p| p.id == planet.id).unwrap();
+            assert_eq!(
+                (planet.orbit, planet.page, planet.orbit_index),
+                (original.orbit, original.page, original.orbit_index)
+            );
+            let Some(task) = &planet.task else {
+                assert!(original.task.as_ref().is_none_or(|t| t.slot == 12));
+                continue;
+            };
+            assert_eq!(task.id, original.task.as_ref().unwrap().id);
             let slot: u32 = task.id.strip_prefix("task-").unwrap().parse().unwrap();
-            assert_eq!(task.page(), page_of_slot("demo-flight", slot).0);
-            // Snapshots older than slots used whole-list orbital radii.
-            task.slot = None;
-            task.orbit.semi_major_au = 0.55 + f64::from(slot) * 0.65;
-            assert_eq!(task.stable_slot(), slot);
+            assert_eq!(planet.page(), page_of_slot("demo-flight", slot).0);
         }
     }
 
@@ -315,7 +322,7 @@ mod tests {
         assert_ne!(page_position("list", 4), page_position("other", 4));
         let mut galaxy = large_galaxy();
         let page_four = page_position("list", 4);
-        galaxy.systems[0].tasks.retain(|task| task.page() != 1);
+        galaxy.systems[0].planets.retain(|task| task.page() != 1);
         assert_eq!(galaxy.systems[0].pages()[..2], [0, 2]);
         assert_eq!(page_position("list", 4), page_four);
     }
@@ -355,7 +362,7 @@ mod tests {
         let mut nav = Navigation::default();
         nav.preset(View::Constellation, &galaxy);
         nav.select_task(0, 42, &galaxy);
-        let page = galaxy.systems[0].tasks[42].page;
+        let page = galaxy.systems[0].planets[42].page;
         assert!(page > 0);
         assert_eq!(nav.page, page);
         assert_eq!(nav.selected, Some(42));

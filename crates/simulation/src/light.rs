@@ -155,6 +155,7 @@ mod tests {
 
     fn sun() -> Star {
         Star {
+            id: "sun".into(),
             page: 0,
             spectral: "G2 V".into(),
             kind: "Yellow dwarf".into(),

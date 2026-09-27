@@ -62,21 +62,30 @@
 - Keep orbital identity stable across API reordering and edits. SQLite slots are
   append-only per list, including when tasks disappear from a snapshot.
 - Changing task status or deadline must not change orbital elements.
+- Planets and tasks are separate: a `Planet` is a generated body with a stable
+  ID (its star's ID and orbit index) and an optional `Task`. Select and follow
+  planets by index into `StarSystem::planets`; find tasks with
+  `StarSystem::tasks`/`task_planet`. Task data (status, assignees, URL) never
+  lives on the body.
+- Generation is keyed by star ID. A list page's star is `star_id(list_id, page)`;
+  `space_simulation::star(id)`, `planetary_system(id)`, `planet_count(id)` and
+  `plane_tilt(id)` take any star ID. Changing a key moves every body it seeds.
 - Task pages are filled in order from append-only slots; each page's capacity is
   `page_capacity(list_id, page)`. A page's whole planetary system is generated at
-  once (`space_simulation::planetary_system`): masses, radii and orbits follow the
-  snow line, neighbours stay Hill-stable and some pairs are resonant. The slot's
-  index within its page picks its body. `shape` applies this on the server and
-  again on the client, so fixtures need only slots. Table layout is
-  presentation-only; leaving it restores current simulated positions. The table
-  keeps physical radii.
-- Each page has its own star (`space_simulation::star(list_id, page)`), drawn in
-  solar-neighbourhood proportions (mostly red dwarfs, a few giants and white
-  dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its radius
-  and temperature colour (`spectral_colour`) are drawn, and it shapes planet formation. Stars and
-  planets carry a `Spin`; planets and star spins draw from their own seeds, so
-  they never move an orbit. Planet mass is capped at 0.4% of the star's, or
-  Hill spacing cannot converge.
+  once: masses, radii and orbits follow the snow line, neighbours stay Hill-stable
+  and some pairs are resonant. The slot's index within its page picks its body.
+  Every page with a task gets all its planets, tasked or bare; a list without
+  tasks shows page 0's. `place` builds this from tasks and `shape` repeats it
+  from a system's own tasks, on the server and again on the client, so fixtures
+  need only slots. Table layout is presentation-only; leaving it restores current
+  simulated positions. The table keeps physical radii.
+- Each page has its own star (`space_simulation::star(&star_id(list_id, page))`),
+  drawn in solar-neighbourhood proportions (mostly red dwarfs, a few giants and
+  white dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its
+  radius and temperature colour (`spectral_colour`) are drawn, and it shapes
+  planet formation. Stars and planets carry a `Spin`; planets and star spins
+  draw from their own seeds, so they never move an orbit. Planet mass is capped
+  at 0.4% of the star's, or Hill spacing cannot converge.
 - Constellation view never moves stars: it keeps the current page's frame, fits
   all page stars from the current angle and draws links between them.
 - Each page has its own deterministic orbital-plane tilt (`page_tilt(list_id, page)`),

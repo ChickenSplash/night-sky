@@ -97,17 +97,16 @@ fn publish_galaxy(universe: Res<Universe>) {
                     id: &s.id,
                     name: &s.name,
                     tasks: s
-                        .tasks
-                        .iter()
-                        .map(|p| TaskSummary {
-                            id: &p.id,
-                            name: &p.name,
-                            colour: p.colour,
-                            page: p.page(),
-                            status: &p.status,
-                            status_type: &p.status_type,
-                            status_order: p.status_order,
-                            due_date_ms: p.due_date_ms,
+                        .tasks()
+                        .map(|(i, t)| TaskSummary {
+                            id: &t.id,
+                            name: &t.name,
+                            colour: t.colour,
+                            page: s.planets[i].page(),
+                            status: &t.status,
+                            status_type: &t.status_type,
+                            status_order: t.status_order,
+                            due_date_ms: t.due_date_ms,
                         })
                         .collect(),
                 })
@@ -139,13 +138,15 @@ struct SystemState<'a> {
     node_deg: f64,
 }
 
+/// The selected planet; the task fields are absent for a planet without one.
 #[derive(Serialize)]
 struct TaskDetail<'a> {
     name: &'a str,
-    status: &'a str,
+    designation: &'a str,
+    status: Option<&'a str>,
     colour: [u8; 3],
-    description: &'a str,
-    assignees: &'a [String],
+    description: Option<&'a str>,
+    assignees: Option<&'a [String]>,
     due_date_ms: Option<i64>,
     url: Option<&'a str>,
     semi_major_au: f64,
@@ -190,7 +191,7 @@ fn publish_state(
     mut last: Local<String>,
 ) {
     let system = universe.0.systems.get(nav.system);
-    let planet = system.and_then(|s| nav.selected.and_then(|i| s.tasks.get(i)));
+    let planet = system.and_then(|s| nav.selected.and_then(|i| s.planets.get(i)));
     let picked = nav.picked.and_then(|(index, page)| {
         let star = universe.0.systems.get(index)?;
         Some(Picked {
@@ -206,7 +207,7 @@ fn publish_state(
         pages: system.map(|s| s.pages()).unwrap_or_default(),
         view: nav.view,
         atlas: nav.atlas,
-        task: planet.map(|p| p.id.as_str()),
+        task: planet.and_then(|p| Some(p.task.as_ref()?.id.as_str())),
         following: nav.following,
         paused: clock.0.paused,
         rate: clock.0.rate,
@@ -225,21 +226,25 @@ fn publish_state(
             SystemState {
                 name: &s.name,
                 star: s.star(nav.page),
-                page_tasks: s.on_page(nav.page).count(),
-                tasks: s.tasks.len(),
+                page_tasks: s
+                    .tasks()
+                    .filter(|&(i, _)| s.planets[i].page() == nav.page)
+                    .count(),
+                tasks: s.tasks().count(),
                 star_ly: crate::scene::page_origin_ly(s, nav.page).to_array(),
                 tilt_deg: inclination.to_degrees(),
                 node_deg: node.to_degrees(),
             }
         }),
         selected: planet.zip(system).map(|(p, s)| TaskDetail {
-            name: &p.name,
-            status: &p.status,
-            colour: p.colour,
-            description: &p.description,
-            assignees: &p.assignees,
-            due_date_ms: p.due_date_ms,
-            url: p.url.as_deref(),
+            name: p.label(),
+            designation: &p.designation,
+            status: p.task.as_ref().map(|t| t.status.as_str()),
+            colour: p.colour(),
+            description: p.task.as_ref().map(|t| t.description.as_str()),
+            assignees: p.task.as_ref().map(|t| t.assignees.as_slice()),
+            due_date_ms: p.task.as_ref().and_then(|t| t.due_date_ms),
+            url: p.task.as_ref().and_then(|t| t.url.as_deref()),
             semi_major_au: p.orbit.semi_major_au,
             eccentricity: p.orbit.eccentricity,
             period_days: period_seconds(&p.orbit, s.mass(p.page())) / 86_400.0,

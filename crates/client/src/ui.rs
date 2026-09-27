@@ -199,7 +199,7 @@ impl Panels<'_> {
             .show(ui, |ui| {
                 for (i, system) in galaxy.systems.iter().enumerate() {
                     let active = nav.system == i && !nav.atlas;
-                    let text = format!("{}\n{} task planets", system.name, system.tasks.len());
+                    let text = format!("{}\n{} task planets", system.name, system.tasks().count());
                     if ui
                         .add_sized(
                             [ui.available_width(), 54.0],
@@ -231,9 +231,7 @@ impl Panels<'_> {
             .filter(|(si, _)| !query.is_empty() || *si == nav.system)
             .flat_map(|(si, system)| {
                 system
-                    .tasks
-                    .iter()
-                    .enumerate()
+                    .tasks()
                     .filter(|(_, task)| {
                         query.is_empty() || task.name.to_lowercase().contains(&query)
                     })
@@ -244,10 +242,10 @@ impl Panels<'_> {
             .id_salt("task-index")
             .max_height((ui.available_height() - 180.0).clamp(60.0, 240.0))
             .show_rows(ui, 30.0, matches.len(), |ui, range| {
-                for &(si, pi, system, planet) in &matches[range] {
-                    let c = planet.colour;
+                for &(si, pi, system, task) in &matches[range] {
+                    let c = task.colour;
                     let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
-                    let text = egui::RichText::new(format!("· {}", planet.name)).color(tint);
+                    let text = egui::RichText::new(format!("· {}", task.name)).color(tint);
                     if ui
                         .add_sized(
                             [ui.available_width(), 30.0],
@@ -260,7 +258,7 @@ impl Panels<'_> {
                     {
                         self.out.push(UiCommand::FindTask {
                             list: system.id.clone(),
-                            task: planet.id.clone(),
+                            task: task.id.clone(),
                         });
                     }
                 }
@@ -361,8 +359,11 @@ impl Panels<'_> {
             egui::RichText::new(format!(
                 "System {} · {} of {} tasks",
                 nav.page + 1,
-                system.tasks.iter().filter(|p| p.page() == nav.page).count(),
-                system.tasks.len()
+                system
+                    .tasks()
+                    .filter(|&(i, _)| system.planets[i].page() == nav.page)
+                    .count(),
+                system.tasks().count()
             ))
             .color(MUTED),
         );
@@ -405,33 +406,45 @@ impl Panels<'_> {
             self.report = true;
         }
         ui.separator();
-        if let Some(planet) = nav.selected.and_then(|i| system.tasks.get(i)) {
-            heading(ui, "SELECTED TASK");
-            ui.add_space(4.0);
-            ui.heading(&planet.name);
-            let c = planet.colour;
-            ui.colored_label(
-                egui::Color32::from_rgb(c[0], c[1], c[2]),
-                planet.status.to_uppercase(),
+        if let Some(planet) = nav.selected.and_then(|i| system.planets.get(i)) {
+            heading(
+                ui,
+                if planet.task.is_some() {
+                    "SELECTED TASK"
+                } else {
+                    "SELECTED PLANET"
+                },
             );
-            ui.label(&planet.description);
-            ui.separator();
-            ui.label(format!(
-                "Assigned: {}",
-                if planet.assignees.is_empty() {
-                    "Nobody".into()
-                } else {
-                    planet.assignees.join(", ")
+            ui.add_space(4.0);
+            ui.heading(planet.label());
+            if let Some(task) = &planet.task {
+                let c = task.colour;
+                ui.colored_label(
+                    egui::Color32::from_rgb(c[0], c[1], c[2]),
+                    task.status.to_uppercase(),
+                );
+                ui.label(&task.description);
+                ui.separator();
+                ui.label(format!(
+                    "Assigned: {}",
+                    if task.assignees.is_empty() {
+                        "Nobody".into()
+                    } else {
+                        task.assignees.join(", ")
+                    }
+                ));
+                if let Some(due) = task.due_date_ms {
+                    let now = crate::network::now_ms();
+                    let days = (due - now) as f64 / 86_400_000.0;
+                    ui.label(if days < 0.0 {
+                        format!("Due date: {:.1} days ago", -days)
+                    } else {
+                        format!("Due in {days:.1} days")
+                    });
                 }
-            ));
-            if let Some(due) = planet.due_date_ms {
-                let now = crate::network::now_ms();
-                let days = (due - now) as f64 / 86_400_000.0;
-                ui.label(if days < 0.0 {
-                    format!("Due date: {:.1} days ago", -days)
-                } else {
-                    format!("Due in {days:.1} days")
-                });
+            } else {
+                ui.label(egui::RichText::new(&planet.designation).color(MUTED));
+                ui.label(egui::RichText::new("No task on this planet.").color(MUTED));
             }
             ui.add_space(6.0);
             heading(ui, "ORBITAL ELEMENTS");
@@ -480,7 +493,7 @@ impl Panels<'_> {
             if ui.button("◎  Follow this planet").clicked() {
                 self.out.push(UiCommand::Follow);
             }
-            if let Some(url) = &planet.url {
+            if let Some(url) = planet.task.as_ref().and_then(|t| t.url.as_ref()) {
                 ui.hyperlink_to("Open task in ClickUp ↗", url);
             }
         } else {
@@ -572,7 +585,11 @@ fn save_bug_report(
         nav.selected,
         galaxy.source,
         galaxy.systems.len(),
-        galaxy.systems.iter().map(|s| s.tasks.len()).sum::<usize>(),
+        galaxy
+            .systems
+            .iter()
+            .map(|s| s.planets.len())
+            .sum::<usize>(),
         clock.seconds,
         clock.rate,
         clock.paused,
@@ -732,9 +749,9 @@ fn canvas_overlay(
         } else if hovered && click {
             match marker.kind {
                 MarkerKind::Planet(index) => {
-                    if let Some(task) = system.and_then(|s| s.tasks.get(index)) {
+                    if let Some(planet) = system.and_then(|s| s.planets.get(index)) {
                         out.push(UiCommand::Inspect {
-                            task: task.id.clone(),
+                            planet: planet.id.clone(),
                         });
                     }
                 }

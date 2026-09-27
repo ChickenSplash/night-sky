@@ -257,7 +257,7 @@ fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: Re
                     .0
                     .systems
                     .get(nav.system)
-                    .and_then(|s| nav.selected.and_then(|i| s.tasks.get(i)))
+                    .and_then(|s| nav.selected.and_then(|i| s.planets.get(i)))
                     .map(|p| p.id.clone());
                 let same_system = old_system
                     .as_ref()
@@ -265,13 +265,17 @@ fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: Re
                 nav.notice = CONNECTED.into();
                 if let Some(index) = same_system {
                     nav.system = index;
-                    nav.selected = old_task
-                        .and_then(|id| galaxy.systems[index].tasks.iter().position(|p| p.id == id));
+                    nav.selected = old_task.and_then(|id| {
+                        galaxy.systems[index]
+                            .planets
+                            .iter()
+                            .position(|p| p.id == id)
+                    });
                     if nav.selected.is_none() {
                         nav.following = false;
                     }
                     let system = &galaxy.systems[index];
-                    if let Some(task) = nav.selected.map(|i| &system.tasks[i]) {
+                    if let Some(task) = nav.selected.map(|i| &system.planets[i]) {
                         nav.page = task.page();
                     } else if system.on_page(nav.page).next().is_none() {
                         nav.page = system.first_page();

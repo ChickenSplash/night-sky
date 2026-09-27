@@ -155,8 +155,8 @@ fn hot_tilt(rng: &mut Rng) -> f64 {
     }
 }
 
-pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
-    let mut rng = Rng::new(&format!("{list_id}:page-{page}:star"));
+pub(crate) fn formation(id: &str) -> Formation {
+    let mut rng = Rng::new(&format!("{id}:star"));
     let mut roll = rng.unit() * 100.0;
     let &(kind, _, cool, hot) = CENSUS
         .iter()
@@ -177,7 +177,8 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
             let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
             let (name, _, _) = letter(kelvin);
             let star = Star {
-                page,
+                id: id.into(),
+                page: 0,
                 spectral: format!("{} III", subclass(kelvin)),
                 kind: match name {
                     'M' => "Red giant",
@@ -211,7 +212,8 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
             let radius = 0.0126 * (0.6 / mass).cbrt();
             let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
             let star = Star {
-                page,
+                id: id.into(),
+                page: 0,
                 spectral: format!("DA{}", (50_400.0 / kelvin).round().clamp(1.0, 9.0)),
                 kind: "White dwarf".into(),
                 mass_solar: mass,
@@ -263,7 +265,8 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
                 _ => "Blue-white main-sequence star",
             };
             let star = Star {
-                page,
+                id: id.into(),
+                page: 0,
                 spectral: format!("{} V", subclass(kelvin)),
                 kind: kind_name.into(),
                 mass_solar: mass,
@@ -291,9 +294,9 @@ pub(crate) fn formation(list_id: &str, page: u32) -> Formation {
     }
 }
 
-/// The star of a page.
-pub fn star(list_id: &str, page: u32) -> Star {
-    formation(list_id, page).star
+/// The star with this ID, on page 0.
+pub fn star(id: &str) -> Star {
+    formation(id).star
 }
 
 /// Rotation angle about the spin axis at a simulation time.
@@ -309,7 +312,9 @@ mod tests {
     use super::*;
 
     fn stars() -> Vec<Star> {
-        (0..20_000).map(|page| star("list", page)).collect()
+        (0..20_000)
+            .map(|page| star(&crate::star_id("list", page)))
+            .collect()
     }
 
     #[test]

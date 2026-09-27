@@ -172,7 +172,9 @@ is available it retains its last data, initially the clearly labelled demo.
   angle until every page star fits and joins them with lines. Orbit and Task table
   retain physical orbital distances. Camera flights roll between planes; the atlas
   uses galactic axes.
-- Each page is its own planetary system of 7 to 14 slots, generated as a whole:
+- Each page is its own planetary system of 7 to 14 planets, generated as a whole
+  from its star's ID. Tasks fill the planets in slot order; the rest stay bare,
+  with catalogue names such as "Flight Operations 2c". Composition follows:
   rocky worlds and sub-Neptunes inside the snow line, giants beyond it, dwarf
   planets far out. Sizes run from Pluto to just past Jupiter. Neighbours sit at
   least ten mutual Hill radii apart without crossing orbits, and some pairs lock

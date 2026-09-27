@@ -37,7 +37,11 @@ impl Link {
             info!(
                 "Galaxy received: {} systems, {} tasks ({})",
                 galaxy.systems.len(),
-                galaxy.systems.iter().map(|s| s.tasks.len()).sum::<usize>(),
+                galaxy
+                    .systems
+                    .iter()
+                    .map(|s| s.planets.len())
+                    .sum::<usize>(),
                 galaxy.source
             );
         }

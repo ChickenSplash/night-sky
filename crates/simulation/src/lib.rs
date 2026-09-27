@@ -98,7 +98,7 @@ pub fn plane_tilt(key: &str) -> [f64; 3] {
 
 /// Each page is its own star system, with its own orbital plane.
 pub fn page_tilt(list_id: &str, page: u32) -> [f64; 3] {
-    plane_tilt(&format!("{list_id}:page-{page}"))
+    plane_tilt(&star_id(list_id, page))
 }
 
 #[cfg(test)]

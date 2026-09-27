@@ -1,4 +1,4 @@
-//! Procedural planetary systems: one per page, generated as a whole so every
+//! Procedural planetary systems: one per star, generated as a whole so every
 //! planet's mass, size and orbit is consistent with its neighbours.
 //!
 //! - Planet counts vary from `MIN_PLANETS` to `MAX_PLANETS` per system.
@@ -13,9 +13,9 @@
 
 use crate::star::formation;
 use crate::{period_seconds, stable_hash};
-use space_shared::{Galaxy, MAX_PLANETS, MIN_PLANETS, Orbit, Spin, StarSystem};
+use space_shared::{Galaxy, MAX_PLANETS, MIN_PLANETS, Orbit, Planet, Spin, StarSystem, Task};
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     f64::consts::{PI, TAU},
 };
 
@@ -101,11 +101,21 @@ impl Rng {
     }
 }
 
-/// Number of planets in a page's system.
-pub fn page_capacity(list_id: &str, page: u32) -> u32 {
+/// ID of a list page's star, which seeds the star and its planets.
+pub fn star_id(list_id: &str, page: u32) -> String {
+    format!("{list_id}:page-{page}")
+}
+
+/// Number of planets around a star.
+pub fn planet_count(star: &str) -> u32 {
     MIN_PLANETS
-        + (stable_hash(&format!("{list_id}:page-{page}:planets"))
-            % u64::from(MAX_PLANETS - MIN_PLANETS + 1)) as u32
+        + (stable_hash(&format!("{star}:planets")) % u64::from(MAX_PLANETS - MIN_PLANETS + 1))
+            as u32
+}
+
+/// Number of planets, and so of task slots, in a page's system.
+pub fn page_capacity(list_id: &str, page: u32) -> u32 {
+    planet_count(&star_id(list_id, page))
 }
 
 /// Page and orbit index within the page for an append-only list slot.
@@ -197,10 +207,10 @@ fn stable(inner: &Body, outer_au: f64, outer_e: f64, outer_mass: f64, star: f64)
             >= 2.0 * 3f64.sqrt() * hill
 }
 
-/// The whole planetary system of one page, innermost first.
-pub fn planetary_system(list_id: &str, page: u32) -> Vec<Body> {
-    let formed = formation(list_id, page);
-    let ordinary = generate_system(list_id, page, &formed, false);
+/// The whole planetary system of one star, innermost first.
+pub fn planetary_system(star: &str) -> Vec<Body> {
+    let formed = formation(star);
+    let ordinary = generate_system(star, &formed, false);
     if ordinary.last().is_none_or(|body| {
         body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity) <= MAX_SYSTEM_APOAPSIS_AU
     }) {
@@ -209,26 +219,21 @@ pub fn planetary_system(list_id: &str, page: u32) -> Vec<Body> {
         // A crowded page around an evolved star can otherwise push its outer
         // bodies thousands of AU out. Form a compact, low-mass system instead;
         // reducing mass makes Hill-stable spacing possible within the disc.
-        generate_system(list_id, page, &formed, true)
+        generate_system(star, &formed, true)
     }
 }
 
-fn generate_system(
-    list_id: &str,
-    page: u32,
-    formed: &crate::star::Formation,
-    compact: bool,
-) -> Vec<Body> {
+fn generate_system(star: &str, formed: &crate::star::Formation, compact: bool) -> Vec<Body> {
     let suffix = if compact { ":compact" } else { "" };
-    let mut rng = Rng::new(&format!("{list_id}:page-{page}:system{suffix}"));
+    let mut rng = Rng::new(&format!("{star}:system{suffix}"));
     // Spins draw from their own sequence, so they never move an orbit.
-    let mut spins = Rng::new(&format!("{list_id}:page-{page}:spins"));
+    let mut spins = Rng::new(&format!("{star}:spins"));
     let (mass_solar, snow) = (formed.star.mass_solar, formed.snow_au);
     let light = snow / 2.7;
     // A few systems form tight resonant chains, like TRAPPIST-1 or Kepler-223.
     let chain = !compact && rng.chance(0.12);
     let mut bodies: Vec<Body> = Vec::new();
-    for _ in 0..page_capacity(list_id, page) {
+    for _ in 0..planet_count(star) {
         let previous = bodies.last();
         let tentative = match previous {
             Some(p) if compact => p.orbit.semi_major_au * rng.log_range(1.12, 1.22),
@@ -369,47 +374,68 @@ fn planet_spin(rng: &mut Rng, class: Class, orbit: &Orbit, star_mass: f64) -> Sp
     }
 }
 
-/// Gives every task the page, orbit and physical body of its slot. Deterministic,
-/// so repeating it on an already shaped system changes nothing.
+/// Places tasks by slot and fills every page they reach with its star's whole
+/// planetary system. Deterministic, so repeating it on an already shaped system
+/// changes nothing.
 pub fn shape(system: &mut StarSystem) {
-    let mut systems: HashMap<u32, Vec<Body>> = HashMap::new();
-    for task in &mut system.tasks {
-        let slot = task.stable_slot();
-        let (page, index) = page_of_slot(&system.id, slot);
-        let body = &systems
-            .entry(page)
-            .or_insert_with(|| planetary_system(&system.id, page))[index as usize];
-        task.slot = Some(slot);
-        task.page = page;
-        task.orbit_index = index;
-        task.orbit = body.orbit;
-        task.radius_km = body.radius_km;
-        task.mass_earth = body.mass_earth;
-        task.class = body.class.name().into();
-        task.resonance = body.resonance;
-        task.spin = body.spin;
-    }
-    system.stars = system
-        .pages()
+    let tasks = std::mem::take(&mut system.planets)
         .into_iter()
-        .map(|page| crate::star(&system.id, page))
+        .filter_map(|p| p.task)
         .collect();
+    place(system, tasks);
+}
+
+/// Replaces a system's planets and stars with those of the pages the tasks'
+/// slots fall on, or of page 0 when there are no tasks.
+pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
+    let empty = |page| vec![None; page_capacity(&system.id, page) as usize];
+    let mut pages: BTreeMap<u32, Vec<Option<Task>>> = BTreeMap::new();
+    for task in tasks {
+        let (page, index) = page_of_slot(&system.id, task.slot);
+        pages.entry(page).or_insert_with(|| empty(page))[index as usize] = Some(task);
+    }
+    if pages.is_empty() {
+        pages.insert(0, empty(0));
+    }
+    system.planets.clear();
+    system.stars.clear();
+    for (page, tasks) in pages {
+        let star = star_id(&system.id, page);
+        for (index, (body, task)) in planetary_system(&star).into_iter().zip(tasks).enumerate() {
+            system.planets.push(Planet {
+                id: format!("{star}/{index}"),
+                // Exoplanet style: the innermost planet is b.
+                designation: format!(
+                    "{} {}{}",
+                    system.name,
+                    page + 1,
+                    (b'b' + index as u8) as char
+                ),
+                page,
+                orbit_index: index as u32,
+                orbit: body.orbit,
+                radius_km: body.radius_km,
+                mass_earth: body.mass_earth,
+                class: body.class.name().into(),
+                resonance: body.resonance,
+                spin: body.spin,
+                task,
+            });
+        }
+        system.stars.push(space_shared::Star {
+            page,
+            ..crate::star(&star)
+        });
+    }
 }
 
 pub fn shape_galaxy(galaxy: &mut Galaxy) {
     galaxy.systems.iter_mut().for_each(shape);
 }
 
-pub fn demo_galaxy() -> Galaxy {
-    let mut galaxy = space_shared::demo_fixture();
-    populate_demo(&mut galaxy);
-    shape_galaxy(&mut galaxy);
-    galaxy
-}
-
 /// Reproducible fictional lists. Stable IDs and slots keep every demo planet in
 /// the same orbit across launches, while each list has several page stars.
-fn populate_demo(galaxy: &mut Galaxy) {
+pub fn demo_galaxy() -> Galaxy {
     use fake::{
         Fake,
         faker::lorem::en::Sentence,
@@ -417,24 +443,66 @@ fn populate_demo(galaxy: &mut Galaxy) {
         rand::{SeedableRng, rngs::StdRng},
     };
 
-    let mut rng = StdRng::seed_from_u64(0x5441_534b_5350_4143);
-    let template = galaxy.systems[0].tasks[0].clone();
-    let additional = [
-        ("demo-observatory", "Observatory Network"),
-        ("demo-expedition", "Expedition Planning"),
-        ("demo-engineering", "Station Engineering"),
-        ("demo-archives", "Celestial Archives"),
+    let lists = [
+        (
+            "demo-flight",
+            "Flight Operations",
+            Some([0.0, 0.0, 0.0]),
+            [
+                "Design the navigation console",
+                "Map the outer systems",
+                "Calibrate orbital telemetry",
+                "Test the jump drive",
+                "Review the mission briefing",
+                "Prepare launch checklist",
+            ]
+            .as_slice(),
+            80,
+        ),
+        (
+            "demo-research",
+            "Deep Space Research",
+            Some([3.7, 0.65, -2.1]),
+            [
+                "Survey a new exoplanet",
+                "Analyse stellar spectra",
+                "Deploy the sensor array",
+                "Chart the debris field",
+                "Process observatory data",
+                "Publish the expedition log",
+            ]
+            .as_slice(),
+            74,
+        ),
+        (
+            "demo-observatory",
+            "Observatory Network",
+            None,
+            [].as_slice(),
+            84,
+        ),
+        (
+            "demo-expedition",
+            "Expedition Planning",
+            None,
+            [].as_slice(),
+            76,
+        ),
+        (
+            "demo-engineering",
+            "Station Engineering",
+            None,
+            [].as_slice(),
+            91,
+        ),
+        (
+            "demo-archives",
+            "Celestial Archives",
+            None,
+            [].as_slice(),
+            68,
+        ),
     ];
-    for (id, name) in additional {
-        let mut system = galaxy.systems[0].clone();
-        system.id = id.into();
-        system.name = name.into();
-        system.position_ly = crate::star_position(id);
-        system.tasks.clear();
-        galaxy.systems.push(system);
-    }
-
-    let counts = [80, 74, 84, 76, 91, 68];
     let verbs = [
         "Survey",
         "Calibrate",
@@ -459,32 +527,62 @@ fn populate_demo(galaxy: &mut Galaxy) {
         "observation plan",
         "flight computer",
     ];
-    for (system, count) in galaxy.systems.iter_mut().zip(counts) {
-        for slot in system.tasks.len()..count {
-            let mut task = template.clone();
-            task.slot = Some(slot as u32);
-            task.id = format!("{}-{slot}", system.id);
-            task.name = format!(
-                "{} the {} · sector {}",
-                verbs[(slot + system.id.len()) % verbs.len()],
-                subjects[(slot / verbs.len() + slot) % subjects.len()],
-                slot / 12 + 1,
-            );
-            task.description = Sentence(8..16).fake_with_rng::<String, _>(&mut rng);
-            task.assignees = vec![Name().fake_with_rng::<String, _>(&mut rng)];
-            let (status, status_type, status_order, colour) = match slot % 3 {
-                0 => ("in progress", "custom", 1, [92, 213, 242]),
-                1 => ("to do", "open", 0, [169, 154, 238]),
-                _ => ("complete", "done", 2, [100, 220, 169]),
-            };
-            task.status = status.into();
-            task.status_type = status_type.into();
-            task.status_order = status_order;
-            task.colour = colour;
-            system.tasks.push(task);
-        }
+    let mut rng = StdRng::seed_from_u64(0x5441_534b_5350_4143);
+    let mut galaxy = Galaxy {
+        source: "Demo · generated fictional tasks".into(),
+        systems: Vec::new(),
+    };
+    for (id, name, position_ly, named, count) in lists {
+        let tasks = (0..count)
+            .map(|slot| {
+                let (status, status_type, status_order, colour) = match slot % 3 {
+                    0 => ("in progress", "custom", 1, [92, 213, 242]),
+                    1 => ("to do", "open", 0, [169, 154, 238]),
+                    _ => ("complete", "done", 2, [100, 220, 169]),
+                };
+                let (name, description, assignee) = match named.get(slot) {
+                    Some(name) => (
+                        (*name).to_owned(),
+                        "A fictional task for exploring Task Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".to_owned(),
+                        "Mission control".to_owned(),
+                    ),
+                    None => (
+                        format!(
+                            "{} the {} · sector {}",
+                            verbs[(slot + id.len()) % verbs.len()],
+                            subjects[(slot / verbs.len() + slot) % subjects.len()],
+                            slot / 12 + 1,
+                        ),
+                        Sentence(8..16).fake_with_rng(&mut rng),
+                        Name().fake_with_rng(&mut rng),
+                    ),
+                };
+                Task {
+                    slot: slot as u32,
+                    id: format!("{id}-{slot}"),
+                    name,
+                    description,
+                    status: status.into(),
+                    status_type: status_type.into(),
+                    status_order,
+                    colour,
+                    assignees: vec![assignee],
+                    due_date_ms: None,
+                    url: None,
+                }
+            })
+            .collect();
+        let mut system = StarSystem {
+            id: id.into(),
+            name: name.into(),
+            position_ly: position_ly.unwrap_or_else(|| crate::star_position(id)),
+            planets: Vec::new(),
+            stars: Vec::new(),
+        };
+        place(&mut system, tasks);
+        galaxy.systems.push(system);
     }
-    galaxy.source = "Demo · generated fictional tasks".into();
+    galaxy
 }
 
 #[cfg(test)]
@@ -497,23 +595,68 @@ mod tests {
         assert_eq!(first, demo_galaxy());
         assert_eq!(first.systems.len(), 6);
         assert_eq!(
-            first.systems.iter().map(|s| s.tasks.len()).sum::<usize>(),
+            first
+                .systems
+                .iter()
+                .map(|s| s.tasks().count())
+                .sum::<usize>(),
             473
         );
         let mut ids = std::collections::HashSet::new();
         for system in &first.systems {
             assert!(system.pages().len() >= 5);
             assert_eq!(system.pages().len(), system.stars.len());
-            for (slot, task) in system.tasks.iter().enumerate() {
-                assert_eq!(task.stable_slot(), slot as u32);
+            for (slot, (_, task)) in system.tasks().enumerate() {
+                assert_eq!(task.slot, slot as u32);
                 assert!(ids.insert(&task.id));
                 assert!(task.url.is_none());
             }
         }
     }
 
+    #[test]
+    fn every_planet_of_a_tasked_page_exists_and_tasks_keep_their_bodies() {
+        let mut system = demo_galaxy().systems.remove(0);
+        for page in system.pages() {
+            let star = star_id(&system.id, page);
+            let bodies = planetary_system(&star);
+            let planets: Vec<_> = system.on_page(page).collect();
+            assert_eq!(planets.len(), bodies.len());
+            for (planet, body) in planets.iter().zip(&bodies) {
+                assert_eq!(planet.orbit, body.orbit);
+                assert_eq!(planet.id, format!("{star}/{}", planet.orbit_index));
+            }
+            assert_eq!(system.star(page).unwrap().id, star);
+        }
+        // The last page is only partly tasked; the rest are bare planets.
+        assert!(system.planets.iter().any(|p| p.task.is_none()));
+        let before = system.clone();
+        shape(&mut system);
+        assert_eq!(system, before);
+        // Without tasks, a list still has its first star's planets.
+        system.planets.clear();
+        shape(&mut system);
+        assert_eq!(system.pages(), [0]);
+        assert_eq!(system.planets.len() as u32, page_capacity(&system.id, 0));
+    }
+
+    #[test]
+    fn systems_are_keyed_by_star() {
+        let star = star_id("list", 3);
+        assert_eq!(star, "list:page-3");
+        assert_eq!(
+            planetary_system(&star).len() as u32,
+            page_capacity("list", 3)
+        );
+        assert_eq!(crate::star(&star).id, star);
+        assert_ne!(
+            planetary_system("elsewhere")[0].orbit,
+            planetary_system(&star)[0].orbit
+        );
+    }
+
     fn systems() -> impl Iterator<Item = Vec<Body>> {
-        (0..400).map(|page| planetary_system("list", page))
+        (0..400).map(|page| planetary_system(&star_id("list", page)))
     }
 
     #[test]
@@ -554,7 +697,7 @@ mod tests {
     #[test]
     fn neighbours_are_hill_stable_and_never_cross() {
         for (page, bodies) in systems().enumerate() {
-            let star = formation("list", page as u32).star.mass_solar;
+            let star = formation(&star_id("list", page as u32)).star.mass_solar;
             for pair in bodies.windows(2) {
                 let (inner, outer) = (&pair[0], &pair[1]);
                 assert!(outer.orbit.semi_major_au > inner.orbit.semi_major_au);
@@ -574,15 +717,16 @@ mod tests {
         let mut compact_count = 0;
         for list in ["list", "demo-flight", "demo-research"] {
             for page in 0..1_000 {
-                let formed = formation(list, page);
-                let ordinary = generate_system(list, page, &formed, false);
+                let star = star_id(list, page);
+                let formed = formation(&star);
+                let ordinary = generate_system(&star, &formed, false);
                 if ordinary.last().is_some_and(|body| {
                     body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity)
                         > MAX_SYSTEM_APOAPSIS_AU
                 }) {
                     compact_count += 1;
                 }
-                let bodies = planetary_system(list, page);
+                let bodies = planetary_system(&star);
                 assert_eq!(bodies.len(), page_capacity(list, page) as usize);
                 for body in &bodies {
                     let apoapsis = body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity);
@@ -631,7 +775,7 @@ mod tests {
     #[test]
     fn composition_follows_the_snow_line() {
         for (page, bodies) in systems().enumerate() {
-            let formed = formation("list", page as u32);
+            let formed = formation(&star_id("list", page as u32));
             for body in bodies {
                 if body.orbit.semi_major_au < 0.7 * formed.snow_au {
                     assert!(matches!(body.class, Class::Rocky | Class::SubNeptune));

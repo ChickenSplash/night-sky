@@ -221,7 +221,7 @@ pub fn place_camera(
     nav.fit_preset(system);
     if nav.following
         && !nav.atlas
-        && let Some(planet) = nav.selected.and_then(|i| system.tasks.get(i))
+        && let Some(planet) = nav.selected.and_then(|i| system.planets.get(i))
     {
         nav.target = DVec3::from_array(position(
             &planet.orbit,
@@ -758,7 +758,7 @@ impl Canvas<'_> {
                 );
             }
         }
-        for (index, planet) in system.tasks.iter().enumerate() {
+        for (index, planet) in system.planets.iter().enumerate() {
             if planet.page() != pose.page {
                 continue;
             }
@@ -776,7 +776,7 @@ impl Canvas<'_> {
                 physical
             };
             let radius = orbital_radius + (physical - orbital_radius) * pose.layout;
-            let tint = colour(planet.colour);
+            let tint = colour(planet.colour());
             let basis = spin_basis(self.frame, &planet.spin, seconds);
             if nav.realistic
                 && let Some(per_pixel) = self.per_pixel(centre)
@@ -801,8 +801,8 @@ impl Canvas<'_> {
                 markers.push(Marker {
                     point,
                     radius: pixels.unwrap_or(6.0).max(5.0),
-                    label: planet.name.clone(),
-                    colour: planet.colour,
+                    label: planet.label().to_owned(),
+                    colour: planet.colour(),
                     kind: MarkerKind::Planet(index),
                 });
             }
@@ -863,7 +863,7 @@ pub fn draw(
         let followed = nav
             .selected
             .filter(|_| nav.following)
-            .and_then(|i| system.tasks.get(i))
+            .and_then(|i| system.planets.get(i))
             .filter(|p| p.page() == pose.page)
             .map(|p| {
                 DVec3::from_array(position(&p.orbit, system.mass(pose.page), clock.0.seconds))
@@ -912,8 +912,8 @@ mod tests {
         let mut system = space_simulation::demo_galaxy().systems.remove(0);
         let page = system.first_page();
         let normal = planet_visibility_range(&system, page);
-        system.tasks[0].orbit.semi_major_au = 5_183.534;
-        system.tasks[0].orbit.eccentricity = 0.057;
+        system.planets[0].orbit.semi_major_au = 5_183.534;
+        system.planets[0].orbit.eccentricity = 0.057;
         let apoapsis = 5_183.534 * 1.057 * AU_METRES;
         let wide = planet_visibility_range(&system, page);
         assert!(wide > 0.02 * LY_METRES);
@@ -931,7 +931,7 @@ mod tests {
             assert!((pole.length() - 1.0).abs() < 1e-12);
         }
         assert!(poles.windows(2).all(|pair| pair[0].dot(pair[1]) < 0.99));
-        let orbit = &system.tasks[0].orbit;
+        let orbit = &system.planets[0].orbit;
         for page in 0..5 {
             let frame = page_frame(system, page);
             let point = orbit_point(orbit, 7, 48);

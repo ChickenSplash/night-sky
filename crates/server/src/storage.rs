@@ -19,7 +19,12 @@ pub fn load(path: &Path, key: &str) -> Result<Option<Galaxy>> {
             r.get(0)
         })
         .optional()?;
-    Ok(json.map(|json| serde_json::from_str(&json)).transpose()?)
+    // A cache from an older layout is dropped; slots keep the next sync in place.
+    Ok(json.and_then(|json| {
+        serde_json::from_str(&json)
+            .inspect_err(|err| eprintln!("Ignoring outdated cache: {err}"))
+            .ok()
+    }))
 }
 
 pub fn save(path: &Path, key: &str, galaxy: &Galaxy) -> Result<()> {

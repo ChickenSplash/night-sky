@@ -515,17 +515,21 @@ export function mount(bridge, canvas) {
     if (modal.hidden || key === modalKey) return;
     modalKey = key;
     const star = system?.star_ly.map(v => (v >= 0 ? '+' : '') + v.toFixed(2)).join('  ');
+    // A planet without a task has no status, description or task facts.
+    const tasked = task.status != null;
     modalBody.replaceChildren(...[
-      el('p', { className: 'status', textContent: task.status.toUpperCase(), style: `color: ${rgb(task.colour)}` }),
+      tasked ? el('p', { className: 'status', textContent: task.status.toUpperCase(), style: `color: ${rgb(task.colour)}` }) : null,
       el('h3', { textContent: task.name }),
-      el('p', { className: task.description ? 'description' : 'muted', textContent: task.description || 'No description.' }),
+      tasked ? el('p', { className: task.description ? 'description' : 'muted', textContent: task.description || 'No description.' })
+        : el('p', { className: 'muted', textContent: 'No task on this planet.' }),
       el('div', { className: 'columns' },
-        el('section', {}, heading('Task'), facts([
+        tasked ? el('section', {}, heading('Task'), facts([
           ['Assigned', task.assignees.length ? task.assignees.join(', ') : 'Nobody'],
           ['Due', task.due_date_ms != null ? dueText(task.due_date_ms) : 'No due date'],
           ['List', system?.name],
-        ])),
+        ])) : null,
         el('section', {}, heading('Planet'), facts([
+          ['Designation', tasked ? task.designation : null],
           ['Type', task.class],
           ['Mass', massText(task.mass_earth)],
           ['Physical radius', `${task.radius_km.toFixed(0)} km`],

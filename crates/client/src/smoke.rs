@@ -86,18 +86,16 @@ pub fn exercise(
                 .clamp(50, 1500);
             universe.0 = space_simulation::demo_galaxy();
             let system = &mut universe.0.systems[0];
-            let template = system.tasks[0].clone();
-            system.tasks = (0..count)
-                .map(|slot| {
-                    let mut task = template.clone();
-                    task.id = format!("smoke-{slot}");
-                    task.name =
-                        format!("Task {}: review the mission navigation checklist", slot + 1);
-                    task.slot = Some(slot);
-                    task
+            let template = system.planets[0].task.clone().unwrap();
+            let tasks = (0..count)
+                .map(|slot| space_shared::Task {
+                    id: format!("smoke-{slot}"),
+                    name: format!("Task {}: review the mission navigation checklist", slot + 1),
+                    slot,
+                    ..template.clone()
                 })
                 .collect();
-            space_simulation::shape(system);
+            space_simulation::place(system, tasks);
             nav.jump(0, &universe.0);
             nav.show_page(0, &universe.0);
             nav.preset(View::Table, &universe.0);
