@@ -37,6 +37,9 @@ use std::{collections::HashMap, f32::consts::PI, sync::Mutex};
 const BODY_SHADER: Handle<Shader> = uuid_handle!("6f1f3c47-2a8e-4d61-9b53-4f8e0d7a91c2");
 const POINT_SHADER: Handle<Shader> = uuid_handle!("0c9b5d2e-7a41-4e8f-a3d6-5b2f81c4e970");
 
+/// Deep navy behind the wireframes; realistic space is black.
+pub const SPACE_BLUE: Color = Color::srgb(0.015, 0.035, 0.09);
+
 /// Display value of the subject's key: a lit planet at the reference distance.
 const KEY: f64 = 1.0;
 /// Display value of the brightest star in the sky when it is exposed alone,
@@ -599,12 +602,14 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     });
 }
 
-/// HDR and bloom only while realistic, so the wireframe look is unchanged.
+/// HDR, bloom and a black sky only while realistic, so the wireframe look is
+/// unchanged.
 /// Cameras sharing a window must agree on HDR, or the overlay presents a stale
 /// frame, so the egui camera switches too, without tone mapping.
 fn switch_camera(
     mut commands: Commands,
     nav: Res<Navigation>,
+    mut clear: ResMut<ClearColor>,
     space: Query<(Entity, Has<Hdr>), With<SpaceCamera>>,
     overlay: Query<Entity, With<bevy_egui::PrimaryEguiContext>>,
 ) {
@@ -614,6 +619,11 @@ fn switch_camera(
     if nav.realistic == hdr {
         return;
     }
+    clear.0 = if nav.realistic {
+        Color::BLACK
+    } else {
+        SPACE_BLUE
+    };
     for overlay in &overlay {
         if nav.realistic {
             commands.entity(overlay).insert((Hdr, Tonemapping::None));

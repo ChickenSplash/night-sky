@@ -197,7 +197,7 @@ fn main() {
         EguiPlugin::default(),
         render::RenderPlugin,
     ))
-    .insert_resource(ClearColor(Color::srgb(0.015, 0.035, 0.09)))
+    .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {
         auto_create_primary_context: false,
         ..default()

@@ -4,7 +4,7 @@
 
 - Native Linux and browser/WASM clients. Rust workspace: `client` (Bevy/egui), `server` (Axum),
   `shared` (wire models), `simulation` (engine-independent orbital maths).
-- Lists are constellations of system pages (7 to 14 slots each); tasks are planets. Deep navy background and line-based
+- Lists are constellations of system pages (7 to 14 slots each); tasks are planets. Deep navy background (black with realistic lighting) and line-based
   wireframe bodies. Preserve real distances, with explicit visual size exaggeration.
 - Keep ClickUp access read-only until a write workflow is explicitly requested.
 - Credentials belong only in the backend. Do not expose them in API models or logs.
