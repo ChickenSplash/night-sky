@@ -64,7 +64,9 @@ const CORE_SIGMA: f32 = 0.8;
 const HALO_SIGMA: f32 = 3.0;
 const HALO_SHARE: f32 = 0.12;
 /// Assisted exposure eases star discs between these on-screen radii down to
-/// `DISC_KEY`, so their limb and granulation are not lost to white.
+/// `DISC_KEY`, so their limb and granulation are not lost to white. Physical
+/// exposure adapts the whole frame over the same range instead, as a camera
+/// metering on the disc would.
 const DISC_NEAR: f32 = 12.0;
 const DISC_FAR: f32 = 160.0;
 const DISC_KEY: f64 = 0.8;
@@ -215,7 +217,13 @@ pub fn exposure_caption(nav: &Navigation, lights: &Lights) -> String {
         Some((metres, false)) => format!("typical orbit at {:.3} AU", metres / AU_METRES),
         None => "brightest star".into(),
     };
-    format!("Exposure {mode} / metered on {metering}")
+    let adapted = nav.physical && lights.stars.iter().any(|s| closeness(s.pixels) > 0.0);
+    let adapted = if adapted {
+        " / adapting to star disc"
+    } else {
+        ""
+    };
+    format!("Exposure {mode} / metered on {metering}{adapted}")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -235,6 +243,20 @@ impl Exposure {
             ratio.powf(ASSISTED_CONTRAST)
         };
         (self.target * ratio).min(MAX_VALUE)
+    }
+
+    /// Physical exposure stopped down as a star disc fills the view, until the
+    /// disc shows at `DISC_KEY`. It stays one linear exposure for the frame.
+    fn adapt(self, stars: &[StarLight]) -> Self {
+        let key = stars
+            .iter()
+            .map(|s| {
+                let close = closeness(s.pixels);
+                let disc = s.radiance * self.target / DISC_KEY;
+                (self.key.ln() * (1.0 - close) + disc.ln() * close).exp()
+            })
+            .fold(self.key, f64::max);
+        Self { key, ..self }
     }
 
     /// Light of a point, in display value × square pixels, exposed as if spread
@@ -396,10 +418,16 @@ impl Point {
     }
 }
 
+/// How far a disc of this on-screen radius has grown from `DISC_NEAR` to
+/// `DISC_FAR`, eased.
+fn closeness(pixels: f32) -> f64 {
+    let t = ((pixels - DISC_NEAR) / (DISC_FAR - DISC_NEAR)).clamp(0.0, 1.0);
+    f64::from(t * t * (3.0 - 2.0 * t))
+}
+
 /// Assisted display value of a star disc, eased down as it grows on screen.
 fn ease_disc(value: f64, pixels: f32) -> f64 {
-    let t = ((pixels - DISC_NEAR) / (DISC_FAR - DISC_NEAR)).clamp(0.0, 1.0);
-    let close = f64::from(t * t * (3.0 - 2.0 * t));
+    let close = closeness(pixels);
     if value > DISC_KEY {
         (value.ln() * (1.0 - close) + DISC_KEY.ln() * close).exp()
     } else {
@@ -438,11 +466,16 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool) -> Fram
         target: KEY,
         physical,
     });
-    let sky = Exposure {
+    let mut sky = Exposure {
         key: if sky > 0.0 { sky } else { 1.0 },
         target: SKY_KEY,
         physical,
     };
+    let mut subject = subject;
+    if physical {
+        sky = sky.adapt(&lights.stars);
+        subject = subject.map(|s| s.adapt(&lights.stars));
+    }
     let mut frame = Frame::default();
     for star in &lights.stars {
         let exposure = match subject {
@@ -926,10 +959,12 @@ mod tests {
         near.stars[0].pixels = 400.0;
         let assisted = resolve(&near, &photometry, false);
         let physical = resolve(&near, &photometry, true);
-        // Assisted eases a large disc down to the disc key; physical does not.
+        // Assisted eases a large disc down to the disc key; physical exposure
+        // adapts to it instead.
         let disc = brightness(&assisted.bodies[0]);
         assert!(disc <= DISC_KEY as f32 * 1.01 && disc > 0.5);
-        assert!(brightness(&physical.bodies[0]) > 100.0);
+        let disc = brightness(&physical.bodies[0]);
+        assert!(disc <= DISC_KEY as f32 * 1.01 && disc > 0.5);
         // A small disc keeps its exposure.
         assert!((ease_disc(300.0, DISC_NEAR) - 300.0).abs() < 1e-9);
         // The corona is visible assisted, and all but invisible physically.
@@ -945,6 +980,25 @@ mod tests {
         near.stars[0].pixels = POINT_PIXELS;
         let edge = resolve(&near, &photometry, false);
         assert!(edge.coronas[0].colour.max_element() < 1e-6);
+    }
+
+    #[test]
+    fn physical_exposure_adapts_to_a_close_star_disc() {
+        let photometry = Photometry::default();
+        let mut near = lights();
+        let far = resolve(&near, &photometry, true);
+        near.stars[0].pixels = DISC_FAR;
+        let close = resolve(&near, &photometry, true);
+        // The disc shows its surface, and the frame stays one linear exposure.
+        let disc = brightness(&close.bodies[0]);
+        assert!((disc - DISC_KEY as f32).abs() < 0.01);
+        let ratio = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
+        assert!((ratio(&close) / ratio(&far) - 1.0).abs() < 1e-3);
+        assert!(brightness(&close.bodies[1]) < brightness(&far.bodies[1]) * 1e-3);
+        // A dim disc is never brightened.
+        near.stars[0].radiance = 1e-9;
+        let dim = resolve(&near, &photometry, true);
+        assert!(brightness(&dim.bodies[1]) >= brightness(&far.bodies[1]) * 0.999);
     }
 
     #[test]

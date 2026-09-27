@@ -148,6 +148,8 @@ pub fn exercise(
             nav.pitch = 0.2;
         }
         29 => capture(&mut commands, "realistic-star"),
+        30 => nav.physical = true,
+        31 => capture(&mut commands, "realistic-star-physical"),
         _ => {
             exit.write(AppExit::Success);
         }

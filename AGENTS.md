@@ -14,7 +14,7 @@
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
-- `./scripts/run.sh --smoke-test`: desktop rendering check with sixteen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and five realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up).
+- `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up in both exposures).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
   run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
   documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
@@ -102,7 +102,8 @@
   read red. Brightness is visual, not bolometric.
 - Assisted exposure compresses contrast around the planets, exposes the star
   field on its own and floors planet brightness. Physical exposure (default) is
-  one linear exposure per frame.
+  one linear exposure per frame; it stops down as a star disc fills the view
+  (`Exposure::adapt`), so a close star shows its surface.
 - Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
   over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
   spread integrates to its whole light, exposed as if spread over a point-sized
