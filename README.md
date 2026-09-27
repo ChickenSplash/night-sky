@@ -47,7 +47,8 @@ docker logs --tail 50 task-space
 
 The first build downloads dependencies and compiles Bevy. Subsequent launches
 reuse `target/`. Closing the window also stops the backend started by this script.
-No ClickUp credentials are needed for the two-system demo.
+No ClickUp credentials are needed for the demo. Its six fictional lists contain
+473 stable tasks, forming multi-star constellations without any live data.
 
 Requirements: Rust via rustup, clang, LLD, pkgconf, Wayland/X11 development
 libraries and a Vulkan-capable graphics driver. These are already installed on

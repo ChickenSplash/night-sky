@@ -369,13 +369,115 @@ pub fn shape_galaxy(galaxy: &mut Galaxy) {
 
 pub fn demo_galaxy() -> Galaxy {
     let mut galaxy = space_shared::demo_fixture();
+    populate_demo(&mut galaxy);
     shape_galaxy(&mut galaxy);
     galaxy
+}
+
+/// Reproducible fictional lists. Stable IDs and slots keep every demo planet in
+/// the same orbit across launches, while each list has several page stars.
+fn populate_demo(galaxy: &mut Galaxy) {
+    use fake::{
+        Fake,
+        faker::lorem::en::Sentence,
+        faker::name::en::Name,
+        rand::{SeedableRng, rngs::StdRng},
+    };
+
+    let mut rng = StdRng::seed_from_u64(0x5441_534b_5350_4143);
+    let template = galaxy.systems[0].tasks[0].clone();
+    let additional = [
+        ("demo-observatory", "Observatory Network"),
+        ("demo-expedition", "Expedition Planning"),
+        ("demo-engineering", "Station Engineering"),
+        ("demo-archives", "Celestial Archives"),
+    ];
+    for (id, name) in additional {
+        let mut system = galaxy.systems[0].clone();
+        system.id = id.into();
+        system.name = name.into();
+        system.position_ly = crate::star_position(id);
+        system.tasks.clear();
+        galaxy.systems.push(system);
+    }
+
+    let counts = [80, 74, 84, 76, 91, 68];
+    let verbs = [
+        "Survey",
+        "Calibrate",
+        "Map",
+        "Review",
+        "Test",
+        "Deploy",
+        "Monitor",
+        "Catalogue",
+    ];
+    let subjects = [
+        "sensor array",
+        "navigation beacon",
+        "spectral atlas",
+        "orbital relay",
+        "telemetry feed",
+        "probe trajectory",
+        "stellar catalogue",
+        "landing site",
+        "signal archive",
+        "research module",
+        "observation plan",
+        "flight computer",
+    ];
+    for (system, count) in galaxy.systems.iter_mut().zip(counts) {
+        for slot in system.tasks.len()..count {
+            let mut task = template.clone();
+            task.slot = Some(slot as u32);
+            task.id = format!("{}-{slot}", system.id);
+            task.name = format!(
+                "{} the {} · sector {}",
+                verbs[(slot + system.id.len()) % verbs.len()],
+                subjects[(slot / verbs.len() + slot) % subjects.len()],
+                slot / 12 + 1,
+            );
+            task.description = Sentence(8..16).fake_with_rng::<String, _>(&mut rng);
+            task.assignees = vec![Name().fake_with_rng::<String, _>(&mut rng)];
+            let (status, status_type, status_order, colour) = match slot % 3 {
+                0 => ("in progress", "custom", 1, [92, 213, 242]),
+                1 => ("to do", "open", 0, [169, 154, 238]),
+                _ => ("complete", "done", 2, [100, 220, 169]),
+            };
+            task.status = status.into();
+            task.status_type = status_type.into();
+            task.status_order = status_order;
+            task.colour = colour;
+            system.tasks.push(task);
+        }
+    }
+    galaxy.source = "Demo · generated fictional tasks".into();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn demo_has_repeatable_multi_star_constellations() {
+        let first = demo_galaxy();
+        assert_eq!(first, demo_galaxy());
+        assert_eq!(first.systems.len(), 6);
+        assert_eq!(
+            first.systems.iter().map(|s| s.tasks.len()).sum::<usize>(),
+            473
+        );
+        let mut ids = std::collections::HashSet::new();
+        for system in &first.systems {
+            assert!(system.pages().len() >= 5);
+            assert_eq!(system.pages().len(), system.stars.len());
+            for (slot, task) in system.tasks.iter().enumerate() {
+                assert_eq!(task.stable_slot(), slot as u32);
+                assert!(ids.insert(&task.id));
+                assert!(task.url.is_none());
+            }
+        }
+    }
 
     fn systems() -> impl Iterator<Item = Vec<Body>> {
         (0..400).map(|page| planetary_system("list", page))
