@@ -62,6 +62,9 @@ pub enum Display {
     Exaggerate,
     Orbits,
     Labels,
+    Realistic,
+    Physical,
+    Wireframe,
 }
 
 /// Set once HTML panels have taken over from egui: top, right, bottom, left.
@@ -126,6 +129,9 @@ pub fn apply(
                 Display::Exaggerate => nav.exaggerate = *on,
                 Display::Orbits => nav.orbits = *on,
                 Display::Labels => nav.labels = *on,
+                Display::Realistic => nav.realistic = *on,
+                Display::Physical => nav.physical = *on,
+                Display::Wireframe => nav.wireframe = *on,
             },
             UiCommand::Panels {
                 top,

@@ -121,6 +121,9 @@ struct DisplayState {
     exaggerate: bool,
     orbits: bool,
     labels: bool,
+    realistic: bool,
+    physical: bool,
+    wireframe: bool,
 }
 
 /// Telemetry for the current list and page.
@@ -211,6 +214,9 @@ fn publish_state(
             exaggerate: nav.exaggerate,
             orbits: nav.orbits,
             labels: nav.labels,
+            realistic: nav.realistic,
+            physical: nav.physical,
+            wireframe: nav.wireframe,
         },
         system: system.map(|s| {
             let [inclination, node, _] = page_tilt(&s.id, nav.page);

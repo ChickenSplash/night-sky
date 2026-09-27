@@ -282,6 +282,33 @@ impl Panels<'_> {
             .size(11.0)
             .color(MUTED),
         );
+        ui.add_space(8.0);
+        heading(ui, "RENDERING");
+        let mut realistic = nav.realistic;
+        if ui.checkbox(&mut realistic, "Realistic lighting").changed() {
+            self.out.push(UiCommand::SetDisplay {
+                option: Display::Realistic,
+                on: realistic,
+            });
+        }
+        for (option, mut on, label) in [
+            (Display::Physical, nav.physical, "Physical exposure"),
+            (Display::Wireframe, nav.wireframe, "Wireframes over bodies"),
+        ] {
+            if ui
+                .add_enabled(nav.realistic, egui::Checkbox::new(&mut on, label))
+                .changed()
+            {
+                self.out.push(UiCommand::SetDisplay { option, on });
+            }
+        }
+        ui.label(
+            egui::RichText::new(
+                "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.",
+            )
+            .size(11.0)
+            .color(MUTED),
+        );
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {

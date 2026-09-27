@@ -3,6 +3,7 @@ mod actions;
 mod diagnostics;
 mod flight;
 mod network;
+mod render;
 mod scene;
 #[cfg(not(target_arch = "wasm32"))]
 mod smoke;
@@ -43,6 +44,12 @@ pub struct Navigation {
     pub exaggerate: bool,
     pub labels: bool,
     pub orbits: bool,
+    /// Lit and glowing bodies in HDR under the wireframes.
+    pub realistic: bool,
+    /// One linear exposure for the frame instead of the assisted, readable one.
+    pub physical: bool,
+    /// Wireframes over the realistic bodies. Always drawn otherwise.
+    pub wireframe: bool,
     pub search: String,
     pub notice: String,
     /// Animate the camera to the new target instead of cutting to it.
@@ -67,6 +74,9 @@ impl Default for Navigation {
             exaggerate: false,
             labels: true,
             orbits: true,
+            realistic: false,
+            physical: false,
+            wireframe: true,
             search: String::new(),
             notice: "Connecting to local API…".into(),
             fly: false,
@@ -182,6 +192,7 @@ fn main() {
             .disable::<TransformPlugin>(),
         BigSpaceDefaultPlugins,
         EguiPlugin::default(),
+        render::RenderPlugin,
     ))
     .insert_resource(ClearColor(Color::srgb(0.015, 0.035, 0.09)))
     .insert_resource(bevy_egui::EguiGlobalSettings {
@@ -207,7 +218,12 @@ fn main() {
         )
             .chain(),
     )
-    .add_systems(PostUpdate, scene::draw.after(TransformSystems::Propagate))
+    .add_systems(
+        PostUpdate,
+        scene::draw
+            .after(TransformSystems::Propagate)
+            .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
+    )
     .add_systems(EguiPrimaryContextPass, ui::draw_ui);
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, smoke::exercise);

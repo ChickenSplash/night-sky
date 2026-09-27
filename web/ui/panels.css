@@ -227,6 +227,7 @@
 #hud .task .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 #hud .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 #hud .toggle input { accent-color: var(--accent); margin: 0; }
+#hud .toggle:has(input:disabled) { opacity: .45; cursor: default; }
 #hud .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 #hud .muted { color: var(--muted); }
 #hud .small { font-size: 11px; line-height: 1.45; }

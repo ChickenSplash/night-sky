@@ -114,6 +114,25 @@ pub fn exercise(
         16 => capture(&mut commands, "restored-orbits"),
         17 => nav.show_page(1, &universe.0),
         19 => capture(&mut commands, "orbit-page-2"),
+        20 => {
+            nav.realistic = true;
+            nav.jump(0, &universe.0);
+        }
+        21 => capture(&mut commands, "realistic"),
+        22 => nav.physical = true,
+        23 => capture(&mut commands, "realistic-physical"),
+        24 => {
+            nav.physical = false;
+            nav.exaggerate = true;
+            nav.selected = Some(0);
+            nav.focus_selected(&universe.0);
+        }
+        25 => capture(&mut commands, "realistic-planet"),
+        26 => {
+            nav.exaggerate = false;
+            nav.preset(View::Constellation, &universe.0);
+        }
+        27 => capture(&mut commands, "realistic-constellation"),
         _ => {
             exit.write(AppExit::Success);
         }

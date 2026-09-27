@@ -1,4 +1,5 @@
 use crate::flight::{Flight, Pose, STAR_JUMP_SECONDS};
+use crate::render::{self, Lights, Photometry, PlanetLight, StarLight};
 use crate::views::{TableLayout, View, page_position};
 use crate::{Clock, Navigation, Universe};
 use bevy::{
@@ -110,6 +111,9 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
                 ..default()
             }),
             Msaa::Sample4,
+            // GPU-driven culling drops every mesh with this far plane. WebGL 2
+            // has no indirect drawing, so native now matches the browser.
+            bevy::render::view::NoIndirectDrawing,
         ));
     });
 }
@@ -414,6 +418,9 @@ struct Canvas<'a> {
     /// Plane of the page on display.
     frame: DQuat,
     seconds: f64,
+    photometry: &'a Photometry,
+    /// The current page's planets are on screen.
+    subject: bool,
 }
 
 impl Canvas<'_> {
@@ -504,6 +511,26 @@ impl Canvas<'_> {
         pixels
     }
 
+    /// A body's wireframe, unless realistic bodies are drawn without them, and its
+    /// on-screen radius. Over a realistic body the wireframe sits just outside its
+    /// surface, so the body hides the far side.
+    #[allow(clippy::too_many_arguments)]
+    fn outline(
+        &self,
+        gizmos: &mut Gizmos,
+        centre: Vec3,
+        radius: f32,
+        tint: Color,
+        basis: DQuat,
+        flat: bool,
+    ) -> Option<f32> {
+        match (self.nav.realistic, self.nav.wireframe) {
+            (false, _) => self.sphere(gizmos, centre, radius, tint, basis, flat),
+            (true, true) => self.sphere(gizmos, centre, radius * 1.01, tint, basis, flat),
+            (true, false) => self.pixels(centre, radius),
+        }
+    }
+
     /// Joins the current list's page stars where they already are, like a star
     /// chart: each star links to its nearest neighbour in a minimum spanning tree.
     fn constellation(&self, gizmos: &mut Gizmos) {
@@ -544,10 +571,16 @@ impl Canvas<'_> {
 
     /// Every list draws all its page stars, so no stars appear or vanish when a
     /// jump changes list. Every star can be picked.
-    fn stars(&self, gizmos: &mut Gizmos, galaxy: &Galaxy, markers: &mut Vec<Marker>) {
+    fn stars(
+        &self,
+        gizmos: &mut Gizmos,
+        galaxy: &Galaxy,
+        markers: &mut Vec<Marker>,
+        lights: &mut Lights,
+    ) {
         for (index, star) in galaxy.systems.iter().enumerate() {
             for page in star.pages() {
-                self.star(gizmos, markers, star, index, page);
+                self.star(gizmos, markers, lights, star, index, page);
             }
         }
     }
@@ -556,6 +589,7 @@ impl Canvas<'_> {
         &self,
         gizmos: &mut Gizmos,
         markers: &mut Vec<Marker>,
+        lights: &mut Lights,
         star: &StarSystem,
         index: usize,
         page: u32,
@@ -596,8 +630,31 @@ impl Canvas<'_> {
             physical
         };
         let limb = current && table && !wide;
+        if self.nav.realistic
+            && let Some(body) = body
+        {
+            // Flux uses the true distance, even for a star drawn on the near shell.
+            let (drawn, kept) = render::enlarge(radius, visible_distance, render::STAR_POINT);
+            let flux = space_simulation::light::flux(
+                self.photometry.visual_luminosity(body),
+                relative.length(),
+            );
+            let surface = if current {
+                self.photometry.surface_radiance(body) * (physical / radius).powi(2)
+            } else {
+                // A distant star's disc is its point: spread its flux over it.
+                flux / (std::f64::consts::PI * (radius / visible_distance).powi(2))
+            };
+            lights.stars.push(StarLight {
+                centre,
+                radius: self.units(drawn),
+                radiance: surface * kept,
+                kelvin: body.temperature_k,
+                subject: current && self.subject,
+            });
+        }
         let pixels = self
-            .sphere(
+            .outline(
                 gizmos,
                 centre,
                 self.units(radius),
@@ -638,7 +695,13 @@ impl Canvas<'_> {
 
     /// The destination page's planets, blending between running orbits and table
     /// rows while the camera flies. Orbital radii are never presentation-scaled.
-    fn planets(&self, gizmos: &mut Gizmos, seconds: f64, markers: &mut Vec<Marker>) {
+    fn planets(
+        &self,
+        gizmos: &mut Gizmos,
+        seconds: f64,
+        markers: &mut Vec<Marker>,
+        lights: &mut Lights,
+    ) {
         let (nav, pose, system) = (self.nav, self.pose, self.system);
         let layout = TableLayout::new(system, pose.page);
         let place = |local: DVec3| self.frame * local;
@@ -670,7 +733,23 @@ impl Canvas<'_> {
             let radius = orbital_radius + (physical - orbital_radius) * pose.layout;
             let tint = colour(planet.colour);
             let basis = spin_basis(self.frame, &planet.spin, seconds);
-            let pixels = self.sphere(gizmos, centre, self.units(radius), tint, basis, false);
+            if nav.realistic {
+                let luminosity = system
+                    .star(pose.page)
+                    .map_or(1.0, |s| self.photometry.visual_luminosity(s));
+                let (drawn, kept) =
+                    render::enlarge(radius, (galactic - pose.eye).length(), render::PLANET_POINT);
+                lights.planets.push(PlanetLight {
+                    centre,
+                    radius: self.units(drawn),
+                    // Lit from the star even in the table, which is only a layout.
+                    towards_star: (-galactic).normalize_or_zero().as_vec3(),
+                    flux: space_simulation::light::flux(luminosity, orbital.length()),
+                    surface: space_simulation::light::surface(&planet.class),
+                    conserved: kept,
+                });
+            }
+            let pixels = self.outline(gizmos, centre, self.units(radius), tint, basis, false);
             if let Some(point) = self.screen(centre) {
                 markers.push(Marker {
                     point,
@@ -684,6 +763,7 @@ impl Canvas<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut gizmos: Gizmos,
     universe: Res<Universe>,
@@ -692,15 +772,22 @@ pub fn draw(
     pose: Res<CameraPose>,
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
     mut markers: ResMut<Markers>,
+    light: (ResMut<Lights>, Res<Photometry>),
 ) {
     let (nav, rig) = navigation;
+    let (mut lights, photometry) = light;
     markers.0.clear();
+    lights.clear();
     let Ok((camera, view)) = camera.single() else {
         return;
     };
     let Some(system) = universe.0.systems.get(nav.system) else {
         return;
     };
+    // During a page-to-page flight the camera may still be near the departure
+    // star. Do not draw the destination's AU-scale orbits from interstellar range.
+    let planet_range = planet_visibility_range(system, pose.page);
+    let planets_shown = pose.distance <= planet_range && pose.eye.length() <= planet_range;
     let canvas = Canvas {
         camera,
         view,
@@ -712,17 +799,31 @@ pub fn draw(
         system,
         frame: page_frame(system, pose.page),
         seconds: clock.0.seconds,
+        photometry: &photometry,
+        subject: planets_shown,
     };
     let markers = &mut markers.0;
     if nav.view == View::Constellation {
         canvas.constellation(&mut gizmos);
     }
-    canvas.stars(&mut gizmos, &universe.0, markers);
-    // During a page-to-page flight the camera may still be near the departure
-    // star. Do not draw the destination's AU-scale orbits from interstellar range.
-    let planet_range = planet_visibility_range(system, pose.page);
-    if pose.distance <= planet_range && pose.eye.length() <= planet_range {
-        canvas.planets(&mut gizmos, clock.0.seconds, markers);
+    canvas.stars(&mut gizmos, &universe.0, markers, &mut lights);
+    if planets_shown {
+        canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
+        let luminosity = system
+            .star(pose.page)
+            .map_or(1.0, |s| photometry.visual_luminosity(s));
+        let followed = nav
+            .selected
+            .filter(|_| nav.following)
+            .and_then(|i| system.tasks.get(i))
+            .filter(|p| p.page() == pose.page)
+            .map(|p| {
+                DVec3::from_array(position(&p.orbit, system.mass(pose.page), clock.0.seconds))
+                    .length()
+            });
+        let reference = render::reference_distance(system, pose.page, followed, luminosity);
+        lights.subject_key = Some(render::subject_key(luminosity, reference));
+        lights.kelvin = system.star(pose.page).map_or(5772.0, |s| s.temperature_k);
     }
 }
 

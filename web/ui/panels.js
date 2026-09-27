@@ -11,6 +11,8 @@ const RATES = [
 ];
 const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'constellation']];
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Task labels']];
+// Physical exposure and wireframes apply only to realistic rendering.
+const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
 const HELP = [['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Down / up'],
   ['Shift', 'Boost'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 const LIST_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
@@ -298,16 +300,18 @@ export function mount(bridge, canvas) {
   const gear = round('gear', 'Settings', 'panel floating round');
   gear.id = 'settings-button';
   const closeSettings = round('close', 'Close settings', 'round small');
-  const toggles = DISPLAY.map(([option, label]) => {
+  const toggle = ([option, label]) => {
     const input = el('input', { type: 'checkbox' });
     input.dataset.option = option;
     input.addEventListener('change', () => send({ type: 'set_display', option, on: input.checked }));
     return el('label', { className: 'toggle' }, input, el('span', { textContent: label }));
-  });
+  };
   const settings = el('div', { id: 'settings', className: 'panel floating', hidden: true, role: 'dialog', ariaLabel: 'Settings' },
     el('header', {}, el('h3', { textContent: 'Settings' }), closeSettings),
-    heading('Display'), ...toggles,
+    heading('Display'), ...DISPLAY.map(toggle),
     el('p', { className: 'muted small', textContent: 'Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.' }),
+    heading('Rendering'), ...RENDERING.map(toggle),
+    el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
     heading('Controls'),
     el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])));
   const setSettings = open => {
@@ -556,7 +560,10 @@ export function mount(bridge, canvas) {
     renderIndex(false);
     renderWhere();
     renderModal();
-    for (const input of settings.querySelectorAll('.toggle input')) input.checked = !!state.display?.[input.dataset.option];
+    for (const input of settings.querySelectorAll('.toggle input')) {
+      input.checked = !!state.display?.[input.dataset.option];
+      input.disabled = ['physical', 'wireframe'].includes(input.dataset.option) && !state.display?.realistic;
+    }
     const step = rateStep(state.rate);
     slower.disabled = step === 0;
     faster.disabled = step === RATES.length - 1;

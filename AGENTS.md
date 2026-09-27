@@ -14,7 +14,7 @@
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
-- `./scripts/run.sh --smoke-test`: desktop rendering check with eleven screenshots, including a 50-task pagination fixture and mid-flight captures of a list jump and a page jump.
+- `./scripts/run.sh --smoke-test`: desktop rendering check with fifteen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and four realistic-rendering captures (assisted, physical, lit planet close-up, constellation).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
   run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
   documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
@@ -84,6 +84,29 @@
   real local star density (`views::page_position(list_id, page)`); never lay them
   on a grid, cluster or plane.
 - Explain demo, live, cached and failed-sync states in the interface.
+
+## Realistic rendering
+
+- Optional (`Navigation::realistic`); the wireframe look is the default and must
+  stay unchanged when it is off. Photometry lives in `space_simulation::light`;
+  exposure, the body pool and the HDR camera in `crates/client/src/render.rs`,
+  with the shader in `body.wgsl`.
+- Bodies are plain spheres under the wireframes. `scene::draw` gathers `Lights`
+  while drawing gizmos; `render::sync` places pooled mesh entities in the camera's
+  cell and writes `GlobalTransform` directly, because it runs after propagation.
+- Colours reach the GPU pre-exposed on the CPU. Never send raw radiance: star
+  surfaces reach 1e10 W m⁻² sr⁻¹ and HDR targets are half-float.
+- Star colours are blackbody spectra white-balanced to the Sun. True colours make
+  red dwarfs orange; assisted exposure saturates them (`light::saturate`) so they
+  read red. Brightness is visual, not bolometric.
+- Assisted exposure (default) compresses contrast around the planets, exposes the
+  star field on its own and floors planet brightness. Physical exposure is one
+  linear exposure per frame. Bodies below a point on screen are enlarged with flux
+  conserved (`render::enlarge`).
+- Cameras sharing the window must agree on `Hdr`: the egui overlay camera switches
+  with the 3D camera (without tone mapping), or it presents a stale frame.
+- The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh
+  with its 1e22 far plane. WebGL 2 never draws indirectly anyway.
 
 ## Current limitations
 
