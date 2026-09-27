@@ -44,6 +44,8 @@ pub struct Navigation {
     pub exaggerate: bool,
     pub labels: bool,
     pub orbits: bool,
+    /// Rings marking bodies too small to see. Hover and selection rings stay.
+    pub markers: bool,
     /// Lit and glowing bodies in HDR under the wireframes.
     pub realistic: bool,
     /// One linear exposure for the frame instead of the assisted, readable one.
@@ -74,6 +76,7 @@ impl Default for Navigation {
             exaggerate: false,
             labels: true,
             orbits: true,
+            markers: true,
             realistic: false,
             physical: false,
             wireframe: true,

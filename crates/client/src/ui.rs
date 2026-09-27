@@ -272,6 +272,7 @@ impl Panels<'_> {
             (Display::Exaggerate, nav.exaggerate, "Readable planet sizes"),
             (Display::Orbits, nav.orbits, "Orbital paths"),
             (Display::Labels, nav.labels, "Task labels"),
+            (Display::Markers, nav.markers, "Body markers"),
         ] {
             if ui.checkbox(&mut on, label).changed() {
                 self.out.push(UiCommand::SetDisplay { option, on });
@@ -692,7 +693,7 @@ fn canvas_overlay(
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }
         // Markers remain visible at true physical body sizes.
-        if marker.radius < 6.0 {
+        if nav.markers && marker.radius < 6.0 {
             painter.circle_stroke(point, 4.0, egui::Stroke::new(1.0, tint));
         }
         // Task labels would smear across the screen mid-flight. Stars are
