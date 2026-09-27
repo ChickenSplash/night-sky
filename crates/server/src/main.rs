@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
     let bind = std::env::var("SPACE_BIND").unwrap_or_else(|_| "127.0.0.1:4321".into());
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
-        .context("Cannot bind port 4321. Is another ClickUp Space server running?")?;
+        .context("Cannot bind port 4321. Is another Task Space server running?")?;
     if !lists.is_empty() {
         let client = clickup::ClickUp::new(&token)?;
         let state = state.clone();
@@ -140,7 +140,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route(
             "/health",
-            get(|| async { Json(serde_json::json!({"service": "clickup-space", "status": "ok"})) }),
+            get(|| async { Json(serde_json::json!({"service": "task-space", "status": "ok"})) }),
         )
         .route("/galaxy", get(galaxy))
         .fallback_service(ServeDir::new(root.join("web/dist")).precompressed_gzip())
@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
             axum::http::HeaderValue::from_static("no-cache"),
         ))
         .with_state(state);
-    println!("ClickUp Space: http://{bind} (Ctrl+C to stop)");
+    println!("Task Space: http://{bind} (Ctrl+C to stop)");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             tokio::signal::ctrl_c().await.ok();

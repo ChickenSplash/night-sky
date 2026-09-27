@@ -147,7 +147,7 @@ fn main() {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "ClickUp Space · Mission Control".into(),
+                    title: "Task Space · Mission Control".into(),
                     resolution: (1440, 900).into(),
                     #[cfg(not(target_arch = "wasm32"))]
                     mode: if std::env::args().any(|arg| arg == "--smoke-test") {

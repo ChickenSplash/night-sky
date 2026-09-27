@@ -182,7 +182,7 @@ pub fn demo_fixture() -> Galaxy {
                     TaskPlanet {
                         slot: Some(i as u32),
                         id: format!("{id}-{i}"), name: name.into(),
-                        description: "A fictional task for exploring ClickUp Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".into(),
+                        description: "A fictional task for exploring Task Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".into(),
                         status: status.into(), status_type: status_type.into(), status_order, colour, assignees: vec!["Mission control".into()],
                         due_date_ms: None, url: None, radius_km: 0.0, orbit: Orbit::default(),
                         page: 0, orbit_index: 0, mass_earth: 0.0, class: String::new(), resonance: None, spin: Spin::default(),

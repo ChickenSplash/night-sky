@@ -254,7 +254,7 @@ pub fn prepare_windows(
             continue;
         }
 
-        // CLICKUP SPACE PATCH (see vendor/README.md): upstream only tolerates
+        // TASK SPACE PATCH (see vendor/README.md): upstream only tolerates
         // `SurfaceError::Timeout` on AMD and Intel. NVIDIA on Wayland also times out
         // when a window returns from a hidden workspace, and upstream then panics.
         // Every recoverable surface error now skips the frame instead.
@@ -294,7 +294,7 @@ pub fn prepare_windows(
     }
 }
 
-/// CLICKUP SPACE PATCH: logs skipped frames without flooding the log while a window
+/// TASK SPACE PATCH: logs skipped frames without flooding the log while a window
 /// stays hidden (each timeout already blocks for about a second).
 fn skipped_frame(err: wgpu::SurfaceError) {
     use core::sync::atomic::{AtomicU64, Ordering};

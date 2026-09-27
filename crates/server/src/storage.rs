@@ -71,10 +71,8 @@ mod tests {
     use super::*;
     #[test]
     fn slots_survive_reordering_deletion_and_restart() {
-        let path = std::env::temp_dir().join(format!(
-            "clickup-space-slots-{}.sqlite3",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("task-space-slots-{}.sqlite3", std::process::id()));
         initialise(&path).unwrap();
         assert_eq!(
             assign_slots(&path, "list", &["a".into(), "b".into()]).unwrap(),

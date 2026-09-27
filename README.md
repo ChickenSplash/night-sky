@@ -1,4 +1,4 @@
-# ClickUp Space
+# Task Space
 
 A Rust mission-control view of your tasks, available natively and in a browser. Each list is a constellation of systems with at most ten tasks each;
 each task is a wireframe planet. Deep blue space, physical distances, Keplerian
@@ -16,8 +16,8 @@ Use a current desktop browser with hardware acceleration enabled. WebGL 2 works
 over the LAN HTTP URL, so this deployment does not require WebGPU or HTTPS.
 
 Deployment files, credentials and the database live at
-`/home/ecorreia/homelab/clickup-space` on the homelab. Docker restarts the
-`clickup-space` container automatically after a reboot. The service is published
+`/home/ecorreia/homelab/task-space` on the homelab. Docker restarts the
+`task-space` container automatically after a reboot. The service is published
 on the homelab's LAN address, with no public tunnel route configured.
 
 To rebuild and redeploy from this project:
@@ -36,7 +36,7 @@ image and web directory.
 After SSHing into the homelab, view logs with:
 
 ```sh
-docker logs --tail 50 clickup-space
+docker logs --tail 50 task-space
 ```
 
 ### Native desktop

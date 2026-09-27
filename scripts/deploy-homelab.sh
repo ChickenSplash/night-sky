@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 host=ecorreia@192.168.1.90
-remote=/home/ecorreia/homelab/clickup-space
+remote=/home/ecorreia/homelab/task-space
 # Demo data by default. Pass --with-clickup to publish your credentials and cached tasks.
 live=false
 [[ ${1:-} == --with-clickup ]] && live=true

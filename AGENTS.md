@@ -1,4 +1,4 @@
-# ClickUp Space
+# Task Space
 
 ## Scope and architecture
 
@@ -33,7 +33,7 @@
   HTML panels, keyboard focus and wheel routing against `SPACE_URL` (default
   local). `test-browser.mjs` covers the egui panels on the web.
 - `./scripts/deploy-homelab.sh`: build locally and deploy to the homelab's
-  `~/homelab/clickup-space`. URL: `http://192.168.1.90:4321/`. Demo data only
+  `~/homelab/task-space`. URL: `http://192.168.1.90:4321/`. Demo data only
   by default; `--with-clickup` publishes credentials and cached tasks, so only use
   it when the user explicitly asks.
 - Docker's restart policy manages the remote service, independently of SSH sessions.

@@ -275,7 +275,7 @@ export function mount(bridge, canvas) {
     el('div', { className: 'row' }, groupChip),
     taskCount, taskBox);
   const nav = el('aside', { id: 'nav-panel', className: 'panel floating' },
-    el('header', {}, el('div', {}, el('h1', { textContent: 'ClickUp / Space' }), source), hide),
+    el('header', {}, el('div', {}, el('h1', { textContent: 'Task / Space' }), source), hide),
     el('div', { className: 'tabs', role: 'tablist' }, listsTab, tasksTab),
     listsBody, tasksBody, notice);
 

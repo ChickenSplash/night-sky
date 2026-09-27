@@ -1,8 +1,8 @@
 services:
-  clickup-space:
+  task-space:
     build: ./bundle
-    image: clickup-space:local
-    container_name: clickup-space
+    image: task-space:local
+    container_name: task-space
     restart: unless-stopped
     ports:
       - "192.168.1.90:4321:4321"
@@ -20,7 +20,7 @@ services:
 
 networks:
   # Created by the cloudflared stack. The tunnel's public hostname points at
-  # http://clickup-space:4321, which cloudflared resolves on this network.
+  # http://task-space:4321, which cloudflared resolves on this network.
   edge:
     name: edge
     external: true

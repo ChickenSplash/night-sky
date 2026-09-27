@@ -30,7 +30,7 @@ try {
   });
   const health = await page.request.get(`${base}/health`);
   assert.equal(health.status(), 200);
-  assert.equal((await health.json()).service, 'clickup-space');
+  assert.equal((await health.json()).service, 'task-space');
   const galaxy = await (await page.request.get(`${base}/galaxy`)).json();
   assert(galaxy.systems.length > 0, 'Expected cached or synced systems.');
   for (const path of ['/.env', '/data/space.sqlite3', '/compose.yaml']) {
