@@ -70,6 +70,8 @@ const DISC_FAR: f32 = 160.0;
 const DISC_KEY: f64 = 0.8;
 /// Corona brightness just outside the limb, relative to the disc: the real
 /// inner corona is about a millionth, so a physical camera shows only bloom.
+/// Assisted, it is relative to the disc eased to `DISC_KEY`, however far away,
+/// or a glaring disc would blow it out to its whole sprite.
 const CORONA_SHARE: f64 = 0.2;
 const PHYSICAL_CORONA_SHARE: f64 = 1e-6;
 /// Corona sprite half side and falloff, in disc radii.
@@ -491,7 +493,7 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool) -> Fram
             star.centre,
             star.pixels,
             star.per_pixel,
-            pearl * value * share * fade,
+            pearl * if physical { value } else { value.min(DISC_KEY) } * share * fade,
         ));
     }
     let Some(subject) = subject else {
@@ -741,7 +743,7 @@ fn sync_points(
     let Ok((cell, parent, view)) = camera.single() else {
         return;
     };
-    let count = frame.points.len() + frame.coronas.len();
+    let count = frame.coronas.len() + frame.points.len();
     grow(
         &mut commands,
         &mut pool,
@@ -757,7 +759,9 @@ fn sync_points(
         let Ok((transform, global, point_cell, visibility)) = points.get_mut(*entity) else {
             continue;
         };
-        let Some(point) = frame.points.iter().chain(&frame.coronas).nth(index) else {
+        // Coronas first: points come and go as bodies cross `POINT_PIXELS`, and a
+        // sprite moved to another pooled entity shows its old material for a frame.
+        let Some(point) = frame.coronas.iter().chain(&frame.points).nth(index) else {
             hide(visibility);
             continue;
         };
@@ -932,6 +936,10 @@ mod tests {
         let corona = |f: &Frame| f.coronas[0].colour.max_element() / brightness(&f.bodies[0]);
         assert!((corona(&assisted) - CORONA_SHARE as f32).abs() < 0.05);
         assert!(corona(&physical) < 1e-5);
+        // A glaring distant disc does not blow the corona out.
+        near.stars[0].pixels = 30.0;
+        let mid = resolve(&near, &photometry, false);
+        assert!(mid.coronas[0].colour.max_element() <= (DISC_KEY * CORONA_SHARE) as f32 * 1.01);
         // Only discs have coronas, and they fade in from a point.
         assert_eq!(assisted.coronas.len(), 1);
         near.stars[0].pixels = POINT_PIXELS;

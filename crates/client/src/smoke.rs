@@ -117,6 +117,7 @@ pub fn exercise(
         20 => {
             // Bodies alone, so the points are not hidden under their outlines.
             nav.realistic = true;
+            nav.physical = false;
             nav.wireframe = false;
             nav.markers = false;
             nav.jump(0, &universe.0);

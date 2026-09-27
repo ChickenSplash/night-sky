@@ -78,7 +78,7 @@ impl Default for Navigation {
             orbits: true,
             markers: true,
             realistic: false,
-            physical: false,
+            physical: true,
             wireframe: true,
             search: String::new(),
             notice: "Connecting to local API…".into(),

@@ -100,9 +100,9 @@
 - Star colours are blackbody spectra white-balanced to the Sun. True colours make
   red dwarfs orange; assisted exposure saturates them (`light::saturate`) so they
   read red. Brightness is visual, not bolometric.
-- Assisted exposure (default) compresses contrast around the planets, exposes the
-  star field on its own and floors planet brightness. Physical exposure is one
-  linear exposure per frame.
+- Assisted exposure compresses contrast around the planets, exposes the star
+  field on its own and floors planet brightness. Physical exposure (default) is
+  one linear exposure per frame.
 - Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
   over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
   spread integrates to its whole light, exposed as if spread over a point-sized
@@ -114,7 +114,9 @@
   scale height (`render::granules`); patterns fade out before their cells reach
   a pixel, and hot stars have none. Assisted exposure eases large discs down to
   `DISC_KEY` so the surface survives tone mapping. Coronas are additive sprites
-  (`Frame::coronas`, `point.wgsl`) at a millionth of the disc when physical.
+  (`Frame::coronas`, `point.wgsl`) at a millionth of the disc when physical;
+  assisted, capped relative to `DISC_KEY`. Coronas come first in the sprite
+  pool so they keep their entity.
 - Cameras sharing the window must agree on `Hdr`: the egui overlay camera switches
   with the 3D camera (without tone mapping), or it presents a stale frame.
 - The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh
