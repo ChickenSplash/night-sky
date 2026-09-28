@@ -99,7 +99,9 @@ impl ClickUp {
             position_ly: star_position(id),
             planets: Vec::new(),
             stars: Vec::new(),
+            page_stars: Vec::new(),
         };
+        crate::storage::assign_page_stars(db, &mut system)?;
         space_simulation::place(&mut system, tasks);
         Ok(system)
     }

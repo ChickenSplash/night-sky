@@ -130,6 +130,29 @@ pub fn page_capacity(list_id: &str, page: u32) -> u32 {
     planet_count(&star_id(list_id, page))
 }
 
+fn assigned_star(system: &StarSystem, page: u32) -> String {
+    system
+        .page_star(page)
+        .map_or_else(|| star_id(&system.id, page), |s| s.id.clone())
+}
+
+fn capacity(system: &StarSystem, page: u32) -> u32 {
+    planet_count(&assigned_star(system, page))
+}
+
+/// An append-only slot mapped through this list's actual assigned stars.
+pub fn system_page_of_slot(system: &StarSystem, slot: u32) -> (u32, u32) {
+    let (mut page, mut first) = (0, 0);
+    loop {
+        let count = capacity(system, page);
+        if slot < first + count {
+            return (page, slot - first);
+        }
+        first += count;
+        page += 1;
+    }
+}
+
 /// Page and orbit index within the page for an append-only list slot.
 pub fn page_of_slot(list_id: &str, slot: u32) -> (u32, u32) {
     let (mut page, mut first) = (0, 0);
@@ -408,10 +431,10 @@ pub fn shape(system: &mut StarSystem) {
 /// Replaces a system's planets and stars with those of the pages the tasks'
 /// slots fall on, or of page 0 when there are no tasks.
 pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
-    let empty = |page| vec![None; page_capacity(&system.id, page) as usize];
+    let empty = |page| vec![None; capacity(system, page) as usize];
     let mut pages: BTreeMap<u32, Vec<Option<Task>>> = BTreeMap::new();
     for task in tasks {
-        let (page, index) = page_of_slot(&system.id, task.slot);
+        let (page, index) = system_page_of_slot(system, task.slot);
         pages.entry(page).or_insert_with(|| empty(page))[index as usize] = Some(task);
     }
     if pages.is_empty() {
@@ -420,8 +443,18 @@ pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
     system.planets.clear();
     system.stars.clear();
     for (page, tasks) in pages {
-        let star = star_id(&system.id, page);
-        for (index, (body, task)) in planetary_system(&star).into_iter().zip(tasks).enumerate() {
+        let star = assigned_star(system, page);
+        let (bodies, star_data) = if system.page_star(page).is_some() {
+            (
+                crate::cells::cell_planetary_system(&star).expect("assigned cell star"),
+                crate::cells::cell_star(&star)
+                    .expect("assigned cell star")
+                    .1,
+            )
+        } else {
+            (planetary_system(&star), crate::star(&star))
+        };
+        for (index, (body, task)) in bodies.into_iter().zip(tasks).enumerate() {
             system.planets.push(Planet {
                 id: format!("{star}/{index}"),
                 // Exoplanet style: the innermost planet is b.
@@ -442,10 +475,7 @@ pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
                 task,
             });
         }
-        system.stars.push(space_shared::Star {
-            page,
-            ..crate::star(&star)
-        });
+        system.stars.push(space_shared::Star { page, ..star_data });
     }
 }
 
@@ -598,6 +628,7 @@ pub fn demo_galaxy() -> Galaxy {
             position_ly: position_ly.unwrap_or_else(|| crate::star_position(id)),
             planets: Vec::new(),
             stars: Vec::new(),
+            page_stars: Vec::new(),
         };
         place(&mut system, tasks);
         galaxy.systems.push(system);

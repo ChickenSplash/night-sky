@@ -488,6 +488,23 @@ impl Sky {
         stars
     }
 
+    /// A cell's own star by ordinal, without generating every star in the cell.
+    pub fn cell_star_at(&mut self, cell: Cell, mut ordinal: u64) -> Option<CellStar> {
+        let tier = cell.level();
+        if tier >= TIERS {
+            return None;
+        }
+        let counts = self.counts(cell);
+        for component in Component::ALL {
+            let count = counts[component.index()][tier];
+            if ordinal < count {
+                return Some(self.build(cell, component, ordinal));
+            }
+            ordinal -= count;
+        }
+        None
+    }
+
     /// One cell star, by ID, if it exists.
     pub fn star(&mut self, id: &str) -> Option<CellStar> {
         let (cell, component, index) = parse_cell_star(id)?;
@@ -661,6 +678,22 @@ fn within(
 mod tests {
     use super::*;
     use crate::population::{reach_pc, tier_limit};
+
+    #[test]
+    fn indexed_stars_match_cell_population() {
+        let home = GalaxyModel::milky_way().home_pc;
+        let cell = Cell::containing(10, home).unwrap();
+        let mut sky = Sky::default();
+        let stars = sky.cell_stars(cell);
+        assert!(!stars.is_empty());
+        for index in [0, stars.len() / 2, stars.len() - 1] {
+            assert_eq!(
+                sky.cell_star_at(cell, index as u64),
+                Some(stars[index].clone())
+            );
+        }
+        assert_eq!(sky.cell_star_at(cell, stars.len() as u64), None);
+    }
 
     #[test]
     fn cells_have_stable_codes_and_coordinates() {

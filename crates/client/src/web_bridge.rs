@@ -212,10 +212,10 @@ fn publish_state(
         });
     let state = State {
         picked,
-        list: (!nav.galactic)
-            .then(|| universe.0.systems.get(nav.system))
-            .flatten()
-            .map(|s| s.id.as_str()),
+        list: system.and_then(|s| {
+            (!nav.galactic || universe.0.systems.iter().any(|list| list.id == s.id))
+                .then_some(s.id.as_str())
+        }),
         page: nav.page,
         pages: system.map(|s| s.pages()).unwrap_or_default(),
         view: nav.view,
@@ -237,7 +237,10 @@ fn publish_state(
             wireframe: nav.wireframe,
         },
         system: system.map(|s| {
-            let [inclination, node, _] = page_tilt(&s.id, nav.page);
+            let [inclination, node, _] = s.page_star(nav.page).map_or_else(
+                || page_tilt(&s.id, nav.page),
+                |star| space_simulation::plane_tilt(&star.id),
+            );
             SystemState {
                 name: &s.name,
                 star: s.star(nav.page),

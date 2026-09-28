@@ -71,7 +71,8 @@
   `space_simulation::star(id)`, `planetary_system(id)`, `planet_count(id)` and
   `plane_tilt(id)` take any star ID. Changing a key moves every body it seeds.
 - Task pages are filled in order from append-only slots; each page's capacity is
-  `page_capacity(list_id, page)`. A page's whole planetary system is generated at
+  `planet_count(assigned_star_id)` for mapped ClickUp pages, or
+  `page_capacity(list_id, page)` for legacy/demo pages. A page's whole planetary system is generated at
   once: masses, radii and orbits follow the snow line, neighbours stay Hill-stable
   and some pairs are resonant. The slot's index within its page picks its body.
   Every page with a task gets all its planets, tasked or bare; a list without
@@ -79,7 +80,14 @@
   from a system's own tasks, on the server and again on the client, so fixtures
   need only slots. Table layout is presentation-only; leaving it restores current
   simulated positions. The table keeps physical radii.
-- Each page has its own star (`space_simulation::star(&star_id(list_id, page))`),
+- ClickUp page-to-cell-star assignments live in SQLite `page_stars` and in the
+  snapshot's `StarSystem::page_stars`. They are unique and immutable per list/page;
+  include removed tasks' allocated slots when deciding how many pages need a
+  star. Mapped pages use the cell star's ID, position, formation and plane tilt,
+  so visiting that star from the galaxy shows the same planets, with tasks as an
+  optional overlay. The first migration moves legacy ClickUp pages once; demo
+  pages still use the old deterministic list/page stars.
+- Each legacy/demo page has its own star (`space_simulation::star(&star_id(list_id, page))`),
   drawn in solar-neighbourhood proportions (mostly red dwarfs, a few giants and
   white dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its
   radius and temperature colour (`spectral_colour`) are drawn, and it shapes

@@ -133,11 +133,14 @@ Smoke tests write `data/logs/smoke-client.log` separately. Deployment errors
 are in Docker logs. A recoverable NVIDIA/Wayland surface timeout skips a frame
 and logs a rate-limited warning instead of crashing. The local renderer patch
 is documented in `vendor/README.md`.
-Cached tasks and stable orbital slots
+Cached tasks, stable orbital slots and ClickUp page-to-galactic-star assignments
 are stored in `data/space.sqlite3`. Keep this database to preserve layout across
 task deletions and subsequent additions. A new task is appended to the next free
-slot rather than rearranging existing planets. Stars have deterministic generated
-positions, not positions of real astronomical objects.
+slot rather than rearranging existing planets. On the first run with this mapping,
+existing ClickUp pages move once from legacy list-generated stars to assigned
+galactic stars; their assignments and subsequent task orbits then remain stable.
+The demo retains its legacy page stars for now. No star represents a catalogued
+astronomical object.
 
 Local endpoints:
 
@@ -164,11 +167,9 @@ is available it retains its last data, initially the clearly labelled demo.
   **Readable planet sizes** exaggerates radii in Orbit view, not positions or periods.
 - Each page is a separate star system with a stable, independently random orbital
   plane (poles uniform over the sphere). The telemetry panel shows the current
-  page's tilt. Page stars are scattered at random at the real star density near
-  the Sun (about 0.004 stars per cubic light year, so neighbours are typically
-  3 to 5 ly apart). A 140-page list spans about 40 ly, and its stars mingle
-  with those of other lists, as in real space. Positions are stable per list
-  and page. Constellation view moves nothing: it zooms out from the current
+  page's tilt. Live ClickUp pages occupy distinct, visible cell stars near galactic
+  home, with their real generated positions and planetary systems. Demo pages
+  still use legacy seeded local positions. Constellation view moves nothing: it zooms out from the current
   angle until every page star fits and joins them with lines. Orbit and Task table
   retain physical orbital distances. Camera flights roll between planes; the atlas
   uses galactic axes.
@@ -179,7 +180,7 @@ is available it retains its last data, initially the clearly labelled demo.
   planets far out. Sizes run from Pluto to just past Jupiter. Neighbours sit at
   least ten mutual Hill radii apart without crossing orbits, and some pairs lock
   into resonances (2:1, 3:2, 4:3, 5:4, 5:3, 3:1).
-- Each system's star follows the solar neighbourhood census: about 72% red
+- Demo page stars follow the solar neighbourhood census: about 72% red
   dwarfs, 12% orange, 7% yellow, 5% white dwarfs, 3% F, and rare A, B and giant
   stars. Wireframes use the star's radius and spectral colour (deep red to blue by temperature).
 - Stars and planets rotate about tilted axes. Close-in planets are tidally

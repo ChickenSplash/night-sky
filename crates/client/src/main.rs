@@ -255,7 +255,12 @@ fn tick(time: Res<Time>, mut clock: ResMut<Clock>) {
     clock.0.advance(time.delta_secs_f64());
 }
 
-fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: ResMut<Navigation>) {
+fn receive_galaxy(
+    inbox: Res<Inbox>,
+    mut universe: ResMut<Universe>,
+    mut nav: ResMut<Navigation>,
+    mut galactic: ResMut<galaxy_nav::Galactic>,
+) {
     let Ok(receiver) = inbox.0.lock() else {
         return;
     };
@@ -266,6 +271,28 @@ fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: Re
             network::Update::Galaxy(mut galaxy) => {
                 // Bodies are deterministic from slots, so fixtures need only slots.
                 space_simulation::shape_galaxy(&mut galaxy);
+                if nav.galactic
+                    && galactic.system.is_some()
+                    && let Some((system, page)) = galactic.picked.as_ref().and_then(|picked| {
+                        galaxy.systems.iter().find_map(|system| {
+                            system
+                                .page_stars
+                                .iter()
+                                .find(|star| star.id == picked.id)
+                                .map(|star| (system, star.page))
+                        })
+                    })
+                {
+                    let selected = galactic
+                        .system
+                        .as_ref()
+                        .and_then(|s| nav.selected.and_then(|i| s.planets.get(i)))
+                        .map(|p| p.id.as_str());
+                    nav.selected =
+                        selected.and_then(|id| system.planets.iter().position(|p| p.id == id));
+                    nav.page = page;
+                    galactic.system = Some(system.clone());
+                }
                 let old_system = universe.0.systems.get(nav.system).map(|s| s.id.clone());
                 let old_task = universe
                     .0
@@ -279,6 +306,10 @@ fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: Re
                 nav.notice = CONNECTED.into();
                 if let Some(index) = same_system {
                     nav.system = index;
+                    if nav.galactic {
+                        universe.0 = galaxy;
+                        continue;
+                    }
                     nav.selected = old_task.and_then(|id| {
                         galaxy.systems[index]
                             .planets

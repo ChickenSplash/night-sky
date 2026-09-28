@@ -67,7 +67,9 @@ function elapsed(days) {
 }
 
 function caption(state) {
-  if (state.galactic) return state.system ? 'Generated system / no tasks' : 'Galaxy / generated stars';
+  if (state.galactic) return state.system
+    ? state.system.tasks ? 'Galaxy / task-bearing system' : 'Galaxy / task-free system'
+    : 'Galaxy / generated stars';
   if (state.atlas) return 'Interstellar atlas / light years';
   if (state.view === 'table') return 'Task table / true sizes · orbits continue';
   if (state.view === 'constellation') return 'List constellation / select a system';
@@ -374,8 +376,8 @@ export function mount(bridge, canvas) {
     frame.title = picked ? `Fly to ${picked.name}, system ${picked.page + 1}` : 'Frame orbital system';
     viewSelect.querySelector('.dropdown span').textContent = name;
     viewSelect.querySelector('.dropdown').title = `${name} · change view`;
-    pageBack.disabled = state.atlas || current <= 0;
-    pageOn.disabled = state.atlas || current + 1 >= pages.length;
+    pageBack.disabled = state.atlas || state.galactic || current <= 0;
+    pageOn.disabled = state.atlas || state.galactic || current + 1 >= pages.length;
     pageBack.onclick = () => send({ type: 'show_page', page: pages[current - 1] });
     pageOn.onclick = () => send({ type: 'show_page', page: pages[current + 1] });
     const task = state.selected;

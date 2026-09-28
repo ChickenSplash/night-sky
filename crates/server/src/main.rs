@@ -57,12 +57,16 @@ async fn main() -> Result<()> {
         demo_galaxy()
     } else {
         storage::load(&db_path, &cache_key)?
-            .map(|mut g| {
+            .map(|mut g| -> Result<Galaxy> {
                 // Older caches used other layouts; derive bodies from slots again.
+                for system in &mut g.systems {
+                    storage::assign_page_stars(&db_path, system)?;
+                }
                 space_simulation::shape_galaxy(&mut g);
                 g.source = "ClickUp · cached, awaiting sync".into();
-                g
+                Ok(g)
             })
+            .transpose()?
             .unwrap_or_else(|| Galaxy {
                 source: "ClickUp · connecting".into(),
                 systems: vec![],

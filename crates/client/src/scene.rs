@@ -192,7 +192,7 @@ pub fn controls(
             galactic.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
         }
         if nav.galactic && galactic.system.is_none() && keys.just_pressed(KeyCode::Enter) {
-            crate::galaxy_nav::enter(&mut nav, &mut galactic);
+            crate::galaxy_nav::enter(&mut nav, &mut galactic, &universe.0);
         }
         if nav.galactic && galactic.system.is_some() && keys.just_pressed(KeyCode::Backspace) {
             crate::galaxy_nav::exit(&mut nav, &mut galactic);
@@ -396,7 +396,10 @@ fn rotation([inclination, node, twist]: [f64; 3]) -> DQuat {
 /// Rotation from a page's orbital-plane axes into galactic axes. Every page is its
 /// own star system, so each has its own plane.
 pub fn page_frame(system: &StarSystem, page: u32) -> DQuat {
-    rotation(page_tilt(&system.id, page))
+    rotation(system.page_star(page).map_or_else(
+        || page_tilt(&system.id, page),
+        |assigned| space_simulation::plane_tilt(&assigned.id),
+    ))
 }
 
 /// A body's wireframe orientation in its system's plane: its axis tilted, then
@@ -412,6 +415,10 @@ fn spin_basis(frame: DQuat, spin: &Spin, seconds: f64) -> DQuat {
 
 /// Galactic offset of a page star from its list's anchor, in metres.
 pub fn page_offset(system: &StarSystem, page: u32) -> DVec3 {
+    if let Some(assigned) = system.page_star(page) {
+        return (DVec3::from_array(assigned.position_ly) - DVec3::from_array(system.position_ly))
+            * LY_METRES;
+    }
     page_position(&system.id, page)
 }
 
@@ -908,7 +915,14 @@ pub fn draw(
         canvas.constellation(&mut gizmos);
     }
     if nav.galactic {
-        canvas.star(&mut gizmos, markers, &mut lights, system, nav.system, 0);
+        canvas.star(
+            &mut gizmos,
+            markers,
+            &mut lights,
+            system,
+            nav.system,
+            pose.page,
+        );
     } else {
         canvas.stars(&mut gizmos, &universe.0, markers, &mut lights);
     }

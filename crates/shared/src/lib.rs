@@ -16,6 +16,18 @@ pub struct StarSystem {
     /// One star per page, derived from the list and page.
     #[serde(default)]
     pub stars: Vec<Star>,
+    /// Persisted assignments from this list's pages to generated galactic stars.
+    /// Empty for legacy/demo systems until assigned by the backend.
+    #[serde(default)]
+    pub page_stars: Vec<PageStar>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PageStar {
+    pub page: u32,
+    pub id: String,
+    /// Position relative to the galactic home, in light years.
+    pub position_ly: [f64; 3],
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -110,6 +122,9 @@ impl Planet {
 }
 
 impl StarSystem {
+    pub fn page_star(&self, page: u32) -> Option<&PageStar> {
+        self.page_stars.iter().find(|s| s.page == page)
+    }
     pub fn pages(&self) -> Vec<u32> {
         let mut pages: Vec<_> = self.planets.iter().map(Planet::page).collect();
         pages.sort_unstable();

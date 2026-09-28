@@ -350,7 +350,7 @@ impl Panels<'_> {
         ui.horizontal_wrapped(|ui| {
             for (label, view) in [
                 ("Orbit", View::Orbit),
-                ("Task table", View::Table),
+                ("Planet table", View::Table),
                 ("Constellation", View::Constellation),
             ] {
                 if ui
@@ -365,7 +365,7 @@ impl Panels<'_> {
         let current = pages.iter().position(|p| *p == nav.page).unwrap_or(0);
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(current > 0, egui::Button::new("‹"))
+                .add_enabled(!nav.galactic && current > 0, egui::Button::new("‹"))
                 .clicked()
             {
                 self.out.push(UiCommand::ShowPage {
@@ -374,7 +374,10 @@ impl Panels<'_> {
             }
             ui.label(format!("Page {} / {}", current + 1, pages.len()));
             if ui
-                .add_enabled(current + 1 < pages.len(), egui::Button::new("›"))
+                .add_enabled(
+                    !nav.galactic && current + 1 < pages.len(),
+                    egui::Button::new("›"),
+                )
                 .clicked()
             {
                 self.out.push(UiCommand::ShowPage {
@@ -413,7 +416,10 @@ impl Panels<'_> {
             .size(11.0)
             .color(MUTED),
         );
-        let [inclination, node, _] = space_simulation::page_tilt(&system.id, nav.page);
+        let [inclination, node, _] = system.page_star(nav.page).map_or_else(
+            || space_simulation::page_tilt(&system.id, nav.page),
+            |star| space_simulation::plane_tilt(&star.id),
+        );
         ui.label(
             egui::RichText::new(format!(
                 "Page {} plane tilt {:.0}°, node {:.0}°",
@@ -705,8 +711,15 @@ fn canvas_overlay(
             egui::Align2::LEFT_TOP,
             if nav.galactic && galactic.system.is_none() {
                 "GALAXY / GENERATED STARS"
+            } else if nav.galactic
+                && galactic
+                    .system
+                    .as_ref()
+                    .is_some_and(|s| s.tasks().next().is_some())
+            {
+                "GALAXY / TASK-BEARING SYSTEM"
             } else if nav.galactic {
-                "GENERATED SYSTEM / NO TASKS"
+                "GALAXY / TASK-FREE SYSTEM"
             } else if nav.atlas {
                 "INTERSTELLAR ATLAS / LIGHT YEARS"
             } else if nav.view == View::Table {
@@ -797,7 +810,9 @@ fn canvas_overlay(
             painter.galley(egui::pos2(x, point.y - text.size().y * 0.5), text, tint);
         }
         // A second click on the selected body flies to it.
-        if hovered && click && selected {
+        if hovered && click && star && nav.galactic {
+            out.push(UiCommand::FrameSystem);
+        } else if hovered && click && selected {
             out.push(if star {
                 UiCommand::FrameSystem
             } else {

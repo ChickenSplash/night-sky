@@ -105,7 +105,7 @@ pub fn apply(
             }
             UiCommand::EnterGalactic => {
                 if nav.galactic {
-                    crate::galaxy_nav::enter(&mut nav, &mut galactic);
+                    crate::galaxy_nav::enter(&mut nav, &mut galactic, galaxy);
                 }
             }
             UiCommand::LeaveGalactic => crate::galaxy_nav::exit(&mut nav, &mut galactic),
@@ -163,13 +163,7 @@ pub fn apply(
                     if let Some(system) = &galactic.system {
                         nav.view = View::Orbit;
                         nav.target = bevy::math::DVec3::ZERO;
-                        nav.distance = system
-                            .planets
-                            .iter()
-                            .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
-                            .fold(3.0, f64::max)
-                            * 3.1
-                            * space_simulation::AU_METRES;
+                        nav.distance = crate::galaxy_nav::fit_distance(system, nav.page);
                         nav.fly = true;
                     }
                     continue;

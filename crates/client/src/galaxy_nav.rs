@@ -5,7 +5,7 @@ use crate::{
     stream::Starfield,
 };
 use bevy::{math::DVec3, prelude::*};
-use space_shared::{Planet, StarSystem};
+use space_shared::{Galaxy, PageStar, Planet, StarSystem};
 use space_simulation::{
     AU_METRES, LY_METRES,
     cells::cell_planetary_system,
@@ -89,10 +89,28 @@ pub fn overview(nav: &mut Navigation, galactic: &mut Galactic, centre: DVec3) {
     nav.fly = true;
 }
 
-pub fn enter(nav: &mut Navigation, galactic: &mut Galactic) -> bool {
+pub fn enter(nav: &mut Navigation, galactic: &mut Galactic, lists: &Galaxy) -> bool {
     let Some(picked) = &galactic.picked else {
         return false;
     };
+    if let Some((system, page)) = lists.systems.iter().find_map(|system| {
+        system
+            .page_stars
+            .iter()
+            .find(|star| star.id == picked.id)
+            .map(|star| (system, star.page))
+    }) {
+        galactic.system = Some(system.clone());
+        nav.galactic = true;
+        nav.page = page;
+        nav.view = crate::views::View::Orbit;
+        nav.target = DVec3::ZERO;
+        nav.distance = fit_distance(system, page);
+        nav.following = false;
+        nav.selected = None;
+        nav.fly = true;
+        return true;
+    }
     let Some((_, mut star)) = cell_star(&picked.id) else {
         return false;
     };
@@ -117,26 +135,36 @@ pub fn enter(nav: &mut Navigation, galactic: &mut Galactic) -> bool {
             task: None,
         })
         .collect::<Vec<_>>();
-    let extent = planets
-        .iter()
-        .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
-        .fold(3.0, f64::max);
     galactic.system = Some(StarSystem {
         id: picked.id.clone(),
         name: picked.id.clone(),
         position_ly: relative_ly(picked.position_pc).to_array(),
         planets,
         stars: vec![star],
+        page_stars: vec![PageStar {
+            page: 0,
+            id: picked.id.clone(),
+            position_ly: relative_ly(picked.position_pc).to_array(),
+        }],
     });
     nav.galactic = true;
     nav.page = 0;
     nav.view = crate::views::View::Orbit;
     nav.target = DVec3::ZERO;
-    nav.distance = extent * 3.1 * AU_METRES;
+    nav.distance = fit_distance(galactic.system.as_ref().expect("created system"), 0);
     nav.following = false;
     nav.selected = None;
     nav.fly = true;
     true
+}
+
+pub fn fit_distance(system: &StarSystem, page: u32) -> f64 {
+    system
+        .on_page(page)
+        .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
+        .fold(3.0, f64::max)
+        * 3.1
+        * AU_METRES
 }
 
 pub fn exit(nav: &mut Navigation, galactic: &mut Galactic) {
@@ -208,13 +236,112 @@ mod tests {
             system: None,
         };
         let mut nav = Navigation::default();
-        assert!(enter(&mut nav, &mut galactic));
+        assert!(enter(
+            &mut nav,
+            &mut galactic,
+            &Galaxy {
+                source: String::new(),
+                systems: vec![]
+            }
+        ));
         let first = galactic.system.clone().unwrap();
         assert!(!first.planets.is_empty());
         assert!(first.planets.iter().all(|p| p.task.is_none()));
         exit(&mut nav, &mut galactic);
-        assert!(enter(&mut nav, &mut galactic));
+        assert!(enter(
+            &mut nav,
+            &mut galactic,
+            &Galaxy {
+                source: String::new(),
+                systems: vec![]
+            }
+        ));
         assert_eq!(galactic.system.as_ref(), Some(&first));
         assert_eq!(galactic.picked.as_ref().unwrap().id, picked.id);
+    }
+
+    #[test]
+    fn entering_an_assigned_star_shows_its_tasks_without_changing_orbits() {
+        let home = GalaxyModel::milky_way().home_pc;
+        let mut sky = Sky::default();
+        let cell = space_simulation::cells::Cell::containing(10, home).unwrap();
+        let star = sky.cell_star_at(cell, 0).unwrap();
+        let picked = PickedStar {
+            id: star.id.clone(),
+            position_pc: star.position_pc,
+        };
+        let mut list = space_simulation::demo_galaxy().systems.remove(0);
+        list.page_stars = vec![PageStar {
+            page: 0,
+            id: star.id,
+            position_ly: relative_ly(star.position_pc).to_array(),
+        }];
+        list.position_ly = list.page_stars[0].position_ly;
+        let task = list.tasks().next().unwrap().1.clone();
+        let task_id = task.id.clone();
+        space_simulation::place(&mut list, vec![task]);
+        let lists = Galaxy {
+            source: String::new(),
+            systems: vec![list.clone()],
+        };
+        let mut galactic = Galactic {
+            picked: Some(picked),
+            system: None,
+        };
+        let mut nav = Navigation::default();
+        assert!(enter(&mut nav, &mut galactic, &lists));
+        assert_eq!(galactic.system.as_ref(), Some(&list));
+        assert!(
+            galactic
+                .system
+                .as_ref()
+                .unwrap()
+                .task_planet(&task_id)
+                .is_some()
+        );
+        assert_eq!(nav.page, 0);
+        assert_eq!(
+            list.planets[0].orbit,
+            space_simulation::cells::cell_planetary_system(&list.page_stars[0].id).unwrap()[0]
+                .orbit
+        );
+    }
+
+    #[test]
+    fn visiting_a_later_list_page_keeps_its_own_star_and_page() {
+        let home = GalaxyModel::milky_way().home_pc;
+        let mut sky = Sky::default();
+        let cell = space_simulation::cells::Cell::containing(10, home).unwrap();
+        let first = sky.cell_star_at(cell, 0).unwrap();
+        let second = sky.cell_star_at(cell, 1).unwrap();
+        let mut list = space_simulation::demo_galaxy().systems.remove(0);
+        list.page_stars = [first, second.clone()]
+            .into_iter()
+            .enumerate()
+            .map(|(page, star)| PageStar {
+                page: page as u32,
+                id: star.id,
+                position_ly: relative_ly(star.position_pc).to_array(),
+            })
+            .collect();
+        list.position_ly = list.page_stars[0].position_ly;
+        let mut task = list.tasks().next().unwrap().1.clone();
+        task.slot = space_simulation::planet_count(&list.page_stars[0].id);
+        space_simulation::place(&mut list, vec![task]);
+        let lists = Galaxy {
+            source: String::new(),
+            systems: vec![list.clone()],
+        };
+        let mut galactic = Galactic {
+            picked: Some(PickedStar {
+                id: second.id,
+                position_pc: second.position_pc,
+            }),
+            system: None,
+        };
+        let mut nav = Navigation::default();
+        assert!(enter(&mut nav, &mut galactic, &lists));
+        assert_eq!(nav.page, 1);
+        assert_eq!(galactic.system.unwrap(), list);
     }
 }
