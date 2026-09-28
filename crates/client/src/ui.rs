@@ -180,7 +180,7 @@ impl Panels<'_> {
 
     fn footer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Click: select a star, again to visit    F: centre star    Enter: visit    RMB drag: orbit    Scroll: zoom    WASD: move    Q/E: down/up    Shift: boost    Space: pause").size(11.0).color(MUTED));
+            ui.label(egui::RichText::new("Click: select a star, again to visit    C: centre star    Enter: visit    LMB drag: look    RMB drag: orbit    Scroll: zoom    WASD: move    Q/E: roll    R/F: up/down    Shift: boost    Space: pause").size(11.0).color(MUTED));
             ui.separator();
             ui.label(egui::RichText::new(&self.nav.notice).size(11.0).color(MUTED));
         });

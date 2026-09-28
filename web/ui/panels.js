@@ -13,7 +13,7 @@ const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'c
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers']];
 // Physical exposure and wireframes apply only to realistic rendering.
 const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
-const HELP = [['Click', 'Select a star, again to visit'], ['F', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Down / up'],
+const HELP = [['Click', 'Select a star, again to visit'], ['C', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Left drag', 'Look around'], ['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Roll left / right'], ['R / F', 'Up / down'],
   ['Shift', 'Boost'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 const LIST_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
 const TASK_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Due date', 'due']];

@@ -50,6 +50,8 @@
 - Divide render positions and radii by `CameraPose::render_scale()` (displayed camera
   about 1,000 units from target). `Navigation` holds the destination; `CameraRig`
   flies the displayed pose there. Discrete camera changes set `Navigation::fly`.
+  Free-look and roll update the camera's local quaternion; left-drag turns about
+  its current screen axes and repositions the target to keep the eye fixed.
   `Navigation` and orbital positions use the page's plane axes;
   `scene::page_frame` rotates them into galactic axes, which `CameraPose` and star
   offsets use. Each page star is a cell star at its own position
@@ -182,7 +184,7 @@
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from
   loaded, visible points only, and only on click, never every frame. Click
-  again or Enter to visit, F picks the view centre. The only bodies drawn are
+  again or Enter to visit, C picks the view centre. The only bodies drawn are
   the visited star and its planets. Scroll zooms from 20,000 km to 40,000 ly;
   movement scales with the displayed distance.
 - Unassigned cell stars use ID-derived `TS` catalogue names and lettered

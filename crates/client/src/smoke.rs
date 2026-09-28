@@ -157,7 +157,7 @@ pub fn exercise(
                 .star(nav.page)
                 .map_or(1.0, |s| s.radius_solar);
             nav.distance = 5.0 * radius * space_simulation::SUN_RADIUS_METRES;
-            nav.pitch = 0.2;
+            nav.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.2);
         }
         29 => capture(&mut commands, "realistic-star"),
         30 => nav.physical = true,

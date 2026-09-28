@@ -52,8 +52,9 @@ pub struct Navigation {
     pub following: bool,
     pub target: DVec3,
     pub distance: f64,
-    pub yaw: f32,
-    pub pitch: f32,
+    /// Camera orientation in the current system's local plane. Keeping this as
+    /// a quaternion lets mouse turns follow the screen axes even past the poles.
+    pub rotation: Quat,
     pub exaggerate: bool,
     pub labels: bool,
     pub orbits: bool,
@@ -83,8 +84,7 @@ impl Default for Navigation {
             following: false,
             target: DVec3::ZERO,
             distance: 120.0 * LY_METRES,
-            yaw: 0.3,
-            pitch: 0.85,
+            rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
             exaggerate: false,
             labels: true,
             orbits: true,
@@ -132,8 +132,7 @@ impl Navigation {
         };
         self.fly = true;
         self.view = views::View::Orbit;
-        self.yaw = 0.3;
-        self.pitch = 0.85;
+        self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);
         self.selected = None;
         self.picked = None;
         self.following = false;

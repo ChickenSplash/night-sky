@@ -58,10 +58,12 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 
 | Action | Control |
 | --- | --- |
+| Look around from the camera | Left mouse drag |
+| Roll around the viewing direction | Q / E |
 | Orbit the camera target | Right mouse drag |
 | Zoom | Mouse wheel |
 | Translate camera and target | W/A/S/D |
-| Move down / up | Q / E |
+| Move up / down | R / F |
 | Move faster | Left Shift |
 | Pause/resume orbital motion | Space |
 | Clear selection and stop tracking | Escape |
@@ -72,7 +74,7 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Frame the list's systems | **Constellation** |
 | Browse system pages | **‹ / ›** in the inspector |
 | Select a star, then visit it | Click it, then click again or press Enter |
-| Select the star at the view centre | F |
+| Select the star at the view centre | C |
 | Jump to a list | Click it in the sidebar |
 
 Search covers all systems. The simulation clock starts at an arbitrary epoch;
@@ -210,9 +212,9 @@ is available it retains its last data, initially the clearly labelled demo.
   its physical horizon radius. There is no dust or gravitational lensing yet.
 
 - **One galaxy (Phase 6):** lists and generated stars share one view. Scroll
-  out for kiloparsec-scale travel; WASD and Q/E move, Shift accelerates. Click
+  out for kiloparsec-scale travel; WASD and R/F move, Shift accelerates. Click
   any visible star to select it, then click it again (or press **Enter**) to
-  visit its planetary system. **F** selects the star at the view centre. A star
+  visit its planetary system. **C** selects the star at the view centre. A star
   that carries a list page opens that page with its tasks; any other shows its
   generated planets, with the same orbit, table and constellation views.
   Generated stars have stable `TS <cell>-<component>-<index>` catalogue names

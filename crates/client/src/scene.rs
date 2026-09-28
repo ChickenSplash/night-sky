@@ -151,13 +151,14 @@ pub fn controls(
         .map(|ctx| (ctx.is_pointer_over_area(), ctx.wants_keyboard_input()))
         .unwrap_or_default();
     // Flights are short; camera input resumes when they land. Constellations
-    // rotate around their auto-framed centre, but cannot zoom or translate.
+    // orbit their auto-framed centre, but cannot zoom or translate.
     let free = nav.view == View::Orbit && !rig.flying();
     let rotating = matches!(nav.view, View::Orbit | View::Constellation) && !rig.flying();
     if !pointer && rotating {
-        if buttons.pressed(MouseButton::Right) {
-            nav.yaw -= motion.delta.x * 0.005;
-            nav.pitch = (nav.pitch + motion.delta.y * 0.005).clamp(-1.48, 1.48);
+        if buttons.pressed(MouseButton::Left) && free {
+            drag_look(&mut nav, motion.delta);
+        } else if buttons.pressed(MouseButton::Right) {
+            orbit(&mut nav, motion.delta);
         }
         if free {
             nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
@@ -165,7 +166,7 @@ pub fn controls(
         }
     }
     if !keyboard {
-        if keys.just_pressed(KeyCode::KeyF) {
+        if keys.just_pressed(KeyCode::KeyC) {
             nav.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
         }
         if keys.just_pressed(KeyCode::Enter) {
@@ -184,12 +185,16 @@ pub fn controls(
         };
         let movement = DVec3::new(
             axis(KeyCode::KeyD, KeyCode::KeyA),
-            axis(KeyCode::KeyE, KeyCode::KeyQ),
+            axis(KeyCode::KeyR, KeyCode::KeyF),
             axis(KeyCode::KeyS, KeyCode::KeyW),
         );
+        let roll_input = axis(KeyCode::KeyQ, KeyCode::KeyE) as f32;
+        if roll_input != 0.0 && free {
+            roll(&mut nav, roll_input * time.delta_secs() * 1.5);
+        }
         if movement.length_squared() > 0.0 && free {
             nav.following = false;
-            let rotation = Quat::from_rotation_y(nav.yaw) * Quat::from_rotation_x(-nav.pitch);
+            let rotation = nav.rotation;
             let boost = if keys.pressed(KeyCode::ShiftLeft) {
                 4.0
             } else {
@@ -203,6 +208,37 @@ pub fn controls(
             nav.target += step;
         }
     }
+}
+
+/// Roll in camera-local space, not around the galaxy's vertical axis. Rolling
+/// leaves the line of sight and the camera's position unchanged at any pitch.
+fn roll(nav: &mut Navigation, angle: f32) {
+    nav.rotation = (nav.rotation * Quat::from_rotation_z(angle)).normalize();
+    nav.following = false;
+}
+
+fn drag_look(nav: &mut Navigation, delta: Vec2) {
+    if delta == Vec2::ZERO {
+        return;
+    }
+    let eye = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+    // Both axes are local to the *current camera*. At a pole or upside down,
+    // screen right is not galactic right; world-axis yaw behaves like roll there.
+    let turn = Quat::from_rotation_y(-delta.x * 0.005) * Quat::from_rotation_x(-delta.y * 0.005);
+    nav.rotation = (nav.rotation * turn).normalize();
+    nav.target = eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+    nav.following = false;
+}
+
+/// Right-drag keeps its target fixed and turns around the system's vertical.
+fn orbit(nav: &mut Navigation, delta: Vec2) {
+    if delta == Vec2::ZERO {
+        return;
+    }
+    nav.rotation = (Quat::from_rotation_y(-delta.x * 0.005)
+        * nav.rotation
+        * Quat::from_rotation_x(-delta.y * 0.005))
+    .normalize();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -248,9 +284,7 @@ pub fn place_camera(
     let desired = Pose {
         target: frame_tilt * nav.target,
         distance: nav.distance,
-        rotation: frame_tilt.as_quat()
-            * Quat::from_rotation_y(nav.yaw)
-            * Quat::from_rotation_x(-nav.pitch),
+        rotation: frame_tilt.as_quat() * nav.rotation,
         layout: f64::from(u8::from(nav.view == View::Table)),
     };
     let frame = system.map_or(DVec3::ZERO, |system| page_origin_ly(system, frame_page));
@@ -818,6 +852,86 @@ pub fn draw(
 mod tests {
     use super::*;
     use space_simulation::AU_METRES;
+
+    #[test]
+    fn free_look_holds_the_eye_still_and_turns_past_both_poles() {
+        let mut nav = Navigation {
+            target: DVec3::new(2.0, 3.0, -5.0) * AU_METRES,
+            distance: 10.0 * AU_METRES,
+            rotation: Quat::from_rotation_x(-1.4),
+            ..Navigation::default()
+        };
+        let eye = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+        drag_look(&mut nav, Vec2::new(80.0, 400.0));
+        let expected =
+            Quat::from_rotation_x(-1.4) * Quat::from_rotation_y(-0.4) * Quat::from_rotation_x(-2.0);
+        assert!(nav.rotation.angle_between(expected) < 1e-5);
+        let after = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+        assert!(eye.distance(after) < nav.distance * 1e-7);
+        drag_look(&mut nav, Vec2::new(-80.0, 200.0));
+        let after = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+        assert!(eye.distance(after) < nav.distance * 1e-7);
+    }
+
+    #[test]
+    fn orbit_turn_preserves_the_target() {
+        let mut nav = Navigation::default();
+        let target = nav.target;
+        let before = nav.rotation;
+        orbit(&mut nav, Vec2::new(-100.0, 400.0));
+        assert_eq!(nav.target, target);
+        assert!(before.angle_between(nav.rotation) > 1.0);
+    }
+
+    #[test]
+    fn mouse_horizontal_look_uses_the_new_direction() {
+        let mut nav = Navigation {
+            rotation: Quat::IDENTITY,
+            ..Navigation::default()
+        };
+        drag_look(&mut nav, Vec2::new(20.0, 0.0));
+        assert!((nav.rotation * -Vec3::Z).x > 0.0);
+    }
+
+    #[test]
+    fn drag_tracks_screen_axes_at_poles_upside_down_and_rolled() {
+        for pitch in [0.0, 0.9, std::f32::consts::FRAC_PI_2, 3.0] {
+            for roll_angle in [0.0, 0.7] {
+                let mut nav = Navigation {
+                    rotation: Quat::from_rotation_x(-pitch) * Quat::from_rotation_z(roll_angle),
+                    ..Navigation::default()
+                };
+                let before = nav.rotation;
+                drag_look(&mut nav, Vec2::new(20.0, 0.0));
+                let change = nav.rotation * -Vec3::Z - before * -Vec3::Z;
+                assert!(change.dot(before * Vec3::X) > 0.09);
+                assert!(change.dot(before * Vec3::Y).abs() < 1e-5);
+                let before = nav.rotation;
+                drag_look(&mut nav, Vec2::new(0.0, 20.0));
+                let change = nav.rotation * -Vec3::Z - before * -Vec3::Z;
+                assert!(change.dot(before * Vec3::Y) < -0.09);
+                assert!(change.dot(before * Vec3::X).abs() < 1e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn roll_rotates_the_horizon_without_turning_or_moving_at_any_pitch() {
+        for pitch in [0.0, 0.9, std::f32::consts::FRAC_PI_2, 3.0] {
+            let mut nav = Navigation {
+                rotation: Quat::from_rotation_x(-pitch),
+                distance: 10.0 * AU_METRES,
+                ..Navigation::default()
+            };
+            let before = nav.rotation;
+            let target = nav.target;
+            roll(&mut nav, 0.5);
+            let after = nav.rotation;
+            assert_eq!(nav.target, target);
+            assert!((before * Vec3::Z).distance(after * Vec3::Z) < 1e-6);
+            assert!((before * Vec3::Y).distance(after * Vec3::Y) > 0.4);
+        }
+    }
 
     #[test]
     fn synchronous_spin_keeps_one_face_towards_star() {

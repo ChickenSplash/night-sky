@@ -1,6 +1,6 @@
 //! Presentation layouts never modify orbital elements or simulation time.
 use crate::Navigation;
-use bevy::math::DVec3;
+use bevy::math::{DVec3, Quat};
 use space_shared::{Galaxy, Planet, StarSystem};
 use space_simulation::{AU_METRES, LY_METRES, SUN_RADIUS_METRES};
 
@@ -91,8 +91,7 @@ impl Navigation {
         self.view = View::Orbit;
         // A marker clicked mid page swap may belong to the page being wound away.
         self.page = page;
-        self.yaw = 0.3;
-        self.pitch = 0.85;
+        self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);
         self.following = true;
         self.fly = true;
         self.distance = radius_km * 1000.0 * 12.0;
@@ -157,8 +156,7 @@ impl Navigation {
         self.target = target;
         self.distance = distance;
         if top_down {
-            self.yaw = 0.0;
-            self.pitch = std::f32::consts::FRAC_PI_2;
+            self.rotation = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
         }
     }
 
@@ -224,8 +222,8 @@ mod tests {
         nav.select_list(0, &galaxy);
         nav.fit_preset(&galaxy);
         let (target, distance, frame) = (nav.target, nav.distance, nav.frame_page(system));
-        nav.yaw = 0.7;
-        nav.pitch = 0.4;
+        nav.rotation = Quat::from_rotation_y(0.7) * Quat::from_rotation_x(-0.4);
+        let rotated = nav.rotation;
         nav.fly = false;
         for &page in pages.iter().skip(1).take(2) {
             nav.show_page(page, &galaxy);
@@ -234,7 +232,7 @@ mod tests {
             assert_eq!(nav.picked, crate::galaxy_nav::page_pick(system, page));
             assert_eq!(nav.frame_page(system), frame);
             assert_eq!((nav.target, nav.distance), (target, distance));
-            assert_eq!((nav.yaw, nav.pitch), (0.7, 0.4));
+            assert_eq!(nav.rotation, rotated);
             assert!(!nav.fly);
         }
     }
