@@ -159,6 +159,12 @@
   wait, render-sync time and frame-time percentiles once per second; the
   bottom-left 3D caption shows these below camera range on both clients.
   Instrumentation does not change loading policy.
+  The browser settings' **Run star-stream benchmark** reloads into a fresh,
+  empty starfield at home, then follows -X (towards the galactic centre) at
+  1,000 ly/s for 15 s without auto-visits. `?benchmark=star-flight` is the
+  identical route used by `SPACE_HEADFUL=1 node scripts/benchmark-star-flight.mjs
+  <label>`; it writes JSON results under `data/logs/`. Headless SwiftShader is
+  too slow for meaningful comparisons, so use headed Chromium on Wayland.
 - `starfield.rs` draws one oversized triangle per visible star in mesh batches
   of at most 4,096 source stars (never an entity per star). Star positions are
   local to the owning cell; per-frame transforms subtract the camera in f64,

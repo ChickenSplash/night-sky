@@ -30,7 +30,7 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 serde_json.workspace = true
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["CustomEvent", "CustomEventInit", "EventTarget", "Window", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent"] }
+web-sys = { version = "0.3", features = ["CustomEvent", "CustomEventInit", "EventTarget", "Window", "Location", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent"] }
 
 [dev-dependencies]
 serde_json.workspace = true

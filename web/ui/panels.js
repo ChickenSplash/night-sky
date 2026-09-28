@@ -300,6 +300,12 @@ export function mount(bridge, canvas) {
   const gear = round('gear', 'Settings', 'panel floating round');
   gear.id = 'settings-button';
   const closeSettings = round('close', 'Close settings', 'round small');
+  const benchmarkButton = el('button', { type: 'button', className: 'benchmark-button', textContent: 'Run star-stream benchmark' });
+  benchmarkButton.addEventListener('click', () => {
+    const url = new URL(location.href);
+    url.searchParams.set('benchmark', 'star-flight');
+    location.assign(url);
+  });
   const toggle = ([option, label]) => {
     const input = el('input', { type: 'checkbox' });
     input.dataset.option = option;
@@ -313,7 +319,9 @@ export function mount(bridge, canvas) {
     heading('Rendering'), ...RENDERING.map(toggle),
     el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
     heading('Controls'),
-    el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])));
+    el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])),
+    heading('Benchmark'), benchmarkButton,
+    el('p', { className: 'muted small', textContent: 'Reloads with no stars loaded, then flies 15 seconds from home towards the galactic centre at 1,000 ly/s. Results appear on screen and in the browser console.' }));
   const setSettings = open => {
     settings.hidden = !open;
     gear.classList.toggle('active', open);
