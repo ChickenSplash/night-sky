@@ -280,6 +280,7 @@ struct Tick {
     exposure: String,
     set_speed: String,
     velocity: String,
+    stream: String,
 }
 
 fn publish_tick(
@@ -289,6 +290,7 @@ fn publish_tick(
     nav: Res<Navigation>,
     lights: Res<crate::render::Lights>,
     velocity: Res<crate::scene::CameraVelocity>,
+    metrics: Res<crate::stream::StreamMetrics>,
     mut next: Local<f64>,
 ) {
     let now = time.elapsed_secs_f64();
@@ -305,6 +307,7 @@ fn publish_tick(
             exposure: crate::render::exposure_caption(&nav, &lights),
             set_speed: crate::scene::speed_label(nav.move_speed),
             velocity: crate::scene::speed_label(velocity.metres_per_second.length()),
+            stream: metrics.caption.clone(),
         },
     );
 }

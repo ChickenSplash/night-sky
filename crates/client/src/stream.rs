@@ -14,6 +14,7 @@ use space_simulation::{
     stream::{Event, Loader, StarCell},
 };
 use std::collections::{HashMap, VecDeque};
+use std::time::Duration;
 
 /// Faintest apparent magnitude loaded: the naked-eye limit.
 pub const MAGNITUDE: f64 = space_simulation::population::VISIBLE_MAGNITUDE;
@@ -36,6 +37,89 @@ pub struct Starfield {
     pub aimed_pc: Option<[f64; 3]>,
     started: Option<Instant>,
     loaded_once: bool,
+}
+
+/// One-second measurements of generation and mesh preparation. The render
+/// queue is measured separately from the loader's pending-cell queue.
+#[derive(Resource)]
+pub struct StreamMetrics {
+    pub caption: String,
+    mode: &'static str,
+    pub loaded_at: HashMap<Cell, Instant>,
+    pub mesh_queue: usize,
+    pub oldest_mesh_ms: f64,
+    pub built_batches: usize,
+    pub mesh_wait_ms: f64,
+    pub mesh_wait_samples: usize,
+    pub generated: usize,
+    pub cancelled: usize,
+    pub generation: Duration,
+    pub rendering: Duration,
+    pub frames: Vec<f64>,
+    started: Instant,
+}
+
+impl Default for StreamMetrics {
+    fn default() -> Self {
+        Self {
+            caption: "STAR STREAM / MEASURING…".into(),
+            mode: "",
+            loaded_at: HashMap::new(),
+            mesh_queue: 0,
+            oldest_mesh_ms: 0.0,
+            built_batches: 0,
+            mesh_wait_ms: 0.0,
+            mesh_wait_samples: 0,
+            generated: 0,
+            cancelled: 0,
+            generation: Duration::ZERO,
+            rendering: Duration::ZERO,
+            frames: Vec::with_capacity(120),
+            started: Instant::now(),
+        }
+    }
+}
+
+impl StreamMetrics {
+    fn report(&mut self, field: &Starfield) {
+        let elapsed = self.started.elapsed();
+        if elapsed < Duration::from_secs(1) {
+            return;
+        }
+        self.frames.sort_by(f64::total_cmp);
+        let percentile = |p: usize| {
+            self.frames
+                .get((self.frames.len().saturating_sub(1) * p) / 100)
+                .copied()
+                .unwrap_or(0.0)
+        };
+        self.caption = format!(
+            "STAR STREAM [{}] {} stars / {} cells  ·  {} pending  ·  {} mesh chunks\nGEN {:.0} ms / {} cells  ·  {} cancelled  ·  RENDER SYNC {:.0} ms / {} chunks\nMESH WAIT {:.0} ms avg / {:.0} ms oldest  ·  FRAME P95 {:.1} / P99 {:.1} ms",
+            self.mode,
+            field.stars,
+            field.cells.len(),
+            field.pending,
+            self.mesh_queue,
+            self.generation.as_secs_f64() * 1000.0,
+            self.generated,
+            self.cancelled,
+            self.rendering.as_secs_f64() * 1000.0,
+            self.built_batches,
+            self.mesh_wait_ms / self.mesh_wait_samples.max(1) as f64,
+            self.oldest_mesh_ms,
+            percentile(95),
+            percentile(99),
+        );
+        self.started = Instant::now();
+        self.generated = 0;
+        self.cancelled = 0;
+        self.generation = Duration::ZERO;
+        self.rendering = Duration::ZERO;
+        self.built_batches = 0;
+        self.mesh_wait_ms = 0.0;
+        self.mesh_wait_samples = 0;
+        self.frames.clear();
+    }
 }
 
 impl Starfield {
@@ -84,14 +168,17 @@ pub struct StreamPlugin;
 impl Plugin for StreamPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Starfield>()
+            .init_resource::<StreamMetrics>()
             .insert_resource(Backend::start())
             .add_systems(Update, stream.after(crate::scene::place_camera));
     }
 }
 
 fn stream(
+    time: Res<Time>,
     mut backend: ResMut<Backend>,
     mut field: ResMut<Starfield>,
+    mut metrics: ResMut<StreamMetrics>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
 ) {
@@ -106,14 +193,31 @@ fn stream(
         field.aimed_pc = Some(camera);
         camera
     });
-    let Some((events, pending)) = backend.exchange(aim) else {
+    metrics.frames.push(time.delta_secs_f64() * 1000.0);
+    metrics.mode = backend.mode();
+    let Some((events, pending, generation, cancelled)) = backend.exchange(aim) else {
+        metrics.report(&field);
         return;
     };
+    metrics.generation += generation;
+    metrics.cancelled += cancelled;
+    for event in &events {
+        match event {
+            Event::Loaded(cell) => {
+                metrics.generated += 1;
+                metrics.loaded_at.insert(cell.cell, Instant::now());
+            }
+            Event::Dropped(cell) => {
+                metrics.loaded_at.remove(cell);
+            }
+        }
+    }
     if field.pending == 0 && pending > 0 {
         field.started = Some(Instant::now());
     }
     field.apply(events);
     field.pending = pending;
+    metrics.report(&field);
     if pending == 0
         && let Some(started) = field.started.take()
     {
@@ -144,7 +248,7 @@ mod native {
     /// Work between checks for a new camera position.
     const SLICE: Duration = Duration::from_millis(20);
 
-    type Batch = (Vec<Event>, usize);
+    type Batch = (Vec<Event>, usize, Duration, usize);
 
     #[derive(Resource)]
     pub struct Backend {
@@ -153,6 +257,10 @@ mod native {
     }
 
     impl Backend {
+        pub fn mode(&self) -> &'static str {
+            "NATIVE THREAD"
+        }
+
         pub fn start() -> Self {
             let (aim, aims) = mpsc::channel();
             let (sender, batches) = mpsc::channel();
@@ -173,7 +281,15 @@ mod native {
                     }
                     let start = std::time::Instant::now();
                     let events = loader.step(&mut || start.elapsed() < SLICE);
-                    if sender.send((events, loader.pending())).is_err() {
+                    if sender
+                        .send((
+                            events,
+                            loader.pending(),
+                            start.elapsed(),
+                            loader.take_cancelled_jobs(),
+                        ))
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -197,10 +313,12 @@ mod native {
             }
             let batches = self.batches.get_mut().ok()?;
             let mut merged: Option<Batch> = None;
-            for (events, pending) in batches.try_iter() {
+            for (events, pending, duration, cancelled) in batches.try_iter() {
                 let batch = merged.get_or_insert_with(Default::default);
                 batch.0.extend(events);
                 batch.1 = pending;
+                batch.2 += duration;
+                batch.3 += cancelled;
             }
             merged
         }
@@ -210,28 +328,168 @@ mod native {
 #[cfg(target_arch = "wasm32")]
 mod web {
     use super::*;
-    use std::time::Duration;
+    use std::{
+        cell::RefCell,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
+    };
+    use wasm_bindgen::{JsCast, closure::Closure};
+    use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
     /// Share of each frame spent loading.
     const SLICE: Duration = Duration::from_millis(4);
 
+    thread_local! {
+        static WORKER: RefCell<Option<(Worker, Closure<dyn FnMut(MessageEvent)>, Closure<dyn FnMut(ErrorEvent)>)>> = const { RefCell::new(None) };
+    }
+
     #[derive(Resource)]
-    pub struct Backend(Loader);
+    pub enum Backend {
+        Worker {
+            batches: Mutex<mpsc::Receiver<Batch>>,
+            failed: Arc<AtomicBool>,
+            next_aim: Option<[f64; 3]>,
+            camera: Option<[f64; 3]>,
+            awaiting_response: bool,
+        },
+        Inline(Loader),
+    }
+
+    type Batch = (Vec<Event>, usize, Duration, usize);
 
     impl Backend {
-        pub fn start() -> Self {
-            Self(Loader::new(Sky::default(), MAGNITUDE))
+        pub fn mode(&self) -> &'static str {
+            match self {
+                Self::Worker { .. } => "WEB WORKER",
+                Self::Inline(_) => "FRAME SLICE",
+            }
         }
 
-        pub fn exchange(&mut self, aim: Option<[f64; 3]>) -> Option<(Vec<Event>, usize)> {
-            if let Some(camera) = aim {
-                self.0.aim(camera);
-            } else if self.0.pending() == 0 {
-                return None;
+        pub fn start() -> Self {
+            let options = WorkerOptions::new();
+            options.set_type(WorkerType::Module);
+            let Ok(worker) = Worker::new_with_options("star-worker.js", &options) else {
+                warn!("Cannot start star worker; using the frame-sliced loader");
+                return Self::Inline(Loader::new(Sky::default(), MAGNITUDE));
+            };
+            let (sender, receiver) = mpsc::channel();
+            let failed = Arc::new(AtomicBool::new(false));
+            let invalid = failed.clone();
+            let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+                let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() else {
+                    warn!("Star worker returned a non-binary message");
+                    invalid.store(true, Ordering::Relaxed);
+                    return;
+                };
+                let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+                if let Some(batch) = space_simulation::stream_wire::decode(&bytes) {
+                    let _ = sender.send(batch);
+                } else {
+                    warn!("Star worker returned an invalid batch");
+                    invalid.store(true, Ordering::Relaxed);
+                }
+            });
+            let error = failed.clone();
+            let onerror = Closure::<dyn FnMut(ErrorEvent)>::new(move |event: ErrorEvent| {
+                bevy::log::error!("Star worker failed: {}", event.message());
+                error.store(true, Ordering::Relaxed);
+            });
+            worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+            worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+            WORKER.with_borrow_mut(|slot| *slot = Some((worker, onmessage, onerror)));
+            Self::Worker {
+                batches: Mutex::new(receiver),
+                failed,
+                next_aim: None,
+                camera: None,
+                awaiting_response: false,
             }
-            let start = Instant::now();
-            let events = self.0.step(&mut || start.elapsed() < SLICE);
-            Some((events, self.0.pending()))
+        }
+
+        pub fn exchange(&mut self, aim: Option<[f64; 3]>) -> Option<Batch> {
+            if let Self::Worker { failed, camera, .. } = self {
+                if failed.load(Ordering::Relaxed) {
+                    warn!("Falling back to frame-sliced galaxy loading");
+                    WORKER.with_borrow_mut(|slot| {
+                        if let Some((worker, ..)) = slot.take() {
+                            worker.terminate();
+                        }
+                    });
+                    let mut loader = Loader::new(Sky::default(), MAGNITUDE);
+                    if let Some(camera) = *camera {
+                        loader.aim(camera);
+                    }
+                    *self = Self::Inline(loader);
+                }
+            }
+            match self {
+                Self::Worker {
+                    batches,
+                    failed,
+                    next_aim,
+                    camera,
+                    awaiting_response,
+                    ..
+                } => {
+                    // Keep only the latest camera position while the worker is
+                    // busy, as the native channel's try_iter().last() does.
+                    if let Some(position) = aim {
+                        *camera = Some(position);
+                        *next_aim = Some(position);
+                    }
+                    let batches = batches.get_mut().ok()?;
+                    let mut merged: Option<Batch> = None;
+                    // Avoid draining an unlimited number of messages in a frame.
+                    let start = Instant::now();
+                    for (events, pending, duration, cancelled) in batches.try_iter() {
+                        let batch = merged.get_or_insert_with(Default::default);
+                        batch.0.extend(events);
+                        batch.1 = pending;
+                        batch.2 += duration;
+                        batch.3 += cancelled;
+                        if start.elapsed() >= Duration::from_millis(2) {
+                            break;
+                        }
+                    }
+                    if merged.is_some() {
+                        *awaiting_response = false;
+                    }
+                    if !*awaiting_response && let Some(camera) = next_aim.take() {
+                        let array = js_sys::Array::new();
+                        for value in camera {
+                            array.push(&value.into());
+                        }
+                        WORKER.with_borrow(|slot| {
+                            if let Some((worker, ..)) = &*slot {
+                                if let Err(err) = worker.post_message(&array) {
+                                    warn!("Cannot aim star worker: {err:?}");
+                                    failed.store(true, Ordering::Relaxed);
+                                }
+                            }
+                        });
+                        *awaiting_response = true;
+                    }
+                    merged
+                }
+                Self::Inline(loader) => {
+                    if let Some(camera) = aim {
+                        loader.aim(camera);
+                    } else if loader.pending() == 0 {
+                        return None;
+                    }
+                    let start = Instant::now();
+                    let events = loader.step(&mut || start.elapsed() < SLICE);
+                    Some((
+                        events,
+                        loader.pending(),
+                        start.elapsed(),
+                        loader.take_cancelled_jobs(),
+                    ))
+                }
+            }
         }
     }
 }

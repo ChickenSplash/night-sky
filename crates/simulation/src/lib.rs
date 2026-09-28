@@ -4,6 +4,7 @@ pub mod light;
 pub mod population;
 mod star;
 pub mod stream;
+pub mod stream_wire;
 mod system;
 
 use space_shared::Orbit;

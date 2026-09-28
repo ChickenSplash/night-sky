@@ -147,10 +147,18 @@
   cells drop beyond `KEEP` × reach. Stars stream as compact `StarPoint`s.
 - `crates/client/src/stream.rs` aims the loader at the camera
   (`CameraRig::galactic_ly`, lists anchored at home) to `MAGNITUDE` 6.5: a
-  worker thread natively, a 4 ms slice per frame in the browser, into the
-  `Starfield` resource. About 1.06 million stars in 175 cells near home: 2.3 s
-  native, about 8 to 14 s in the browser. `space-simulation` builds at
-  opt-level 3 in dev, or loading and tests crawl.
+  worker thread natively, a dedicated module Web Worker in the browser, into
+  the `Starfield` resource. The worker's generation-only WASM crate is
+  `crates/star-worker`, with `web/star-worker.js` as its entry point; both WASM
+  bundles are built by `scripts/build-web.sh`. `stream_wire` transfers cells in
+  binary with f64 positions, and browser startup/worker errors fall back to
+  the old 4 ms per-frame loader. Native loads about 1.06 million stars in 175
+  cells near home in 2.3 s; the pre-worker browser took about 8 to 14 s.
+  `space-simulation` builds at opt-level 3 in dev, or loading and tests crawl.
+  `StreamMetrics` samples generation time, cancelled jobs, mesh backlog and
+  wait, render-sync time and frame-time percentiles once per second; the
+  bottom-left 3D caption shows these below camera range on both clients.
+  Instrumentation does not change loading policy.
 - `starfield.rs` draws one oversized triangle per visible star in mesh batches
   of at most 4,096 source stars (never an entity per star). Star positions are
   local to the owning cell; per-frame transforms subtract the camera in f64,

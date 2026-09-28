@@ -123,6 +123,7 @@ pub struct Loader {
     queue: Vec<Cell>,
     job: Option<Job>,
     events: Vec<Event>,
+    cancelled_jobs: usize,
 }
 
 impl Loader {
@@ -135,6 +136,7 @@ impl Loader {
             queue: Vec::new(),
             job: None,
             events: Vec::new(),
+            cancelled_jobs: 0,
         }
     }
 
@@ -166,6 +168,7 @@ impl Loader {
             .is_some_and(|job| !self.keeps(job.cell, camera))
         {
             self.job = None;
+            self.cancelled_jobs += 1;
         }
         let building = self.job.as_ref().map(|job| job.cell);
         self.queue = wanted(camera, self.magnitude)
@@ -182,6 +185,11 @@ impl Loader {
 
     pub fn loaded(&self) -> usize {
         self.loaded.len()
+    }
+
+    /// Partly generated cells abandoned after the camera moved away.
+    pub fn take_cancelled_jobs(&mut self) -> usize {
+        std::mem::take(&mut self.cancelled_jobs)
     }
 
     /// Loads until `more` says to stop, checked after every star or child
@@ -397,5 +405,17 @@ mod tests {
         assert!(wanted.iter().all(|cell| cells.contains_key(cell)));
         assert!(cells.keys().all(|&cell| loader.keeps(cell, away)));
         assert_eq!(loader.loaded(), cells.len());
+    }
+
+    #[test]
+    fn abandoned_partial_cell_is_counted_once() {
+        let home = GalaxyModel::milky_way().home_pc;
+        let mut loader = Loader::new(Sky::default(), MAGNITUDE);
+        loader.aim(home);
+        loader.step(&mut || false);
+        assert_eq!(loader.take_cancelled_jobs(), 0);
+        loader.aim([1_000_000.0, home[1], home[2]]);
+        assert_eq!(loader.take_cancelled_jobs(), 1);
+        assert_eq!(loader.take_cancelled_jobs(), 0);
     }
 }

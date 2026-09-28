@@ -42,6 +42,8 @@ try {
   const seen = name => page.evaluate(n => window.seen[n], name);
   const settle = () => page.waitForTimeout(2500);
   await settle();
+  assert.match((await seen('tick')).stream, /STAR STREAM .*FRAME P95/s);
+  assert.match(await page.locator('#hud .caption.bottom').innerText(), /Camera range .*STAR STREAM/is);
   const galaxy = await seen('galaxy');
   const lists = page.locator('#nav-panel .lists .item');
   assert.equal(await lists.count(), galaxy.lists.length, 'Every list has a button');

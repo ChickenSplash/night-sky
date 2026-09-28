@@ -33,6 +33,7 @@ pub fn draw_ui(
         Res<CameraRig>,
         Res<CameraPose>,
         Res<crate::stream::Starfield>,
+        Res<crate::stream::StreamMetrics>,
     ),
     mut styled: Local<bool>,
 ) {
@@ -40,7 +41,7 @@ pub fn draw_ui(
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
     let (markers, insets, lights, velocity) = overlay;
-    let (rig, pose, starfield) = camera_state;
+    let (rig, pose, starfield, metrics) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -119,6 +120,7 @@ pub fn draw_ui(
         &starfield,
         &exposure_caption(&nav, &lights),
         &velocity,
+        &metrics.caption,
         insets.0.is_none(),
         &mut out,
     );
@@ -663,6 +665,7 @@ fn canvas_overlay(
     field: &crate::stream::Starfield,
     exposure: &str,
     velocity: &CameraVelocity,
+    stream_caption: &str,
     // HTML panels show the loading state and view captions themselves.
     captions: bool,
     out: &mut Vec<UiCommand>,
@@ -706,7 +709,7 @@ fn canvas_overlay(
             format!("{:.4} AU", pose.distance / AU_METRES)
         };
         painter.text(
-            rect.left_bottom() + egui::vec2(24.0, -20.0),
+            rect.left_bottom() + egui::vec2(24.0, -68.0),
             egui::Align2::LEFT_BOTTOM,
             format!(
                 "SET SPEED {}   /   VELOCITY {}\n{}\nCAMERA RANGE {distance}   /   {}",
@@ -721,6 +724,13 @@ fn canvas_overlay(
                     "FREE NAVIGATION"
                 }
             ),
+            egui::FontId::monospace(11.0),
+            MUTED,
+        );
+        painter.text(
+            rect.left_bottom() + egui::vec2(24.0, -20.0),
+            egui::Align2::LEFT_BOTTOM,
+            stream_caption,
             egui::FontId::monospace(11.0),
             MUTED,
         );
