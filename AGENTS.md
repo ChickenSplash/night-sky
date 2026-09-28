@@ -171,6 +171,11 @@
   G enters/leaves galaxy mode, F picks a visible star at the view centre,
   Enter visits it, Backspace returns to overview. Scroll zooms as far as
   40,000 ly in the overview; movement scales with the displayed distance.
+- Galaxy canvas clicks select visible streamed points by stable ID, with a
+  second click entering the star. The hit test runs over loaded points only on
+  clicks, not every frame; GPU batches draw optional body-marker rings for all
+  visible stars. Unassigned cell stars use ID-derived `TS` catalogue names and
+  lettered planets, with no name registry or per-star UI entities.
 
 ## Realistic rendering
 

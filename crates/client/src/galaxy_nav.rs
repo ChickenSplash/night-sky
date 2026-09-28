@@ -20,6 +20,17 @@ pub struct PickedStar {
     pub position_pc: [f64; 3],
 }
 
+/// A compact, collision-free catalogue name derived from the immutable cell ID.
+/// No stored name registry or million-entry lookup table is needed.
+pub fn star_name(id: &str) -> String {
+    let code = id.strip_prefix('g').unwrap_or(id).replace('.', "-");
+    format!("TS {code}")
+}
+
+pub fn planet_name(star: &str, index: usize) -> String {
+    format!("{} {}", star_name(star), (b'b' + index as u8) as char)
+}
+
 #[derive(Resource, Default)]
 pub struct Galactic {
     pub picked: Option<PickedStar>,
@@ -39,8 +50,43 @@ pub fn pick_centre(
     pose: &CameraPose,
     rotation: Quat,
 ) -> Option<PickedStar> {
+    pick_ray(field, rig, pose, (rotation * -Vec3::Z).as_dvec3(), 0.99985)
+}
+
+/// Pick a visible streamed star along the pointer ray. The threshold is the
+/// angular size of a ten-pixel hit target at the current viewport height.
+pub fn pick_pointer(
+    field: &Starfield,
+    rig: &CameraRig,
+    pose: &CameraPose,
+    rotation: Quat,
+    pointer: [f64; 2],
+    viewport: [f64; 2],
+) -> Option<PickedStar> {
+    let [x, y] = pointer;
+    let [width, height] = viewport;
+    let tan_half = (50.0_f64.to_radians() / 2.0).tan();
+    let right = (2.0 * x - width) / height * tan_half;
+    let up = (1.0 - 2.0 * y / height) * tan_half;
+    let direction = (rotation * Vec3::new(right as f32, up as f32, -1.0).normalize()).as_dvec3();
+    let radius = 10.0 * 2.0 * tan_half / height;
+    pick_ray(
+        field,
+        rig,
+        pose,
+        direction,
+        1.0 / (1.0 + radius * radius).sqrt(),
+    )
+}
+
+fn pick_ray(
+    field: &Starfield,
+    rig: &CameraRig,
+    pose: &CameraPose,
+    forward: DVec3,
+    min_alignment: f64,
+) -> Option<PickedStar> {
     let eye = rig.galactic_ly(pose);
-    let forward = (rotation * -Vec3::Z).as_dvec3();
     let mut best: Option<(f64, PickedStar)> = None;
     for (&cell, stars) in &field.cells {
         for star in &stars.stars {
@@ -57,9 +103,9 @@ pub fn pick_centre(
                 continue;
             }
             let alignment = delta.dot(forward) / distance;
-            // Approximately a one-degree crosshair. Prefer angular proximity;
-            // a stable ID resolves equal scores regardless of HashMap ordering.
-            if alignment < 0.99985 {
+            // Prefer angular proximity within the caller's hit cone; a stable
+            // ID resolves equal scores regardless of HashMap ordering.
+            if alignment < min_alignment {
                 continue;
             }
             let score = 1.0 - alignment;
@@ -75,6 +121,21 @@ pub fn pick_centre(
         }
     }
     best.map(|(_, star)| star)
+}
+
+/// Find a picked point by stable ID, never by its batch or vertex number.
+pub fn picked_id(field: &Starfield, id: &str) -> Option<PickedStar> {
+    let (cell, component, index) = space_simulation::cells::parse_cell_star(id)?;
+    let star = field
+        .cells
+        .get(&cell)?
+        .stars
+        .iter()
+        .find(|s| s.component == component && u64::from(s.index) == index)?;
+    Some(PickedStar {
+        id: id.to_owned(),
+        position_pc: star.position_pc,
+    })
 }
 
 pub fn overview(nav: &mut Navigation, galactic: &mut Galactic, centre: DVec3) {
@@ -122,8 +183,8 @@ pub fn enter(nav: &mut Navigation, galactic: &mut Galactic, lists: &Galaxy) -> b
         .into_iter()
         .enumerate()
         .map(|(index, body)| Planet {
-            id: format!("{}:{index}", picked.id),
-            designation: format!("{} {}", picked.id, index + 1),
+            id: format!("{}/{}", picked.id, index),
+            designation: planet_name(&picked.id, index),
             page: 0,
             orbit_index: index as u32,
             orbit: body.orbit,
@@ -137,7 +198,7 @@ pub fn enter(nav: &mut Navigation, galactic: &mut Galactic, lists: &Galaxy) -> b
         .collect::<Vec<_>>();
     galactic.system = Some(StarSystem {
         id: picked.id.clone(),
-        name: picked.id.clone(),
+        name: star_name(&picked.id),
         position_ly: relative_ly(picked.position_pc).to_array(),
         planets,
         stars: vec![star],
@@ -210,6 +271,64 @@ mod tests {
         assert_eq!(picked.id, point(0.01, 1).id(cell));
         field.cells.get_mut(&cell).unwrap().stars.pop();
         assert!(pick_centre(&field, &rig, &pose, Quat::IDENTITY).is_none());
+    }
+
+    #[test]
+    fn pointer_picks_visible_off_centre_star_by_stable_id() {
+        let home = GalaxyModel::milky_way().home_pc;
+        let cell = Cell::containing(10, home).unwrap();
+        let mut field = Starfield::default();
+        let star = StarPoint {
+            position_pc: [home[0] + 0.01, home[1], home[2] - 1.0],
+            luminosity_solar: 1.0,
+            temperature_k: 5772.0,
+            radius_solar: 1.0,
+            component: Component::ThinDisc,
+            index: 8,
+        };
+        field.cells.insert(
+            cell,
+            StarCell {
+                cell,
+                stars: vec![star],
+            },
+        );
+        let rig = CameraRig::default();
+        let pose = CameraPose::default();
+        let x = 500.0 + 0.01 * 500.0 / (50.0_f64.to_radians() / 2.0).tan();
+        let picked = pick_pointer(
+            &field,
+            &rig,
+            &pose,
+            Quat::IDENTITY,
+            [x, 500.0],
+            [1000.0, 1000.0],
+        )
+        .unwrap();
+        assert_eq!(picked.id, star.id(cell));
+        assert_eq!(
+            picked_id(&field, &picked.id).unwrap().position_pc,
+            star.position_pc
+        );
+        assert!(
+            pick_pointer(
+                &field,
+                &rig,
+                &pose,
+                Quat::IDENTITY,
+                [x + 30.0, 500.0],
+                [1000.0, 1000.0]
+            )
+            .is_none()
+        );
+        assert!(picked_id(&field, "g1.2.8").is_none());
+    }
+
+    #[test]
+    fn catalogue_names_are_unique_stable_and_planets_are_lettered() {
+        assert_eq!(star_name("g78040000.2.854"), "TS 78040000-2-854");
+        assert_ne!(star_name("g78040000.2.854"), star_name("g78040000.2.855"));
+        assert_eq!(planet_name("g78040000.2.854", 0), "TS 78040000-2-854 b");
     }
 
     #[test]

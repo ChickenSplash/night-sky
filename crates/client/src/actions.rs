@@ -11,6 +11,10 @@ pub enum UiCommand {
     Atlas,
     GalaxyView,
     PickGalactic,
+    /// Select a streamed point by stable star ID, or enter it on a second click.
+    PickStar {
+        id: String,
+    },
     EnterGalactic,
     LeaveGalactic,
     ReturnToLists,
@@ -101,6 +105,18 @@ pub fn apply(
                 if nav.galactic && galactic.system.is_none() {
                     galactic.picked =
                         crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
+                }
+            }
+            UiCommand::PickStar { id } => {
+                if nav.galactic
+                    && galactic.system.is_none()
+                    && let Some(picked) = crate::galaxy_nav::picked_id(&field, id)
+                {
+                    if galactic.picked.as_ref().is_some_and(|star| star.id == *id) {
+                        crate::galaxy_nav::enter(&mut nav, &mut galactic, galaxy);
+                    } else {
+                        galactic.picked = Some(picked);
+                    }
                 }
             }
             UiCommand::EnterGalactic => {
@@ -250,6 +266,68 @@ mod tests {
         app.world_mut().write_message(UiCommand::ReturnToLists);
         app.update();
         assert!(!app.world().resource::<Navigation>().galactic);
+    }
+
+    #[test]
+    fn clicking_a_streamed_star_selects_then_enters_its_system() {
+        use space_simulation::cells::{Cell, Sky};
+        use space_simulation::galaxy::GalaxyModel;
+        use space_simulation::stream::{StarCell, StarPoint};
+        let home = GalaxyModel::milky_way().home_pc;
+        let cell = Cell::containing(10, home).unwrap();
+        let star = Sky::default().cell_star_at(cell, 0).unwrap();
+        let mut app = run(space_simulation::demo_galaxy(), vec![UiCommand::GalaxyView]);
+        let mut field = app.world_mut().resource_mut::<crate::stream::Starfield>();
+        field.cells.insert(
+            cell,
+            StarCell {
+                cell,
+                stars: vec![StarPoint {
+                    position_pc: star.position_pc,
+                    luminosity_solar: star.star.luminosity_solar as f32,
+                    temperature_k: star.star.temperature_k as f32,
+                    radius_solar: star.star.radius_solar as f32,
+                    component: star.component,
+                    index: 0,
+                }],
+            },
+        );
+        app.world_mut().write_message(UiCommand::PickStar {
+            id: star.id.clone(),
+        });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<crate::galaxy_nav::Galactic>()
+                .picked
+                .as_ref()
+                .unwrap()
+                .id,
+            star.id
+        );
+        assert!(
+            app.world()
+                .resource::<crate::galaxy_nav::Galactic>()
+                .system
+                .is_none()
+        );
+        app.world_mut().write_message(UiCommand::PickStar {
+            id: star.id.clone(),
+        });
+        app.update();
+        let system = app
+            .world()
+            .resource::<crate::galaxy_nav::Galactic>()
+            .system
+            .clone()
+            .unwrap();
+        assert_eq!(system.id, star.id);
+        assert_eq!(system.name, crate::galaxy_nav::star_name(&star.id));
+        assert!(system.planets.iter().all(|p| p.task.is_none()));
+        assert_eq!(
+            system.planets[0].designation,
+            crate::galaxy_nav::planet_name(&star.id, 0)
+        );
     }
 
     #[test]

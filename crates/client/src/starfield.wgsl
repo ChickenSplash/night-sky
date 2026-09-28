@@ -8,6 +8,7 @@
 
 struct Settings { values: vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> settings: Settings;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> marker: vec4<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -50,5 +51,7 @@ fn fragment(in: Output) -> @location(0) vec4<f32> {
     // One linear apparent-flux scale. Exposure and bloom operate on this HDR
     // colour; in the wireframe view it is tone-mapped by the normal SDR target.
     let intensity = min(20000.0, settings.values.z * pow(10.0, -0.4 * magnitude));
-    return vec4(in.colour.rgb * intensity * exp(-3.0 * r2) * settings.values.w, 0.0);
+    let ring = marker.x * (1.0 - smoothstep(0.72, 0.78, sqrt(r2)))
+        * smoothstep(0.55, 0.65, sqrt(r2));
+    return vec4(in.colour.rgb * (intensity * exp(-3.0 * r2) * settings.values.w + ring * 0.35), 0.0);
 }

@@ -10,7 +10,7 @@ const RATES = [
   ['10 yr/s', 10 * YEAR], ['30 yr/s', 30 * YEAR], ['100 yr/s', 100 * YEAR],
 ];
 const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'constellation']];
-const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Task labels'], ['markers', 'Body markers']];
+const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers']];
 // Physical exposure and wireframes apply only to realistic rendering.
 const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
 const HELP = [['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Down / up'],

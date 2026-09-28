@@ -144,7 +144,7 @@ try {
 
   // Display toggles live in the settings popover and reach Rust.
   await page.locator('#settings-button').click();
-  const labels = page.locator('#settings .toggle', { hasText: 'Task labels' });
+  const labels = page.locator('#settings .toggle', { hasText: 'Planet labels' });
   const labelsOn = (await seen('state')).display.labels;
   await labels.click();
   await page.waitForFunction(on => window.seen.state.display.labels === !on, labelsOn);

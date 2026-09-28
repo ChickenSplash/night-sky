@@ -41,6 +41,9 @@ struct StarMaterial {
     /// Parsecs per render unit, apparent-magnitude cutoff and display gain.
     #[uniform(0)]
     settings: Vec4,
+    /// 1 for a thin marker ring around every visible streamed star.
+    #[uniform(1)]
+    marker: Vec4,
 }
 
 impl Material for StarMaterial {
@@ -165,18 +168,19 @@ fn sync(
                     12.0,
                     sky_dimming(&nav, &lights),
                 ),
+                marker: Vec4::new(f32::from(nav.markers), 0.0, 0.0, 0.0),
             })
         })
         .clone();
     let scale = pc_per_unit as f32;
     let dimming = sky_dimming(&nav, &lights);
-    if materials
-        .get(&material)
-        .is_some_and(|m| m.settings.x != scale || m.settings.w != dimming)
-        && let Some(m) = materials.get_mut(&material)
+    if materials.get(&material).is_some_and(|m| {
+        m.settings.x != scale || m.settings.w != dimming || m.marker.x != f32::from(nav.markers)
+    }) && let Some(m) = materials.get_mut(&material)
     {
         m.settings.x = scale;
         m.settings.w = dimming;
+        m.marker.x = f32::from(nav.markers);
     }
     let origin = rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;

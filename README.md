@@ -206,17 +206,20 @@ is available it retains its last data, initially the clearly labelled demo.
   left behind. Batched point meshes show stars actually bright enough to see,
   in both the wireframe and realistic views. A faint approximate glow traces
   unresolved disc and spiral-arm light; the central black hole is modelled at
-  its physical horizon radius. There is no galactic navigation, dust or
-  gravitational lensing yet.
+  its physical horizon radius. There is no dust or gravitational lensing yet.
 
 - **Generated galaxy (Phase 6):** choose **Generated galaxy** in the native
   navigation panel or press **G** (the same shortcut works on the web canvas).
   Scroll out for kiloparsec-scale travel; WASD and Q/E move, Shift accelerates.
-  Aim the centre of the view at a visible star and press **F** (or **Pick centre
-  star**), then **Enter** to fly into its deterministic, task-free planetary
-  system. **Backspace** returns to the galaxy, **G** returns to lists. Canvas
-  controls are present on both browser and native. Picking uses only currently
-  loaded stars; wait for streaming if the target is not yet selectable.
+  Click any visible star to select it, then click it again (or press **Enter**)
+  to visit its planetary system. **F** (or **Pick centre star**) selects the star
+  at the view centre. **Body markers** adds rings to every visible galactic
+  point without allocating UI widgets per star. Generated stars have stable
+  `TS <cell>-<component>-<index>` catalogue names and lettered planets; stars
+  assigned to ClickUp pages instead show the same planets with task overlays.
+  **Backspace** returns to the galaxy, **G** returns to lists. The browser and
+  native canvas share these controls. Picking uses only currently loaded,
+  magnitude-visible stars; wait for streaming if a target is not selectable.
 
 ## Project structure
 

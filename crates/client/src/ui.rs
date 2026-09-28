@@ -37,8 +37,6 @@ pub fn draw_ui(
     let _ = &mut commands;
     let (markers, insets, lights) = overlay;
     let (rig, pose, starfield, galactic) = camera_state;
-    #[cfg(target_arch = "wasm32")]
-    let _ = &starfield;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -116,6 +114,7 @@ pub fn draw_ui(
         &rig,
         &pose,
         &galactic,
+        &starfield,
         &exposure_caption(&nav, &lights),
         insets.0.is_none(),
         &mut out,
@@ -292,7 +291,7 @@ impl Panels<'_> {
         for (option, mut on, label) in [
             (Display::Exaggerate, nav.exaggerate, "Readable planet sizes"),
             (Display::Orbits, nav.orbits, "Orbital paths"),
-            (Display::Labels, nav.labels, "Task labels"),
+            (Display::Labels, nav.labels, "Planet labels"),
             (Display::Markers, nav.markers, "Body markers"),
         ] {
             if ui.checkbox(&mut on, label).changed() {
@@ -659,6 +658,7 @@ fn canvas_overlay(
     rig: &CameraRig,
     pose: &CameraPose,
     galactic: &crate::galaxy_nav::Galactic,
+    field: &crate::stream::Starfield,
     exposure: &str,
     // HTML panels show the loading state and view captions themselves.
     captions: bool,
@@ -681,9 +681,9 @@ fn canvas_overlay(
                         if ui.button("Lists (G)").clicked() { out.push(UiCommand::ReturnToLists); }
                     });
                     if let Some(star) = &galactic.picked {
-                        ui.label(format!("Selected {}", star.id));
+                        ui.label(format!("Selected {}", crate::galaxy_nav::star_name(&star.id)));
                     } else if galactic.system.is_none() {
-                        ui.label("Aim at a visible star, then pick it. WASD/QE travel, scroll zoom, Shift boost.");
+                        ui.label("Click a visible star to select; click again to enter. F picks centre. WASD/QE travel.");
                     }
                 });
             });
@@ -758,6 +758,51 @@ fn canvas_overlay(
 
     let pointer = ctx.input(|i| i.pointer.interact_pos());
     let click = ctx.input(|i| i.pointer.primary_clicked());
+    if nav.galactic && galactic.system.is_none() {
+        if let Some(star) = &galactic.picked {
+            let eye = rig.galactic_ly(pose);
+            let position = (bevy::math::DVec3::from_array(star.position_pc)
+                - bevy::math::DVec3::from_array(
+                    space_simulation::galaxy::GalaxyModel::milky_way().home_pc,
+                ))
+                * (space_simulation::galaxy::PC_METRES / LY_METRES);
+            let camera = rig.rotation().inverse() * (position - eye).as_vec3();
+            if camera.z < 0.0 {
+                let half = (50.0_f32.to_radians() / 2.0).tan();
+                let size = rect.height() / (2.0 * half * -camera.z);
+                let point = egui::pos2(
+                    rect.center().x + camera.x * size,
+                    rect.center().y - camera.y * size,
+                );
+                if rect.contains(point) {
+                    painter.circle_stroke(point, 10.0, egui::Stroke::new(1.5, ACCENT));
+                    painter.text(
+                        point + egui::vec2(16.0, -8.0),
+                        egui::Align2::LEFT_CENTER,
+                        crate::galaxy_nav::star_name(&star.id),
+                        egui::FontId::proportional(12.0),
+                        ACCENT,
+                    );
+                }
+            }
+        }
+        if click
+            && let Some(pointer) = pointer.filter(|p| rect.contains(*p))
+            && let Some(star) = crate::galaxy_nav::pick_pointer(
+                field,
+                rig,
+                pose,
+                rig.rotation(),
+                [
+                    f64::from(pointer.x - rect.min.x),
+                    f64::from(pointer.y - rect.min.y),
+                ],
+                [f64::from(rect.width()), f64::from(rect.height())],
+            )
+        {
+            out.push(UiCommand::PickStar { id: star.id });
+        }
+    }
     // A large constellation can contain hundreds of page stars. Showing every
     // label at once makes the overview look like one collapsed line of stars.
     let dense_constellation = nav.view == View::Constellation && markers.0.len() > 24;
