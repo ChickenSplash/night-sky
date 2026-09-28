@@ -8,9 +8,10 @@
 
 struct Settings { values: vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> settings: Settings;
-// x: points closer than this times their offset from the mesh origin are drawn
-// one by one, precisely, instead (`starfield.rs`); y: nor are points within this
-// many parsecs, where the visited star is drawn as a body. Zero for sprites.
+// x: batch points closer than this times their offset from the mesh origin are
+// hidden. This is smaller than the precise sprite's visibility radius, so both
+// overlap during the handoff (`starfield.rs`). y: body range in parsecs.
+// Both zero for sprites.
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> near: vec4<f32>;
 
 struct Vertex {

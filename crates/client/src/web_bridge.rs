@@ -121,6 +121,7 @@ struct DisplayState {
     orbits: bool,
     labels: bool,
     markers: bool,
+    velocity_marker: bool,
     realistic: bool,
     physical: bool,
     wireframe: bool,
@@ -218,6 +219,7 @@ fn publish_state(
             orbits: nav.orbits,
             labels: nav.labels,
             markers: nav.markers,
+            velocity_marker: nav.velocity_marker,
             realistic: nav.realistic,
             physical: nav.physical,
             wireframe: nav.wireframe,
@@ -276,6 +278,8 @@ struct Tick {
     target: [f64; 3],
     /// The camera's exposure in words.
     exposure: String,
+    set_speed: String,
+    velocity: String,
 }
 
 fn publish_tick(
@@ -284,6 +288,7 @@ fn publish_tick(
     pose: Res<CameraPose>,
     nav: Res<Navigation>,
     lights: Res<crate::render::Lights>,
+    velocity: Res<crate::scene::CameraVelocity>,
     mut next: Local<f64>,
 ) {
     let now = time.elapsed_secs_f64();
@@ -298,6 +303,8 @@ fn publish_tick(
             range: pose.distance,
             target: nav.target.to_array(),
             exposure: crate::render::exposure_caption(&nav, &lights),
+            set_speed: crate::scene::speed_label(nav.move_speed),
+            velocity: crate::scene::speed_label(velocity.metres_per_second.length()),
         },
     );
 }

@@ -63,6 +63,7 @@ pub enum Display {
     Orbits,
     Labels,
     Markers,
+    VelocityMarker,
     Realistic,
     Physical,
     Wireframe,
@@ -132,6 +133,7 @@ pub fn apply(
                 Display::Orbits => nav.orbits = *on,
                 Display::Labels => nav.labels = *on,
                 Display::Markers => nav.markers = *on,
+                Display::VelocityMarker => nav.velocity_marker = *on,
                 Display::Realistic => nav.realistic = *on,
                 Display::Physical => nav.physical = *on,
                 Display::Wireframe => nav.wireframe = *on,
@@ -198,6 +200,27 @@ mod tests {
 
     fn nav(app: &App) -> &Navigation {
         app.world().resource::<Navigation>()
+    }
+
+    #[test]
+    fn velocity_marker_can_be_disabled_without_disabling_body_markers() {
+        let mut app = run(
+            space_simulation::demo_galaxy(),
+            vec![UiCommand::SetDisplay {
+                option: Display::VelocityMarker,
+                on: false,
+            }],
+        );
+        assert!(!nav(&app).velocity_marker);
+        assert!(nav(&app).markers);
+        send(
+            &mut app,
+            vec![UiCommand::SetDisplay {
+                option: Display::VelocityMarker,
+                on: true,
+            }],
+        );
+        assert!(nav(&app).velocity_marker);
     }
 
     #[test]

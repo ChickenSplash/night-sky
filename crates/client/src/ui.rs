@@ -3,9 +3,9 @@ use crate::views::View;
 use crate::{
     Clock, Navigation, Universe,
     render::{Lights, exposure_caption},
-    scene::{CameraPose, CameraRig, Markers},
+    scene::{CameraPose, CameraRig, CameraVelocity, Markers, speed_label},
 };
-use bevy::prelude::*;
+use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiContexts, egui};
 use space_shared::Galaxy;
 use space_simulation::{AU_METRES, LY_METRES, SimulationClock, period_seconds};
@@ -23,7 +23,12 @@ pub fn draw_ui(
     universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
-    overlay: (Res<Markers>, Res<PanelInsets>, Res<Lights>),
+    overlay: (
+        Res<Markers>,
+        Res<PanelInsets>,
+        Res<Lights>,
+        Res<CameraVelocity>,
+    ),
     camera_state: (
         Res<CameraRig>,
         Res<CameraPose>,
@@ -34,7 +39,7 @@ pub fn draw_ui(
     let (mut commands, mut contexts, mut writer) = interaction;
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
-    let (markers, insets, lights) = overlay;
+    let (markers, insets, lights, velocity) = overlay;
     let (rig, pose, starfield) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -113,6 +118,7 @@ pub fn draw_ui(
         &pose,
         &starfield,
         &exposure_caption(&nav, &lights),
+        &velocity,
         insets.0.is_none(),
         &mut out,
     );
@@ -180,7 +186,7 @@ impl Panels<'_> {
 
     fn footer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Click: select a star, again to visit    C: centre star    Enter: visit    LMB drag: look    RMB drag: orbit    Scroll: zoom    WASD: move    Q/E: roll    R/F: up/down    Shift: boost    Space: pause").size(11.0).color(MUTED));
+            ui.label(egui::RichText::new("Click: select a star, again to visit    C: centre star    Enter: visit    LMB drag: look    RMB drag: orbit    Scroll: zoom    Shift+scroll: speed    WASD: move    Q/E: roll    R/F: up/down    Space: pause").size(11.0).color(MUTED));
             ui.separator();
             ui.label(egui::RichText::new(&self.nav.notice).size(11.0).color(MUTED));
         });
@@ -277,6 +283,11 @@ impl Panels<'_> {
             (Display::Orbits, nav.orbits, "Orbital paths"),
             (Display::Labels, nav.labels, "Planet labels"),
             (Display::Markers, nav.markers, "Body markers"),
+            (
+                Display::VelocityMarker,
+                nav.velocity_marker,
+                "Velocity marker",
+            ),
         ] {
             if ui.checkbox(&mut on, label).changed() {
                 self.out.push(UiCommand::SetDisplay { option, on });
@@ -651,6 +662,7 @@ fn canvas_overlay(
     pose: &CameraPose,
     field: &crate::stream::Starfield,
     exposure: &str,
+    velocity: &CameraVelocity,
     // HTML panels show the loading state and view captions themselves.
     captions: bool,
     out: &mut Vec<UiCommand>,
@@ -697,7 +709,9 @@ fn canvas_overlay(
             rect.left_bottom() + egui::vec2(24.0, -20.0),
             egui::Align2::LEFT_BOTTOM,
             format!(
-                "{}\nCAMERA RANGE {distance}   /   {}",
+                "SET SPEED {}   /   VELOCITY {}\n{}\nCAMERA RANGE {distance}   /   {}",
+                speed_label(nav.move_speed).to_uppercase(),
+                speed_label(velocity.metres_per_second.length()).to_uppercase(),
                 exposure.to_uppercase(),
                 if nav.following {
                     "TRACKING"
@@ -710,6 +724,10 @@ fn canvas_overlay(
             egui::FontId::monospace(11.0),
             MUTED,
         );
+    }
+
+    if nav.velocity_marker {
+        draw_velocity_marker(&painter, rect, rig, velocity.marker_metres_per_second);
     }
 
     let pointer = ctx.input(|i| i.pointer.interact_pos());
@@ -825,5 +843,42 @@ fn canvas_overlay(
         )
     {
         out.push(UiCommand::PickStar { id: star.id });
+    }
+}
+
+/// Prograde (dot) and retrograde (cross) on the visible hemisphere. A direction
+/// straight along the sight line sits at the centre; sideways motion approaches
+/// the viewport edge. The far-side marker is hidden rather than reflected.
+fn draw_velocity_marker(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    rig: &CameraRig,
+    velocity: DVec3,
+) {
+    if velocity.length_squared() < 1.0 || rect.width() < 60.0 || rect.height() < 60.0 {
+        return;
+    }
+    let direction = rig.rotation().inverse() * velocity.normalize().as_vec3();
+    let radius = rect.width().min(rect.height()) * 0.43;
+    for (vector, prograde) in [(direction, true), (-direction, false)] {
+        if vector.z > 0.0 {
+            continue;
+        }
+        let point = rect.center() + egui::vec2(vector.x, -vector.y) * radius;
+        let colour = if prograde { ACCENT } else { MUTED };
+        painter.circle_stroke(point, 9.0, egui::Stroke::new(1.5, colour));
+        if prograde {
+            painter.circle_filled(point, 2.5, colour);
+        } else {
+            for sign in [-1.0, 1.0] {
+                painter.line_segment(
+                    [
+                        point + egui::vec2(-4.0, 4.0 * sign),
+                        point + egui::vec2(4.0, -4.0 * sign),
+                    ],
+                    egui::Stroke::new(1.5, colour),
+                );
+            }
+        }
     }
 }

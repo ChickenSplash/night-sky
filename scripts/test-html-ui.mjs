@@ -150,6 +150,11 @@ try {
   await page.waitForFunction(on => window.seen.state.display.labels === !on, labelsOn);
   await labels.click();
   await page.waitForFunction(on => window.seen.state.display.labels === on, labelsOn);
+  const marker = page.locator('#settings .toggle', { hasText: 'Velocity marker' });
+  await marker.click();
+  await page.waitForFunction(() => window.seen.state.display.velocity_marker === false);
+  await marker.click();
+  await page.waitForFunction(() => window.seen.state.display.velocity_marker === true);
   await shot('settings');
   await page.mouse.click(900, 450);
   assert.equal(await page.locator('#settings').isHidden(), true, 'Clicking the view did not close settings');
@@ -193,6 +198,14 @@ try {
   await page.mouse.wheel(0, -600);
   await page.waitForTimeout(1200);
   assert.notEqual(await range(), steady, 'Scrolling the canvas did not zoom');
+  const zoomed = await range();
+  const speed = (await seen('tick')).set_speed;
+  await page.keyboard.down('Shift');
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(500);
+  await page.keyboard.up('Shift');
+  assert.equal(await range(), zoomed, 'Shift + scroll changed camera range');
+  assert.notEqual((await seen('tick')).set_speed, speed, 'Shift + scroll did not change travel speed');
 
   // The sidebar slides away and back.
   await page.locator('#nav-panel button[aria-label="Hide sidebar"]').click();

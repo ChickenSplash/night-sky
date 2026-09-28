@@ -159,9 +159,10 @@
   retained cells after the camera travels 0.2 of the tier's reach. New entities
   start hidden for one frame, avoiding Bevy's material specialization race.
   Batch vertices are f32 offsets from their cell's centre, so their error grows
-  with that offset: within `PRECISE` times it of the camera the batch shader
-  hides a point, and a single-star sprite placed by an f64 subtraction takes
-  over (built at `PREPARE` times the radius, so its hidden frame is spent). The
+  with that offset: within `PRECISE` times it of the camera a single-star sprite
+  placed by an f64 subtraction takes over (built at `PREPARE` times the radius,
+  so its hidden frame is spent). The batch remains until a quarter of that
+  radius, and is not culled while the precise sprite is still unplaced. The
   visited star is a body only within `scene::body_range` (where its planets
   show): batches hide points that close and its sprite waits hidden. Beyond, it
   is a galactic point under the same magnitude limit. Galactic points use
@@ -179,6 +180,24 @@
   relative to home in galactic axes; a visit moves the camera frame to its
   star in f64, and the same `Flight` shifts the displayed pose. Orbit, table
   and constellation views work on any visited system.
+- Free flight automatically activates a nearby loaded star's list page or
+  generated system at 0.02 ly, without flying, reframing or changing movement
+  speed. It restores the previous explicit visit beyond 0.04 ly. Frame changes
+  preserve the camera eye despite f32 quaternion rounding. Body visibility and
+  render scale follow physical proximity, not the zoom/range setting, so the
+  same point-to-body handoff works after clicking Visit or drifting in.
+  Close-up star size exaggeration also follows physical eye distance, never a
+  potentially interstellar camera range that would put the eye inside its shell.
+- During free-look and free flight, `Navigation::eye` is the authoritative f64
+  camera position in the current page frame. `target` remains for orbiting and
+  flights; never reconstruct the close-up eye by cancelling a distant target
+  against the camera range. Velocity uses differences of local eyes and ignores
+  the rounding residual on star-frame switches. During right-drag the speed
+  readout still measures the eye's orbit, but the direction marker uses only
+  intentional keyboard travel, not rotation around the target.
+- The render scale tightens near any loaded star within 20 ly even before its
+  system activates, independently of the selected camera range. Keep the
+  visited body's physical-proximity fallback when its cell has not loaded yet.
 - `Navigation::picked` is one selected star, by stable ID. `galaxy_nav.rs`
   picks and visits it: a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
@@ -186,7 +205,7 @@
   loaded, visible points only, and only on click, never every frame. Click
   again or Enter to visit, C picks the view centre. The only bodies drawn are
   the visited star and its planets. Scroll zooms from 20,000 km to 40,000 ly;
-  movement scales with the displayed distance.
+  movement uses an independently selected speed (Shift + scroll).
 - Unassigned cell stars use ID-derived `TS` catalogue names and lettered
   planets, with no name registry or per-star UI entities.
 

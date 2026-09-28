@@ -35,11 +35,14 @@ const SHADER: Handle<Shader> = uuid_handle!("d12d0ce2-812e-4260-a528-74d3af35d48
 const BATCH: usize = 4096;
 const UPLOAD_BUDGET: Duration = Duration::from_millis(3);
 const MARGIN: f64 = 1.25;
-/// A batched point closer than this many times its offset from its cell's
-/// centre is drawn on its own instead. Batch vertices are f32 offsets from that
-/// centre, so their error grows with the offset; from farther away it stays
-/// below a quarter of a pixel.
+/// A point closer than this many times its offset from its cell's centre gets
+/// a precise sprite. Batch vertices are f32 offsets from that centre, so their
+/// error grows with the offset; beyond here it stays below a quarter pixel.
 const PRECISE: f64 = 2e-3;
+/// Keep the batched point while its precise replacement becomes visible. The
+/// former is accurate to around a pixel at this cutoff; without overlap an
+/// unloaded/hidden sprite leaves a hole light-years from a bright star.
+const BATCH_HIDE: f64 = PRECISE * 0.25;
 /// Precise sprites are built this many times farther out than they show, so
 /// each has passed its hidden first frame before it takes over.
 const PREPARE: f64 = 2.0;
@@ -240,7 +243,7 @@ fn sync(
     };
     let material = batches
         .material
-        .get_or_insert_with(|| star_material(PRECISE as f32))
+        .get_or_insert_with(|| star_material(BATCH_HIDE as f32))
         .clone();
     let precise_material = precise
         .material
@@ -374,6 +377,7 @@ fn sync(
         ..
     } = &mut *precise;
     let mut wanted = HashSet::new();
+    let mut unready_precise = false;
     for candidate in candidates.iter() {
         let position = DVec3::from_array(candidate.star.position_pc);
         let distance = position.distance(eye);
@@ -383,6 +387,9 @@ fn sync(
         }
         wanted.insert(candidate.id.as_str());
         let Some(&(entity, _)) = sprites.get(&candidate.id) else {
+            if distance < BATCH_HIDE * candidate.offset_pc {
+                unready_precise = true;
+            }
             let (geometry, visible) = mesh(&[candidate.star], candidate.star.position_pc, eye);
             if visible > 0 {
                 let handle = meshes.add(geometry);
@@ -415,7 +422,18 @@ fn sync(
             } else {
                 Visibility::Hidden
             };
+        } else if distance < BATCH_HIDE * candidate.offset_pc {
+            // The first frame after spawning a sprite has no placement yet.
+            // Do not remove its batch representation before it is ready.
+            unready_precise = true;
         }
+    }
+    if let Some(batch) = materials.get_mut(&material) {
+        batch.near.x = if unready_precise {
+            0.0
+        } else {
+            BATCH_HIDE as f32
+        };
     }
     sprites.retain(|id, (entity, handle)| {
         let keep = wanted.contains(id.as_str());
@@ -506,5 +524,41 @@ mod tests {
         assert!(candidates(&field, far, 0.0).is_empty());
         // A visited star's body range reaches farther.
         assert_eq!(candidates(&field, far, 1.0).len(), 1);
+    }
+
+    #[test]
+    fn precise_sprite_is_ready_before_batch_culls_at_interstellar_range() {
+        let cell = Cell::containing(6, [8200.0, 20.0, 0.0]).unwrap();
+        let centre = DVec3::from_array(cell.centre_pc());
+        // A bright star far from its large cell's centre can switch several
+        // light years before the actual 0.02 ly system handoff.
+        let position = centre + DVec3::X * 980.0;
+        let point = StarPoint {
+            position_pc: position.to_array(),
+            luminosity_solar: 10_000.0,
+            temperature_k: 10_000.0,
+            radius_solar: 10.0,
+            component: space_simulation::galaxy::Component::ThinDisc,
+            index: 0,
+        };
+        let mut field = Starfield::default();
+        field.cells.insert(
+            cell,
+            space_simulation::stream::StarCell {
+                cell,
+                stars: vec![point],
+            },
+        );
+        let eye = position + DVec3::Z * (6.0 * space_simulation::LY_METRES / PC_METRES);
+        let candidate = candidates(&field, eye, 0.0);
+        assert_eq!(candidate.len(), 1);
+        let radius = PRECISE * candidate[0].offset_pc;
+        let distance = eye.distance(position);
+        assert!(distance < PREPARE * radius);
+        assert!(distance < radius, "sprite must be visible at 6 ly");
+        assert!(
+            distance > BATCH_HIDE * candidate[0].offset_pc,
+            "batch must still cover the six-light-year transition"
+        );
     }
 }

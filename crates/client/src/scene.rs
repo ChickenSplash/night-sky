@@ -11,13 +11,98 @@ use bevy_egui::EguiContexts;
 use big_space::prelude::*;
 use space_shared::{Orbit, Spin, StarSystem};
 use space_simulation::{
-    LY_METRES, SUN_RADIUS_METRES, plane_tilt, position, position_at_eccentric_anomaly, spin_angle,
+    LY_METRES, SUN_RADIUS_METRES,
+    galaxy::{GalaxyModel, PC_METRES},
+    plane_tilt, position, position_at_eccentric_anomaly, spin_angle,
 };
 use std::f64::consts::TAU;
 
 /// Beyond this camera range stars draw at their true separation. Planet
 /// visibility also depends on the actual size of the current page's system.
 const WIDE_METRES: f64 = 0.02 * LY_METRES;
+const APPROACH_METRES: f64 = 0.02 * LY_METRES;
+const LEAVE_METRES: f64 = 0.04 * LY_METRES;
+/// Keep nearby streamed points well clear of the camera's near clip plane even
+/// when the selected camera range is interstellar.
+const PRECISE_SCALE_PC: f64 = 20.0 * LY_METRES / PC_METRES;
+pub const MIN_SPEED: f64 = 1.0;
+pub const MAX_SPEED: f64 = 1000.0 * LY_METRES;
+
+fn scroll_speed(speed: f64, scroll: f32) -> f64 {
+    (speed * (f64::from(scroll) * 0.35).exp()).clamp(MIN_SPEED, MAX_SPEED)
+}
+
+/// Use larger units only once the value reaches one whole unit.
+pub fn speed_label(metres_per_second: f64) -> String {
+    let (value, unit) = if metres_per_second >= LY_METRES {
+        (metres_per_second / LY_METRES, "ly/s")
+    } else if metres_per_second >= space_simulation::AU_METRES {
+        (metres_per_second / space_simulation::AU_METRES, "AU/s")
+    } else if metres_per_second >= 1000.0 {
+        (metres_per_second / 1000.0, "km/s")
+    } else {
+        (metres_per_second, "m/s")
+    };
+    format!("{value:.2} {unit}")
+}
+
+/// Camera velocity in galactic axes, measured from displayed positions rather
+/// than the requested movement, so flights and turns are accounted for.
+#[derive(Resource, Default)]
+pub struct CameraVelocity {
+    pub metres_per_second: DVec3,
+    pub marker_metres_per_second: DVec3,
+    previous: Option<(DVec3, DVec3)>,
+}
+
+/// Right-drag moves the eye around a fixed target. That is real camera motion,
+/// but should not steer the travel-direction marker. Keyboard travel can still
+/// happen during the drag, so retain its precise displacement separately.
+#[derive(Resource, Default)]
+pub struct CameraMotion {
+    orbiting: bool,
+    travel_metres: DVec3,
+}
+
+pub fn measure_velocity(
+    time: Res<Time>,
+    rig: Res<CameraRig>,
+    pose: Res<CameraPose>,
+    motion: Res<CameraMotion>,
+    mut velocity: ResMut<CameraVelocity>,
+) {
+    let current = (rig.frame_ly, pose.eye);
+    let dt = time.delta_secs_f64();
+    velocity.metres_per_second = if let Some((frame, eye)) = velocity.previous {
+        if dt > 0.0 {
+            if frame != rig.frame_ly {
+                // Switching a star-relative frame subtracts interstellar-sized
+                // numbers. Do not interpret the rounding residual as motion.
+                velocity.previous = Some(current);
+                velocity.metres_per_second = DVec3::ZERO;
+                velocity.marker_metres_per_second = DVec3::ZERO;
+                return;
+            }
+            // Subtract local eyes first: adding the distant galactic origin to
+            // each position would lose metre-scale motion to f64 precision.
+            (pose.eye - eye) / dt
+        } else {
+            DVec3::ZERO
+        }
+    } else {
+        DVec3::ZERO
+    };
+    velocity.marker_metres_per_second = if motion.orbiting {
+        if dt > 0.0 {
+            motion.travel_metres / dt
+        } else {
+            DVec3::ZERO
+        }
+    } else {
+        velocity.metres_per_second
+    };
+    velocity.previous = Some(current);
+}
 
 #[derive(Component)]
 pub struct SpaceCamera;
@@ -28,6 +113,8 @@ pub struct CameraPose {
     /// Metres relative to the current star, retained in double precision.
     pub eye: DVec3,
     pub distance: f64,
+    /// Local rendering scale may tighten near a body without changing zoom or speed.
+    pub scale_distance: f64,
     /// 0 for orbital positions, 1 for the task table layout.
     pub layout: f64,
     /// Page anchoring the camera (the list's first page in constellation view).
@@ -39,7 +126,7 @@ impl CameraPose {
     /// GPU clip-space values stay small at every zoom level (perspective is
     /// scale-invariant, so the image does not change).
     pub fn render_scale(&self) -> f64 {
-        self.distance / 1000.0
+        self.scale_distance.max(20_000_000.0) / 1000.0
     }
 }
 
@@ -51,6 +138,124 @@ pub struct CameraRig {
     flight: Option<Flight>,
     selected: Option<usize>,
     warned_stall: bool,
+}
+
+/// An implicit system visit, preserving the explicit selection for when the
+/// camera leaves. It never starts a flight or re-frames the camera.
+#[derive(Resource, Default)]
+pub struct NearbySystem {
+    id: Option<String>,
+    prior: Option<(Option<crate::Visit>, u32)>,
+}
+
+fn rebase(
+    nav: &mut Navigation,
+    rig: &CameraRig,
+    displayed_eye: DVec3,
+    lists: &space_shared::Galaxy,
+    next: Option<crate::Visit>,
+    page: u32,
+) {
+    let old_tilt = nav
+        .system(lists)
+        .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
+    let old_frame = rig.frame_ly;
+    let new_system = match &next {
+        Some(crate::Visit::List(index)) => lists.systems.get(*index),
+        Some(crate::Visit::Generated(system)) => Some(system.as_ref()),
+        None => None,
+    };
+    let new_tilt = new_system.map_or(DQuat::IDENTITY, |s| page_frame(s, page));
+    let new_frame = new_system.map_or(DVec3::ZERO, |s| page_origin_ly(s, page));
+    let old_eye = nav
+        .eye
+        .unwrap_or_else(|| old_tilt.inverse() * displayed_eye);
+    let new_eye = new_tilt.inverse() * ((old_frame - new_frame) * LY_METRES + old_tilt * old_eye);
+    nav.rotation = ((new_tilt.inverse() * old_tilt).as_quat() * nav.rotation).normalize();
+    // Quat is f32: changing its basis can rotate the distance-sized camera
+    // offset slightly. Reconstruct the target from the eye, not vice versa.
+    nav.target = new_eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+    nav.eye = Some(new_eye);
+    nav.visit = next;
+    nav.page = page;
+    nav.selected = None;
+    nav.following = false;
+}
+
+/// Use the same star body and planetary system when arriving by free flight as
+/// when arriving by clicking Visit. Only cells already streamed in are eligible.
+pub fn nearby_system(
+    field: Res<crate::stream::Starfield>,
+    lists: Res<Universe>,
+    rig: Res<CameraRig>,
+    pose: Res<CameraPose>,
+    mut nav: ResMut<Navigation>,
+    mut nearby: ResMut<NearbySystem>,
+) {
+    if nav.fly {
+        // A deliberate visit supersedes the implicit one.
+        nearby.id = None;
+        nearby.prior = None;
+    }
+    if nav.view != View::Orbit || rig.flying() || nav.fly {
+        return;
+    }
+    let eye_ly = rig.galactic_ly(&pose);
+    if nearby.id.is_some() {
+        let current = nav.system(&lists.0).map(|s| page_origin_ly(s, nav.page));
+        if current.is_some_and(|star| (star - eye_ly).length() * LY_METRES < LEAVE_METRES) {
+            return;
+        }
+        let (prior, page) = nearby.prior.take().unwrap_or((None, 0));
+        rebase(&mut nav, &rig, pose.eye, &lists.0, prior, page);
+        nearby.id = None;
+        // Let place_camera switch the displayed frame before another handoff.
+        return;
+    }
+    // If the explicitly visited star is close, it already owns the body handoff.
+    if nav
+        .system(&lists.0)
+        .is_some_and(|s| (page_origin_ly(s, nav.page) - eye_ly).length() * LY_METRES < LEAVE_METRES)
+    {
+        return;
+    }
+    let eye_pc =
+        DVec3::from_array(GalaxyModel::milky_way().home_pc) + eye_ly * (LY_METRES / PC_METRES);
+    let reach_pc = APPROACH_METRES / PC_METRES;
+    let mut closest = None;
+    for (&cell, stars) in &field.cells {
+        if space_simulation::stream::gap_pc(cell, eye_pc.to_array()) > reach_pc {
+            continue;
+        }
+        for star in &stars.stars {
+            let distance = (DVec3::from_array(star.position_pc) - eye_pc).length();
+            if distance >= reach_pc {
+                continue;
+            }
+            let id = star.id(cell);
+            if closest.as_ref().is_none_or(|(best, old_id, _)| {
+                distance < *best || (distance == *best && id < *old_id)
+            }) {
+                closest = Some((distance, id, star.position_pc));
+            }
+        }
+    }
+    let Some((_, id, position_pc)) = closest else {
+        return;
+    };
+    let position_ly = (DVec3::from_array(position_pc)
+        - DVec3::from_array(GalaxyModel::milky_way().home_pc))
+        * (PC_METRES / LY_METRES);
+    let (visit, page) = if let Some((list, page)) = crate::galaxy_nav::mapped(&lists.0, &id) {
+        (crate::Visit::List(list), page)
+    } else if let Some(system) = crate::galaxy_nav::generated(&id, position_ly) {
+        (crate::Visit::Generated(Box::new(system)), 0)
+    } else {
+        return;
+    };
+    nearby.prior = Some((nav.visit.clone(), nav.page));
+    rebase(&mut nav, &rig, pose.eye, &lists.0, Some(visit), page);
+    nearby.id = Some(id);
 }
 
 impl CameraRig {
@@ -104,6 +309,9 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
     config.line.width = 1.25;
     commands.init_resource::<CameraPose>();
     commands.init_resource::<CameraRig>();
+    commands.init_resource::<NearbySystem>();
+    commands.init_resource::<CameraVelocity>();
+    commands.init_resource::<CameraMotion>();
     commands.init_resource::<Markers>();
     commands.spawn_big_space_default(|root| {
         root.spawn_spatial((
@@ -137,7 +345,10 @@ pub fn controls(
     field: Res<crate::stream::Starfield>,
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
+    mut camera_motion: ResMut<CameraMotion>,
 ) {
+    camera_motion.orbiting = false;
+    camera_motion.travel_metres = DVec3::ZERO;
     let (keys, buttons) = input;
     let scroll = wheel
         .read()
@@ -156,13 +367,28 @@ pub fn controls(
     let rotating = matches!(nav.view, View::Orbit | View::Constellation) && !rig.flying();
     if !pointer && rotating {
         if buttons.pressed(MouseButton::Left) && free {
-            drag_look(&mut nav, motion.delta);
+            let tilt = nav
+                .system(&universe.0)
+                .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
+            drag_look(&mut nav, motion.delta, Some(tilt.inverse() * pose.eye));
         } else if buttons.pressed(MouseButton::Right) {
+            nav.eye = None;
             orbit(&mut nav, motion.delta);
+            camera_motion.orbiting = free;
         }
-        if free {
+        if free && keys.pressed(KeyCode::ShiftLeft) {
+            nav.move_speed = scroll_speed(nav.move_speed, scroll);
+        } else if free && scroll != 0.0 {
+            let tilt = nav
+                .system(&universe.0)
+                .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
+            let old_eye = nav.eye.unwrap_or_else(|| tilt.inverse() * pose.eye);
+            let old_distance = nav.distance;
             nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
                 .clamp(20_000_000.0, 40_000.0 * LY_METRES);
+            let eye = old_eye + (nav.rotation * Vec3::Z).as_dvec3() * (nav.distance - old_distance);
+            nav.eye = Some(eye);
+            nav.target = eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
         }
     }
     if !keyboard {
@@ -194,18 +420,17 @@ pub fn controls(
         }
         if movement.length_squared() > 0.0 && free {
             nav.following = false;
+            let tilt = nav
+                .system(&universe.0)
+                .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
             let rotation = nav.rotation;
-            let boost = if keys.pressed(KeyCode::ShiftLeft) {
-                4.0
-            } else {
-                1.0
-            };
             let step = (rotation * movement.normalize().as_vec3()).as_dvec3()
-                * nav.distance
-                * time.delta_secs_f64()
-                * 0.35
-                * boost;
-            nav.target += step;
+                * nav.move_speed
+                * time.delta_secs_f64();
+            camera_motion.travel_metres += tilt * step;
+            let eye = nav.eye.get_or_insert_with(|| tilt.inverse() * pose.eye);
+            *eye += step;
+            nav.target = *eye - (rotation * Vec3::Z).as_dvec3() * nav.distance;
         }
     }
 }
@@ -217,11 +442,14 @@ fn roll(nav: &mut Navigation, angle: f32) {
     nav.following = false;
 }
 
-fn drag_look(nav: &mut Navigation, delta: Vec2) {
+fn drag_look(nav: &mut Navigation, delta: Vec2, displayed_eye: Option<DVec3>) {
     if delta == Vec2::ZERO {
         return;
     }
-    let eye = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+    let eye = *nav.eye.get_or_insert_with(|| {
+        displayed_eye
+            .unwrap_or_else(|| nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance)
+    });
     // Both axes are local to the *current camera*. At a pole or upside down,
     // screen right is not galactic right; world-axis yaw behaves like roll there.
     let turn = Quat::from_rotation_y(-delta.x * 0.005) * Quat::from_rotation_x(-delta.y * 0.005);
@@ -245,6 +473,7 @@ fn orbit(nav: &mut Navigation, delta: Vec2) {
 pub fn place_camera(
     time: Res<Time>,
     universe: Res<Universe>,
+    field: Res<crate::stream::Starfield>,
     clock: Res<Clock>,
     mut nav: ResMut<Navigation>,
     mut rig: ResMut<CameraRig>,
@@ -262,6 +491,9 @@ pub fn place_camera(
     >,
 ) {
     nav.fit_preset(&universe.0);
+    if nav.fly || nav.following || nav.view != View::Orbit {
+        nav.eye = None;
+    }
     if nav.following
         && let Some(followed) = nav.system(&universe.0).and_then(|system| {
             let planet = system.planets.get(nav.selected?)?;
@@ -355,8 +587,24 @@ pub fn place_camera(
     pose.page = frame_page;
 
     let rotation = shown.rotation;
-    pose.eye = shown.target + (rotation * Vec3::Z).as_dvec3() * shown.distance;
+    pose.eye = if rig.flight.is_none() {
+        nav.eye.map_or_else(
+            || shown.target + (rotation * Vec3::Z).as_dvec3() * shown.distance,
+            |eye| frame_tilt * eye,
+        )
+    } else {
+        shown.target + (rotation * Vec3::Z).as_dvec3() * shown.distance
+    };
     pose.distance = shown.distance;
+    // The camera range is only a framing control. A streamed point can need
+    // camera-relative precision well before its planets/body are activated.
+    let eye_pc = DVec3::from_array(GalaxyModel::milky_way().home_pc)
+        + frame * (LY_METRES / PC_METRES)
+        + pose.eye / PC_METRES;
+    pose.scale_distance = proximity_scale_distance(&field, eye_pc, shown.distance);
+    if system.is_some_and(|s| pose.eye.length() <= planet_visibility_range(s, frame_page)) {
+        pose.scale_distance = pose.scale_distance.min(pose.eye.length().max(20_000_000.0));
+    }
     pose.layout = shown.layout;
     let Ok((mut transform, mut cell, parent, mut projection, mut camera)) = camera.single_mut()
     else {
@@ -375,6 +623,26 @@ pub fn place_camera(
         // Render units, see `CameraPose::render_scale`.
         p.near = 0.01;
     }
+}
+
+fn proximity_scale_distance(
+    field: &crate::stream::Starfield,
+    eye_pc: DVec3,
+    selected_range: f64,
+) -> f64 {
+    let mut scale = selected_range;
+    for (&cell, stars) in &field.cells {
+        if space_simulation::stream::gap_pc(cell, eye_pc.to_array()) > PRECISE_SCALE_PC {
+            continue;
+        }
+        for star in &stars.stars {
+            let distance = DVec3::from_array(star.position_pc).distance(eye_pc);
+            if distance < PRECISE_SCALE_PC {
+                scale = scale.min(distance * PC_METRES);
+            }
+        }
+    }
+    scale.max(20_000_000.0)
 }
 
 fn rotation([inclination, node, twist]: [f64; 3]) -> DQuat {
@@ -457,7 +725,28 @@ fn planet_visibility_range(system: &StarSystem, page: u32) -> f64 {
 /// same magnitude limit, and the planets are hidden.
 pub fn body_range(system: &StarSystem, pose: &CameraPose) -> Option<f64> {
     let range = planet_visibility_range(system, pose.page);
-    (pose.distance <= range && pose.eye.length() <= range).then_some(range)
+    (pose.eye.length() <= range).then_some(range)
+}
+
+/// Exaggeration is a screen-space aid, not an orbit-sized shell tied to zoom.
+/// Once the camera is close, even a 40,000 ly range must not put the camera
+/// inside a star inflated to hundreds of light years across.
+fn star_display_radius(
+    pose: &CameraPose,
+    physical: f64,
+    exaggerate: bool,
+    table: bool,
+    wide: bool,
+) -> f64 {
+    if table {
+        physical
+    } else if wide {
+        (pose.eye.length() * 0.004).max(physical)
+    } else if exaggerate {
+        (pose.distance.min(pose.eye.length()) * 0.008).max(physical)
+    } else {
+        physical
+    }
 }
 
 /// One frame's projection from f64 metres relative to the current star into render
@@ -660,9 +949,8 @@ impl Canvas<'_> {
     /// the rest of its list, is a streamed galactic point.
     fn star(&self, gizmos: &mut Gizmos, lights: &mut Lights) {
         let (nav, pose, system) = (self.nav, self.pose, self.system);
-        let wide = pose.distance > WIDE_METRES;
+        let wide = pose.distance > WIDE_METRES && pose.eye.length() > WIDE_METRES;
         let table = pose.layout > 0.5;
-        let relative = -pose.eye;
         let centre = self.world(DVec3::ZERO);
         let body = system.star(pose.page);
         let physical = body.map_or(SUN_RADIUS_METRES, |b| b.radius_solar * SUN_RADIUS_METRES);
@@ -671,13 +959,7 @@ impl Canvas<'_> {
             Some(b) => spin_basis(self.frame, &b.spin, self.seconds),
             None => self.frame,
         };
-        let radius = if wide && !table {
-            relative.length() * 0.004
-        } else if nav.exaggerate && !table {
-            (pose.distance * 0.008).max(physical)
-        } else {
-            physical
-        };
+        let radius = star_display_radius(pose, physical, nav.exaggerate, table, wide);
         if nav.realistic
             && let Some(body) = body
             && let Some(per_pixel) = self.per_pixel(centre)
@@ -854,6 +1136,189 @@ mod tests {
     use space_simulation::AU_METRES;
 
     #[test]
+    fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
+        use space_simulation::{
+            cells::{Cell, Sky, parse_cell_star},
+            stream::{StarCell, StarPoint},
+        };
+        let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        let cell = Cell::containing(10, home.to_array()).unwrap();
+        let mut sky = Sky::default();
+        let id = sky.cell_star_at(cell, 0).unwrap().id;
+        let star = sky.star(&id).unwrap();
+        let position_ly = (DVec3::from_array(star.position_pc) - home) * (PC_METRES / LY_METRES);
+        let mut field = crate::stream::Starfield::default();
+        field.cells.insert(
+            cell,
+            StarCell {
+                cell,
+                stars: vec![StarPoint {
+                    position_pc: star.position_pc,
+                    luminosity_solar: star.star.luminosity_solar as f32,
+                    temperature_k: star.star.temperature_k as f32,
+                    radius_solar: star.star.radius_solar as f32,
+                    component: parse_cell_star(&id).unwrap().1,
+                    index: parse_cell_star(&id).unwrap().2 as u32,
+                }],
+            },
+        );
+        let mut nav = Navigation {
+            rotation: Quat::IDENTITY,
+            distance: 40_000.0 * LY_METRES,
+            ..default()
+        };
+        let eye = position_ly * LY_METRES + DVec3::X * (APPROACH_METRES * 0.5);
+        nav.target = eye - DVec3::Z * nav.distance;
+        let pose = CameraPose {
+            eye,
+            distance: nav.distance,
+            ..default()
+        };
+        let mut app = App::new();
+        app.insert_resource(field)
+            .insert_resource(Universe(space_simulation::demo_galaxy()))
+            .insert_resource(CameraRig::default())
+            .insert_resource(pose)
+            .insert_resource(nav)
+            .init_resource::<NearbySystem>()
+            .add_systems(Update, nearby_system);
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert_eq!(
+            nav.system(&app.world().resource::<Universe>().0)
+                .unwrap()
+                .page_star(0)
+                .unwrap()
+                .id,
+            id
+        );
+        assert!(!nav.fly);
+        let rig = app.world().resource::<CameraRig>();
+        let system = nav.system(&app.world().resource::<Universe>().0).unwrap();
+        let actual_eye = page_origin_ly(system, 0) * LY_METRES
+            + page_frame(system, 0)
+                * (nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance);
+        assert!((actual_eye - eye).length() < 100_000.0);
+        assert_eq!(rig.frame_ly, DVec3::ZERO);
+        let tilt = page_frame(system, 0);
+
+        // Leaving the system restores open space without moving the eye.
+        let departing_eye = DVec3::X * (LEAVE_METRES * 1.1);
+        let frame = position_ly;
+        app.world_mut().resource_mut::<CameraRig>().frame_ly = frame;
+        app.world_mut().resource_mut::<CameraPose>().eye = departing_eye;
+        {
+            let mut nav = app.world_mut().resource_mut::<Navigation>();
+            nav.target =
+                tilt.inverse() * departing_eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+            nav.eye = Some(tilt.inverse() * departing_eye);
+        }
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert!(nav.visit.is_none());
+        let restored_eye = nav.eye.unwrap();
+        assert!((restored_eye - (frame * LY_METRES + departing_eye)).length() < 100_000.0);
+    }
+
+    #[test]
+    fn close_body_is_visible_without_zooming_camera_range() {
+        let galaxy = space_simulation::demo_galaxy();
+        let system = &galaxy.systems[0];
+        let pose = CameraPose {
+            distance: 120.0 * LY_METRES,
+            eye: DVec3::X * (APPROACH_METRES * 0.5),
+            scale_distance: APPROACH_METRES * 0.5,
+            ..default()
+        };
+        assert!(body_range(system, &pose).is_some());
+        assert!(pose.render_scale() < pose.distance / 1000.0);
+    }
+
+    #[test]
+    fn close_star_exaggeration_does_not_depend_on_maximum_camera_range() {
+        let eye = DVec3::X * (APPROACH_METRES * 0.5);
+        let close = CameraPose {
+            eye,
+            distance: 100.0 * LY_METRES,
+            ..default()
+        };
+        let maximum = CameraPose {
+            distance: 40_000.0 * LY_METRES,
+            ..close
+        };
+        let physical = SUN_RADIUS_METRES;
+        let radius = star_display_radius(&maximum, physical, true, false, false);
+        assert_eq!(
+            radius,
+            star_display_radius(&close, physical, true, false, false)
+        );
+        assert!(radius < eye.length());
+        assert_eq!(
+            star_display_radius(&maximum, physical, false, false, false),
+            physical
+        );
+    }
+
+    #[test]
+    fn streamed_star_tightens_render_scale_before_system_handoff_at_max_range() {
+        use space_simulation::{
+            cells::Cell,
+            galaxy::Component,
+            stream::{StarCell, StarPoint},
+        };
+        let star_pc = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        let cell = Cell::containing(10, star_pc.to_array()).unwrap();
+        let mut field = crate::stream::Starfield::default();
+        field.cells.insert(
+            cell,
+            StarCell {
+                cell,
+                stars: vec![StarPoint {
+                    position_pc: star_pc.to_array(),
+                    luminosity_solar: 1.0,
+                    temperature_k: 5772.0,
+                    radius_solar: 1.0,
+                    component: Component::ThinDisc,
+                    index: 0,
+                }],
+            },
+        );
+        let maximum = 40_000.0 * LY_METRES;
+        let eye = star_pc + DVec3::X * (6.0 * LY_METRES / PC_METRES);
+        let scale = proximity_scale_distance(&field, eye, maximum);
+        assert!((scale / LY_METRES - 6.0).abs() < 1e-9);
+        assert_eq!(
+            proximity_scale_distance(
+                &field,
+                eye + DVec3::X * 30.0 * LY_METRES / PC_METRES,
+                maximum
+            ),
+            maximum
+        );
+    }
+
+    #[test]
+    fn speed_scroll_is_independent_of_range_and_bounded() {
+        let mut nav = Navigation::default();
+        let range = nav.distance;
+        nav.move_speed = scroll_speed(nav.move_speed, 3.0);
+        assert!(nav.move_speed > 42.0 * LY_METRES);
+        assert_eq!(nav.distance, range);
+        nav.move_speed = scroll_speed(nav.move_speed, -3.0);
+        assert!((nav.move_speed / (42.0 * LY_METRES) - 1.0).abs() < 1e-6);
+        assert_eq!(scroll_speed(MIN_SPEED, -1000.0), MIN_SPEED);
+        assert_eq!(scroll_speed(MAX_SPEED, 1000.0), MAX_SPEED);
+    }
+
+    #[test]
+    fn speed_units_follow_the_distance_ladder() {
+        assert_eq!(speed_label(42.0), "42.00 m/s");
+        assert_eq!(speed_label(42_000.0), "42.00 km/s");
+        assert_eq!(speed_label(2.0 * AU_METRES), "2.00 AU/s");
+        assert_eq!(speed_label(2.0 * LY_METRES), "2.00 ly/s");
+    }
+
+    #[test]
     fn free_look_holds_the_eye_still_and_turns_past_both_poles() {
         let mut nav = Navigation {
             target: DVec3::new(2.0, 3.0, -5.0) * AU_METRES,
@@ -862,15 +1327,101 @@ mod tests {
             ..Navigation::default()
         };
         let eye = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
-        drag_look(&mut nav, Vec2::new(80.0, 400.0));
+        drag_look(&mut nav, Vec2::new(80.0, 400.0), None);
         let expected =
             Quat::from_rotation_x(-1.4) * Quat::from_rotation_y(-0.4) * Quat::from_rotation_x(-2.0);
         assert!(nav.rotation.angle_between(expected) < 1e-5);
         let after = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
         assert!(eye.distance(after) < nav.distance * 1e-7);
-        drag_look(&mut nav, Vec2::new(-80.0, 200.0));
+        drag_look(&mut nav, Vec2::new(-80.0, 200.0), None);
         let after = nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
         assert!(eye.distance(after) < nav.distance * 1e-7);
+    }
+
+    #[test]
+    fn distant_range_free_look_keeps_precise_eye_through_repeated_turns() {
+        let eye = DVec3::new(13_000_000.0, -24_000_000.0, 51_000_000.0);
+        let mut nav = Navigation {
+            distance: 120.0 * LY_METRES,
+            rotation: Quat::IDENTITY,
+            target: eye - DVec3::Z * (120.0 * LY_METRES),
+            ..default()
+        };
+        for _ in 0..50 {
+            drag_look(&mut nav, Vec2::new(2.0, -1.0), Some(eye));
+            assert_eq!(nav.eye, Some(eye));
+        }
+        // The target is only an orbit/flight compatibility representation;
+        // subtracting the large offset from it loses precision near the star.
+        assert_eq!(nav.eye.unwrap(), eye);
+    }
+
+    #[test]
+    fn turning_in_place_has_no_measured_velocity() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(CameraRig::default())
+            .insert_resource(CameraPose {
+                eye: DVec3::new(13_000_000.0, -24_000_000.0, 51_000_000.0),
+                distance: 120.0 * LY_METRES,
+                ..default()
+            })
+            .init_resource::<CameraMotion>()
+            .init_resource::<CameraVelocity>()
+            .add_systems(Update, measure_velocity);
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(16));
+        app.update();
+        // A rotation updates the camera orientation but not its precise eye.
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(16));
+        app.update();
+        assert_eq!(
+            app.world().resource::<CameraVelocity>().metres_per_second,
+            DVec3::ZERO
+        );
+    }
+
+    #[test]
+    fn orbit_motion_does_not_steer_travel_marker() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(CameraRig::default())
+            .insert_resource(CameraPose::default())
+            .init_resource::<CameraMotion>()
+            .init_resource::<CameraVelocity>()
+            .add_systems(Update, measure_velocity);
+        let frame = std::time::Duration::from_millis(16);
+        app.world_mut().resource_mut::<Time>().advance_by(frame);
+        app.update();
+
+        // The eye really moves during right-drag, but the direction marker
+        // should represent keyboard travel, not motion around the orbit pivot.
+        app.world_mut().resource_mut::<CameraPose>().eye = DVec3::X * 1e9;
+        let travel = DVec3::Y * 160.0;
+        *app.world_mut().resource_mut::<CameraMotion>() = CameraMotion {
+            orbiting: true,
+            travel_metres: travel,
+        };
+        app.world_mut().resource_mut::<Time>().advance_by(frame);
+        app.update();
+        let velocity = app.world().resource::<CameraVelocity>();
+        assert_eq!(velocity.metres_per_second, DVec3::X * 1e9 / 0.016);
+        assert_eq!(velocity.marker_metres_per_second, travel / 0.016);
+
+        // With no keyboard travel, an orbiting camera has no travel marker.
+        app.world_mut().resource_mut::<CameraPose>().eye = DVec3::X * 2e9;
+        app.world_mut().resource_mut::<CameraMotion>().travel_metres = DVec3::ZERO;
+        app.world_mut().resource_mut::<Time>().advance_by(frame);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<CameraVelocity>()
+                .marker_metres_per_second,
+            DVec3::ZERO
+        );
     }
 
     #[test]
@@ -889,7 +1440,7 @@ mod tests {
             rotation: Quat::IDENTITY,
             ..Navigation::default()
         };
-        drag_look(&mut nav, Vec2::new(20.0, 0.0));
+        drag_look(&mut nav, Vec2::new(20.0, 0.0), None);
         assert!((nav.rotation * -Vec3::Z).x > 0.0);
     }
 
@@ -902,12 +1453,12 @@ mod tests {
                     ..Navigation::default()
                 };
                 let before = nav.rotation;
-                drag_look(&mut nav, Vec2::new(20.0, 0.0));
+                drag_look(&mut nav, Vec2::new(20.0, 0.0), None);
                 let change = nav.rotation * -Vec3::Z - before * -Vec3::Z;
                 assert!(change.dot(before * Vec3::X) > 0.09);
                 assert!(change.dot(before * Vec3::Y).abs() < 1e-5);
                 let before = nav.rotation;
-                drag_look(&mut nav, Vec2::new(0.0, 20.0));
+                drag_look(&mut nav, Vec2::new(0.0, 20.0), None);
                 let change = nav.rotation * -Vec3::Z - before * -Vec3::Z;
                 assert!(change.dot(before * Vec3::Y) < -0.09);
                 assert!(change.dot(before * Vec3::X).abs() < 1e-5);

@@ -51,7 +51,12 @@ pub struct Navigation {
     pub picked: Option<galaxy_nav::PickedStar>,
     pub following: bool,
     pub target: DVec3,
+    /// Authoritative free-flight eye in the current page's local frame.
+    /// Avoids cancelling a distant target against the camera range.
+    pub eye: Option<DVec3>,
     pub distance: f64,
+    /// Selected free-flight speed in metres per real second, independent of zoom.
+    pub move_speed: f64,
     /// Camera orientation in the current system's local plane. Keeping this as
     /// a quaternion lets mouse turns follow the screen axes even past the poles.
     pub rotation: Quat,
@@ -60,6 +65,7 @@ pub struct Navigation {
     pub orbits: bool,
     /// Rings marking bodies too small to see. Hover and selection rings stay.
     pub markers: bool,
+    pub velocity_marker: bool,
     /// Lit and glowing bodies in HDR under the wireframes.
     pub realistic: bool,
     /// One linear exposure for the frame instead of the assisted, readable one.
@@ -83,12 +89,15 @@ impl Default for Navigation {
             picked: None,
             following: false,
             target: DVec3::ZERO,
+            eye: None,
             distance: 120.0 * LY_METRES,
+            move_speed: 42.0 * LY_METRES,
             rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
             exaggerate: false,
             labels: true,
             orbits: true,
             markers: true,
+            velocity_marker: true,
             realistic: false,
             physical: true,
             wireframe: true,
@@ -137,7 +146,9 @@ impl Navigation {
         self.picked = None;
         self.following = false;
         self.target = DVec3::ZERO;
+        self.eye = None;
         self.distance = distance;
+        self.move_speed = (distance * 0.35).clamp(scene::MIN_SPEED, scene::MAX_SPEED);
     }
 
     /// A list opens as a constellation regardless of the previous view.
@@ -167,6 +178,7 @@ fn main() {
         // Its captures start in the first list's first system.
         initial_nav.visit = Some(Visit::List(0));
         initial_nav.distance = 20.0 * AU_METRES;
+        initial_nav.move_speed = initial_nav.distance * 0.35;
     }
     let mut app = App::new();
     app.add_plugins((
@@ -227,7 +239,9 @@ fn main() {
             actions::apply,
             tick,
             scene::controls,
+            scene::nearby_system,
             scene::place_camera,
+            scene::measure_velocity,
         )
             .chain(),
     )

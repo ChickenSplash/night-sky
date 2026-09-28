@@ -10,11 +10,11 @@ const RATES = [
   ['10 yr/s', 10 * YEAR], ['30 yr/s', 30 * YEAR], ['100 yr/s', 100 * YEAR],
 ];
 const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'constellation']];
-const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers']];
+const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers'], ['velocity_marker', 'Velocity marker']];
 // Physical exposure and wireframes apply only to realistic rendering.
 const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
 const HELP = [['Click', 'Select a star, again to visit'], ['C', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Left drag', 'Look around'], ['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Roll left / right'], ['R / F', 'Up / down'],
-  ['Shift', 'Boost'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
+  ['Shift + scroll', 'Adjust movement speed'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 const LIST_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
 const TASK_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Due date', 'due']];
 const STATUS_RANK = { open: 0, custom: 1, done: 2, closed: 3 };
@@ -635,11 +635,11 @@ export function mount(bridge, canvas) {
     state = detail;
     renderState();
   });
-  bridge.on('tick', ({ days, range: metres, exposure }) => {
+  bridge.on('tick', ({ days, range: metres, exposure, set_speed, velocity }) => {
     clock.textContent = elapsed(days);
     const range = metres > LY * 0.01 ? `${(metres / LY).toFixed(3)} ly` : `${(metres / AU).toFixed(4)} AU`;
     const mode = state.following ? 'tracking' : state.view !== 'orbit' ? 'auto-framed preset' : 'free navigation';
-    rangeCaption.textContent = `${exposure}\nCamera range ${range} / ${mode}`;
+    rangeCaption.textContent = `Set speed ${set_speed} / Velocity ${velocity}\n${exposure}\nCamera range ${range} / ${mode}`;
   });
 
   // Every panel floats over the full-window 3D view. Reporting the insets also

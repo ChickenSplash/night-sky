@@ -95,6 +95,8 @@ impl Navigation {
         self.following = true;
         self.fly = true;
         self.distance = radius_km * 1000.0 * 12.0;
+        self.move_speed =
+            (self.distance * 0.35).clamp(crate::scene::MIN_SPEED, crate::scene::MAX_SPEED);
     }
 
     pub fn show_page(&mut self, page: u32, lists: &Galaxy) {
