@@ -1,4 +1,6 @@
 mod actions;
+#[cfg(target_arch = "wasm32")]
+mod benchmark;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
 mod diffuse;
@@ -174,6 +176,12 @@ fn main() {
     diagnostics::install_crash_reports();
     let smoke_test = std::env::args().any(|arg| arg == "--smoke-test");
     let mut initial_nav = Navigation::default();
+    #[cfg(target_arch = "wasm32")]
+    let benchmark = benchmark::requested();
+    #[cfg(target_arch = "wasm32")]
+    if benchmark {
+        benchmark::at_home(&mut initial_nav);
+    }
     if smoke_test {
         // Its captures start in the first list's first system.
         initial_nav.visit = Some(Visit::List(0));
@@ -239,6 +247,8 @@ fn main() {
             actions::apply,
             tick,
             scene::controls,
+            #[cfg(target_arch = "wasm32")]
+            benchmark::advance,
             scene::nearby_system,
             scene::place_camera,
             scene::measure_velocity,
@@ -256,6 +266,10 @@ fn main() {
     .add_systems(EguiPrimaryContextPass, ui::draw_ui);
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, smoke::exercise);
+    #[cfg(target_arch = "wasm32")]
+    if benchmark {
+        app.insert_resource(benchmark::BenchmarkFlight::default());
+    }
     #[cfg(target_arch = "wasm32")]
     web_bridge::install(&mut app);
     app.run();

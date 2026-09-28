@@ -108,6 +108,7 @@
   font: 11px ui-monospace, monospace; padding: 2px 8px; border-radius: 6px;
   background: var(--control); border: 1px solid var(--line);
 }
+#settings .benchmark-button { padding: 10px; border-radius: 10px; background: var(--control); text-align: left; }
 
 #task-modal {
   position: absolute; inset: 0; pointer-events: auto; z-index: 5;

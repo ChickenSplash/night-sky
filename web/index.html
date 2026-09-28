@@ -26,6 +26,9 @@
     const htmlUi = new URLSearchParams(location.search).get('ui') !== 'egui';
     // Created before the renderer starts, so no state event is missed.
     const bridge = createBridge();
+    if (new URLSearchParams(location.search).get('benchmark') === 'star-flight') {
+      (await import('./ui/benchmark.js')).track();
+    }
     window.spaceBridge = bridge;
     const canvas = document.querySelector('#space-canvas');
     const loading = document.querySelector('#loading');

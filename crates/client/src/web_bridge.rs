@@ -280,6 +280,12 @@ struct Tick {
     exposure: String,
     set_speed: String,
     velocity: String,
+    stream: String,
+    stream_stars: usize,
+    stream_cells: usize,
+    stream_pending: usize,
+    mesh_queue: usize,
+    benchmark_seconds: Option<f64>,
 }
 
 fn publish_tick(
@@ -289,6 +295,9 @@ fn publish_tick(
     nav: Res<Navigation>,
     lights: Res<crate::render::Lights>,
     velocity: Res<crate::scene::CameraVelocity>,
+    metrics: Res<crate::stream::StreamMetrics>,
+    starfield: Res<crate::stream::Starfield>,
+    benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     mut next: Local<f64>,
 ) {
     let now = time.elapsed_secs_f64();
@@ -305,6 +314,12 @@ fn publish_tick(
             exposure: crate::render::exposure_caption(&nav, &lights),
             set_speed: crate::scene::speed_label(nav.move_speed),
             velocity: crate::scene::speed_label(velocity.metres_per_second.length()),
+            stream: metrics.caption.clone(),
+            stream_stars: starfield.stars,
+            stream_cells: starfield.cells.len(),
+            stream_pending: starfield.pending,
+            mesh_queue: metrics.mesh_queue,
+            benchmark_seconds: benchmark.map(|flight| flight.elapsed),
         },
     );
 }

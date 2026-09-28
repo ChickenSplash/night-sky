@@ -185,6 +185,7 @@ fn rebase(
 /// Use the same star body and planetary system when arriving by free flight as
 /// when arriving by clicking Visit. Only cells already streamed in are eligible.
 pub fn nearby_system(
+    #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     field: Res<crate::stream::Starfield>,
     lists: Res<Universe>,
     rig: Res<CameraRig>,
@@ -192,6 +193,10 @@ pub fn nearby_system(
     mut nav: ResMut<Navigation>,
     mut nearby: ResMut<NearbySystem>,
 ) {
+    #[cfg(target_arch = "wasm32")]
+    if benchmark.is_some() {
+        return;
+    }
     if nav.fly {
         // A deliberate visit supersedes the implicit one.
         nearby.id = None;

@@ -5,7 +5,7 @@ use crate::{
     Navigation, Universe,
     render::{Lights, sky_dimming},
     scene::{CameraPose, CameraRig, SpaceCamera},
-    stream::Starfield,
+    stream::{Starfield, StreamMetrics},
 };
 use bevy::{
     asset::{RenderAssetUsages, load_internal_asset, uuid_handle},
@@ -197,6 +197,7 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize) {
 fn sync(
     mut commands: Commands,
     mut field: ResMut<Starfield>,
+    mut metrics: ResMut<StreamMetrics>,
     mut batches: ResMut<Batches>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StarMaterial>>,
@@ -217,6 +218,7 @@ fn sync(
         Without<SpaceCamera>,
     >,
 ) {
+    let sync_start = bevy::platform::time::Instant::now();
     let Ok((cell, parent, camera_transform)) = camera.single() else {
         return;
     };
@@ -265,6 +267,7 @@ fn sync(
     let eye = origin + DVec3::from_array(home);
     let changed = !field.added.is_empty() || !field.removed.is_empty();
     for dropped in field.removed.drain(..) {
+        metrics.loaded_at.remove(&dropped);
         batches.built_at.remove(&dropped);
         if let Some(entities) = batches.active.remove(&dropped) {
             for (entity, handle) in entities {
@@ -312,6 +315,13 @@ fn sync(
             batches.built_at.insert(owner, eye);
         }
         let (geometry, visible) = mesh(&stars[offset..end], centre, eye);
+        metrics.built_batches += 1;
+        if offset == 0
+            && let Some(at) = metrics.loaded_at.remove(&owner)
+        {
+            metrics.mesh_wait_ms += at.elapsed().as_secs_f64() * 1000.0;
+            metrics.mesh_wait_samples += 1;
+        }
         if visible > 0 {
             let handle = meshes.add(geometry);
             commands
@@ -443,6 +453,14 @@ fn sync(
         }
         keep
     });
+    metrics.mesh_queue = batches.queued.len();
+    metrics.oldest_mesh_ms = batches
+        .queued
+        .iter()
+        .filter_map(|(cell, _)| metrics.loaded_at.get(cell))
+        .map(|at| at.elapsed().as_secs_f64() * 1000.0)
+        .fold(0.0, f64::max);
+    metrics.rendering += sync_start.elapsed();
 }
 
 #[cfg(test)]

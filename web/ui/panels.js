@@ -300,6 +300,12 @@ export function mount(bridge, canvas) {
   const gear = round('gear', 'Settings', 'panel floating round');
   gear.id = 'settings-button';
   const closeSettings = round('close', 'Close settings', 'round small');
+  const benchmarkButton = el('button', { type: 'button', className: 'benchmark-button', textContent: 'Run star-stream benchmark' });
+  benchmarkButton.addEventListener('click', () => {
+    const url = new URL(location.href);
+    url.searchParams.set('benchmark', 'star-flight');
+    location.assign(url);
+  });
   const toggle = ([option, label]) => {
     const input = el('input', { type: 'checkbox' });
     input.dataset.option = option;
@@ -313,7 +319,9 @@ export function mount(bridge, canvas) {
     heading('Rendering'), ...RENDERING.map(toggle),
     el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
     heading('Controls'),
-    el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])));
+    el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])),
+    heading('Benchmark'), benchmarkButton,
+    el('p', { className: 'muted small', textContent: 'Reloads with no stars loaded, then flies 15 seconds from home towards the galactic centre at 1,000 ly/s. Results appear on screen and in the browser console.' }));
   const setSettings = open => {
     settings.hidden = !open;
     gear.classList.toggle('active', open);
@@ -635,11 +643,11 @@ export function mount(bridge, canvas) {
     state = detail;
     renderState();
   });
-  bridge.on('tick', ({ days, range: metres, exposure, set_speed, velocity }) => {
+  bridge.on('tick', ({ days, range: metres, exposure, set_speed, velocity, stream }) => {
     clock.textContent = elapsed(days);
     const range = metres > LY * 0.01 ? `${(metres / LY).toFixed(3)} ly` : `${(metres / AU).toFixed(4)} AU`;
     const mode = state.following ? 'tracking' : state.view !== 'orbit' ? 'auto-framed preset' : 'free navigation';
-    rangeCaption.textContent = `Set speed ${set_speed} / Velocity ${velocity}\n${exposure}\nCamera range ${range} / ${mode}`;
+    rangeCaption.textContent = `Set speed ${set_speed} / Velocity ${velocity}\n${exposure}\nCamera range ${range} / ${mode}\n${stream}`;
   });
 
   // Every panel floats over the full-window 3D view. Reporting the insets also
