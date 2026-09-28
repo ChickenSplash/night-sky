@@ -8,7 +8,10 @@
 
 struct Settings { values: vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> settings: Settings;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> marker: vec4<f32>;
+// x: points closer than this times their offset from the mesh origin are drawn
+// one by one, precisely, instead (`starfield.rs`); y: nor are points within this
+// many parsecs, where the visited star is drawn as a body. Zero for sprites.
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> near: vec4<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -30,14 +33,16 @@ fn vertex(v: Vertex) -> Output {
     let world = mesh_functions::mesh_position_local_to_world(
         mesh_functions::get_world_from_local(v.instance_index), vec4(v.position, 1.0));
     var clip = position_world_to_clip(world.xyz);
+    out.distance_pc = distance(world.xyz, view.world_position) * settings.values.x;
     // The far plane is 1e22 render units; reject bodies behind the camera.
-    if clip.w <= 0.0 { clip = vec4(2.0, 2.0, 0.0, 1.0); }
+    if clip.w <= 0.0 || out.distance_pc < max(near.x * length(v.position), near.y) {
+        clip = vec4(2.0, 2.0, 0.0, 1.0);
+    }
     let width = max(view.viewport.zw, vec2(1.0, 1.0));
     clip = vec4(clip.xy + v.corner * clip.w * 5.0 / width, clip.zw);
     out.position = clip;
     out.corner = v.corner;
     out.colour = v.colour;
-    out.distance_pc = distance(world.xyz, view.world_position) * settings.values.x;
     return out;
 }
 
@@ -45,13 +50,12 @@ fn vertex(v: Vertex) -> Output {
 fn fragment(in: Output) -> @location(0) vec4<f32> {
     let r2 = dot(in.corner, in.corner);
     if r2 > 1.0 { discard; }
+    // Luminosity over squared distance is linear in apparent flux, so the
+    // magnitude cutoff and brightness need no logarithm (`population.rs`).
     let ratio = in.colour.a / max(in.distance_pc * in.distance_pc, 1e-16);
-    let magnitude = 4.83 - 2.5 * log2(max(ratio, 1e-30)) / log2(10.0) - 5.0;
-    if magnitude > settings.values.y { discard; }
+    if ratio < settings.values.y { discard; }
     // One linear apparent-flux scale. Exposure and bloom operate on this HDR
     // colour; in the wireframe view it is tone-mapped by the normal SDR target.
-    let intensity = min(20000.0, settings.values.z * pow(10.0, -0.4 * magnitude));
-    let ring = marker.x * (1.0 - smoothstep(0.72, 0.78, sqrt(r2)))
-        * smoothstep(0.55, 0.65, sqrt(r2));
-    return vec4(in.colour.rgb * (intensity * exp(-3.0 * r2) * settings.values.w + ring * 0.35), 0.0);
+    let intensity = min(20000.0, settings.values.z * ratio);
+    return vec4(in.colour.rgb * intensity * exp(-3.0 * r2) * settings.values.w, 0.0);
 }

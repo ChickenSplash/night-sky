@@ -1,10 +1,16 @@
 //! An opt-in graphical integration smoke test, also useful for visual regression review.
-use crate::{Clock, Navigation, Universe, scene::CameraRig, views::View};
+use crate::{Clock, Navigation, Universe, Visit, scene::CameraRig, views::View};
 use bevy::{
     app::AppExit,
     prelude::*,
     render::view::screenshot::{Screenshot, save_to_disk},
 };
+
+/// Flies to a list's first system.
+fn jump(nav: &mut Navigation, lists: &space_shared::Galaxy, index: usize) {
+    let page = lists.systems.get(index).map_or(0, |s| s.first_page());
+    nav.arrive(Visit::List(index), page, lists);
+}
 
 /// Captures a system-to-system jump halfway through its camera flight.
 const MID_FLIGHT: usize = 8;
@@ -72,11 +78,19 @@ pub fn exercise(
             nav.focus_selected(&universe.0);
         }
         2 => capture(&mut commands, "planet"),
-        3 => nav.show_atlas(&universe.0),
-        4 => capture(&mut commands, "atlas"),
-        5 => nav.jump(usize::from(universe.0.systems.len() > 1), &universe.0),
+        3 => {
+            // Zoomed out from the visited star into the surrounding galaxy.
+            nav.frame(&universe.0);
+            nav.distance = 120.0 * space_simulation::LY_METRES;
+        }
+        4 => capture(&mut commands, "galaxy"),
+        5 => jump(
+            &mut nav,
+            &universe.0,
+            usize::from(universe.0.systems.len() > 1),
+        ),
         6 => capture(&mut commands, "jump"),
-        7 => nav.jump(0, &universe.0),
+        7 => jump(&mut nav, &universe.0, 0),
         9 => {
             // A deterministic large list exercises pagination without live credentials.
             let count = std::env::var("SPACE_SMOKE_TASKS")
@@ -96,7 +110,7 @@ pub fn exercise(
                 })
                 .collect();
             space_simulation::place(system, tasks);
-            nav.jump(0, &universe.0);
+            jump(&mut nav, &universe.0, 0);
             nav.show_page(0, &universe.0);
             nav.preset(View::Table, &universe.0);
         }
@@ -118,7 +132,7 @@ pub fn exercise(
             nav.physical = false;
             nav.wireframe = false;
             nav.markers = false;
-            nav.jump(0, &universe.0);
+            jump(&mut nav, &universe.0, 0);
         }
         21 => capture(&mut commands, "realistic"),
         22 => nav.physical = true,
@@ -138,7 +152,7 @@ pub fn exercise(
         }
         27 => capture(&mut commands, "realistic-constellation"),
         28 => {
-            nav.jump(0, &universe.0);
+            jump(&mut nav, &universe.0, 0);
             let radius = universe.0.systems[0]
                 .star(nav.page)
                 .map_or(1.0, |s| s.radius_solar);

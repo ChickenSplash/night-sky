@@ -100,11 +100,6 @@ pub fn plane_tilt(key: &str) -> [f64; 3] {
     [(1.0 - 2.0 * unit(0)).acos(), unit(16) * TAU, unit(32) * TAU]
 }
 
-/// Each page is its own star system, with its own orbital plane.
-pub fn page_tilt(list_id: &str, page: u32) -> [f64; 3] {
-    plane_tilt(&star_id(list_id, page))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,10 +159,11 @@ mod tests {
 
     #[test]
     fn system_poles_are_stable_and_isotropic() {
-        assert_eq!(page_tilt("list", 3), page_tilt("list", 3));
-        assert_ne!(page_tilt("list", 0), page_tilt("list", 1));
+        let tilt = |page| plane_tilt(&star_id("list", page));
+        assert_eq!(tilt(3), tilt(3));
+        assert_ne!(tilt(0), tilt(1));
         // Pages of one list are as independent as separate lists.
-        let tilts: Vec<_> = (0..4000).map(|page| page_tilt("list", page)).collect();
+        let tilts: Vec<_> = (0..4000).map(tilt).collect();
         assert!(tilts.iter().all(|t| (0.0..=PI).contains(&t[0])));
         // Uniform poles have cos(inclination) uniform on [-1, 1].
         let mean = tilts.iter().map(|t| t[0].cos()).sum::<f64>() / 4000.0;

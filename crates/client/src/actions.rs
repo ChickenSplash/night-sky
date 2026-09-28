@@ -8,16 +8,12 @@ use serde::Deserialize;
 #[derive(Message, Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiCommand {
-    Atlas,
-    GalaxyView,
-    PickGalactic,
-    /// Select a streamed point by stable star ID, or enter it on a second click.
+    /// Select the visible star nearest the centre of the view.
+    PickCentre,
+    /// Select a streamed star by stable ID, or visit it on a second click.
     PickStar {
         id: String,
     },
-    EnterGalactic,
-    LeaveGalactic,
-    ReturnToLists,
     /// Open a list's constellation from any view.
     Jump {
         list: String,
@@ -27,7 +23,7 @@ pub enum UiCommand {
         list: String,
         task: String,
     },
-    /// Select a planet in the current list without moving the camera.
+    /// Select a planet in the visited system without moving the camera.
     Inspect {
         planet: String,
     },
@@ -37,12 +33,7 @@ pub enum UiCommand {
     SetView {
         view: View,
     },
-    /// Picks a star without moving the camera.
-    Pick {
-        list: String,
-        page: u32,
-    },
-    /// Flies to the picked star, or re-frames the current system.
+    /// Visits the picked star, or re-frames the visited system.
     FrameSystem,
     Follow,
     SetPaused {
@@ -88,7 +79,6 @@ pub fn apply(
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     mut insets: ResMut<PanelInsets>,
-    mut galactic: ResMut<crate::galaxy_nav::Galactic>,
     field: Res<crate::stream::Starfield>,
     rig: Res<crate::scene::CameraRig>,
     pose: Res<crate::scene::CameraPose>,
@@ -97,38 +87,15 @@ pub fn apply(
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
     for command in commands.read() {
         match command {
-            UiCommand::Atlas => nav.show_atlas(galaxy),
-            UiCommand::GalaxyView => {
-                crate::galaxy_nav::overview(&mut nav, &mut galactic, rig.galactic_ly(&pose))
-            }
-            UiCommand::PickGalactic => {
-                if nav.galactic && galactic.system.is_none() {
-                    galactic.picked =
-                        crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
-                }
+            UiCommand::PickCentre => {
+                nav.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
             }
             UiCommand::PickStar { id } => {
-                if nav.galactic
-                    && galactic.system.is_none()
-                    && let Some(picked) = crate::galaxy_nav::picked_id(&field, id)
-                {
-                    if galactic.picked.as_ref().is_some_and(|star| star.id == *id) {
-                        crate::galaxy_nav::enter(&mut nav, &mut galactic, galaxy);
-                    } else {
-                        galactic.picked = Some(picked);
-                    }
+                if nav.picked.as_ref().is_some_and(|star| star.id == *id) {
+                    crate::galaxy_nav::visit_picked(&mut nav, galaxy);
+                } else if let Some(picked) = crate::galaxy_nav::picked_id(&field, id) {
+                    nav.picked = Some(picked);
                 }
-            }
-            UiCommand::EnterGalactic => {
-                if nav.galactic {
-                    crate::galaxy_nav::enter(&mut nav, &mut galactic, galaxy);
-                }
-            }
-            UiCommand::LeaveGalactic => crate::galaxy_nav::exit(&mut nav, &mut galactic),
-            UiCommand::ReturnToLists => {
-                let system = nav.system;
-                nav.jump(system, galaxy);
-                galactic.system = None;
             }
             UiCommand::Jump { list: id } => {
                 if let Some(index) = list(id) {
@@ -143,70 +110,21 @@ pub fn apply(
                 }
             }
             UiCommand::Inspect { planet } => {
-                let active = if nav.galactic {
-                    galactic.system.as_ref()
-                } else {
-                    galaxy.systems.get(nav.system)
-                };
-                if let Some(index) =
-                    active.and_then(|s| s.planets.iter().position(|p| &p.id == planet))
+                if let Some(index) = nav
+                    .system(galaxy)
+                    .and_then(|s| s.planets.iter().position(|p| &p.id == planet))
                 {
                     nav.selected = Some(index);
                 }
             }
-            UiCommand::ShowPage { page } => {
-                if !nav.galactic {
-                    nav.show_page(*page, galaxy);
-                }
-            }
-            UiCommand::SetView { view } => {
-                if nav.galactic {
-                    if galactic.system.is_some() {
-                        nav.view = *view;
-                        nav.fly = true;
-                    }
-                } else {
-                    nav.preset(*view, galaxy);
-                }
-            }
-            UiCommand::Pick { list: id, page } => {
-                if let Some(index) = list(id) {
-                    nav.picked = Some((index, *page));
-                }
-            }
+            UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
+            UiCommand::SetView { view } => nav.preset(*view, galaxy),
             UiCommand::FrameSystem => {
-                if nav.galactic {
-                    if let Some(system) = &galactic.system {
-                        nav.view = View::Orbit;
-                        nav.target = bevy::math::DVec3::ZERO;
-                        nav.distance = crate::galaxy_nav::fit_distance(system, nav.page);
-                        nav.fly = true;
-                    }
-                    continue;
-                }
-                let (system, page) = nav.picked.unwrap_or((nav.system, nav.page));
-                if system != nav.system {
-                    nav.jump(system, galaxy);
-                }
-                nav.page = page;
-                nav.jump(system, galaxy);
-            }
-            UiCommand::Follow => {
-                if nav.galactic {
-                    if let Some(planet) = galactic
-                        .system
-                        .as_ref()
-                        .and_then(|s| nav.selected.and_then(|i| s.planets.get(i)))
-                    {
-                        nav.view = View::Orbit;
-                        nav.following = true;
-                        nav.fly = true;
-                        nav.distance = planet.radius_km * 12_000.0;
-                    }
-                } else {
-                    nav.focus_selected(galaxy);
+                if !crate::galaxy_nav::visit_picked(&mut nav, galaxy) {
+                    nav.frame(galaxy);
                 }
             }
+            UiCommand::Follow => nav.focus_selected(galaxy),
             UiCommand::SetPaused { paused } => clock.0.paused = *paused,
             UiCommand::SetRate { rate } => clock.0.rate = *rate,
             UiCommand::SetDisplay { option, on } => match option {
@@ -231,6 +149,11 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::galaxy_nav::page_pick;
+    use space_simulation::{
+        cells::{Sky, parse_cell_star},
+        stream::{StarCell, StarPoint},
+    };
 
     fn run(galaxy: space_shared::Galaxy, commands: Vec<UiCommand>) -> App {
         let mut app = App::new();
@@ -239,95 +162,98 @@ mod tests {
             .init_resource::<Navigation>()
             .init_resource::<Clock>()
             .init_resource::<PanelInsets>()
-            .init_resource::<crate::galaxy_nav::Galactic>()
             .init_resource::<crate::stream::Starfield>()
             .init_resource::<crate::scene::CameraRig>()
             .init_resource::<crate::scene::CameraPose>()
             .add_systems(Update, apply);
+        send(&mut app, commands);
+        app
+    }
+
+    fn send(app: &mut App, commands: Vec<UiCommand>) {
         for command in commands {
             app.world_mut().write_message(command);
         }
         app.update();
-        app
+    }
+
+    /// Streams a cell star into the loaded field, as the loader would.
+    fn stream(app: &mut App, id: &str) {
+        let (cell, component, index) = parse_cell_star(id).unwrap();
+        let star = Sky::default().star(id).unwrap();
+        let mut field = app.world_mut().resource_mut::<crate::stream::Starfield>();
+        field.cells.entry(cell).or_insert(StarCell {
+            cell,
+            stars: vec![],
+        });
+        field.cells.get_mut(&cell).unwrap().stars.push(StarPoint {
+            position_pc: star.position_pc,
+            luminosity_solar: star.star.luminosity_solar as f32,
+            temperature_k: star.star.temperature_k as f32,
+            radius_solar: star.star.radius_solar as f32,
+            component,
+            index: index as u32,
+        });
+    }
+
+    fn nav(app: &App) -> &Navigation {
+        app.world().resource::<Navigation>()
     }
 
     #[test]
-    fn galaxy_mode_remains_separate_from_list_view_controls() {
-        let mut app = run(space_simulation::demo_galaxy(), vec![UiCommand::GalaxyView]);
-        assert!(app.world().resource::<Navigation>().galactic);
-        app.world_mut()
-            .write_message(UiCommand::SetView { view: View::Orbit });
-        app.world_mut()
-            .write_message(UiCommand::ShowPage { page: 1 });
-        app.update();
-        let nav = app.world().resource::<Navigation>();
-        assert!(nav.galactic);
-        assert_eq!(nav.page, 0);
-        app.world_mut().write_message(UiCommand::ReturnToLists);
-        app.update();
-        assert!(!app.world().resource::<Navigation>().galactic);
-    }
-
-    #[test]
-    fn clicking_a_streamed_star_selects_then_enters_its_system() {
-        use space_simulation::cells::{Cell, Sky};
+    fn clicking_a_streamed_star_selects_then_visits_its_generated_system() {
+        use space_simulation::cells::Cell;
         use space_simulation::galaxy::GalaxyModel;
-        use space_simulation::stream::{StarCell, StarPoint};
         let home = GalaxyModel::milky_way().home_pc;
         let cell = Cell::containing(10, home).unwrap();
-        let star = Sky::default().cell_star_at(cell, 0).unwrap();
-        let mut app = run(space_simulation::demo_galaxy(), vec![UiCommand::GalaxyView]);
-        let mut field = app.world_mut().resource_mut::<crate::stream::Starfield>();
-        field.cells.insert(
-            cell,
-            StarCell {
-                cell,
-                stars: vec![StarPoint {
-                    position_pc: star.position_pc,
-                    luminosity_solar: star.star.luminosity_solar as f32,
-                    temperature_k: star.star.temperature_k as f32,
-                    radius_solar: star.star.radius_solar as f32,
-                    component: star.component,
-                    index: 0,
-                }],
-            },
-        );
-        app.world_mut().write_message(UiCommand::PickStar {
-            id: star.id.clone(),
-        });
-        app.update();
-        assert_eq!(
-            app.world()
-                .resource::<crate::galaxy_nav::Galactic>()
-                .picked
-                .as_ref()
-                .unwrap()
-                .id,
-            star.id
-        );
-        assert!(
-            app.world()
-                .resource::<crate::galaxy_nav::Galactic>()
-                .system
-                .is_none()
-        );
-        app.world_mut().write_message(UiCommand::PickStar {
-            id: star.id.clone(),
-        });
-        app.update();
-        let system = app
-            .world()
-            .resource::<crate::galaxy_nav::Galactic>()
-            .system
-            .clone()
+        let galaxy = space_simulation::demo_galaxy();
+        let mut sky = Sky::default();
+        let id = (0..)
+            .map(|ordinal| sky.cell_star_at(cell, ordinal).unwrap().id)
+            .find(|id| crate::galaxy_nav::mapped(&galaxy, id).is_none())
             .unwrap();
-        assert_eq!(system.id, star.id);
-        assert_eq!(system.name, crate::galaxy_nav::star_name(&star.id));
+        let mut app = run(galaxy, vec![UiCommand::SetView { view: View::Table }]);
+        // Presets need a system to frame.
+        assert_eq!(nav(&app).view, View::Orbit);
+        stream(&mut app, &id);
+        send(&mut app, vec![UiCommand::PickStar { id: id.clone() }]);
+        assert_eq!(nav(&app).picked.as_ref().unwrap().id, id);
+        assert!(nav(&app).visit.is_none());
+        send(&mut app, vec![UiCommand::PickStar { id: id.clone() }]);
+        let universe = &app.world().resource::<Universe>().0;
+        let system = nav(&app).system(universe).unwrap();
+        assert_eq!(system.id, id);
         assert!(system.planets.iter().all(|p| p.task.is_none()));
-        assert_eq!(
-            system.planets[0].designation,
-            crate::galaxy_nav::planet_name(&star.id, 0)
+        assert_eq!(nav(&app).list(), None);
+        // The table and page controls work on a generated star as on a list page.
+        send(
+            &mut app,
+            vec![
+                UiCommand::SetView { view: View::Table },
+                UiCommand::ShowPage { page: 1 },
+            ],
         );
+        assert_eq!(nav(&app).view, View::Table);
+        assert_eq!(nav(&app).page, 0);
+    }
+
+    #[test]
+    fn clicking_a_list_page_star_visits_the_list_at_that_page() {
+        let galaxy = space_simulation::demo_galaxy();
+        let star = galaxy.systems[1].page_star(1).unwrap().id.clone();
+        let mut app = run(galaxy, vec![]);
+        stream(&mut app, &star);
+        send(
+            &mut app,
+            vec![
+                UiCommand::PickStar { id: star.clone() },
+                UiCommand::PickStar { id: star },
+            ],
+        );
+        assert_eq!(nav(&app).list(), Some(1));
+        assert_eq!(nav(&app).page, 1);
+        assert_eq!(nav(&app).view, View::Orbit);
+        assert_eq!(nav(&app).picked, None);
     }
 
     #[test]
@@ -353,9 +279,9 @@ mod tests {
                 },
             ],
         );
-        let nav = app.world().resource::<Navigation>();
+        let nav = nav(&app);
         let universe = app.world().resource::<Universe>();
-        assert_eq!(nav.system, expected);
+        assert_eq!(nav.list(), Some(expected));
         let selected = nav
             .selected
             .map(|i| &universe.0.systems[expected].planets[i]);
@@ -378,70 +304,65 @@ mod tests {
                 UiCommand::Inspect {
                     planet: "missing".into(),
                 },
+                UiCommand::PickStar {
+                    id: "g1.2.8".into(),
+                },
             ],
         );
-        let nav = app.world().resource::<Navigation>();
-        assert_eq!(nav.system, 0);
+        let nav = nav(&app);
+        assert!(nav.visit.is_none());
         assert_eq!(nav.selected, None);
+        assert_eq!(nav.picked, None);
     }
 
     #[test]
     fn list_selection_always_opens_constellation() {
         let galaxy = space_simulation::demo_galaxy();
         let list = galaxy.systems[1].id.clone();
-        for start in [
-            UiCommand::Atlas,
-            UiCommand::SetView {
-                view: View::Constellation,
-            },
-            UiCommand::SetView { view: View::Table },
-            UiCommand::SetView { view: View::Orbit },
-        ] {
+        let first = galaxy.systems[1].first_page();
+        for start in [View::Constellation, View::Table, View::Orbit] {
             let app = run(
                 galaxy.clone(),
-                vec![start, UiCommand::Jump { list: list.clone() }],
+                vec![
+                    UiCommand::Jump {
+                        list: galaxy.systems[0].id.clone(),
+                    },
+                    UiCommand::SetView { view: start },
+                    UiCommand::Jump { list: list.clone() },
+                ],
             );
-            let nav = app.world().resource::<Navigation>();
-            assert_eq!(nav.system, 1);
-            assert_eq!(nav.page, galaxy.systems[1].first_page());
+            let nav = nav(&app);
+            assert_eq!(nav.list(), Some(1));
+            assert_eq!(nav.page, first);
             assert_eq!(nav.view, View::Constellation);
-            assert_eq!(nav.picked, Some((1, galaxy.systems[1].first_page())));
-            assert!(!nav.atlas);
+            assert_eq!(nav.picked, page_pick(&galaxy.systems[1], first));
             assert!(nav.fly);
         }
-        let app = run(
-            galaxy.clone(),
-            vec![
-                UiCommand::ShowPage { page: 2 },
-                UiCommand::Jump {
-                    list: galaxy.systems[0].id.clone(),
-                },
-            ],
-        );
-        let nav = app.world().resource::<Navigation>();
-        assert_eq!(nav.page, galaxy.systems[0].first_page());
-        assert_eq!(nav.picked, Some((0, nav.page)));
     }
 
     #[test]
     fn page_navigation_selects_constellation_stars_and_keeps_other_views() {
         let galaxy = space_simulation::demo_galaxy();
-        for (start, expected) in [
-            (View::Constellation, View::Constellation),
-            (View::Table, View::Table),
-            (View::Orbit, View::Orbit),
-        ] {
+        for start in [View::Constellation, View::Table, View::Orbit] {
             let app = run(
                 galaxy.clone(),
                 vec![
+                    UiCommand::Jump {
+                        list: galaxy.systems[0].id.clone(),
+                    },
                     UiCommand::SetView { view: start },
                     UiCommand::ShowPage { page: 1 },
                 ],
             );
-            let nav = app.world().resource::<Navigation>();
+            let nav = nav(&app);
             assert_eq!(nav.page, 1);
-            assert_eq!(nav.view, expected);
-            assert_eq!(nav.picked, (start == View::Constellation).then_some((0, 1)));
+            assert_eq!(nav.view, start);
+            assert_eq!(
+                nav.picked,
+                (start == View::Constellation)
+                    .then(|| page_pick(&galaxy.systems[0], 1))
+                    .flatten()
+            );
         }
     }
 
@@ -461,6 +382,11 @@ mod tests {
                 on: true
             }
         );
-        assert_eq!(parse(r#"{"type":"atlas"}"#), UiCommand::Atlas);
+        assert_eq!(
+            parse(r#"{"type":"pick_star","id":"g1.2.3"}"#),
+            UiCommand::PickStar {
+                id: "g1.2.3".into()
+            }
+        );
     }
 }

@@ -21,7 +21,7 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 use big_space::prelude::*;
 use space_shared::{Galaxy, StarSystem};
 use space_simulation::demo_galaxy;
-use space_simulation::{AU_METRES, SimulationClock};
+use space_simulation::{AU_METRES, LY_METRES, SimulationClock};
 use std::sync::{Mutex, mpsc};
 
 #[derive(Resource)]
@@ -29,20 +29,27 @@ pub struct Universe(pub Galaxy);
 #[derive(Resource, Default)]
 pub struct Clock(pub SimulationClock);
 
+/// The star system the camera is at. List pages and generated systems are
+/// both galactic stars; a list page adds its tasks.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Visit {
+    /// A list, by index into `Universe`, at `Navigation::page`.
+    List(usize),
+    Generated(Box<StarSystem>),
+}
+
 #[derive(Resource)]
 pub struct Navigation {
     pub page: u32,
     pub view: views::View,
     pub viewport: Option<bevy::camera::Viewport>,
-    pub system: usize,
+    /// `None` in open space, where the camera is relative to home.
+    pub visit: Option<Visit>,
     pub selected: Option<usize>,
-    /// Selected star, by click, list selection or page controls. Picking never
-    /// moves the camera; framing the system flies there.
-    pub picked: Option<(usize, u32)>,
+    /// Selected star, by click, F or page controls. Picking never moves the
+    /// camera; visiting flies there.
+    pub picked: Option<galaxy_nav::PickedStar>,
     pub following: bool,
-    pub atlas: bool,
-    /// Galaxy overview or a generated star system, independent of list pages.
-    pub galactic: bool,
     pub target: DVec3,
     pub distance: f64,
     pub yaw: f32,
@@ -70,14 +77,12 @@ impl Default for Navigation {
             page: 0,
             view: views::View::Orbit,
             viewport: None,
-            system: 0,
+            visit: None,
             selected: None,
             picked: None,
             following: false,
-            atlas: false,
-            galactic: false,
             target: DVec3::ZERO,
-            distance: 20.0 * AU_METRES,
+            distance: 120.0 * LY_METRES,
             yaw: 0.3,
             pitch: 0.85,
             exaggerate: false,
@@ -95,71 +100,57 @@ impl Default for Navigation {
 }
 
 impl Navigation {
-    /// A list opens as a constellation regardless of the previous view.
-    pub fn select_list(&mut self, system: usize, galaxy: &Galaxy) {
-        let Some(first_page) = galaxy.systems.get(system).map(StarSystem::first_page) else {
-            return;
-        };
-        self.jump(system, galaxy);
-        self.galactic = false;
-        self.page = first_page;
-        self.preset(views::View::Constellation, galaxy);
-        self.picked = Some((system, first_page));
+    pub fn system<'a>(&'a self, lists: &'a Galaxy) -> Option<&'a StarSystem> {
+        match self.visit.as_ref()? {
+            Visit::List(index) => lists.systems.get(*index),
+            Visit::Generated(system) => Some(system),
+        }
     }
 
-    pub fn show_atlas(&mut self, galaxy: &Galaxy) {
-        self.galactic = false;
+    /// The visited list, if the camera is at one of its pages.
+    pub fn list(&self) -> Option<usize> {
+        match self.visit {
+            Some(Visit::List(index)) => Some(index),
+            _ => None,
+        }
+    }
+
+    /// Fly to a page's star, framing its planets in orbit view.
+    pub fn arrive(&mut self, visit: Visit, page: u32, lists: &Galaxy) {
+        self.visit = Some(visit);
+        self.page = page;
+        self.frame(lists);
+    }
+
+    /// Frame the current page's planets in orbit view.
+    pub fn frame(&mut self, lists: &Galaxy) {
+        let Some(distance) = self
+            .system(lists)
+            .map(|system| views::fit_distance(system, self.page))
+        else {
+            return;
+        };
         self.fly = true;
         self.view = views::View::Orbit;
         self.yaw = 0.3;
         self.pitch = 0.85;
-        self.atlas = true;
-        self.following = false;
-        self.selected = None;
-        let Some(current) = galaxy.systems.get(self.system) else {
-            return;
-        };
-        let base = DVec3::from_array(current.position_ly);
-        let mut low = DVec3::ZERO;
-        let mut high = DVec3::ZERO;
-        for system in &galaxy.systems {
-            let p = DVec3::from_array(system.position_ly) - base;
-            low = low.min(p);
-            high = high.max(p);
-        }
-        self.target = (low + high) * 0.5 * space_simulation::LY_METRES;
-        self.distance = (high - low).length().max(2.0) * 2.8 * space_simulation::LY_METRES;
-    }
-
-    pub fn jump(&mut self, system: usize, galaxy: &Galaxy) {
-        if self.system != system {
-            self.page = galaxy
-                .systems
-                .get(system)
-                .map(StarSystem::first_page)
-                .unwrap_or(0);
-        }
-        self.fly = true;
-        self.view = views::View::Orbit;
-        self.yaw = 0.3;
-        self.pitch = 0.85;
-        self.system = system;
-        self.galactic = false;
         self.selected = None;
         self.picked = None;
         self.following = false;
-        self.atlas = false;
         self.target = DVec3::ZERO;
-        let extent = galaxy
-            .systems
-            .get(system)
-            .map(|s| {
-                s.on_page(self.page)
-                    .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
-                    .fold(3.0, f64::max)
-            })
-            .unwrap_or(6.0);
-        self.distance = extent * 3.1 * AU_METRES;
+        self.distance = distance;
+    }
+
+    /// A list opens as a constellation regardless of the previous view.
+    pub fn select_list(&mut self, index: usize, lists: &Galaxy) {
+        let Some(system) = lists.systems.get(index) else {
+            return;
+        };
+        let first_page = system.first_page();
+        let picked = galaxy_nav::page_pick(system, first_page);
+        self.arrive(Visit::List(index), first_page, lists);
+        self.preset(views::View::Constellation, lists);
+        self.picked = picked;
     }
 }
 
@@ -171,6 +162,13 @@ struct Inbox(Mutex<mpsc::Receiver<network::Update>>);
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
     diagnostics::install_crash_reports();
+    let smoke_test = std::env::args().any(|arg| arg == "--smoke-test");
+    let mut initial_nav = Navigation::default();
+    if smoke_test {
+        // Its captures start in the first list's first system.
+        initial_nav.visit = Some(Visit::List(0));
+        initial_nav.distance = 20.0 * AU_METRES;
+    }
     let mut app = App::new();
     app.add_plugins((
         DefaultPlugins
@@ -184,7 +182,7 @@ fn main() {
                     title: "Task Space · Mission Control".into(),
                     resolution: (1440, 900).into(),
                     #[cfg(not(target_arch = "wasm32"))]
-                    mode: if std::env::args().any(|arg| arg == "--smoke-test") {
+                    mode: if smoke_test {
                         bevy::window::WindowMode::BorderlessFullscreen(
                             bevy::window::MonitorSelection::Current,
                         )
@@ -219,8 +217,7 @@ fn main() {
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
-    .init_resource::<Navigation>()
-    .init_resource::<galaxy_nav::Galactic>()
+    .insert_resource(initial_nav)
     .init_resource::<actions::PanelInsets>()
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
@@ -255,12 +252,7 @@ fn tick(time: Res<Time>, mut clock: ResMut<Clock>) {
     clock.0.advance(time.delta_secs_f64());
 }
 
-fn receive_galaxy(
-    inbox: Res<Inbox>,
-    mut universe: ResMut<Universe>,
-    mut nav: ResMut<Navigation>,
-    mut galactic: ResMut<galaxy_nav::Galactic>,
-) {
+fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: ResMut<Navigation>) {
     let Ok(receiver) = inbox.0.lock() else {
         return;
     };
@@ -271,67 +263,43 @@ fn receive_galaxy(
             network::Update::Galaxy(mut galaxy) => {
                 // Bodies are deterministic from slots, so fixtures need only slots.
                 space_simulation::shape_galaxy(&mut galaxy);
-                if nav.galactic
-                    && galactic.system.is_some()
-                    && let Some((system, page)) = galactic.picked.as_ref().and_then(|picked| {
-                        galaxy.systems.iter().find_map(|system| {
-                            system
-                                .page_stars
-                                .iter()
-                                .find(|star| star.id == picked.id)
-                                .map(|star| (system, star.page))
-                        })
-                    })
-                {
-                    let selected = galactic
-                        .system
-                        .as_ref()
-                        .and_then(|s| nav.selected.and_then(|i| s.planets.get(i)))
-                        .map(|p| p.id.as_str());
-                    nav.selected =
-                        selected.and_then(|id| system.planets.iter().position(|p| p.id == id));
-                    nav.page = page;
-                    galactic.system = Some(system.clone());
-                }
-                let old_system = universe.0.systems.get(nav.system).map(|s| s.id.clone());
-                let old_task = universe
-                    .0
-                    .systems
-                    .get(nav.system)
-                    .and_then(|s| nav.selected.and_then(|i| s.planets.get(i)))
-                    .map(|p| p.id.clone());
-                let same_system = old_system
-                    .as_ref()
-                    .and_then(|id| galaxy.systems.iter().position(|s| &s.id == id));
                 nav.notice = CONNECTED.into();
-                if let Some(index) = same_system {
-                    nav.system = index;
-                    if nav.galactic {
-                        universe.0 = galaxy;
-                        continue;
-                    }
-                    nav.selected = old_task.and_then(|id| {
-                        galaxy.systems[index]
-                            .planets
-                            .iter()
-                            .position(|p| p.id == id)
-                    });
-                    if nav.selected.is_none() {
-                        nav.following = false;
-                    }
-                    let system = &galaxy.systems[index];
-                    if let Some(task) = nav.selected.map(|i| &system.planets[i]) {
-                        nav.page = task.page();
-                    } else if system.on_page(nav.page).next().is_none() {
-                        nav.page = system.first_page();
-                    }
-                } else if !nav.galactic {
-                    nav.jump(0, &galaxy);
-                } else {
-                    nav.system = 0;
-                }
+                follow_visited_star(&mut nav, &universe.0, &galaxy);
                 universe.0 = galaxy;
             }
         }
+    }
+}
+
+/// A visit follows its star into a new snapshot: its list may move, a list may
+/// gain a page on the visited star, or the list may go and leave the star bare.
+/// Planet IDs name their star, so the selected planet survives each change.
+fn follow_visited_star(nav: &mut Navigation, old: &Galaxy, new: &Galaxy) {
+    let Some(system) = nav.system(old) else {
+        return;
+    };
+    let Some(star) = system.page_star(nav.page).cloned() else {
+        return;
+    };
+    let selected = nav
+        .selected
+        .and_then(|i| system.planets.get(i))
+        .map(|p| p.id.clone());
+    if let Some((list, page)) = galaxy_nav::mapped(new, &star.id) {
+        nav.visit = Some(Visit::List(list));
+        nav.page = page;
+    } else if nav.list().is_some() {
+        nav.visit = galaxy_nav::generated(&star.id, DVec3::from_array(star.position_ly))
+            .map(|system| Visit::Generated(Box::new(system)));
+        nav.page = 0;
+    }
+    nav.selected = selected.and_then(|id| {
+        nav.system(new)?
+            .planets
+            .iter()
+            .position(|planet| planet.id == id)
+    });
+    if nav.selected.is_none() {
+        nav.following = false;
     }
 }

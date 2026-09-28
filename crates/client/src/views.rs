@@ -2,7 +2,7 @@
 use crate::Navigation;
 use bevy::math::DVec3;
 use space_shared::{Galaxy, Planet, StarSystem};
-use space_simulation::{LY_METRES, SUN_RADIUS_METRES, stable_hash};
+use space_simulation::{AU_METRES, LY_METRES, SUN_RADIUS_METRES};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -13,39 +13,24 @@ pub enum View {
     Constellation,
 }
 
-/// Stars per cubic light year in the solar neighbourhood (about 0.14 per cubic
-/// parsec), so neighbouring page stars are typically 3 to 5 ly apart.
-pub const STAR_DENSITY_PER_LY3: f64 = 0.004;
-
-/// Page star position relative to its list anchor (metres), scattered at random
-/// like real stars. Page `n` lies uniformly within the spherical shell that holds
-/// the `n`th star at the local density, in a random direction, so a list of any
-/// size has an even, natural spread with no grid, cluster or plane. It depends
-/// only on the list and page, never on how many pages are occupied.
-pub fn page_position(list_id: &str, page: u32) -> DVec3 {
-    if page == 0 {
-        return DVec3::ZERO;
-    }
-    let unit = |axis: &str| {
-        (stable_hash(&format!("{list_id}:page-star:{page}:{axis}")) % 1_000_001) as f64
-            / 1_000_000.0
-    };
-    let volume = (f64::from(page) - unit("r")) / STAR_DENSITY_PER_LY3;
-    let radius = (volume * 3.0 / (4.0 * std::f64::consts::PI)).cbrt();
-    let z = 2.0 * unit("z") - 1.0;
-    let phi = std::f64::consts::TAU * unit("phi");
-    let ring = (1.0 - z * z).sqrt();
-    DVec3::new(ring * phi.cos(), z, ring * phi.sin()) * radius * LY_METRES
+/// Camera range that frames a page's planets in orbit view.
+pub fn fit_distance(system: &StarSystem, page: u32) -> f64 {
+    system
+        .on_page(page)
+        .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
+        .fold(3.0, f64::max)
+        * 3.1
+        * AU_METRES
 }
 
-/// Rows of planets below their star, all at physical radii. Spacing scales with the
-/// page's largest planet, so a sun-sized star shows only its limb along the top edge.
+/// A row of planets to the right of their star, all at physical radii. Spacing
+/// scales with the page's largest planet; a large star shows only its right limb.
 pub struct TableLayout {
     pub unit: f64,
     first: f64,
     pitch: f64,
-    pub top: f64,
-    pub bottom: f64,
+    pub left: f64,
+    pub right: f64,
 }
 
 impl TableLayout {
@@ -54,7 +39,7 @@ impl TableLayout {
             .on_page(page)
             .map(|p| p.radius_km * 1000.0)
             .fold(1.0e6, f64::max);
-        let rows = system
+        let last = system
             .on_page(page)
             .map(|p| p.orbit_index)
             .max()
@@ -64,24 +49,24 @@ impl TableLayout {
             .map_or(SUN_RADIUS_METRES, |s| s.radius_solar * SUN_RADIUS_METRES);
         let pitch = 3.2 * unit;
         let first = star + 3.0 * unit;
-        let bottom = first + f64::from(rows) * pitch + 2.0 * unit;
-        let top = if star < 5.0 * unit {
+        let right = first + f64::from(last) * pitch + 2.0 * unit;
+        let left = if star < 5.0 * unit {
             -star - unit
         } else {
-            star - 2.0 * unit
+            star - unit
         };
         Self {
             unit,
             first,
             pitch,
-            top,
-            bottom,
+            left,
+            right,
         }
     }
 
-    pub fn position(&self, task: &Planet) -> DVec3 {
-        let row = f64::from(task.orbit_index);
-        DVec3::new(0.0, 0.0, self.first + row * self.pitch)
+    pub fn position(&self, planet: &Planet) -> DVec3 {
+        let column = f64::from(planet.orbit_index);
+        DVec3::new(self.first + column * self.pitch, 0.0, 0.0)
     }
 }
 
@@ -95,66 +80,64 @@ impl Navigation {
         }
     }
 
-    pub fn focus_selected(&mut self, galaxy: &Galaxy) {
-        let Some(planet) = galaxy
-            .systems
-            .get(self.system)
-            .and_then(|s| self.selected.and_then(|i| s.planets.get(i)))
+    pub fn focus_selected(&mut self, lists: &Galaxy) {
+        let Some((page, radius_km)) = self
+            .system(lists)
+            .and_then(|s| s.planets.get(self.selected?))
+            .map(|planet| (planet.page(), planet.radius_km))
         else {
             return;
         };
         self.view = View::Orbit;
         // A marker clicked mid page swap may belong to the page being wound away.
-        self.page = planet.page();
+        self.page = page;
         self.yaw = 0.3;
         self.pitch = 0.85;
-        self.atlas = false;
         self.following = true;
         self.fly = true;
-        self.distance = planet.radius_km * 1000.0 * 12.0;
+        self.distance = radius_km * 1000.0 * 12.0;
     }
 
-    pub fn show_page(&mut self, page: u32, galaxy: &Galaxy) {
-        if !galaxy
-            .systems
-            .get(self.system)
-            .is_some_and(|system| system.pages().contains(&page))
-        {
+    pub fn show_page(&mut self, page: u32, lists: &Galaxy) {
+        let Some(system) = self
+            .system(lists)
+            .filter(|system| system.pages().contains(&page))
+        else {
             return;
-        }
+        };
         if self.view == View::Constellation {
+            self.picked = crate::galaxy_nav::page_pick(system, page);
             self.page = page;
-            self.picked = Some((self.system, page));
             self.selected = None;
             return;
         }
         let view = self.view;
         self.page = page;
-        self.jump(self.system, galaxy);
+        self.frame(lists);
         self.view = view;
     }
 
-    pub fn select_task(&mut self, system: usize, task: usize, galaxy: &Galaxy) {
-        let Some(planet) = galaxy.systems.get(system).and_then(|s| s.planets.get(task)) else {
+    pub fn select_task(&mut self, list: usize, task: usize, lists: &Galaxy) {
+        let Some(planet) = lists.systems.get(list).and_then(|s| s.planets.get(task)) else {
             return;
         };
         let view = self.view;
-        self.jump(system, galaxy);
-        self.show_page(planet.page(), galaxy);
+        self.arrive(crate::Visit::List(list), planet.page(), lists);
         self.view = if view == View::Constellation {
             View::Table
         } else {
             view
         };
-        self.picked = None;
         self.selected = Some(task);
     }
 
-    pub fn preset(&mut self, view: View, galaxy: &Galaxy) {
+    pub fn preset(&mut self, view: View, lists: &Galaxy) {
+        if self.visit.is_none() {
+            return;
+        }
         if view == View::Orbit {
-            self.jump(self.system, galaxy);
+            self.frame(lists);
         } else {
-            self.atlas = false;
             self.following = false;
             self.fly = true;
             self.view = view;
@@ -164,59 +147,72 @@ impl Navigation {
         }
     }
 
-    pub fn fit_preset(&mut self, system: &StarSystem) {
-        let (low, high) = match self.view {
-            View::Orbit => return,
+    /// Keep a preset view framed on the visited system as it changes.
+    pub fn fit_preset(&mut self, lists: &Galaxy) {
+        let Some((target, distance, top_down)) =
+            self.system(lists).and_then(|system| self.framing(system))
+        else {
+            return;
+        };
+        self.target = target;
+        self.distance = distance;
+        if top_down {
+            self.yaw = 0.0;
+            self.pitch = std::f32::consts::FRAC_PI_2;
+        }
+    }
+
+    /// A preset's camera target, range and whether it looks straight down.
+    fn framing(&self, system: &StarSystem) -> Option<(DVec3, f64, bool)> {
+        match self.view {
+            View::Orbit => None,
             View::Table => {
-                // Planets sit left of centre, leaving room for their labels.
                 let layout = TableLayout::new(system, self.page);
-                (
-                    DVec3::new(-4.0 * layout.unit, 0.0, layout.top),
-                    DVec3::new(20.0 * layout.unit, 0.0, layout.bottom),
-                )
+                let aspect = self
+                    .viewport
+                    .as_ref()
+                    .map(|v| v.physical_size.x as f64 / v.physical_size.y.max(1) as f64)
+                    .unwrap_or(1.0);
+                // The width fits every planet at its true radius. Leave vertical
+                // room for the row's labels without giving a giant star more space.
+                let width = layout.right - layout.left;
+                let height = 7.0 * layout.unit;
+                let distance = height.max(width / aspect) * 0.5 / 25.0_f64.to_radians().tan();
+                Some((
+                    DVec3::new((layout.left + layout.right) * 0.5, 0.0, layout.unit),
+                    distance,
+                    true,
+                ))
             }
             View::Constellation => {
                 // One fixed frame for the entire list. Changing which star is
                 // selected must not re-centre or rotate the constellation.
                 let frame_page = self.frame_page(system);
                 let into_page = crate::scene::page_frame(system, frame_page).inverse();
-                let here = crate::scene::page_offset(system, frame_page);
-                let stars: Vec<_> = system
-                    .pages()
-                    .iter()
-                    .map(|&page| into_page * (crate::scene::page_offset(system, page) - here))
+                let stars: Vec<_> = crate::scene::page_offsets(system, frame_page)
+                    .into_iter()
+                    .map(|offset| into_page * offset)
                     .collect();
                 let (low, high) = stars.iter().fold(
                     (DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)),
                     |(low, high), &p| (low.min(p), high.max(p)),
                 );
-                self.target = (low + high) * 0.5;
+                let target = (low + high) * 0.5;
                 let radius = stars
                     .iter()
-                    .map(|p| (*p - self.target).length())
+                    .map(|p| (*p - target).length())
                     .fold(0.0, f64::max)
                     + LY_METRES;
-                self.distance = radius / 22.0_f64.to_radians().sin();
-                return;
+                Some((target, radius / 22.0_f64.to_radians().sin(), false))
             }
-        };
-        let aspect = self
-            .viewport
-            .as_ref()
-            .map(|v| v.physical_size.x as f64 / v.physical_size.y.max(1) as f64)
-            .unwrap_or(1.0);
-        self.target = (low + high) * 0.5;
-        let size = high - low;
-        self.distance = size.z.max(size.x / aspect) * 0.5 / 25.0_f64.to_radians().tan();
-        self.yaw = 0.0;
-        self.pitch = std::f32::consts::FRAC_PI_2;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use space_simulation::{page_capacity, page_of_slot};
+    use space_simulation::{planet_count, system_page_of_slot};
 
     #[test]
     fn constellation_pages_share_one_frame_without_reframing() {
@@ -226,16 +222,16 @@ mod tests {
         assert!(pages.len() > 2);
         let mut nav = Navigation::default();
         nav.select_list(0, &galaxy);
-        nav.fit_preset(system);
+        nav.fit_preset(&galaxy);
         let (target, distance, frame) = (nav.target, nav.distance, nav.frame_page(system));
         nav.yaw = 0.7;
         nav.pitch = 0.4;
         nav.fly = false;
         for &page in pages.iter().skip(1).take(2) {
             nav.show_page(page, &galaxy);
-            nav.fit_preset(system);
+            nav.fit_preset(&galaxy);
             assert_eq!(nav.view, View::Constellation);
-            assert_eq!(nav.picked, Some((0, page)));
+            assert_eq!(nav.picked, crate::galaxy_nav::page_pick(system, page));
             assert_eq!(nav.frame_page(system), frame);
             assert_eq!((nav.target, nav.distance), (target, distance));
             assert_eq!((nav.yaw, nav.pitch), (0.7, 0.4));
@@ -261,12 +257,13 @@ mod tests {
     fn fifty_tasks_have_stable_pages_after_edits_and_removals() {
         let mut galaxy = large_galaxy();
         let system = &mut galaxy.systems[0];
-        let last = page_of_slot(&system.id, 49).0;
-        assert_eq!(system.pages(), (0..=last).collect::<Vec<_>>());
+        let last = system_page_of_slot(system, 49).0;
+        assert!(system.pages().starts_with(&(0..=last).collect::<Vec<_>>()));
+        assert_eq!(system.pages().len(), system.page_stars.len());
         for page in 0..last {
             assert_eq!(
                 system.on_page(page).count() as u32,
-                page_capacity(&system.id, page)
+                planet_count(&system.page_star(page).unwrap().id)
             );
         }
         let before = system.planets.clone();
@@ -293,38 +290,8 @@ mod tests {
             };
             assert_eq!(task.id, original.task.as_ref().unwrap().id);
             let slot: u32 = task.id.strip_prefix("task-").unwrap().parse().unwrap();
-            assert_eq!(planet.page(), page_of_slot("demo-flight", slot).0);
+            assert_eq!(planet.page(), system_page_of_slot(system, slot).0);
         }
-    }
-
-    #[test]
-    fn page_stars_keep_separate_positions_when_other_pages_disappear() {
-        let pages = 1000;
-        let positions: Vec<_> = (0..pages).map(|page| page_position("list", page)).collect();
-        assert_eq!(positions[0], DVec3::ZERO);
-        // Real-space density: the whole list fills the sphere that holds its
-        // stars at the local density, spread evenly along every axis.
-        let volume = f64::from(pages) / STAR_DENSITY_PER_LY3;
-        let edge = (volume * 3.0 / (4.0 * std::f64::consts::PI)).cbrt() * LY_METRES;
-        assert!(positions.iter().all(|p| p.length() <= edge * 1.000_001));
-        let mean = positions.iter().copied().sum::<DVec3>() / f64::from(pages);
-        assert!(mean.length() < edge * 0.1);
-        for axis in 0..3 {
-            let spread = positions
-                .iter()
-                .map(|p| p[axis].powi(2))
-                .sum::<f64>()
-                .sqrt();
-            let expected = edge * (f64::from(pages) / 5.0).sqrt();
-            assert!((spread / expected - 1.0).abs() < 0.15, "axis {axis}");
-        }
-        // Different lists scatter differently.
-        assert_ne!(page_position("list", 4), page_position("other", 4));
-        let mut galaxy = large_galaxy();
-        let page_four = page_position("list", 4);
-        galaxy.systems[0].planets.retain(|task| task.page() != 1);
-        assert_eq!(galaxy.systems[0].pages()[..2], [0, 2]);
-        assert_eq!(page_position("list", 4), page_four);
     }
 
     #[test]
@@ -332,42 +299,82 @@ mod tests {
         let galaxy = large_galaxy();
         let system = &galaxy.systems[0];
         let layout = TableLayout::new(system, 1);
-        let rows: Vec<_> = system.on_page(1).map(|p| layout.position(p).z).collect();
-        assert_eq!(rows.len() as u32, page_capacity(&system.id, 1));
-        assert!(rows.windows(2).all(|r| r[1] - r[0] > 2.0 * layout.unit));
-        // A large star shows only its limb above the first planet; a small one
-        // fits whole.
+        let columns: Vec<_> = system.on_page(1).map(|p| layout.position(p).x).collect();
+        assert_eq!(
+            columns.len() as u32,
+            planet_count(&system.page_star(1).unwrap().id)
+        );
+        assert!(columns.windows(2).all(|r| r[1] - r[0] > 2.0 * layout.unit));
+        assert!(system.on_page(1).all(|p| layout.position(p).z == 0.0));
+        // A large star shows only its right tip; a small one fits whole.
         let star = system.star(1).unwrap().radius_solar * SUN_RADIUS_METRES;
         if star >= 5.0 * layout.unit {
-            assert!(layout.top > 0.0 && layout.top < star);
+            assert!(((star - layout.left) / layout.unit - 1.0).abs() < 1e-10);
         } else {
-            assert!(layout.top < -star);
+            assert!(layout.left < -star);
         }
-        assert!(rows[0] - layout.unit > star);
-        assert!(rows[rows.len() - 1] + layout.unit < layout.bottom);
+        assert!(columns[0] - layout.unit > star);
+        assert!(columns[columns.len() - 1] + layout.unit < layout.right);
         let mut nav = Navigation {
             page: 1,
+            visit: Some(crate::Visit::List(0)),
             ..Navigation::default()
         };
         nav.preset(View::Table, &galaxy);
-        nav.fit_preset(system);
+        nav.fit_preset(&galaxy);
         assert!(
-            nav.distance < 3.0 * (layout.bottom - layout.top) && nav.distance > 10.0 * layout.unit
+            nav.distance < 3.0 * (layout.right - layout.left) && nav.distance > 3.0 * layout.unit
         );
+    }
+
+    #[test]
+    fn table_frames_every_planet_for_dwarfs_and_giants() {
+        let mut galaxy = large_galaxy();
+        let page = 1;
+        for radius_solar in [0.01, 1.0, 1000.0] {
+            galaxy.systems[0]
+                .stars
+                .iter_mut()
+                .find(|star| star.page == page)
+                .unwrap()
+                .radius_solar = radius_solar;
+            let system = &galaxy.systems[0];
+            let layout = TableLayout::new(system, page);
+            let nav = Navigation {
+                page,
+                visit: Some(crate::Visit::List(0)),
+                view: View::Table,
+                ..Navigation::default()
+            };
+            let (target, distance, top_down) = nav.framing(system).unwrap();
+            assert!(top_down);
+            assert!(distance.is_finite());
+            // Default framing uses a square viewport and a 50° vertical FOV.
+            let half_width = distance * 25.0_f64.to_radians().tan();
+            let tolerance = layout.unit * 1e-8;
+            assert!(layout.left + tolerance >= target.x - half_width);
+            assert!(layout.right - tolerance <= target.x + half_width);
+            for planet in system.on_page(page) {
+                let x = layout.position(planet).x;
+                let radius = planet.radius_km * 1000.0;
+                assert!(x - radius > layout.left);
+                assert!(x + radius < layout.right);
+            }
+        }
     }
 
     #[test]
     fn presets_and_search_find_off_page_tasks() {
         let galaxy = large_galaxy();
         let mut nav = Navigation::default();
-        nav.preset(View::Constellation, &galaxy);
+        nav.select_list(0, &galaxy);
         nav.select_task(0, 42, &galaxy);
         let page = galaxy.systems[0].planets[42].page;
         assert!(page > 0);
         assert_eq!(nav.page, page);
         assert_eq!(nav.selected, Some(42));
         assert!(nav.view == View::Table);
-        nav.fit_preset(&galaxy.systems[0]);
+        nav.fit_preset(&galaxy);
         assert!(nav.distance.is_finite());
         nav.preset(View::Orbit, &galaxy);
         assert_eq!(nav.page, page);

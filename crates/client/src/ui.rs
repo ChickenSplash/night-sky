@@ -3,7 +3,7 @@ use crate::views::View;
 use crate::{
     Clock, Navigation, Universe,
     render::{Lights, exposure_caption},
-    scene::{CameraPose, CameraRig, MarkerKind, Markers},
+    scene::{CameraPose, CameraRig, Markers},
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
@@ -28,7 +28,6 @@ pub fn draw_ui(
         Res<CameraRig>,
         Res<CameraPose>,
         Res<crate::stream::Starfield>,
-        Res<crate::galaxy_nav::Galactic>,
     ),
     mut styled: Local<bool>,
 ) {
@@ -36,7 +35,7 @@ pub fn draw_ui(
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
     let (markers, insets, lights) = overlay;
-    let (rig, pose, starfield, galactic) = camera_state;
+    let (rig, pose, starfield) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -66,7 +65,6 @@ pub fn draw_ui(
     } else {
         let mut panels = Panels {
             galaxy: &universe.0,
-            generated: galactic.system.as_ref(),
             nav: &mut nav,
             clock: &clock.0,
             out: &mut out,
@@ -113,7 +111,6 @@ pub fn draw_ui(
         &markers,
         &rig,
         &pose,
-        &galactic,
         &starfield,
         &exposure_caption(&nav, &lights),
         insets.0.is_none(),
@@ -126,7 +123,6 @@ pub fn draw_ui(
 /// take over. They only read state; every change is a `UiCommand`.
 struct Panels<'a> {
     galaxy: &'a Galaxy,
-    generated: Option<&'a space_shared::StarSystem>,
     nav: &'a mut Navigation,
     clock: &'a SimulationClock,
     out: &'a mut Vec<UiCommand>,
@@ -184,7 +180,7 @@ impl Panels<'_> {
 
     fn footer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("RMB drag: orbit    Scroll: zoom    WASD: move    Q/E: down/up    Shift: boost    Space: pause").size(11.0).color(MUTED));
+            ui.label(egui::RichText::new("Click: select a star, again to visit    F: centre star    Enter: visit    RMB drag: orbit    Scroll: zoom    WASD: move    Q/E: down/up    Shift: boost    Space: pause").size(11.0).color(MUTED));
             ui.separator();
             ui.label(egui::RichText::new(&self.nav.notice).size(11.0).color(MUTED));
         });
@@ -203,24 +199,12 @@ impl Panels<'_> {
             .color(MUTED),
         );
         ui.add_space(8.0);
-        if ui
-            .selectable_label(nav.atlas, "Interstellar atlas")
-            .clicked()
-        {
-            self.out.push(UiCommand::Atlas);
-        }
-        if ui
-            .selectable_label(nav.galactic, "Generated galaxy")
-            .clicked()
-        {
-            self.out.push(UiCommand::GalaxyView);
-        }
         egui::ScrollArea::vertical()
             .id_salt("systems")
             .max_height(180.0)
             .show(ui, |ui| {
                 for (i, system) in galaxy.systems.iter().enumerate() {
-                    let active = nav.system == i && !nav.atlas;
+                    let active = nav.list() == Some(i);
                     let text = format!("{}\n{} task planets", system.name, system.tasks().count());
                     if ui
                         .add_sized(
@@ -250,7 +234,7 @@ impl Panels<'_> {
             .systems
             .iter()
             .enumerate()
-            .filter(|(si, _)| !query.is_empty() || *si == nav.system)
+            .filter(|(si, _)| !query.is_empty() || nav.list() == Some(*si))
             .flat_map(|(si, system)| {
                 system
                     .tasks()
@@ -272,7 +256,7 @@ impl Panels<'_> {
                         .add_sized(
                             [ui.available_width(), 30.0],
                             egui::Button::selectable(
-                                si == nav.system && nav.selected == Some(pi),
+                                nav.list() == Some(si) && nav.selected == Some(pi),
                                 text,
                             ),
                         )
@@ -338,11 +322,14 @@ impl Panels<'_> {
         let (galaxy, nav) = (self.galaxy, &*self.nav);
         heading(ui, "03 / TELEMETRY");
         ui.add_space(8.0);
-        let Some(system) = (if nav.galactic {
-            self.generated
-        } else {
-            galaxy.systems.get(nav.system)
-        }) else {
+        let Some(system) = nav.system(galaxy) else {
+            star_controls(ui, galaxy, nav, self.out);
+            ui.label(
+                egui::RichText::new(
+                    "Click a star to select it, and again to visit it. Lists open at their first system.",
+                )
+                .color(MUTED),
+            );
             return;
         };
         ui.heading(&system.name);
@@ -352,10 +339,7 @@ impl Panels<'_> {
                 ("Planet table", View::Table),
                 ("Constellation", View::Constellation),
             ] {
-                if ui
-                    .selectable_label(!nav.atlas && nav.view == view, label)
-                    .clicked()
-                {
+                if ui.selectable_label(nav.view == view, label).clicked() {
                     self.out.push(UiCommand::SetView { view });
                 }
             }
@@ -364,7 +348,7 @@ impl Panels<'_> {
         let current = pages.iter().position(|p| *p == nav.page).unwrap_or(0);
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(!nav.galactic && current > 0, egui::Button::new("‹"))
+                .add_enabled(current > 0, egui::Button::new("‹"))
                 .clicked()
             {
                 self.out.push(UiCommand::ShowPage {
@@ -373,10 +357,7 @@ impl Panels<'_> {
             }
             ui.label(format!("Page {} / {}", current + 1, pages.len()));
             if ui
-                .add_enabled(
-                    !nav.galactic && current + 1 < pages.len(),
-                    egui::Button::new("›"),
-                )
+                .add_enabled(current + 1 < pages.len(), egui::Button::new("›"))
                 .clicked()
             {
                 self.out.push(UiCommand::ShowPage {
@@ -415,10 +396,7 @@ impl Panels<'_> {
             .size(11.0)
             .color(MUTED),
         );
-        let [inclination, node, _] = system.page_star(nav.page).map_or_else(
-            || space_simulation::page_tilt(&system.id, nav.page),
-            |star| space_simulation::plane_tilt(&star.id),
-        );
+        let [inclination, node, _] = crate::scene::page_tilt(system, nav.page);
         ui.label(
             egui::RichText::new(format!(
                 "Page {} plane tilt {:.0}°, node {:.0}°",
@@ -437,6 +415,7 @@ impl Panels<'_> {
         if ui.button("Save bug report").clicked() {
             self.report = true;
         }
+        star_controls(ui, galaxy, nav, self.out);
         ui.separator();
         if let Some(planet) = nav.selected.and_then(|i| system.planets.get(i)) {
             heading(
@@ -587,6 +566,22 @@ impl Panels<'_> {
     }
 }
 
+/// The selected star, from anywhere in the galaxy, and how to visit it.
+fn star_controls(ui: &mut egui::Ui, galaxy: &Galaxy, nav: &Navigation, out: &mut Vec<UiCommand>) {
+    if let Some(star) = &nav.picked {
+        ui.label(format!(
+            "Selected {}",
+            crate::galaxy_nav::label(galaxy, &star.id)
+        ));
+        if ui.button("Visit star (Enter)").clicked() {
+            out.push(UiCommand::FrameSystem);
+        }
+    }
+    if ui.button("Select centre star (F)").clicked() {
+        out.push(UiCommand::PickCentre);
+    }
+}
+
 const RATES: [(&str, f64); 4] = [
     ("Real time", 1.0),
     ("1 hr/s", 3600.0),
@@ -603,16 +598,13 @@ fn save_bug_report(
     (rig, pose): (&CameraRig, &CameraPose),
     starfield: &crate::stream::Starfield,
 ) -> String {
-    let id = galaxy
-        .systems
-        .get(nav.system)
-        .map_or("none", |s| s.id.as_str());
+    let system = nav.system(galaxy);
     let state = format!(
-        "List ID: {}\nPage: {}\nView: {:?}\nAtlas: {}\nFollowing: {}\nSelected task index: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
-        id,
+        "System ID: {}\nList: {}\nPage: {}\nView: {:?}\nFollowing: {}\nSelected task index: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
+        system.map_or("none", |s| s.id.as_str()),
+        nav.list().is_some(),
         nav.page,
         nav.view,
-        nav.atlas,
         nav.following,
         nav.selected,
         galaxy.source,
@@ -657,37 +649,12 @@ fn canvas_overlay(
     markers: &Markers,
     rig: &CameraRig,
     pose: &CameraPose,
-    galactic: &crate::galaxy_nav::Galactic,
     field: &crate::stream::Starfield,
     exposure: &str,
     // HTML panels show the loading state and view captions themselves.
     captions: bool,
     out: &mut Vec<UiCommand>,
 ) {
-    if nav.galactic {
-        egui::Area::new(egui::Id::new("galaxy-controls"))
-            .fixed_pos(rect.right_bottom() - egui::vec2(470.0, 135.0))
-            .show(ctx, |ui| {
-                egui::Frame::new().fill(PANEL).inner_margin(8).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        if galactic.system.is_some() {
-                            if ui.button("Back to galaxy").clicked() { out.push(UiCommand::LeaveGalactic); }
-                        } else {
-                            if ui.button("Pick centre star (F)").clicked() { out.push(UiCommand::PickGalactic); }
-                            if ui.add_enabled(galactic.picked.is_some(), egui::Button::new("Enter star (Enter)")).clicked() {
-                                out.push(UiCommand::EnterGalactic);
-                            }
-                        }
-                        if ui.button("Lists (G)").clicked() { out.push(UiCommand::ReturnToLists); }
-                    });
-                    if let Some(star) = &galactic.picked {
-                        ui.label(format!("Selected {}", crate::galaxy_nav::star_name(&star.id)));
-                    } else if galactic.system.is_none() {
-                        ui.label("Click a visible star to select; click again to enter. F picks centre. WASD/QE travel.");
-                    }
-                });
-            });
-    }
     if captions && galaxy.systems.is_empty() {
         egui::Area::new(egui::Id::new("loading-state"))
             .fixed_pos(rect.center() - egui::vec2(160.0, 45.0))
@@ -709,19 +676,8 @@ fn canvas_overlay(
         painter.text(
             rect.left_top() + egui::vec2(24.0, 24.0),
             egui::Align2::LEFT_TOP,
-            if nav.galactic && galactic.system.is_none() {
-                "GALAXY / GENERATED STARS"
-            } else if nav.galactic
-                && galactic
-                    .system
-                    .as_ref()
-                    .is_some_and(|s| s.tasks().next().is_some())
-            {
-                "GALAXY / TASK-BEARING SYSTEM"
-            } else if nav.galactic {
-                "GALAXY / TASK-FREE SYSTEM"
-            } else if nav.atlas {
-                "INTERSTELLAR ATLAS / LIGHT YEARS"
+            if nav.visit.is_none() {
+                "GALAXY / LIGHT YEARS"
             } else if nav.view == View::Table {
                 "TASK TABLE / TRUE SIZES · ORBITS CONTINUE"
             } else if nav.view == View::Constellation {
@@ -757,58 +713,40 @@ fn canvas_overlay(
     }
 
     let pointer = ctx.input(|i| i.pointer.interact_pos());
-    let click = ctx.input(|i| i.pointer.primary_clicked());
-    if nav.galactic && galactic.system.is_none() {
-        if let Some(star) = &galactic.picked {
-            let eye = rig.galactic_ly(pose);
-            let position = (bevy::math::DVec3::from_array(star.position_pc)
-                - bevy::math::DVec3::from_array(
-                    space_simulation::galaxy::GalaxyModel::milky_way().home_pc,
-                ))
-                * (space_simulation::galaxy::PC_METRES / LY_METRES);
-            let camera = rig.rotation().inverse() * (position - eye).as_vec3();
-            if camera.z < 0.0 {
-                let half = (50.0_f32.to_radians() / 2.0).tan();
-                let size = rect.height() / (2.0 * half * -camera.z);
-                let point = egui::pos2(
-                    rect.center().x + camera.x * size,
-                    rect.center().y - camera.y * size,
+    let mut click = ctx.input(|i| i.pointer.primary_clicked());
+    if let Some(star) = &nav.picked {
+        let camera =
+            rig.rotation().inverse() * (star.position_ly - rig.galactic_ly(pose)).as_vec3();
+        if camera.z < 0.0 {
+            let half = (50.0_f32.to_radians() / 2.0).tan();
+            let size = rect.height() / (2.0 * half * -camera.z);
+            let point = egui::pos2(
+                rect.center().x + camera.x * size,
+                rect.center().y - camera.y * size,
+            );
+            if rect.contains(point) {
+                painter.circle_stroke(point, 10.0, egui::Stroke::new(1.5, ACCENT));
+                painter.text(
+                    point + egui::vec2(16.0, -8.0),
+                    egui::Align2::LEFT_CENTER,
+                    crate::galaxy_nav::label(galaxy, &star.id),
+                    egui::FontId::proportional(12.0),
+                    ACCENT,
                 );
-                if rect.contains(point) {
-                    painter.circle_stroke(point, 10.0, egui::Stroke::new(1.5, ACCENT));
-                    painter.text(
-                        point + egui::vec2(16.0, -8.0),
-                        egui::Align2::LEFT_CENTER,
-                        crate::galaxy_nav::star_name(&star.id),
-                        egui::FontId::proportional(12.0),
-                        ACCENT,
-                    );
-                }
             }
         }
-        if click
-            && let Some(pointer) = pointer.filter(|p| rect.contains(*p))
-            && let Some(star) = crate::galaxy_nav::pick_pointer(
-                field,
-                rig,
-                pose,
-                rig.rotation(),
-                [
-                    f64::from(pointer.x - rect.min.x),
-                    f64::from(pointer.y - rect.min.y),
-                ],
-                [f64::from(rect.width()), f64::from(rect.height())],
-            )
-        {
-            out.push(UiCommand::PickStar { id: star.id });
-        }
     }
-    // A large constellation can contain hundreds of page stars. Showing every
-    // label at once makes the overview look like one collapsed line of stars.
-    let dense_constellation = nav.view == View::Constellation && markers.0.len() > 24;
     // Bevy viewport coordinates are window logical pixels; egui has a further UI scale.
     let scale = ctx.zoom_factor();
-    let system = galaxy.systems.get(nav.system);
+    let system = nav.system(galaxy);
+    // A horizontal table needs its captions below each planet: putting them to
+    // the right covers the next planet, especially on pages with many slots.
+    let table_column = markers
+        .0
+        .windows(2)
+        .map(|pair| (pair[1].point.x - pair[0].point.x).abs() / scale)
+        .filter(|gap| *gap > 1.0)
+        .fold(f32::INFINITY, f32::min);
     for marker in &markers.0 {
         let point = egui::pos2(marker.point.x / scale, marker.point.y / scale);
         if !rect.contains(point) {
@@ -818,9 +756,7 @@ fn canvas_overlay(
         let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
         let radius = (marker.radius / scale).max(7.0);
         let hovered = pointer.is_some_and(|p| rect.contains(p) && p.distance(point) < radius + 8.0);
-        let star = matches!(marker.kind, MarkerKind::Star { .. });
-        let selected = matches!(marker.kind, MarkerKind::Planet(i) if nav.selected == Some(i))
-            || matches!(marker.kind, MarkerKind::Star { system, page } if nav.picked == Some((system, page)));
+        let selected = nav.selected == Some(marker.planet);
         if selected || hovered {
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }
@@ -828,59 +764,66 @@ fn canvas_overlay(
         if nav.markers && marker.radius < 6.0 {
             painter.circle_stroke(point, 4.0, egui::Stroke::new(1.0, tint));
         }
-        // Task labels would smear across the screen mid-flight. Stars are
-        // labelled only when picked or hovered.
-        if (selected || hovered)
-            || (!star
-                && !dense_constellation
-                && (nav.labels || nav.view != View::Orbit)
-                && !rig.flying())
-        {
+        // Task labels would smear across the screen mid-flight.
+        if selected || hovered || ((nav.labels || nav.view != View::Orbit) && !rig.flying()) {
+            let table = nav.view == View::Table && !rig.flying();
+            let width = if table {
+                (table_column - 12.0).clamp(40.0, 180.0)
+            } else {
+                220.0
+            };
             let text = painter.layout(
                 marker.label.clone(),
                 egui::FontId::proportional(12.0),
                 tint,
-                if nav.view == View::Table {
-                    (rect.width() * 0.58).max(80.0)
-                } else {
-                    220.0
-                },
+                width,
             );
-            let right = point.x + radius + 10.0;
-            let x = if right + text.size().x > rect.right() - 10.0 {
-                (point.x - radius - 10.0 - text.size().x).max(rect.left() + 10.0)
+            let (x, y) = if table {
+                (
+                    (point.x - text.size().x * 0.5).clamp(
+                        rect.left() + 10.0,
+                        (rect.right() - 10.0 - text.size().x).max(rect.left() + 10.0),
+                    ),
+                    point.y + radius + 10.0,
+                )
             } else {
-                right
+                let right = point.x + radius + 10.0;
+                let x = if right + text.size().x > rect.right() - 10.0 {
+                    (point.x - radius - 10.0 - text.size().x).max(rect.left() + 10.0)
+                } else {
+                    right
+                };
+                (x, point.y - text.size().y * 0.5)
             };
-            painter.galley(egui::pos2(x, point.y - text.size().y * 0.5), text, tint);
+            painter.galley(egui::pos2(x, y), text, tint);
         }
-        // A second click on the selected body flies to it.
-        if hovered && click && star && nav.galactic {
-            out.push(UiCommand::FrameSystem);
-        } else if hovered && click && selected {
-            out.push(if star {
-                UiCommand::FrameSystem
-            } else {
-                UiCommand::Follow
-            });
-        } else if hovered && click {
-            match marker.kind {
-                MarkerKind::Planet(index) => {
-                    if let Some(planet) = system.and_then(|s| s.planets.get(index)) {
-                        out.push(UiCommand::Inspect {
-                            planet: planet.id.clone(),
-                        });
-                    }
-                }
-                MarkerKind::Star { system, page } => {
-                    if let Some(list) = galaxy.systems.get(system) {
-                        out.push(UiCommand::Pick {
-                            list: list.id.clone(),
-                            page,
-                        });
-                    }
-                }
+        // A second click on the selected planet follows it.
+        if hovered && click {
+            click = false;
+            if selected {
+                out.push(UiCommand::Follow);
+            } else if let Some(planet) = system.and_then(|s| s.planets.get(marker.planet)) {
+                out.push(UiCommand::Inspect {
+                    planet: planet.id.clone(),
+                });
             }
         }
+    }
+    // Any other click picks from the streamed galaxy, list pages included.
+    if click
+        && let Some(pointer) = pointer.filter(|p| rect.contains(*p))
+        && let Some(star) = crate::galaxy_nav::pick_pointer(
+            field,
+            rig,
+            pose,
+            rig.rotation(),
+            [
+                f64::from(pointer.x - rect.min.x),
+                f64::from(pointer.y - rect.min.y),
+            ],
+            [f64::from(rect.width()), f64::from(rect.height())],
+        )
+    {
+        out.push(UiCommand::PickStar { id: star.id });
     }
 }

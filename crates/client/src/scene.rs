@@ -1,6 +1,6 @@
 use crate::flight::{Flight, Pose, STAR_JUMP_SECONDS};
 use crate::render::{self, Lights, Photometry, PlanetLight, StarLight};
-use crate::views::{TableLayout, View, page_position};
+use crate::views::{TableLayout, View};
 use crate::{Clock, Navigation, Universe};
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, MouseWheel},
@@ -9,9 +9,9 @@ use bevy::{
 };
 use bevy_egui::EguiContexts;
 use big_space::prelude::*;
-use space_shared::{Galaxy, Orbit, Spin, StarSystem};
+use space_shared::{Orbit, Spin, StarSystem};
 use space_simulation::{
-    LY_METRES, SUN_RADIUS_METRES, page_tilt, position, position_at_eccentric_anomaly, spin_angle,
+    LY_METRES, SUN_RADIUS_METRES, plane_tilt, position, position_at_eccentric_anomaly, spin_angle,
 };
 use std::f64::consts::TAU;
 
@@ -58,8 +58,7 @@ impl CameraRig {
         self.flight.is_some()
     }
 
-    /// The displayed camera in galactic axes, in light years from the lists'
-    /// shared origin.
+    /// The displayed camera in galactic axes, in light years from home.
     pub fn galactic_ly(&self, pose: &CameraPose) -> DVec3 {
         self.frame_ly + pose.eye / LY_METRES
     }
@@ -74,19 +73,16 @@ impl CameraRig {
     }
 }
 
+/// A planet's label and hit target. Stars have none: they are picked from the
+/// streamed galaxy like any other star.
 #[derive(Clone)]
 pub struct Marker {
     pub point: Vec2,
     pub radius: f32,
     pub label: String,
     pub colour: [u8; 3],
-    pub kind: MarkerKind,
-}
-
-#[derive(Clone, Copy)]
-pub enum MarkerKind {
-    Planet(usize),
-    Star { system: usize, page: u32 },
+    /// Index into the visited system's planets.
+    pub planet: usize,
 }
 
 #[derive(Resource, Default)]
@@ -139,7 +135,6 @@ pub fn controls(
     pose: Res<CameraPose>,
     universe: Res<Universe>,
     field: Res<crate::stream::Starfield>,
-    mut galactic: ResMut<crate::galaxy_nav::Galactic>,
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
 ) {
@@ -165,37 +160,16 @@ pub fn controls(
             nav.pitch = (nav.pitch + motion.delta.y * 0.005).clamp(-1.48, 1.48);
         }
         if free {
-            let min = if nav.atlas || (nav.galactic && galactic.system.is_none()) {
-                0.1 * LY_METRES
-            } else {
-                20_000_000.0
-            };
-            let max = if nav.galactic && galactic.system.is_none() {
-                40_000.0 * LY_METRES
-            } else {
-                200.0 * LY_METRES
-            };
-            nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp()).clamp(min, max);
+            nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
+                .clamp(20_000_000.0, 40_000.0 * LY_METRES);
         }
     }
     if !keyboard {
-        if keys.just_pressed(KeyCode::KeyG) {
-            if nav.galactic {
-                let system = nav.system;
-                nav.jump(system, &universe.0);
-                galactic.system = None;
-            } else {
-                crate::galaxy_nav::overview(&mut nav, &mut galactic, rig.galactic_ly(&pose));
-            }
+        if keys.just_pressed(KeyCode::KeyF) {
+            nav.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
         }
-        if nav.galactic && galactic.system.is_none() && keys.just_pressed(KeyCode::KeyF) {
-            galactic.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
-        }
-        if nav.galactic && galactic.system.is_none() && keys.just_pressed(KeyCode::Enter) {
-            crate::galaxy_nav::enter(&mut nav, &mut galactic, &universe.0);
-        }
-        if nav.galactic && galactic.system.is_some() && keys.just_pressed(KeyCode::Backspace) {
-            crate::galaxy_nav::exit(&mut nav, &mut galactic);
+        if keys.just_pressed(KeyCode::Enter) {
+            crate::galaxy_nav::visit_picked(&mut nav, &universe.0);
         }
         if keys.just_pressed(KeyCode::Space) {
             clock.0.paused = !clock.0.paused;
@@ -235,7 +209,6 @@ pub fn controls(
 pub fn place_camera(
     time: Res<Time>,
     universe: Res<Universe>,
-    galactic: Res<crate::galaxy_nav::Galactic>,
     clock: Res<Clock>,
     mut nav: ResMut<Navigation>,
     mut rig: ResMut<CameraRig>,
@@ -252,45 +225,28 @@ pub fn place_camera(
         With<SpaceCamera>,
     >,
 ) {
-    let system = if nav.galactic {
-        galactic.system.as_ref()
-    } else {
-        universe.0.systems.get(nav.system)
-    };
-    if !nav.galactic && system.is_none() {
-        return;
-    }
-    if let Some(system) = system {
-        nav.fit_preset(system);
-    }
+    nav.fit_preset(&universe.0);
     if nav.following
-        && !nav.atlas
-        && let Some(system) = system
-        && let Some(planet) = nav.selected.and_then(|i| system.planets.get(i))
+        && let Some(followed) = nav.system(&universe.0).and_then(|system| {
+            let planet = system.planets.get(nav.selected?)?;
+            Some(DVec3::from_array(position(
+                &planet.orbit,
+                system.mass(planet.page()),
+                clock.0.seconds,
+            )))
+        })
     {
-        nav.target = DVec3::from_array(position(
-            &planet.orbit,
-            system.mass(planet.page()),
-            clock.0.seconds,
-        ));
+        nav.target = followed;
     }
+    let fly = std::mem::take(&mut nav.fly);
+    let system = nav.system(&universe.0);
     // The constellation uses one page's frame for the whole list; page selection
-    // does not move the camera. Other views use the selected page's plane.
+    // does not move the camera. Other views use the selected page's plane. In
+    // open space the camera is relative to home, in galactic axes.
     let frame_page = system.map_or(0, |system| nav.frame_page(system));
-    let frame_tilt = if nav.atlas {
-        DQuat::IDENTITY
-    } else {
-        system.map_or(DQuat::IDENTITY, |system| page_frame(system, frame_page))
-    };
+    let frame_tilt = system.map_or(DQuat::IDENTITY, |system| page_frame(system, frame_page));
     let desired = Pose {
-        target: if nav.galactic && system.is_none() {
-            nav.target
-        } else if nav.atlas {
-            // The atlas target is in galactic axes relative to the list anchor.
-            nav.target - page_offset(system.expect("list atlas"), nav.page)
-        } else {
-            frame_tilt * nav.target
-        },
+        target: frame_tilt * nav.target,
         distance: nav.distance,
         rotation: frame_tilt.as_quat()
             * Quat::from_rotation_y(nav.yaw)
@@ -313,7 +269,7 @@ pub fn place_camera(
     rig.frame_ly = frame;
     rig.selected = nav.selected;
     // Page jumps, list jumps, task focus and preset changes all use this flight.
-    if std::mem::take(&mut nav.fly) || retarget {
+    if fly || retarget {
         rig.flight = Flight::new(shown, desired);
         // Every jump to another star, in this list or another, keeps one rhythm
         // whatever the distance travelled.
@@ -393,13 +349,17 @@ fn rotation([inclination, node, twist]: [f64; 3]) -> DQuat {
         * DQuat::from_rotation_y(twist)
 }
 
+/// A page star's orbital-plane tilt: inclination, node and twist, in radians.
+pub fn page_tilt(system: &StarSystem, page: u32) -> [f64; 3] {
+    system
+        .page_star(page)
+        .map_or([0.0; 3], |star| plane_tilt(&star.id))
+}
+
 /// Rotation from a page's orbital-plane axes into galactic axes. Every page is its
 /// own star system, so each has its own plane.
 pub fn page_frame(system: &StarSystem, page: u32) -> DQuat {
-    rotation(system.page_star(page).map_or_else(
-        || page_tilt(&system.id, page),
-        |assigned| space_simulation::plane_tilt(&assigned.id),
-    ))
+    rotation(page_tilt(system, page))
 }
 
 /// A body's wireframe orientation in its system's plane: its axis tilted, then
@@ -413,17 +373,23 @@ fn spin_basis(frame: DQuat, spin: &Spin, seconds: f64) -> DQuat {
         * DQuat::from_rotation_y(-spin_angle(spin, seconds))
 }
 
-/// Galactic offset of a page star from its list's anchor, in metres.
-pub fn page_offset(system: &StarSystem, page: u32) -> DVec3 {
-    if let Some(assigned) = system.page_star(page) {
-        return (DVec3::from_array(assigned.position_ly) - DVec3::from_array(system.position_ly))
-            * LY_METRES;
-    }
-    page_position(&system.id, page)
+/// A page star's position: light years from home, in galactic axes.
+pub fn page_origin_ly(system: &StarSystem, page: u32) -> DVec3 {
+    DVec3::from_array(
+        system
+            .page_star(page)
+            .map_or(system.position_ly, |star| star.position_ly),
+    )
 }
 
-pub fn page_origin_ly(system: &StarSystem, page: u32) -> DVec3 {
-    DVec3::from_array(system.position_ly) + page_offset(system, page) / LY_METRES
+/// Every page star of a system relative to one of them, in galactic metres.
+pub fn page_offsets(system: &StarSystem, from: u32) -> Vec<DVec3> {
+    let here = page_origin_ly(system, from);
+    system
+        .pages()
+        .iter()
+        .map(|&page| (page_origin_ly(system, page) - here) * LY_METRES)
+        .collect()
 }
 
 fn colour(rgb: [u8; 3]) -> Color {
@@ -442,14 +408,6 @@ const ORBIT: Color = Color::srgb(0.075, 0.17, 0.25);
 const RING_PIXELS: f32 = 6.0;
 const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
 
-/// Close up, distant stars sit on a shell at four camera ranges, so they stay
-/// visible. The shell grows with the zoom and a star joins its true position
-/// once the shell reaches it. There is no zoom threshold, so no star jumps or
-/// races across the screen, however far away its list is.
-fn visible_star_distance(real: f64, camera_range: f64) -> f64 {
-    real.min(camera_range * 4.0)
-}
-
 /// Keep even unusually wide systems visible at their initial fitted range and
 /// while following an outer planet. Small systems retain the original cutoff.
 fn planet_visibility_range(system: &StarSystem, page: u32) -> f64 {
@@ -458,6 +416,14 @@ fn planet_visibility_range(system: &StarSystem, page: u32) -> f64 {
         .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
         .fold(0.0, f64::max);
     WIDE_METRES.max(4.0 * outer_apoapsis * space_simulation::AU_METRES)
+}
+
+/// Within this range of the visited star, in metres, its planets and body are
+/// drawn. Beyond it the star is a galactic point like any other, bound by the
+/// same magnitude limit, and the planets are hidden.
+pub fn body_range(system: &StarSystem, pose: &CameraPose) -> Option<f64> {
+    let range = planet_visibility_range(system, pose.page);
+    (pose.distance <= range && pose.eye.length() <= range).then_some(range)
 }
 
 /// One frame's projection from f64 metres relative to the current star into render
@@ -469,7 +435,6 @@ struct Canvas<'a> {
     scale: f64,
     pose: &'a CameraPose,
     nav: &'a Navigation,
-    flying: bool,
     system: &'a StarSystem,
     /// Plane of the page on display.
     frame: DQuat,
@@ -628,13 +593,7 @@ impl Canvas<'_> {
     /// Joins the current list's page stars where they already are, like a star
     /// chart: each star links to its nearest neighbour in a minimum spanning tree.
     fn constellation(&self, gizmos: &mut Gizmos) {
-        let system = self.system;
-        let here = page_offset(system, self.pose.page);
-        let stars: Vec<_> = system
-            .pages()
-            .iter()
-            .map(|&page| page_offset(system, page) - here)
-            .collect();
+        let stars = page_offsets(self.system, self.pose.page);
         let Some(&first) = stars.first() else {
             return;
         };
@@ -663,81 +622,39 @@ impl Canvas<'_> {
         }
     }
 
-    /// Every list draws all its page stars, so no stars appear or vanish when a
-    /// jump changes list. Every star can be picked.
-    fn stars(
-        &self,
-        gizmos: &mut Gizmos,
-        galaxy: &Galaxy,
-        markers: &mut Vec<Marker>,
-        lights: &mut Lights,
-    ) {
-        for (index, star) in galaxy.systems.iter().enumerate() {
-            for page in star.pages() {
-                self.star(gizmos, markers, lights, star, index, page);
-            }
-        }
-    }
-
-    fn star(
-        &self,
-        gizmos: &mut Gizmos,
-        markers: &mut Vec<Marker>,
-        lights: &mut Lights,
-        star: &StarSystem,
-        index: usize,
-        page: u32,
-    ) {
-        let (nav, pose) = (self.nav, self.pose);
+    /// The visited page's star, within `body_range`. Every other star, including
+    /// the rest of its list, is a streamed galactic point.
+    fn star(&self, gizmos: &mut Gizmos, lights: &mut Lights) {
+        let (nav, pose, system) = (self.nav, self.pose, self.system);
         let wide = pose.distance > WIDE_METRES;
         let table = pose.layout > 0.5;
-        let current = index == nav.system && page == pose.page;
-        if nav.view == View::Table && !current && (!self.flying || index != nav.system) {
-            return;
-        }
-        let offset =
-            (page_origin_ly(star, page) - page_origin_ly(self.system, pose.page)) * LY_METRES;
-        let relative = offset - pose.eye;
-        // Both the position and the angular size transition continuously from
-        // the close-up marker to the star's real interstellar position.
-        let visible_distance = if current {
-            relative.length()
-        } else {
-            visible_star_distance(relative.length(), pose.distance)
-        };
-        let centre =
-            self.origin + (relative.normalize_or_zero() * visible_distance / self.scale).as_vec3();
-        let body = star.star(page);
+        let relative = -pose.eye;
+        let centre = self.world(DVec3::ZERO);
+        let body = system.star(pose.page);
         let physical = body.map_or(SUN_RADIUS_METRES, |b| b.radius_solar * SUN_RADIUS_METRES);
         let tint = body.map_or([255, 192, 108], |b| b.colour);
         let basis = match body {
-            Some(b) => spin_basis(page_frame(star, page), &b.spin, self.seconds),
-            None => page_frame(star, page),
+            Some(b) => spin_basis(self.frame, &b.spin, self.seconds),
+            None => self.frame,
         };
-        let radius = if !current {
-            visible_distance * 0.004
-        } else if wide {
+        let radius = if wide && !table {
             relative.length() * 0.004
         } else if nav.exaggerate && !table {
             (pose.distance * 0.008).max(physical)
         } else {
             physical
         };
-        let limb = current && table && !wide;
-        if self.nav.realistic
+        if nav.realistic
             && let Some(body) = body
             && let Some(per_pixel) = self.per_pixel(centre)
         {
             let surface = self.photometry.surface_radiance(body);
-            // An enlarged current star dims to keep its light. Any other keeps its
-            // true angular size, even drawn on the near shell.
-            let (disc, radiance) = if current && !wide {
-                (radius, surface * (physical / radius).powi(2))
+            // An enlarged star dims to keep its light. From afar it keeps its
+            // true angular size.
+            let (disc, radiance) = if wide && !table {
+                (physical, surface)
             } else {
-                (
-                    visible_distance * physical / relative.length().max(1.0),
-                    surface,
-                )
+                (radius, surface * (physical / radius).powi(2))
             };
             let disc = self.units(disc);
             lights.stars.push(StarLight {
@@ -747,53 +664,23 @@ impl Canvas<'_> {
                 per_pixel,
                 radiance,
                 kelvin: body.temperature_k,
-                subject: current && self.subject,
+                subject: self.subject,
                 spin: basis.as_quat(),
                 granules: render::granules(body),
             });
         }
-        let pixels = self
-            .outline(
-                gizmos,
-                centre,
-                self.units(radius),
-                colour(tint),
-                basis,
-                limb,
-            )
-            .unwrap_or(0.0);
-        let anchor = if limb {
-            let unit = TableLayout::new(self.system, pose.page).unit;
-            self.world(self.frame * DVec3::new(0.0, 0.0, physical + unit))
-        } else {
-            centre
-        };
-        if let Some(point) = self.screen(anchor) {
-            markers.push(Marker {
-                point,
-                radius: pixels.min(9.0),
-                label: if index == nav.system && !current {
-                    format!(
-                        "System {} · {:.2} ly",
-                        page + 1,
-                        relative.length() / LY_METRES
-                    )
-                } else if wide || !current {
-                    format!("{} · {:.2} ly", star.name, relative.length() / LY_METRES)
-                } else {
-                    star.name.clone()
-                },
-                colour: tint,
-                kind: MarkerKind::Star {
-                    system: index,
-                    page,
-                },
-            });
-        }
+        self.outline(
+            gizmos,
+            centre,
+            self.units(radius),
+            colour(tint),
+            basis,
+            table,
+        );
     }
 
-    /// The destination page's planets, blending between running orbits and table
-    /// rows while the camera flies. Orbital radii are never presentation-scaled.
+    /// The destination page's planets, blending between running orbits and the
+    /// table row while the camera flies. Orbital radii are never presentation-scaled.
     fn planets(
         &self,
         gizmos: &mut Gizmos,
@@ -857,7 +744,7 @@ impl Canvas<'_> {
                     radius: pixels.unwrap_or(6.0).max(5.0),
                     label: planet.label().to_owned(),
                     colour: planet.colour(),
-                    kind: MarkerKind::Planet(index),
+                    planet: index,
                 });
             }
         }
@@ -868,15 +755,13 @@ impl Canvas<'_> {
 pub fn draw(
     mut gizmos: Gizmos,
     universe: Res<Universe>,
-    galactic: Res<crate::galaxy_nav::Galactic>,
-    navigation: (Res<Navigation>, Res<CameraRig>),
+    nav: Res<Navigation>,
     clock: Res<Clock>,
     pose: Res<CameraPose>,
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
     mut markers: ResMut<Markers>,
     light: (ResMut<Lights>, Res<Photometry>),
 ) {
-    let (nav, rig) = navigation;
     let (mut lights, photometry) = light;
     markers.0.clear();
     lights.clear();
@@ -884,18 +769,12 @@ pub fn draw(
         return;
     };
     lights.eye = view.translation();
-    let system = if nav.galactic {
-        galactic.system.as_ref()
-    } else {
-        universe.0.systems.get(nav.system)
-    };
-    let Some(system) = system else {
+    let Some(system) = nav.system(&universe.0) else {
         return;
     };
     // During a page-to-page flight the camera may still be near the departure
     // star. Do not draw the destination's AU-scale orbits from interstellar range.
-    let planet_range = planet_visibility_range(system, pose.page);
-    let planets_shown = pose.distance <= planet_range && pose.eye.length() <= planet_range;
+    let planets_shown = body_range(system, &pose).is_some();
     let canvas = Canvas {
         camera,
         view,
@@ -903,7 +782,6 @@ pub fn draw(
         scale: pose.render_scale(),
         pose: &pose,
         nav: &nav,
-        flying: rig.flying(),
         system,
         frame: page_frame(system, pose.page),
         seconds: clock.0.seconds,
@@ -914,19 +792,8 @@ pub fn draw(
     if nav.view == View::Constellation {
         canvas.constellation(&mut gizmos);
     }
-    if nav.galactic {
-        canvas.star(
-            &mut gizmos,
-            markers,
-            &mut lights,
-            system,
-            nav.system,
-            pose.page,
-        );
-    } else {
-        canvas.stars(&mut gizmos, &universe.0, markers, &mut lights);
-    }
     if planets_shown {
+        canvas.star(&mut gizmos, &mut lights);
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
         let luminosity = system
             .star(pose.page)
@@ -1009,35 +876,6 @@ mod tests {
             // Drawing and navigation use the same f64 transform. Rotation changes
             // the plane, never the orbit's radius or the table's local ordering.
             assert!(((frame * point).length() - point.length()).abs() < 0.001);
-        }
-    }
-
-    #[test]
-    fn constellation_markers_and_camera_destinations_are_the_same_stars() {
-        let system = &space_simulation::demo_galaxy().systems[0];
-        for page in 0..10 {
-            let origin = (page_origin_ly(system, page) - page_origin_ly(system, 0)) * LY_METRES;
-            let marker = page_offset(system, page) - page_offset(system, 0);
-            // Adding and subtracting the list's interstellar position may lose a
-            // few metres, but never enough to move a star on screen.
-            assert!((origin - marker).length() < 128.0);
-        }
-    }
-
-    #[test]
-    fn distant_stars_move_with_the_zoom_whatever_their_distance() {
-        // A page star in this list and a star in another list behave the same:
-        // while zooming out, neither moves faster than the zoom itself.
-        for real in [0.16 * LY_METRES, 4.3 * LY_METRES, 60.0 * LY_METRES] {
-            let mut range = 20.0 * AU_METRES;
-            let mut last = visible_star_distance(real, range);
-            while range < real {
-                range *= 1.01;
-                let shown = visible_star_distance(real, range);
-                assert!(shown / last <= 1.01 + 1e-9);
-                last = shown;
-            }
-            assert_eq!(last, real);
         }
     }
 }

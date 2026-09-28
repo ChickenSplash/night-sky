@@ -69,18 +69,19 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Track planet at close range | **Follow this planet** |
 | Return to orbital view | **Orbit** or **Frame orbital system** |
 | Align ten task-planets in a top-down table | **Task table** |
-| Frame the list's systems, click one to enter | **Constellation** |
+| Frame the list's systems | **Constellation** |
 | Browse system pages | **‹ / ›** in the inspector |
-| Jump between systems | Click list in sidebar or a star marker |
-| View light-year distances | **Interstellar atlas** |
+| Select a star, then visit it | Click it, then click again or press Enter |
+| Select the star at the view centre | F |
+| Jump to a list | Click it in the sidebar |
 
 Search covers all systems. The simulation clock starts at an arbitrary epoch;
 task deadlines always use wall-clock time. Changing simulation speed never
 rewinds or jumps the orbit phase.
 
-Table view aligns planets beneath their sun, with task labels alongside. Planets
-and the sun keep their physical radii, so a sun-sized star shows only its limb
-along the top edge. Row spacing is schematic, scaled to the page's largest planet.
+Table view aligns planets to the right of their star, with task labels below.
+Planets and the star keep their physical radii, so a large star shows only its
+right tip at the left edge. Column spacing is schematic, scaled to the page's largest planet.
 Both presets automatically frame the available viewing area. Switch to **Orbit**
 to restore physical positions at the current simulation time; camera movement is
 available in Orbit.
@@ -88,7 +89,7 @@ available in Orbit.
 Every jump, page change, preset and focus is a short camera flight (0.25 to
 0.75 s) along van Wijk and Nuij's zoom-and-pan path, so long trips zoom out first
 and keep the destination in view. Planets slide between their orbits and the
-table rows during the flight. Camera input resumes when it lands. Changing page
+table positions during the flight. Camera input resumes when it lands. Changing page
 flies between two distinct page stars using that same path and camera rotation.
 Every star-to-star flight, whether to another page or another list, takes
 0.65 s regardless of distance, so both have the same rhythm; only the peak
@@ -159,8 +160,8 @@ is available it retains its last data, initially the clearly labelled demo.
 - `big_space` maintains the camera's grid-cell floating origin. Rendering subtracts
   the camera position in double precision before converting local vectors to GPU
   floats. Planet motion stays relative to its host star.
-- The active system is drawn in detail. Other stars are directional markers at
-  system scale and placed at their actual generated separation in atlas mode.
+- The visited system is drawn in detail. Every other star, list pages included,
+  is a streamed galactic point at its real position.
 - Bevy's reverse-Z perspective depth and distance-adjusted near plane support the
   view's changing scale. This is not a logarithmic-depth-buffer implementation.
 - Bodies use physical radii by default; selectable markers keep them visible.
@@ -168,11 +169,11 @@ is available it retains its last data, initially the clearly labelled demo.
 - Each page is a separate star system with a stable, independently random orbital
   plane (poles uniform over the sphere). The telemetry panel shows the current
   page's tilt. Live ClickUp pages occupy distinct, visible cell stars near galactic
-  home, with their real generated positions and planetary systems. Demo pages
-  still use legacy seeded local positions. Constellation view moves nothing: it zooms out from the current
+  home, with their real generated positions and planetary systems, and so do
+  demo pages. Constellation view moves nothing: it zooms out from the current
   angle until every page star fits and joins them with lines. Orbit and Task table
-  retain physical orbital distances. Camera flights roll between planes; the atlas
-  uses galactic axes.
+  retain physical orbital distances. Camera flights roll between planes; open
+  space uses galactic axes.
 - Each page is its own planetary system of 7 to 14 planets, generated as a whole
   from its star's ID. Tasks fill the planets in slot order; the rest stay bare,
   with catalogue names such as "Flight Operations 2c". Composition follows:
@@ -208,18 +209,15 @@ is available it retains its last data, initially the clearly labelled demo.
   unresolved disc and spiral-arm light; the central black hole is modelled at
   its physical horizon radius. There is no dust or gravitational lensing yet.
 
-- **Generated galaxy (Phase 6):** choose **Generated galaxy** in the native
-  navigation panel or press **G** (the same shortcut works on the web canvas).
-  Scroll out for kiloparsec-scale travel; WASD and Q/E move, Shift accelerates.
-  Click any visible star to select it, then click it again (or press **Enter**)
-  to visit its planetary system. **F** (or **Pick centre star**) selects the star
-  at the view centre. **Body markers** adds rings to every visible galactic
-  point without allocating UI widgets per star. Generated stars have stable
-  `TS <cell>-<component>-<index>` catalogue names and lettered planets; stars
-  assigned to ClickUp pages instead show the same planets with task overlays.
-  **Backspace** returns to the galaxy, **G** returns to lists. The browser and
-  native canvas share these controls. Picking uses only currently loaded,
-  magnitude-visible stars; wait for streaming if a target is not selectable.
+- **One galaxy (Phase 6):** lists and generated stars share one view. Scroll
+  out for kiloparsec-scale travel; WASD and Q/E move, Shift accelerates. Click
+  any visible star to select it, then click it again (or press **Enter**) to
+  visit its planetary system. **F** selects the star at the view centre. A star
+  that carries a list page opens that page with its tasks; any other shows its
+  generated planets, with the same orbit, table and constellation views.
+  Generated stars have stable `TS <cell>-<component>-<index>` catalogue names
+  and lettered planets. Picking uses only currently loaded, magnitude-visible
+  stars; wait for streaming if a target is not selectable.
 
 ## Project structure
 
@@ -254,7 +252,7 @@ node scripts/test-html-ui.mjs
 ```
 
 The graphical smoke test requires a working desktop session. It exercises the
-system view, close tracking, atlas, interstellar jumps (one captured mid-flight),
+system view, close tracking, a zoomed-out galaxy, interstellar jumps (one captured mid-flight),
 a 50-task table fixture, its last page, constellation framing, restored orbits
 and a second orbital page (one captured mid-flight), then realistic rendering in
 assisted and physical exposure, a lit planet close-up, a constellation and a

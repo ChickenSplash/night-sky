@@ -437,6 +437,13 @@ pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
         let (page, index) = system_page_of_slot(system, task.slot);
         pages.entry(page).or_insert_with(|| empty(page))[index as usize] = Some(task);
     }
+    // A reserved page is still a real star and has its whole planetary system,
+    // even when its last task disappears from the latest snapshot.
+    for assigned in &system.page_stars {
+        pages
+            .entry(assigned.page)
+            .or_insert_with(|| empty(assigned.page));
+    }
     if pages.is_empty() {
         pages.insert(0, empty(0));
     }
@@ -458,12 +465,16 @@ pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
             system.planets.push(Planet {
                 id: format!("{star}/{index}"),
                 // Exoplanet style: the innermost planet is b.
-                designation: format!(
-                    "{} {}{}",
-                    system.name,
-                    page + 1,
-                    (b'b' + index as u8) as char
-                ),
+                designation: if system.page_star(page).is_some() {
+                    crate::cells::planet_designation(&star, index)
+                } else {
+                    format!(
+                        "{} {}{}",
+                        system.name,
+                        page + 1,
+                        (b'b' + index as u8) as char
+                    )
+                },
                 page,
                 orbit_index: index as u32,
                 orbit: body.orbit,
@@ -633,7 +644,101 @@ pub fn demo_galaxy() -> Galaxy {
         place(&mut system, tasks);
         galaxy.systems.push(system);
     }
+    // Demo tasks are overlays on the same generated population as live pages.
+    // Assign without a database: iteration order and the immutable IDs make
+    // every placement repeatable, even on an offline first launch.
+    let mut sky = crate::cells::Sky::default();
+    let mut occupied = std::collections::HashSet::new();
+    for system in &mut galaxy.systems {
+        let tasks: Vec<_> = system.tasks().map(|(_, task)| task.clone()).collect();
+        let highest = tasks.iter().map(|t| t.slot).max();
+        assign_page_stars(
+            system,
+            highest,
+            &mut sky,
+            |_| Ok(None),
+            |_, id| Ok::<_, PageStarError>(occupied.insert(id.to_owned())),
+        )
+        .expect("enough visible stars near home for demo pages");
+        place(system, tasks);
+    }
     galaxy
+}
+
+#[derive(Debug)]
+pub enum PageStarError {
+    /// Every visible star in the home cell is taken.
+    Exhausted(String),
+    /// A recorded assignment names no cell star.
+    Invalid(String),
+}
+
+impl std::fmt::Display for PageStarError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exhausted(list) => write!(f, "no free galactic stars for list {list}"),
+            Self::Invalid(star) => write!(f, "invalid assigned star {star}"),
+        }
+    }
+}
+
+impl std::error::Error for PageStarError {}
+
+/// Put each page of a list on a distinct visible star in the home cell, until
+/// the pages hold `highest_slot`. `assigned` returns a page's recorded star;
+/// `claim` records a new one, refusing stars any page already has. Candidates
+/// follow a seeded order per list and page, so picks are repeatable.
+pub fn assign_page_stars<E: From<PageStarError>>(
+    system: &mut StarSystem,
+    highest_slot: Option<u32>,
+    sky: &mut crate::cells::Sky,
+    mut assigned: impl FnMut(u32) -> Result<Option<String>, E>,
+    mut claim: impl FnMut(u32, &str) -> Result<bool, E>,
+) -> Result<(), E> {
+    let home = crate::galaxy::GalaxyModel::milky_way().home_pc;
+    let cell = crate::cells::Cell::containing(10, home).expect("galactic home");
+    let count = sky.tier_counts(cell)[cell.level()];
+    let reach = crate::population::reach_sq_per_luminosity(crate::population::VISIBLE_MAGNITUDE);
+    let offset = |position_pc: [f64; 3]| -> [f64; 3] {
+        std::array::from_fn(|axis| position_pc[axis] - home[axis])
+    };
+    system.page_stars.clear();
+    let mut capacity = 0;
+    let mut page = 0;
+    while page == 0 || highest_slot.is_some_and(|slot| slot >= capacity) {
+        let star = if let Some(id) = assigned(page)? {
+            sky.star(&id).ok_or(PageStarError::Invalid(id))?
+        } else {
+            let seed = stable_hash(&format!("{}:{page}:galactic-star", system.id));
+            let mut chosen = None;
+            for attempt in 0..count {
+                let candidate = sky
+                    .cell_star_at(cell, seed.wrapping_add(attempt) % count)
+                    .expect("ordinal within tier");
+                let distance_sq: f64 = offset(candidate.position_pc).iter().map(|d| d * d).sum();
+                // Assigned stars must appear in the magnitude-limited sky that
+                // the client streams and can pick from the galaxy overview.
+                if distance_sq <= candidate.star.luminosity_solar * reach
+                    && claim(page, &candidate.id)?
+                {
+                    chosen = Some(candidate);
+                    break;
+                }
+            }
+            chosen.ok_or_else(|| PageStarError::Exhausted(system.id.clone()))?
+        };
+        let position_ly =
+            offset(star.position_pc).map(|d| d * crate::galaxy::PC_METRES / crate::LY_METRES);
+        capacity += planet_count(&star.id);
+        system.page_stars.push(space_shared::PageStar {
+            page,
+            id: star.id,
+            position_ly,
+        });
+        page += 1;
+    }
+    system.position_ly = system.page_stars[0].position_ly;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -662,6 +767,11 @@ mod tests {
                 assert!(ids.insert(&task.id));
                 assert!(task.url.is_none());
             }
+            for assigned in &system.page_stars {
+                let cell_star = crate::cells::cell_star(&assigned.id).unwrap();
+                assert_eq!(system.star(assigned.page).unwrap().id, cell_star.1.id);
+                assert!(ids.insert(&assigned.id));
+            }
         }
     }
 
@@ -669,26 +779,29 @@ mod tests {
     fn every_planet_of_a_tasked_page_exists_and_tasks_keep_their_bodies() {
         let mut system = demo_galaxy().systems.remove(0);
         for page in system.pages() {
-            let star = star_id(&system.id, page);
-            let bodies = planetary_system(&star);
+            let star = &system.page_star(page).unwrap().id;
+            let bodies = crate::cells::cell_planetary_system(star).unwrap();
             let planets: Vec<_> = system.on_page(page).collect();
             assert_eq!(planets.len(), bodies.len());
             for (planet, body) in planets.iter().zip(&bodies) {
                 assert_eq!(planet.orbit, body.orbit);
                 assert_eq!(planet.id, format!("{star}/{}", planet.orbit_index));
             }
-            assert_eq!(system.star(page).unwrap().id, star);
+            assert_eq!(&system.star(page).unwrap().id, star);
         }
         // The last page is only partly tasked; the rest are bare planets.
         assert!(system.planets.iter().any(|p| p.task.is_none()));
         let before = system.clone();
         shape(&mut system);
         assert_eq!(system, before);
-        // Without tasks, a list still has its first star's planets.
+        // Without tasks, allocated stars and their bare planets remain.
         system.planets.clear();
         shape(&mut system);
-        assert_eq!(system.pages(), [0]);
-        assert_eq!(system.planets.len() as u32, page_capacity(&system.id, 0));
+        assert_eq!(system.pages().len(), system.page_stars.len());
+        assert_eq!(
+            system.planets.len() as u32,
+            system.page_stars.iter().map(|s| planet_count(&s.id)).sum()
+        );
     }
 
     #[test]

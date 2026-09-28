@@ -13,7 +13,7 @@ const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'c
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers']];
 // Physical exposure and wireframes apply only to realistic rendering.
 const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
-const HELP = [['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Down / up'],
+const HELP = [['Click', 'Select a star, again to visit'], ['F', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Down / up'],
   ['Shift', 'Boost'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 const LIST_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
 const TASK_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Due date', 'due']];
@@ -67,10 +67,7 @@ function elapsed(days) {
 }
 
 function caption(state) {
-  if (state.galactic) return state.system
-    ? state.system.tasks ? 'Galaxy / task-bearing system' : 'Galaxy / task-free system'
-    : 'Galaxy / generated stars';
-  if (state.atlas) return 'Interstellar atlas / light years';
+  if (!state.system) return 'Galaxy / light years';
   if (state.view === 'table') return 'Task table / true sizes · orbits continue';
   if (state.view === 'constellation') return 'List constellation / select a system';
   return 'System view / astronomical units';
@@ -262,8 +259,6 @@ export function mount(bridge, canvas) {
   opener.id = 'nav-toggle';
   const listsTab = tabButton('lists', 'Lists');
   const tasksTab = tabButton('tasks', 'Tasks');
-  const galaxyMode = el('button', { className: 'chip', textContent: 'Generated galaxy (G)' });
-  galaxyMode.addEventListener('click', () => send({ type: state.galactic ? 'return_to_lists' : 'galaxy_view' }));
   const listFilter = el('input', { type: 'search', placeholder: 'Filter lists…', ariaLabel: 'Filter lists' });
   const listSort = select('Sort lists', LIST_SORTS, 'listSort', () => renderLists());
   const lists = el('div', { className: 'lists' });
@@ -284,7 +279,6 @@ export function mount(bridge, canvas) {
   const nav = el('aside', { id: 'nav-panel', className: 'panel floating' },
     el('header', {}, el('div', {}, el('h1', { textContent: 'Task / Space' }), source), hide),
     el('div', { className: 'tabs', role: 'tablist' }, listsTab, tasksTab),
-    el('div', { className: 'row' }, galaxyMode),
     listsBody, tasksBody, notice);
 
   const showTab = tab => {
@@ -351,8 +345,7 @@ export function mount(bridge, canvas) {
     el('div', { className: 'readout' }, clock, speed), slower, pause, faster, realTime);
   // Where you are: list and page, view mode with page arrows, selected task.
   const wherePage = el('span', { className: 'meta' });
-  const viewSelect = dropdown('View mode', [...VIEWS, ['Interstellar atlas', 'atlas']], value => send(value === 'atlas'
-    ? { type: 'atlas' } : { type: 'set_view', view: value }));
+  const viewSelect = dropdown('View mode', VIEWS, view => send({ type: 'set_view', view }));
   const pageBack = round('back', 'Previous page', 'round small');
   const pageOn = round('chevron', 'Next page', 'round small');
   const frame = round('frame', 'Frame orbital system', 'round small');
@@ -366,18 +359,21 @@ export function mount(bridge, canvas) {
   const renderWhere = () => {
     const pages = state.pages || [];
     const current = Math.max(0, pages.indexOf(state.page));
+    // A picked star is any galactic star; only a list page has a system number.
     const picked = state.picked;
-    wherePage.textContent = picked ? `System ${picked.page + 1} / ${picked.pages}`
-      : state.atlas || !state.system ? '' : `System ${current + 1} / ${Math.max(pages.length, 1)}`;
+    const system = picked?.page != null ? `System ${picked.page + 1} / ${picked.pages}` : '';
+    wherePage.textContent = picked ? system
+      : state.system ? `System ${current + 1} / ${Math.max(pages.length, 1)}` : '';
     // The view menu is labelled with where you are; the menu marks the view.
-    viewSelect.set(state.atlas ? 'atlas' : state.view);
-    const name = picked?.name ?? (state.atlas ? 'Interstellar atlas' : state.system?.name ?? 'No list');
+    viewSelect.set(state.view);
+    const name = picked?.name ?? state.system?.name ?? 'Galaxy';
     wherePage.closest('.view-pill').classList.toggle('picked', !!picked);
-    frame.title = picked ? `Fly to ${picked.name}, system ${picked.page + 1}` : 'Frame orbital system';
+    frame.title = picked ? `Visit ${picked.name}${system ? `, ${system.toLowerCase()}` : ''}` : 'Frame orbital system';
+    frame.disabled = !picked && !state.system;
     viewSelect.querySelector('.dropdown span').textContent = name;
     viewSelect.querySelector('.dropdown').title = `${name} · change view`;
-    pageBack.disabled = state.atlas || state.galactic || current <= 0;
-    pageOn.disabled = state.atlas || state.galactic || current + 1 >= pages.length;
+    pageBack.disabled = current <= 0;
+    pageOn.disabled = current + 1 >= pages.length;
     pageBack.onclick = () => send({ type: 'show_page', page: pages[current - 1] });
     pageOn.onclick = () => send({ type: 'show_page', page: pages[current + 1] });
     const task = state.selected;
@@ -427,7 +423,7 @@ export function mount(bridge, canvas) {
     highlightLists();
   };
   const highlightLists = () => {
-    for (const [id, { row }] of listRows) row.classList.toggle('active', !state.atlas && id === state.list);
+    for (const [id, { row }] of listRows) row.classList.toggle('active', id === state.list);
   };
 
   // Tasks of the current list, optionally grouped by status.
@@ -566,8 +562,6 @@ export function mount(bridge, canvas) {
   };
 
   const renderState = () => {
-    galaxyMode.textContent = state.galactic ? 'Return to lists (G)' : 'Generated galaxy (G)';
-    galaxyMode.setAttribute('aria-pressed', !!state.galactic);
     highlightLists();
     renderIndex(false);
     renderWhere();

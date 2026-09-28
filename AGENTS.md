@@ -52,8 +52,9 @@
   flies the displayed pose there. Discrete camera changes set `Navigation::fly`.
   `Navigation` and orbital positions use the page's plane axes;
   `scene::page_frame` rotates them into galactic axes, which `CameraPose` and star
-  offsets use. Each page star has its own stable position (`views::page_position`)
-  and page changes use the same `Flight` as list jumps; no page-swap animation.
+  offsets use. Each page star is a cell star at its own position
+  (`PageStar::position_ly`), and page changes use the same `Flight` as list
+  jumps; no page-swap animation.
   Raw metres push clip-space values to ~1e13 and the gizmo line shader then drops
   or fragments segments.
 - Pick wireframe line density from on-screen radius; dense rings on small bodies
@@ -72,7 +73,7 @@
   `plane_tilt(id)` take any star ID. Changing a key moves every body it seeds.
 - Task pages are filled in order from append-only slots; each page's capacity is
   `planet_count(assigned_star_id)` for mapped ClickUp pages, or
-  `page_capacity(list_id, page)` for legacy/demo pages. A page's whole planetary system is generated at
+  `page_capacity(list_id, page)` for legacy pages. A page's whole planetary system is generated at
   once: masses, radii and orbits follow the snow line, neighbours stay Hill-stable
   and some pairs are resonant. The slot's index within its page picks its body.
   Every page with a task gets all its planets, tasked or bare; a list without
@@ -85,9 +86,9 @@
   include removed tasks' allocated slots when deciding how many pages need a
   star. Mapped pages use the cell star's ID, position, formation and plane tilt,
   so visiting that star from the galaxy shows the same planets, with tasks as an
-  optional overlay. The first migration moves legacy ClickUp pages once; demo
-  pages still use the old deterministic list/page stars.
-- Each legacy/demo page has its own star (`space_simulation::star(&star_id(list_id, page))`),
+  optional overlay. The first migration moves legacy ClickUp pages once. Demo
+  lists get cell stars from the same `assign_page_stars`, without a database.
+- Each legacy page (with no cell star) has its own star (`space_simulation::star(&star_id(list_id, page))`),
   drawn in solar-neighbourhood proportions (mostly red dwarfs, a few giants and
   white dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its
   radius and temperature colour (`spectral_colour`) are drawn, and it shapes
@@ -96,10 +97,8 @@
   at 0.4% of the star's, or Hill spacing cannot converge.
 - Constellation view never moves stars: it keeps the current page's frame, fits
   all page stars from the current angle and draws links between them.
-- Each page has its own deterministic orbital-plane tilt (`page_tilt(list_id, page)`),
-  including pages in one constellation. Page stars are scattered at random at
-  real local star density (`views::page_position(list_id, page)`); never lay them
-  on a grid, cluster or plane.
+- Each page has its own orbital-plane tilt (`scene::page_tilt`, its star's
+  `plane_tilt`), including pages in one constellation.
 - Explain demo, live, cached and failed-sync states in the interface.
 
 ## Galaxy model
@@ -157,25 +156,37 @@
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
   retained cells after the camera travels 0.2 of the tier's reach. New entities
   start hidden for one frame, avoiding Bevy's material specialization race.
-  Galactic points use apparent flux; `sky_dimming` also stops their display
-  brightness down with the close-star physical exposure (as it does the glow).
+  Batch vertices are f32 offsets from their cell's centre, so their error grows
+  with that offset: within `PRECISE` times it of the camera the batch shader
+  hides a point, and a single-star sprite placed by an f64 subtraction takes
+  over (built at `PREPARE` times the radius, so its hidden frame is spent). The
+  visited star is a body only within `scene::body_range` (where its planets
+  show): batches hide points that close and its sprite waits hidden. Beyond, it
+  is a galactic point under the same magnitude limit. Galactic points use
+  apparent flux; `sky_dimming` also stops their display brightness down with
+  the close-star physical exposure (as it does the glow).
 - `diffuse.rs` adds an approximate, faint ray-integrated disc and spiral-arm
   glow behind the points, with no dust or extinction. The central black hole
   is an opaque sphere at its physical Schwarzschild radius; it is not visible
   from home. No accretion disc or lensing yet.
-- `galaxy_nav.rs` owns the galaxy overview, selected cell-star ID and optional
-  generated `StarSystem`. It never adds generated systems to the ClickUp
-  `Universe`. The overview uses the home origin; entering a star changes the
-  camera frame to that star's position in f64 and builds task-free planets
-  from its ID. The same `Flight` shifts the displayed pose across frames.
-  G enters/leaves galaxy mode, F picks a visible star at the view centre,
-  Enter visits it, Backspace returns to overview. Scroll zooms as far as
-  40,000 ly in the overview; movement scales with the displayed distance.
-- Galaxy canvas clicks select visible streamed points by stable ID, with a
-  second click entering the star. The hit test runs over loaded points only on
-  clicks, not every frame; GPU batches draw optional body-marker rings for all
-  visible stars. Unassigned cell stars use ID-derived `TS` catalogue names and
-  lettered planets, with no name registry or per-star UI entities.
+- There is one mode: the streamed galaxy. List pages are ordinary cell stars,
+  drawn and picked like any other, with no markers of their own.
+  `Navigation::visit` is the visited system: `Visit::List` (a list index, at
+  `Navigation::page`) or `Visit::Generated` (task-free planets built from the
+  star's ID, never added to the ClickUp `Universe`). `None` is open space,
+  relative to home in galactic axes; a visit moves the camera frame to its
+  star in f64, and the same `Flight` shifts the displayed pose. Orbit, table
+  and constellation views work on any visited system.
+- `Navigation::picked` is one selected star, by stable ID. `galaxy_nav.rs`
+  picks and visits it: a star with a list page (`galaxy_nav::mapped`) opens
+  that page, any other its generated system. A new snapshot moves the visit
+  with its star (`follow_visited_star`). Clicks not on a planet pick from
+  loaded, visible points only, and only on click, never every frame. Click
+  again or Enter to visit, F picks the view centre. The only bodies drawn are
+  the visited star and its planets. Scroll zooms from 20,000 km to 40,000 ly;
+  movement scales with the displayed distance.
+- Unassigned cell stars use ID-derived `TS` catalogue names and lettered
+  planets, with no name registry or per-star UI entities.
 
 ## Realistic rendering
 

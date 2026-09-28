@@ -1,40 +1,25 @@
-//! Galaxy travel and on-demand systems, independent of ClickUp list pages.
+//! Picking and visiting stars. List pages are ordinary galactic stars: the same
+//! click picks and visits any of them, with tasks as an optional overlay.
 use crate::{
-    Navigation,
+    Navigation, Visit,
     scene::{CameraPose, CameraRig},
     stream::Starfield,
 };
 use bevy::{math::DVec3, prelude::*};
 use space_shared::{Galaxy, PageStar, Planet, StarSystem};
 use space_simulation::{
-    AU_METRES, LY_METRES,
-    cells::cell_planetary_system,
-    cells::cell_star,
+    LY_METRES,
+    cells::{catalogue_name, cell_planetary_system, cell_star, planet_designation},
     galaxy::{GalaxyModel, PC_METRES},
+    population::reach_sq_per_luminosity,
 };
 
-/// A picked streamed star, identified by its stable cell ID, never a mesh index.
-#[derive(Clone, Debug)]
+/// A picked star, identified by its stable cell ID, never a mesh index.
+#[derive(Clone, Debug, PartialEq)]
 pub struct PickedStar {
     pub id: String,
-    pub position_pc: [f64; 3],
-}
-
-/// A compact, collision-free catalogue name derived from the immutable cell ID.
-/// No stored name registry or million-entry lookup table is needed.
-pub fn star_name(id: &str) -> String {
-    let code = id.strip_prefix('g').unwrap_or(id).replace('.', "-");
-    format!("TS {code}")
-}
-
-pub fn planet_name(star: &str, index: usize) -> String {
-    format!("{} {}", star_name(star), (b'b' + index as u8) as char)
-}
-
-#[derive(Resource, Default)]
-pub struct Galactic {
-    pub picked: Option<PickedStar>,
-    pub system: Option<StarSystem>,
+    /// Light years from home, in galactic axes.
+    pub position_ly: DVec3,
 }
 
 fn relative_ly(position: [f64; 3]) -> DVec3 {
@@ -87,22 +72,18 @@ fn pick_ray(
     min_alignment: f64,
 ) -> Option<PickedStar> {
     let eye = rig.galactic_ly(pose);
+    let pc_per_ly = LY_METRES / PC_METRES;
+    let reach = reach_sq_per_luminosity(crate::stream::MAGNITUDE) / (pc_per_ly * pc_per_ly);
     let mut best: Option<(f64, PickedStar)> = None;
     for (&cell, stars) in &field.cells {
         for star in &stars.stars {
-            let delta = relative_ly(star.position_pc) - eye;
-            let distance = delta.length();
-            if distance < 1e-8 {
+            let position_ly = relative_ly(star.position_pc);
+            let delta = position_ly - eye;
+            let distance_sq = delta.length_squared();
+            if distance_sq < 1e-16 || distance_sq > f64::from(star.luminosity_solar) * reach {
                 continue;
             }
-            let pc = distance * LY_METRES / PC_METRES;
-            let magnitude = 4.83 - 2.5 * f64::from(star.luminosity_solar).max(1e-30).log10()
-                + 5.0 * pc.log10()
-                - 5.0;
-            if magnitude > crate::stream::MAGNITUDE {
-                continue;
-            }
-            let alignment = delta.dot(forward) / distance;
+            let alignment = delta.dot(forward) / distance_sq.sqrt();
             // Prefer angular proximity within the caller's hit cone; a stable
             // ID resolves equal scores regardless of HashMap ordering.
             if alignment < min_alignment {
@@ -111,7 +92,7 @@ fn pick_ray(
             let score = 1.0 - alignment;
             let picked = PickedStar {
                 id: star.id(cell),
-                position_pc: star.position_pc,
+                position_ly,
             };
             if best.as_ref().is_none_or(|(old, previous)| {
                 score < *old || (score == *old && picked.id < previous.id)
@@ -134,57 +115,62 @@ pub fn picked_id(field: &Starfield, id: &str) -> Option<PickedStar> {
         .find(|s| s.component == component && u64::from(s.index) == index)?;
     Some(PickedStar {
         id: id.to_owned(),
-        position_pc: star.position_pc,
+        position_ly: relative_ly(star.position_pc),
     })
 }
 
-pub fn overview(nav: &mut Navigation, galactic: &mut Galactic, centre: DVec3) {
-    nav.galactic = true;
-    galactic.system = None;
-    nav.atlas = false;
-    nav.following = false;
-    nav.selected = None;
-    nav.view = crate::views::View::Orbit;
-    nav.target = centre * LY_METRES;
-    nav.distance = 120.0 * LY_METRES;
-    nav.fly = true;
+/// A list page's star, as if picked.
+pub fn page_pick(system: &StarSystem, page: u32) -> Option<PickedStar> {
+    system.page_star(page).map(|star| PickedStar {
+        id: star.id.clone(),
+        position_ly: DVec3::from_array(star.position_ly),
+    })
 }
 
-pub fn enter(nav: &mut Navigation, galactic: &mut Galactic, lists: &Galaxy) -> bool {
-    let Some(picked) = &galactic.picked else {
-        return false;
-    };
-    if let Some((system, page)) = lists.systems.iter().find_map(|system| {
-        system
-            .page_stars
-            .iter()
-            .find(|star| star.id == picked.id)
-            .map(|star| (system, star.page))
-    }) {
-        galactic.system = Some(system.clone());
-        nav.galactic = true;
-        nav.page = page;
-        nav.view = crate::views::View::Orbit;
-        nav.target = DVec3::ZERO;
-        nav.distance = fit_distance(system, page);
-        nav.following = false;
-        nav.selected = None;
-        nav.fly = true;
-        return true;
+/// The list and page a star carries, if any.
+pub fn mapped(lists: &Galaxy, id: &str) -> Option<(usize, u32)> {
+    lists
+        .systems
+        .iter()
+        .enumerate()
+        .find_map(|(index, system)| {
+            system
+                .page_stars
+                .iter()
+                .find(|star| star.id == id)
+                .map(|star| (index, star.page))
+        })
+}
+
+/// A star's name and, for a list page, its page and the list's page count.
+pub fn describe(lists: &Galaxy, id: &str) -> (String, Option<(u32, usize)>) {
+    match mapped(lists, id) {
+        Some((list, page)) => {
+            let system = &lists.systems[list];
+            (system.name.clone(), Some((page, system.pages().len())))
+        }
+        None => (catalogue_name(id), None),
     }
-    let Some((_, mut star)) = cell_star(&picked.id) else {
-        return false;
-    };
-    let Some(bodies) = cell_planetary_system(&picked.id) else {
-        return false;
-    };
+}
+
+/// A star's display name, with its system number for a list page.
+pub fn label(lists: &Galaxy, id: &str) -> String {
+    match describe(lists, id) {
+        (name, Some((page, _))) => format!("{name} · system {}", page + 1),
+        (name, None) => name,
+    }
+}
+
+/// A task-free system built from a cell star's ID alone.
+pub fn generated(id: &str, position_ly: DVec3) -> Option<StarSystem> {
+    let (_, mut star) = cell_star(id)?;
     star.page = 0;
-    let planets = bodies
+    let planets = cell_planetary_system(id)?
         .into_iter()
         .enumerate()
         .map(|(index, body)| Planet {
-            id: format!("{}/{}", picked.id, index),
-            designation: planet_name(&picked.id, index),
+            id: format!("{id}/{index}"),
+            designation: planet_designation(id, index),
             page: 0,
             orbit_index: index as u32,
             orbit: body.orbit,
@@ -195,45 +181,35 @@ pub fn enter(nav: &mut Navigation, galactic: &mut Galactic, lists: &Galaxy) -> b
             spin: body.spin,
             task: None,
         })
-        .collect::<Vec<_>>();
-    galactic.system = Some(StarSystem {
-        id: picked.id.clone(),
-        name: star_name(&picked.id),
-        position_ly: relative_ly(picked.position_pc).to_array(),
+        .collect();
+    Some(StarSystem {
+        id: id.to_owned(),
+        name: catalogue_name(id),
+        position_ly: position_ly.to_array(),
         planets,
         stars: vec![star],
         page_stars: vec![PageStar {
             page: 0,
-            id: picked.id.clone(),
-            position_ly: relative_ly(picked.position_pc).to_array(),
+            id: id.to_owned(),
+            position_ly: position_ly.to_array(),
         }],
-    });
-    nav.galactic = true;
-    nav.page = 0;
-    nav.view = crate::views::View::Orbit;
-    nav.target = DVec3::ZERO;
-    nav.distance = fit_distance(galactic.system.as_ref().expect("created system"), 0);
-    nav.following = false;
-    nav.selected = None;
-    nav.fly = true;
+    })
+}
+
+/// Fly to the picked star: its list page when it has one, or its generated
+/// system.
+pub fn visit_picked(nav: &mut Navigation, lists: &Galaxy) -> bool {
+    let Some(picked) = nav.picked.clone() else {
+        return false;
+    };
+    if let Some((list, page)) = mapped(lists, &picked.id) {
+        nav.arrive(Visit::List(list), page, lists);
+    } else if let Some(system) = generated(&picked.id, picked.position_ly) {
+        nav.arrive(Visit::Generated(Box::new(system)), 0, lists);
+    } else {
+        return false;
+    }
     true
-}
-
-pub fn fit_distance(system: &StarSystem, page: u32) -> f64 {
-    system
-        .on_page(page)
-        .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
-        .fold(3.0, f64::max)
-        * 3.1
-        * AU_METRES
-}
-
-pub fn exit(nav: &mut Navigation, galactic: &mut Galactic) {
-    let centre = galactic
-        .picked
-        .as_ref()
-        .map_or(DVec3::ZERO, |p| relative_ly(p.position_pc));
-    overview(nav, galactic, centre);
 }
 
 #[cfg(test)]
@@ -244,6 +220,13 @@ mod tests {
         galaxy::Component,
         stream::{Loader, StarCell, StarPoint},
     };
+
+    fn lists(systems: Vec<StarSystem>) -> Galaxy {
+        Galaxy {
+            source: String::new(),
+            systems,
+        }
+    }
 
     #[test]
     fn centre_pick_ignores_stars_below_the_visible_limit() {
@@ -307,8 +290,8 @@ mod tests {
         .unwrap();
         assert_eq!(picked.id, star.id(cell));
         assert_eq!(
-            picked_id(&field, &picked.id).unwrap().position_pc,
-            star.position_pc
+            picked_id(&field, &picked.id).unwrap().position_ly,
+            relative_ly(star.position_pc)
         );
         assert!(
             pick_pointer(
@@ -322,13 +305,6 @@ mod tests {
             .is_none()
         );
         assert!(picked_id(&field, "g1.2.8").is_none());
-    }
-
-    #[test]
-    fn catalogue_names_are_unique_stable_and_planets_are_lettered() {
-        assert_eq!(star_name("g78040000.2.854"), "TS 78040000-2-854");
-        assert_ne!(star_name("g78040000.2.854"), star_name("g78040000.2.855"));
-        assert_eq!(planet_name("g78040000.2.854", 0), "TS 78040000-2-854 b");
     }
 
     #[test]
@@ -348,81 +324,61 @@ mod tests {
             .expect("nearby star");
         let picked = PickedStar {
             id: star.id(cell),
-            position_pc: star.position_pc,
+            position_ly: relative_ly(star.position_pc),
         };
-        let mut galactic = Galactic {
+        let lists = lists(vec![]);
+        let mut nav = Navigation {
             picked: Some(picked.clone()),
-            system: None,
+            ..default()
         };
-        let mut nav = Navigation::default();
-        assert!(enter(
-            &mut nav,
-            &mut galactic,
-            &Galaxy {
-                source: String::new(),
-                systems: vec![]
-            }
-        ));
-        let first = galactic.system.clone().unwrap();
+        assert!(visit_picked(&mut nav, &lists));
+        let first = nav.system(&lists).cloned().unwrap();
         assert!(!first.planets.is_empty());
         assert!(first.planets.iter().all(|p| p.task.is_none()));
-        exit(&mut nav, &mut galactic);
-        assert!(enter(
-            &mut nav,
-            &mut galactic,
-            &Galaxy {
-                source: String::new(),
-                systems: vec![]
-            }
-        ));
-        assert_eq!(galactic.system.as_ref(), Some(&first));
-        assert_eq!(galactic.picked.as_ref().unwrap().id, picked.id);
+        assert_eq!(first.name, catalogue_name(&picked.id));
+        assert_eq!(
+            first.planets[0].designation,
+            planet_designation(&picked.id, 0)
+        );
+        assert_eq!(nav.picked, None);
+        nav.picked = Some(picked);
+        assert!(visit_picked(&mut nav, &lists));
+        assert_eq!(nav.system(&lists), Some(&first));
     }
 
     #[test]
-    fn entering_an_assigned_star_shows_its_tasks_without_changing_orbits() {
+    fn visiting_an_assigned_star_shows_its_tasks_without_changing_orbits() {
         let home = GalaxyModel::milky_way().home_pc;
         let mut sky = Sky::default();
-        let cell = space_simulation::cells::Cell::containing(10, home).unwrap();
+        let cell = Cell::containing(10, home).unwrap();
         let star = sky.cell_star_at(cell, 0).unwrap();
-        let picked = PickedStar {
-            id: star.id.clone(),
-            position_pc: star.position_pc,
-        };
         let mut list = space_simulation::demo_galaxy().systems.remove(0);
         list.page_stars = vec![PageStar {
             page: 0,
-            id: star.id,
+            id: star.id.clone(),
             position_ly: relative_ly(star.position_pc).to_array(),
         }];
         list.position_ly = list.page_stars[0].position_ly;
         let task = list.tasks().next().unwrap().1.clone();
         let task_id = task.id.clone();
         space_simulation::place(&mut list, vec![task]);
-        let lists = Galaxy {
-            source: String::new(),
-            systems: vec![list.clone()],
+        let lists = lists(vec![list.clone()]);
+        let mut nav = Navigation {
+            picked: page_pick(&list, 0),
+            ..default()
         };
-        let mut galactic = Galactic {
-            picked: Some(picked),
-            system: None,
-        };
-        let mut nav = Navigation::default();
-        assert!(enter(&mut nav, &mut galactic, &lists));
-        assert_eq!(galactic.system.as_ref(), Some(&list));
-        assert!(
-            galactic
-                .system
-                .as_ref()
-                .unwrap()
-                .task_planet(&task_id)
-                .is_some()
-        );
-        assert_eq!(nav.page, 0);
         assert_eq!(
-            list.planets[0].orbit,
-            space_simulation::cells::cell_planetary_system(&list.page_stars[0].id).unwrap()[0]
-                .orbit
+            describe(&lists, &star.id),
+            (list.name.clone(), Some((0, 1)))
+        );
+        assert!(visit_picked(&mut nav, &lists));
+        assert_eq!(nav.list(), Some(0));
+        assert_eq!(nav.page, 0);
+        let shown = nav.system(&lists).unwrap();
+        assert!(shown.task_planet(&task_id).is_some());
+        assert_eq!(
+            shown.planets[0].orbit,
+            cell_planetary_system(&star.id).unwrap()[0].orbit
         );
     }
 
@@ -430,11 +386,11 @@ mod tests {
     fn visiting_a_later_list_page_keeps_its_own_star_and_page() {
         let home = GalaxyModel::milky_way().home_pc;
         let mut sky = Sky::default();
-        let cell = space_simulation::cells::Cell::containing(10, home).unwrap();
+        let cell = Cell::containing(10, home).unwrap();
         let first = sky.cell_star_at(cell, 0).unwrap();
         let second = sky.cell_star_at(cell, 1).unwrap();
         let mut list = space_simulation::demo_galaxy().systems.remove(0);
-        list.page_stars = [first, second.clone()]
+        list.page_stars = [first, second]
             .into_iter()
             .enumerate()
             .map(|(page, star)| PageStar {
@@ -447,20 +403,13 @@ mod tests {
         let mut task = list.tasks().next().unwrap().1.clone();
         task.slot = space_simulation::planet_count(&list.page_stars[0].id);
         space_simulation::place(&mut list, vec![task]);
-        let lists = Galaxy {
-            source: String::new(),
-            systems: vec![list.clone()],
+        let lists = lists(vec![list.clone()]);
+        let mut nav = Navigation {
+            picked: page_pick(&list, 1),
+            ..default()
         };
-        let mut galactic = Galactic {
-            picked: Some(PickedStar {
-                id: second.id,
-                position_pc: second.position_pc,
-            }),
-            system: None,
-        };
-        let mut nav = Navigation::default();
-        assert!(enter(&mut nav, &mut galactic, &lists));
+        assert!(visit_picked(&mut nav, &lists));
         assert_eq!(nav.page, 1);
-        assert_eq!(galactic.system.unwrap(), list);
+        assert_eq!(nav.system(&lists), Some(&list));
     }
 }

@@ -2,7 +2,7 @@
 //! one entity or material per star. Meshes are uploaded in bounded chunks.
 
 use crate::{
-    Navigation,
+    Navigation, Universe,
     render::{Lights, sky_dimming},
     scene::{CameraPose, CameraRig, SpaceCamera},
     stream::Starfield,
@@ -23,11 +23,11 @@ use big_space::prelude::*;
 use space_simulation::{
     cells::Cell,
     galaxy::PC_METRES,
-    population::{reach_pc, tier_limit},
-    stream::StarPoint,
+    population::{flux_per_luminosity, reach_pc, reach_sq_per_luminosity},
+    stream::{StarPoint, gap_pc},
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     time::Duration,
 };
 
@@ -35,15 +35,27 @@ const SHADER: Handle<Shader> = uuid_handle!("d12d0ce2-812e-4260-a528-74d3af35d48
 const BATCH: usize = 4096;
 const UPLOAD_BUDGET: Duration = Duration::from_millis(3);
 const MARGIN: f64 = 1.25;
+/// A batched point closer than this many times its offset from its cell's
+/// centre is drawn on its own instead. Batch vertices are f32 offsets from that
+/// centre, so their error grows with the offset; from farther away it stays
+/// below a quarter of a pixel.
+const PRECISE: f64 = 2e-3;
+/// Precise sprites are built this many times farther out than they show, so
+/// each has passed its hidden first frame before it takes over.
+const PREPARE: f64 = 2.0;
+/// Camera travel, in parsecs, before precise candidates are gathered again.
+const RESCAN_PC: f64 = 0.1;
 
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 struct StarMaterial {
-    /// Parsecs per render unit, apparent-magnitude cutoff and display gain.
+    /// Parsecs per render unit, faintest visible luminosity per squared
+    /// parsec, display gain per luminosity per squared parsec, and dimming.
     #[uniform(0)]
     settings: Vec4,
-    /// 1 for a thin marker ring around every visible streamed star.
+    /// For batches, `PRECISE` and the visited star's body range in parsecs:
+    /// points that close are drawn alone, or as the body. Zero for precise sprites.
     #[uniform(1)]
-    marker: Vec4,
+    near: Vec4,
 }
 
 impl Material for StarMaterial {
@@ -81,6 +93,24 @@ struct Batches {
     material: Option<Handle<StarMaterial>>,
 }
 
+/// A star that may come close enough to need a precise sprite.
+struct Candidate {
+    id: String,
+    star: StarPoint,
+    /// Parsecs from its cell's centre.
+    offset_pc: f64,
+}
+
+/// Stars near the camera, each drawn alone at an f64 camera-relative position.
+#[derive(Resource, Default)]
+struct Precise {
+    material: Option<Handle<StarMaterial>>,
+    scanned_at: Option<DVec3>,
+    scanned_body: f64,
+    candidates: Vec<Candidate>,
+    sprites: HashMap<String, (Entity, Handle<Mesh>)>,
+}
+
 pub struct StarfieldRenderPlugin;
 
 impl Plugin for StarfieldRenderPlugin {
@@ -88,6 +118,7 @@ impl Plugin for StarfieldRenderPlugin {
         load_internal_asset!(app, SHADER, "starfield.wgsl", Shader::from_wgsl);
         app.add_plugins(MaterialPlugin::<StarMaterial>::default())
             .init_resource::<Batches>()
+            .init_resource::<Precise>()
             .add_systems(
                 PostUpdate,
                 sync.after(crate::scene::draw)
@@ -96,18 +127,45 @@ impl Plugin for StarfieldRenderPlugin {
     }
 }
 
+/// Stars that could need a precise sprite before the camera moves `RESCAN_PC`.
+/// `body_pc` is the visited star's body range, within which batches hide points.
+fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for (&cell, stars) in &field.cells {
+        let half_diagonal = cell.size_pc() * 0.5 * 3.0_f64.sqrt();
+        let reach = PREPARE * (PRECISE * half_diagonal).max(body_pc) + RESCAN_PC;
+        if gap_pc(cell, eye.to_array()) > reach {
+            continue;
+        }
+        let centre = DVec3::from_array(cell.centre_pc());
+        for star in &stars.stars {
+            let position = DVec3::from_array(star.position_pc);
+            let offset_pc = position.distance(centre);
+            let reach = PREPARE * (PRECISE * offset_pc).max(body_pc) + RESCAN_PC;
+            if position.distance(eye) < reach {
+                out.push(Candidate {
+                    id: star.id(cell),
+                    star: *star,
+                    offset_pc,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// The same star at any distance has a stable vertex position within its cell;
 /// camera and zoom move its mesh, not a million individual vertices.
-fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3, tier: usize) -> (Mesh, usize) {
+fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize) {
     let mut positions = Vec::with_capacity(points.len() * 3);
     let mut corners = Vec::with_capacity(points.len() * 3);
     let mut colours = Vec::with_capacity(points.len() * 3);
     let mut visible = 0;
+    let reach = MARGIN * MARGIN * reach_sq_per_luminosity(crate::stream::MAGNITUDE);
     for star in points {
-        let limit = MARGIN
-            * reach_pc(tier, crate::stream::MAGNITUDE)
-            * (f64::from(star.luminosity_solar) / tier_limit(tier)).sqrt();
-        if DVec3::from_array(star.position_pc).distance_squared(eye) > limit * limit {
+        if DVec3::from_array(star.position_pc).distance_squared(eye)
+            > f64::from(star.luminosity_solar) * reach
+        {
             continue;
         }
         visible += 1;
@@ -139,6 +197,8 @@ fn sync(
     mut batches: ResMut<Batches>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StarMaterial>>,
+    mut precise: ResMut<Precise>,
+    universe: Res<Universe>,
     nav: Res<Navigation>,
     lights: Res<Lights>,
     pose: Res<CameraPose>,
@@ -158,33 +218,49 @@ fn sync(
         return;
     };
     let pc_per_unit = pose.render_scale() / PC_METRES;
-    let material = batches
-        .material
-        .get_or_insert_with(|| {
-            materials.add(StarMaterial {
-                settings: Vec4::new(
-                    pc_per_unit as f32,
-                    crate::stream::MAGNITUDE as f32,
-                    12.0,
-                    sky_dimming(&nav, &lights),
-                ),
-                marker: Vec4::new(f32::from(nav.markers), 0.0, 0.0, 0.0),
-            })
-        })
-        .clone();
     let scale = pc_per_unit as f32;
     let dimming = sky_dimming(&nav, &lights);
-    if materials.get(&material).is_some_and(|m| {
-        m.settings.x != scale || m.settings.w != dimming || m.marker.x != f32::from(nav.markers)
-    }) && let Some(m) = materials.get_mut(&material)
-    {
-        m.settings.x = scale;
-        m.settings.w = dimming;
-        m.marker.x = f32::from(nav.markers);
+    // Within its body range the visited star is drawn as a body, so the batches
+    // hide its point there, and it has no sprite.
+    let body = nav.system(&universe.0).and_then(|system| {
+        let range = crate::scene::body_range(system, &pose)?;
+        Some((system.page_star(pose.page)?.id.as_str(), range / PC_METRES))
+    });
+    let body_pc = body.map_or(0.0, |(_, range)| range);
+    let mut star_material = |precise: f32| {
+        materials.add(StarMaterial {
+            settings: Vec4::new(
+                scale,
+                (1.0 / reach_sq_per_luminosity(crate::stream::MAGNITUDE)) as f32,
+                (12.0 * flux_per_luminosity()) as f32,
+                dimming,
+            ),
+            near: Vec4::new(precise, 0.0, 0.0, 0.0),
+        })
+    };
+    let material = batches
+        .material
+        .get_or_insert_with(|| star_material(PRECISE as f32))
+        .clone();
+    let precise_material = precise
+        .material
+        .get_or_insert_with(|| star_material(0.0))
+        .clone();
+    for (handle, hide) in [(&material, body_pc as f32), (&precise_material, 0.0)] {
+        if materials
+            .get(handle)
+            .is_some_and(|m| m.settings.x != scale || m.settings.w != dimming || m.near.y != hide)
+            && let Some(m) = materials.get_mut(handle)
+        {
+            m.settings.x = scale;
+            m.settings.w = dimming;
+            m.near.y = hide;
+        }
     }
     let origin = rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
     let eye = origin + DVec3::from_array(home);
+    let changed = !field.added.is_empty() || !field.removed.is_empty();
     for dropped in field.removed.drain(..) {
         batches.built_at.remove(&dropped);
         if let Some(entities) = batches.active.remove(&dropped) {
@@ -232,7 +308,7 @@ fn sync(
             }
             batches.built_at.insert(owner, eye);
         }
-        let (geometry, visible) = mesh(&stars[offset..end], centre, eye, owner.level());
+        let (geometry, visible) = mesh(&stars[offset..end], centre, eye);
         if visible > 0 {
             let handle = meshes.add(geometry);
             commands
@@ -280,6 +356,75 @@ fn sync(
             }
         }
     }
+    // Close up, each star is placed alone by an f64 subtraction. The visited
+    // star's sprite waits, hidden, while its body is drawn at the exact position.
+    if changed
+        || precise.scanned_body != body_pc
+        || precise
+            .scanned_at
+            .is_none_or(|at| at.distance(eye) > RESCAN_PC)
+    {
+        precise.candidates = candidates(&field, eye, body_pc);
+        precise.scanned_at = Some(eye);
+        precise.scanned_body = body_pc;
+    }
+    let Precise {
+        candidates,
+        sprites,
+        ..
+    } = &mut *precise;
+    let mut wanted = HashSet::new();
+    for candidate in candidates.iter() {
+        let position = DVec3::from_array(candidate.star.position_pc);
+        let distance = position.distance(eye);
+        let radius = (PRECISE * candidate.offset_pc).max(body_pc);
+        if distance >= PREPARE * radius {
+            continue;
+        }
+        wanted.insert(candidate.id.as_str());
+        let Some(&(entity, _)) = sprites.get(&candidate.id) else {
+            let (geometry, visible) = mesh(&[candidate.star], candidate.star.position_pc, eye);
+            if visible > 0 {
+                let handle = meshes.add(geometry);
+                let entity = commands
+                    .spawn((
+                        Mesh3d(handle.clone()),
+                        MeshMaterial3d(precise_material.clone()),
+                        Transform::default(),
+                        GlobalTransform::default(),
+                        *cell,
+                        Visibility::Hidden,
+                        NoFrustumCulling,
+                        ChildOf(parent.parent()),
+                    ))
+                    .id();
+                sprites.insert(candidate.id.clone(), (entity, handle));
+            }
+            continue;
+        };
+        if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
+            placements.get_mut(entity)
+        {
+            let centre = camera_transform.translation() + ((position - eye) * factor).as_vec3();
+            *grid_cell = *cell;
+            *transform = Transform::from_translation(centre).with_scale(Vec3::splat(factor as f32));
+            *global = GlobalTransform::from(*transform);
+            let drawn = body.is_some_and(|(id, _)| id == candidate.id);
+            *visibility = if distance < radius && !drawn {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+    }
+    sprites.retain(|id, (entity, handle)| {
+        let keep = wanted.contains(id.as_str());
+        if !keep {
+            commands.entity(*entity).despawn();
+            meshes.remove(&*handle);
+        }
+        keep
+    });
 }
 
 #[cfg(test)]
@@ -288,7 +433,6 @@ mod tests {
 
     #[test]
     fn batches_only_upload_stars_near_enough_to_see() {
-        let tier = 12;
         let eye = DVec3::new(8200.0, 20.0, 0.0);
         let point = |distance: f64| StarPoint {
             position_pc: [8200.0 + distance, 20.0, 0.0],
@@ -298,11 +442,69 @@ mod tests {
             component: space_simulation::galaxy::Component::ThinDisc,
             index: 0,
         };
-        let (geometry, count) = mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye, tier);
+        let (geometry, count) = mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 1);
         assert_eq!(geometry.count_vertices(), 3);
-        let (geometry, count) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye, tier);
+        let (geometry, count) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 0);
         assert_eq!(geometry.count_vertices(), 0);
+    }
+
+    /// Repeats the GPU's f32 placement of a batched point: its f32 offset
+    /// from the cell centre, scaled, plus the centre's camera-relative offset.
+    #[test]
+    fn batched_points_stay_within_a_quarter_pixel_outside_the_precise_radius() {
+        let quarter_pixel = 0.25 * 2.0 * 25.0_f64.to_radians().tan() / 1000.0;
+        let centre = DVec3::new(8192.0, 64.0, -64.0);
+        for offset_pc in [0.5, 60.0, 110.0, 8_000.0, 110_000.0] {
+            let star = centre + DVec3::new(0.577, -0.614, 0.538).normalize() * offset_pc;
+            let away = DVec3::new(-0.3, 0.8, 0.52).normalize();
+            let eye = star + away * PRECISE * offset_pc * 1.001;
+            let exact_pc = star - eye;
+            // From framing the star itself down to a planet-scale zoom.
+            for zoom in [1.0, 1e-3, 1e-6] {
+                let factor = 1000.0 / (exact_pc.length() * zoom);
+                let vertex = (star - centre).as_vec3();
+                let world = vertex * factor as f32 + ((centre - eye) * factor).as_vec3();
+                let exact = exact_pc * factor;
+                let angle = (world.as_dvec3() - exact).length() / exact.length();
+                assert!(
+                    angle < quarter_pixel,
+                    "{offset_pc} pc, zoom {zoom}: {angle:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stars_near_the_camera_become_precise_candidates() {
+        let cell = Cell::containing(10, [8200.0, 20.0, 0.0]).unwrap();
+        let centre = DVec3::from_array(cell.centre_pc());
+        let point = |position: DVec3, index| StarPoint {
+            position_pc: position.to_array(),
+            luminosity_solar: 1.0,
+            temperature_k: 5772.0,
+            radius_solar: 1.0,
+            component: space_simulation::galaxy::Component::ThinDisc,
+            index,
+        };
+        let star = centre + DVec3::new(40.0, 0.0, 0.0);
+        let mut field = Starfield::default();
+        field.cells.insert(
+            cell,
+            space_simulation::stream::StarCell {
+                cell,
+                stars: vec![point(star, 0), point(centre, 1)],
+            },
+        );
+        let near = candidates(&field, star + DVec3::new(0.0, 0.05, 0.0), 0.0);
+        assert_eq!(near.len(), 1);
+        assert_eq!(near[0].id, point(star, 0).id(cell));
+        assert!((near[0].offset_pc - 40.0).abs() < 1e-9);
+        // Beyond the prepared radius and the rescan margin, nothing is gathered.
+        let far = star + DVec3::new(0.0, PREPARE * PRECISE * 40.0 + RESCAN_PC + 0.01, 0.0);
+        assert!(candidates(&field, far, 0.0).is_empty());
+        // A visited star's body range reaches farther.
+        assert_eq!(candidates(&field, far, 1.0).len(), 1);
     }
 }

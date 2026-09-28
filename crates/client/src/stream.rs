@@ -16,7 +16,7 @@ use space_simulation::{
 use std::collections::{HashMap, VecDeque};
 
 /// Faintest apparent magnitude loaded: the naked-eye limit.
-pub const MAGNITUDE: f64 = 6.5;
+pub const MAGNITUDE: f64 = space_simulation::population::VISIBLE_MAGNITUDE;
 /// Camera moves shorter than this, in parsecs, do not re-aim the loader: about
 /// 2,000 AU, so moving within a planetary system never does.
 const AIM_PC: f64 = 0.01;

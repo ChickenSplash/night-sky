@@ -10,7 +10,7 @@ use crate::views::View;
 use crate::{Clock, Navigation, Universe};
 use bevy::prelude::*;
 use serde::Serialize;
-use space_simulation::{page_tilt, period_seconds};
+use space_simulation::period_seconds;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
@@ -126,7 +126,7 @@ struct DisplayState {
     wireframe: bool,
 }
 
-/// Telemetry for the current list and page.
+/// Telemetry for the visited system and page.
 #[derive(Serialize)]
 struct SystemState<'a> {
     name: &'a str,
@@ -165,9 +165,6 @@ struct State<'a> {
     page: u32,
     pages: Vec<u32>,
     view: View,
-    atlas: bool,
-    galactic: bool,
-    generated_star: Option<&'a str>,
     task: Option<&'a str>,
     following: bool,
     paused: bool,
@@ -176,52 +173,41 @@ struct State<'a> {
     display: DisplayState,
     system: Option<SystemState<'a>>,
     selected: Option<TaskDetail<'a>>,
-    picked: Option<Picked<'a>>,
+    picked: Option<Picked>,
 }
 
+/// The picked star. Page and page count are absent unless it is a list page.
 #[derive(Serialize)]
-struct Picked<'a> {
-    name: &'a str,
-    page: u32,
-    pages: usize,
+struct Picked {
+    name: String,
+    page: Option<u32>,
+    pages: Option<usize>,
 }
 
 fn publish_state(
     universe: Res<Universe>,
-    galactic: Res<crate::galaxy_nav::Galactic>,
     nav: Res<Navigation>,
     clock: Res<Clock>,
     mut last: Local<String>,
 ) {
-    let system = if nav.galactic {
-        galactic.system.as_ref()
-    } else {
-        universe.0.systems.get(nav.system)
-    };
+    let system = nav.system(&universe.0);
     let planet = system.and_then(|s| nav.selected.and_then(|i| s.planets.get(i)));
-    let picked = (!nav.galactic)
-        .then_some(nav.picked)
-        .flatten()
-        .and_then(|(index, page)| {
-            let star = universe.0.systems.get(index)?;
-            Some(Picked {
-                name: &star.name,
-                page,
-                pages: star.pages().len(),
-            })
-        });
+    let picked = nav.picked.as_ref().map(|star| {
+        let (name, page) = crate::galaxy_nav::describe(&universe.0, &star.id);
+        Picked {
+            name,
+            page: page.map(|(page, _)| page),
+            pages: page.map(|(_, pages)| pages),
+        }
+    });
     let state = State {
         picked,
-        list: system.and_then(|s| {
-            (!nav.galactic || universe.0.systems.iter().any(|list| list.id == s.id))
-                .then_some(s.id.as_str())
-        }),
+        list: nav
+            .list()
+            .and_then(|index| Some(universe.0.systems.get(index)?.id.as_str())),
         page: nav.page,
         pages: system.map(|s| s.pages()).unwrap_or_default(),
         view: nav.view,
-        atlas: nav.atlas,
-        galactic: nav.galactic,
-        generated_star: galactic.picked.as_ref().map(|star| star.id.as_str()),
         task: planet.and_then(|p| Some(p.task.as_ref()?.id.as_str())),
         following: nav.following,
         paused: clock.0.paused,
@@ -237,10 +223,7 @@ fn publish_state(
             wireframe: nav.wireframe,
         },
         system: system.map(|s| {
-            let [inclination, node, _] = s.page_star(nav.page).map_or_else(
-                || page_tilt(&s.id, nav.page),
-                |star| space_simulation::plane_tilt(&star.id),
-            );
+            let [inclination, node, _] = crate::scene::page_tilt(s, nav.page);
             SystemState {
                 name: &s.name,
                 star: s.star(nav.page),

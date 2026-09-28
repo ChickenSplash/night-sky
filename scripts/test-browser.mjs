@@ -37,13 +37,14 @@ try {
     assert.equal((await page.request.get(base + path)).status(), 404, `${path} must not be served`);
   }
   // Deterministic pagination coverage, independent of the connected account.
-  const template = galaxy.systems.find(system => system.tasks.length)?.tasks[0];
+  const template = galaxy.systems.flatMap(system => system.planets).find(planet => planet.task);
   assert(template, 'Expected at least one task for the rendering fixture.');
+  // The client rebuilds every body from task slots, so the planets only carry tasks.
   const fixture = {
     source: 'Demo · browser pagination fixture',
-    systems: [{ ...galaxy.systems[0], name: 'Browser fixture', tasks: Array.from({ length: 50 }, (_, slot) => ({
-      ...template, id: `browser-task-${slot}`, slot, name: `Task ${slot + 1}: review the navigation checklist`,
-      orbit: { ...template.orbit, semi_major_au: 0.55 + slot * 0.65 },
+    systems: [{ ...galaxy.systems[0], name: 'Browser fixture', planets: Array.from({ length: 50 }, (_, slot) => ({
+      ...template,
+      task: { ...template.task, id: `browser-task-${slot}`, slot, name: `Task ${slot + 1}: review the navigation checklist` },
     })) }],
   };
   await page.route('**/galaxy', route => route.fulfill({ json: fixture }));
@@ -53,11 +54,11 @@ try {
   // Allow the WebGL pipelines to compile and Bevy to produce complete frames.
   await page.waitForTimeout(6000);
   await page.keyboard.press('Space');
-  await page.screenshot({ path: resolve(root, 'data/web-system.png') });
-  await page.mouse.click(120, 190);
-  await page.waitForTimeout(2000);
-  await page.screenshot({ path: resolve(root, 'data/web-atlas.png') });
-  await page.mouse.click(120, 238); // First list.
+  // The client opens in the galaxy, relative to home.
+  await page.screenshot({ path: resolve(root, 'data/web-galaxy.png') });
+  await page.mouse.click(120, 190); // First list.
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: resolve(root, 'data/web-list.png') });
   await page.mouse.click(1440, 156); // Task table preset.
   await page.waitForTimeout(2500);
   await page.screenshot({ path: resolve(root, 'data/web-table.png') });
@@ -78,7 +79,7 @@ try {
   await page.screenshot({ path: resolve(root, 'data/web-resized.png') });
   assert.equal(await page.locator('#loading').evaluate(el => el.style.display), 'none', 'A renderer error overlay appeared');
   assert.deepEqual(errors, [], 'Browser runtime errors');
-  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, table/constellation/atlas/input/resize, private-file isolation.');
+  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, galaxy/table/constellation/input/resize, private-file isolation.');
 } finally {
   writeFileSync(resolve(root, 'data/browser-console.log'), [...logs, ...errors].join('\n'));
   await browser.close();

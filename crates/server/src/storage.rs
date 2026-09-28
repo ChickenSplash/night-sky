@@ -1,12 +1,7 @@
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
-use space_shared::{Galaxy, PageStar, StarSystem};
-use space_simulation::{
-    LY_METRES,
-    cells::{Cell, Sky},
-    galaxy::{GalaxyModel, PC_METRES},
-    stable_hash,
-};
+use space_shared::{Galaxy, StarSystem};
+use space_simulation::cells::Sky;
 use std::path::Path;
 
 pub fn initialise(path: &Path) -> Result<()> {
@@ -95,77 +90,27 @@ pub fn assign_page_stars(path: &Path, system: &mut StarSystem) -> Result<()> {
         .into_iter()
         .chain(system.tasks().map(|(_, task)| task.slot))
         .max();
-    let home = GalaxyModel::milky_way().home_pc;
-    let cell = Cell::containing(10, home).expect("home is in galaxy");
-    let mut sky = Sky::default();
-    let count = sky.tier_counts(cell)[cell.level()];
-    ensure!(count > 0, "no galactic stars in the home cell");
-    system.page_stars.clear();
-    let mut page = 0;
-    let mut end = 0u32;
-    loop {
-        let id: Option<String> = tx
-            .query_row(
-                "SELECT star_id FROM page_stars WHERE list_id = ?1 AND page = ?2",
-                params![system.id, page],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let id = if let Some(id) = id {
-            id
-        } else {
-            let seed = stable_hash(&format!("{}:{page}:galactic-star", system.id));
-            let mut chosen = None;
-            for attempt in 0..count {
-                let ordinal = (seed.wrapping_add(attempt)) % count;
-                let candidate = sky
-                    .cell_star_at(cell, ordinal)
-                    .expect("ordinal within tier");
-                let distance_pc = candidate
-                    .position_pc
-                    .iter()
-                    .zip(home)
-                    .map(|(position, origin)| (position - origin).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                let magnitude = 4.83 - 2.5 * candidate.star.luminosity_solar.max(1e-30).log10()
-                    + 5.0 * distance_pc.max(1e-8).log10()
-                    - 5.0;
-                // Assigned stars must appear in the same magnitude-limited sky
-                // that the client streams and can pick from galactic overview.
-                if magnitude > 6.5 {
-                    continue;
-                }
-                let changed = tx.execute(
-                    "INSERT OR IGNORE INTO page_stars(list_id, page, star_id) VALUES (?1, ?2, ?3)",
-                    params![system.id, page, candidate.id],
-                )?;
-                if changed > 0 {
-                    chosen = Some(candidate.id);
-                    break;
-                }
-            }
-            chosen
-                .ok_or_else(|| anyhow::anyhow!("no free galactic stars for list {}", system.id))?
-        };
-        let star = sky
-            .star(&id)
-            .ok_or_else(|| anyhow::anyhow!("invalid assigned star {id}"))?;
-        let position_ly = std::array::from_fn(|axis| {
-            (star.position_pc[axis] - home[axis]) * PC_METRES / LY_METRES
-        });
-        system.page_stars.push(PageStar {
-            page,
-            id,
-            position_ly,
-        });
-        end += space_simulation::planet_count(&system.page_stars.last().expect("page").id);
-        if highest.is_none_or(|slot| slot < end) {
-            break;
-        }
-        page += 1;
-    }
-    system.position_ly = system.page_stars[0].position_ly;
+    let list = system.id.clone();
+    space_simulation::assign_page_stars(
+        system,
+        highest,
+        &mut Sky::default(),
+        |page| -> Result<Option<String>> {
+            Ok(tx
+                .query_row(
+                    "SELECT star_id FROM page_stars WHERE list_id = ?1 AND page = ?2",
+                    params![list, page],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        },
+        |page, star| -> Result<bool> {
+            Ok(tx.execute(
+                "INSERT OR IGNORE INTO page_stars(list_id, page, star_id) VALUES (?1, ?2, ?3)",
+                params![list, page, star],
+            )? > 0)
+        },
+    )?;
     tx.commit()?;
     Ok(())
 }

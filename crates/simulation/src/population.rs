@@ -32,12 +32,27 @@ pub fn tier_limit(tier: usize) -> f64 {
     4f64.powi(TOP - tier as i32)
 }
 
+/// Faintest apparent magnitude of the streamed sky, and of stars lists may use.
+pub const VISIBLE_MAGNITUDE: f64 = 6.5;
+const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
+
+/// Brightness relative to magnitude 0 of one solar luminosity at one parsec.
+/// A star's is `luminosity / distance_pc²` times this.
+pub fn flux_per_luminosity() -> f64 {
+    10f64.powf(-0.4 * (SUN_ABSOLUTE_MAGNITUDE - 5.0))
+}
+
+/// Squared parsecs per solar luminosity at which a star fades to `magnitude`.
+/// A star is visible when `distance_pc² <= luminosity * this`: no logarithm
+/// per star.
+pub fn reach_sq_per_luminosity(magnitude: f64) -> f64 {
+    flux_per_luminosity() * 10f64.powf(0.4 * magnitude)
+}
+
 /// Distance at which the brightest star of a tier fades to this apparent
-/// magnitude, from its luminosity alone (the Sun's absolute magnitude is 4.83).
-/// Each tier reaches half as far as the one above it.
+/// magnitude. Each tier reaches half as far as the one above it.
 pub fn reach_pc(tier: usize, magnitude: f64) -> f64 {
-    let absolute = 4.83 - 2.5 * tier_limit(tier).log10();
-    10.0 * 10f64.powf((magnitude - absolute) / 5.0)
+    (tier_limit(tier) * reach_sq_per_luminosity(magnitude)).sqrt()
 }
 
 /// Tier of a star this bright.
@@ -417,6 +432,22 @@ mod tests {
         let bright = |c| tier_shares(c)[..5].iter().sum::<f64>();
         assert_eq!(bright(Component::Halo), 0.0);
         assert!(bright(Component::Arms) > 1e-6);
+    }
+
+    #[test]
+    fn reach_matches_the_distance_modulus() {
+        // The Sun is at its absolute magnitude from ten parsecs.
+        assert!((reach_sq_per_luminosity(SUN_ABSOLUTE_MAGNITUDE) - 100.0).abs() < 1e-9);
+        for (luminosity, distance_pc) in [(1.0, 5.0), (40.0, 90.0), (1e-3, 0.7)] {
+            let magnitude: f64 = SUN_ABSOLUTE_MAGNITUDE - 2.5 * f64::log10(luminosity)
+                + 5.0 * f64::log10(distance_pc)
+                - 5.0;
+            let squared = distance_pc * distance_pc;
+            assert!((luminosity * reach_sq_per_luminosity(magnitude) / squared - 1.0).abs() < 1e-9);
+            let flux = flux_per_luminosity() * luminosity / squared;
+            assert!((flux / 10f64.powf(-0.4 * magnitude) - 1.0).abs() < 1e-9);
+        }
+        assert!((reach_pc(tier_of(1.0), SUN_ABSOLUTE_MAGNITUDE) - 10.0).abs() < 1e-9);
     }
 
     #[test]

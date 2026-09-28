@@ -135,6 +135,18 @@ pub fn cell_star_id(cell: Cell, component: Component, index: u64) -> String {
     format!("g{:x}.{}.{index}", cell.0, component.index())
 }
 
+/// Stable catalogue label, derived from a cell star ID without storing names.
+pub fn catalogue_name(id: &str) -> String {
+    format!(
+        "TS {}",
+        id.strip_prefix('g').unwrap_or(id).replace('.', "-")
+    )
+}
+
+pub fn planet_designation(id: &str, index: usize) -> String {
+    format!("{} {}", catalogue_name(id), (b'b' + index as u8) as char)
+}
+
 /// The cell, component and index a cell star's ID names.
 pub fn parse_cell_star(id: &str) -> Option<(Cell, Component, u64)> {
     let mut parts = id.strip_prefix('g')?.split('.');
@@ -678,6 +690,19 @@ fn within(
 mod tests {
     use super::*;
     use crate::population::{reach_pc, tier_limit};
+
+    #[test]
+    fn catalogue_names_are_unique_stable_and_planets_are_lettered() {
+        assert_eq!(catalogue_name("g78040000.2.854"), "TS 78040000-2-854");
+        assert_ne!(
+            catalogue_name("g78040000.2.854"),
+            catalogue_name("g78040000.2.855")
+        );
+        assert_eq!(
+            planet_designation("g78040000.2.854", 0),
+            "TS 78040000-2-854 b"
+        );
+    }
 
     #[test]
     fn indexed_stars_match_cell_population() {
