@@ -187,7 +187,7 @@ pub struct Spiral {
 
 impl Spiral {
     /// Mean of the arm profile around any circle.
-    fn mean(&self) -> f64 {
+    pub fn mean(&self) -> f64 {
         let k = self.sharpness as u64;
         // C(2k, k) / 4^k.
         (0..k).fold(1.0, |m, i| m * (2 * k - i) as f64 / (k - i) as f64) / 4f64.powi(k as i32)
@@ -389,11 +389,7 @@ impl GalaxyModel {
                 if squared > edge * edge {
                     return 0.0;
                 }
-                let total = q
-                    * 4.0
-                    * PI
-                    * ((edge / c).atan() / (2.0 * c) - edge / (2.0 * (edge * edge + c * c)));
-                stars / total / (squared + c * c).powi(2)
+                stars / self.halo_volume() / (squared + c * c).powi(2)
             }
         }
     }
@@ -414,6 +410,75 @@ impl GalaxyModel {
         let [across, high] = d.centre_pc;
         let centre = d.centre_mag_per_pc * (-radius / across - y.abs() / high).exp();
         disc + centre
+    }
+
+    /// Visual extinction between two points in parsecs. The vertical dust
+    /// profile is integrated across each segment, including plane crossings;
+    /// its radial and arm variation is sampled at the segment's midplane
+    /// crossing (or midpoint). This uses the same slabs as `diffuse.wgsl`.
+    pub fn dust_column(&self, eye: [f64; 3], star: [f64; 3]) -> f64 {
+        const STEPS: usize = 64;
+        let delta = std::array::from_fn::<_, 3, _>(|i| star[i] - eye[i]);
+        let distance = delta.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if distance == 0.0 {
+            return 0.0;
+        }
+        let direction = delta.map(|v| v / distance);
+        let log_range = distance.ln_1p();
+        let mut near = 0.0;
+        let mut column = 0.0;
+        for i in 1..=STEPS {
+            let far = (log_range * i as f64 / STEPS as f64).exp_m1();
+            // A geometric step can span the entire molecular zone; refine
+            // near the centre rather than sampling its sharp radial peak at
+            // one arbitrary midpoint.
+            let closest = (-(eye[0] * direction[0] + eye[2] * direction[2])
+                / (direction[0] * direction[0] + direction[2] * direction[2]).max(1e-30))
+            .clamp(near, far);
+            let radius = (eye[0] + direction[0] * closest).hypot(eye[2] + direction[2] * closest);
+            let max_step = if radius < 500.0 {
+                20.0
+            } else if radius < 1500.0 {
+                80.0
+            } else {
+                far - near
+            };
+            let parts = ((far - near) / max_step).ceil() as usize;
+            for part in 0..parts {
+                let start = near + (far - near) * part as f64 / parts as f64;
+                let end = near + (far - near) * (part + 1) as f64 / parts as f64;
+                let y0 = eye[1] + direction[1] * start;
+                let y1 = eye[1] + direction[1] * end;
+                let sample = if y0 * y1 < 0.0 {
+                    (-eye[1] / direction[1]).clamp(start, end)
+                } else {
+                    (start + end) * 0.5
+                };
+                let x = eye[0] + direction[0] * sample;
+                let z = eye[2] + direction[2] * sample;
+                let radius = x.hypot(z);
+                if radius <= self.radius_pc {
+                    let d = &self.dust;
+                    let disc = d.midplane_mag_per_pc
+                        * ((self.spiral.reference_pc - radius) / d.scale_length_pc).exp()
+                        * smoothstep(d.hole_pc[0], d.hole_pc[1], radius)
+                        * self.spiral.modulation(d.arm_strength, x, z)
+                        * vertical_mean(y0, y1, d.scale_height_pc);
+                    let centre = d.centre_mag_per_pc
+                        * (-radius / d.centre_pc[0]).exp()
+                        * vertical_mean(y0, y1, d.centre_pc[1]);
+                    column += (disc + centre) * (end - start);
+                }
+            }
+            near = far;
+        }
+        column
+    }
+
+    /// Integral of the halo's (r² + c²)⁻² profile over its flattened sphere.
+    pub fn halo_volume(&self) -> f64 {
+        let (c, q, edge) = (self.halo_core_pc, self.halo_flattening, self.radius_pc);
+        q * 4.0 * PI * ((edge / c).atan() / (2.0 * c) - edge / (2.0 * (edge * edge + c * c)))
     }
 
     /// Stars per cubic parsec.
@@ -456,9 +521,51 @@ impl GalaxyModel {
     }
 }
 
+/// Mean of exp(-|y|/height) over a linear segment.
+fn vertical_mean(y0: f64, y1: f64, height: f64) -> f64 {
+    let (a, b) = (y0.abs(), y1.abs());
+    if y0 * y1 < 0.0 {
+        height * (2.0 - (-a / height).exp() - (-b / height).exp()) / (a + b)
+    } else if (b - a).abs() < 1e-3 * height {
+        (-(a + b) * 0.5 / height).exp()
+    } else {
+        height * ((-a / height).exp() - (-b / height).exp()) / (b - a)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dust_column_matches_density_integral_and_reddens_distant_light() {
+        let model = GalaxyModel::milky_way();
+        let eye = model.home_pc;
+        let numerical = |end: [f64; 3]| {
+            let delta = std::array::from_fn::<_, 3, _>(|i| end[i] - eye[i]);
+            let length = delta.iter().map(|v| v * v).sum::<f64>().sqrt();
+            (0..20_000)
+                .map(|i| {
+                    let p = std::array::from_fn(|axis| {
+                        eye[axis] + delta[axis] * (i as f64 + 0.5) / 20_000.0
+                    });
+                    model.dust(p) * length / 20_000.0
+                })
+                .sum::<f64>()
+        };
+        for end in [[8200.0, 1020.0, 0.0], [0.0, 0.0, 0.0], [0.0, 2000.0, 0.0]] {
+            let column = model.dust_column(eye, end);
+            let reference = numerical(end);
+            assert!(
+                (column / reference - 1.0).abs() < 0.1,
+                "{end:?}: {column} vs {reference}"
+            );
+            let red = 10f64.powf(-0.4 * 0.75 * column);
+            let blue = 10f64.powf(-0.4 * 1.32 * column);
+            assert!(blue <= red && red <= 1.0);
+        }
+        assert_eq!(model.dust_column(eye, eye), 0.0);
+    }
 
     /// Stars in each component, integrated over all space in cylindrical
     /// coordinates with log-spaced radius and height, so both the parsec-wide

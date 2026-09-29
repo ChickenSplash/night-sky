@@ -23,12 +23,13 @@ use bevy::{
 use big_space::prelude::*;
 use space_simulation::{
     cells::Cell,
-    galaxy::PC_METRES,
+    galaxy::{GalaxyModel, PC_METRES},
     population::{flux_per_luminosity, reach_pc, reach_sq_per_luminosity},
     stream::{StarPoint, gap_pc},
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    sync::OnceLock,
     time::Duration,
 };
 
@@ -83,6 +84,7 @@ impl Material for StarMaterial {
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
             Mesh::ATTRIBUTE_COLOR.at_shader_location(2),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(3),
         ])?];
         descriptor.primitive.cull_mode = None;
         Ok(())
@@ -173,10 +175,13 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
     let mut positions = Vec::with_capacity(points.len() * 3);
     let mut corners = Vec::with_capacity(points.len() * 3);
     let mut colours = Vec::with_capacity(points.len() * 3);
+    let mut transmissions = Vec::with_capacity(points.len() * 3);
     let mut visible = 0;
     let mut seen = Vec::new();
     let limit = reach_sq_per_luminosity(crate::stream::MAGNITUDE);
     let reach = MARGIN * MARGIN * limit;
+    static GALAXY: OnceLock<GalaxyModel> = OnceLock::new();
+    let galaxy = GALAXY.get_or_init(GalaxyModel::milky_way);
     for star in points {
         let offset = DVec3::from_array(star.position_pc) - eye;
         let luminosity = f64::from(star.luminosity_solar);
@@ -185,18 +190,31 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
             continue;
         }
         visible += 1;
-        if squared <= luminosity * limit {
-            seen.push((offset, luminosity / squared.max(1e-16)));
-        }
+        let column = galaxy.dust_column(eye.to_array(), star.position_pc);
+        // Match the glow's V-band to RGB extinction law. Keep the colour and
+        // visibility cutoff separate: dust removes light, not a star's ID.
+        let transmission = [0.75, 1.0, 1.32].map(|ratio| 10f64.powf(-0.4 * ratio * column) as f32);
         let pos: [f32; 3] =
             std::array::from_fn(|axis| (star.position_pc[axis] - centre[axis]) as f32);
         let rgb = space_simulation::spectral_colour(f64::from(star.temperature_k));
         let colour = Color::srgb_u8(rgb[0], rgb[1], rgb[2]).to_linear();
+        if squared <= luminosity * limit {
+            let attenuated = (colour.red * transmission[0] * 0.2126
+                + colour.green * transmission[1] * 0.7152
+                + colour.blue * transmission[2] * 0.0722)
+                / (colour.red * 0.2126 + colour.green * 0.7152 + colour.blue * 0.0722)
+                    .max(f32::MIN_POSITIVE);
+            seen.push((
+                offset,
+                luminosity / squared.max(1e-16) * f64::from(attenuated),
+            ));
+        }
         let tint = [colour.red, colour.green, colour.blue, star.luminosity_solar];
         for corner in [[-1.0, -1.0], [3.0, -1.0], [-1.0, 3.0]] {
             positions.push(pos);
             corners.push(corner);
             colours.push(tint);
+            transmissions.push(transmission);
         }
     }
     let mut mesh = Mesh::new(
@@ -206,6 +224,7 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, corners);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, transmissions);
     (mesh, visible, sky::share(seen.into_iter()))
 }
 
@@ -319,7 +338,12 @@ fn sync(
         .built_at
         .iter()
         .filter_map(|(&owner, &built)| {
-            let threshold = 0.2 * reach_pc(owner.level(), crate::stream::MAGNITUDE);
+            // The point's dust column and its share of the exposure map are
+            // both baked at upload. Refresh them when local extinction could
+            // change perceptibly, even for a very bright, far-reaching tier.
+            let dust_step = if eye.length() < 500.0 { 1.0 } else { 10.0 };
+            let threshold =
+                (0.2 * reach_pc(owner.level(), crate::stream::MAGNITUDE)).min(dust_step);
             (eye.distance(built) > threshold && !batches.queued.iter().any(|(c, _)| *c == owner))
                 .then_some(owner)
         })
@@ -519,7 +543,8 @@ mod tests {
         // The visible star, in the direction it is seen from the eye.
         assert_eq!(share.len(), 1);
         assert_eq!(usize::from(share[0].0), sky::bin(DVec3::X));
-        assert_eq!(share[0].1, [0.01, 1.0]);
+        assert!((share[0].1[0] - 0.01).abs() < 1e-4);
+        assert_eq!(share[0].1[1], 1.0);
         let (geometry, count, share) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 0);
         assert_eq!(geometry.count_vertices(), 0);

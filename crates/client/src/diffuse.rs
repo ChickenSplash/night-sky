@@ -1,6 +1,6 @@
-//! Faint unresolved Galactic light. A far sky sphere ray-integrates a smooth
-//! disc and spiral-arm emissivity; individual visible stars stay in `starfield`.
-//! This is an approximate glow, not dust extinction or a resolved star count.
+//! Unresolved Galactic light. A far sky sphere ray-integrates the galaxy
+//! model's stars too faint to be points, dimmed and reddened by its dust;
+//! stars bright enough stay in `starfield`. There is no scattered light.
 
 use crate::{
     Navigation,
@@ -19,20 +19,125 @@ use bevy::{
     shader::ShaderRef,
 };
 use big_space::prelude::*;
-use space_simulation::galaxy::{GalaxyModel, PC_METRES};
+use space_simulation::{
+    galaxy::{Component, GalaxyModel, PC_METRES},
+    population::{GLOW_DISTANCES, flux_per_luminosity, unresolved_light},
+};
 
 const SHADER: Handle<Shader> = uuid_handle!("fd104454-3330-4f40-9ac9-bcad7da21b11");
 
+/// Unresolved-light entries: component × distance.
+const LIGHT: usize = 6 * GLOW_DISTANCES;
+
+/// The galaxy model's parameters, as `diffuse.wgsl` documents them.
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 struct Glow {
     #[uniform(0)]
     eye: Vec4,
-    /// Radial disc scale, thin height, arm height and outer edge in parsecs.
     #[uniform(0)]
-    disc: Vec4,
-    /// Spiral pitch, reference radius, phase and assisted display multiplier.
+    nucleus: Vec4,
     #[uniform(0)]
-    arm: Vec4,
+    bar: Vec4,
+    #[uniform(0)]
+    bar_axis: Vec4,
+    #[uniform(0)]
+    thin: Vec4,
+    #[uniform(0)]
+    arms: Vec4,
+    #[uniform(0)]
+    thick: Vec4,
+    #[uniform(0)]
+    spiral: Vec4,
+    #[uniform(0)]
+    spiral_extent: Vec4,
+    #[uniform(0)]
+    halo: Vec4,
+    #[uniform(0)]
+    dust: Vec4,
+    #[uniform(0)]
+    dust_hole: Vec4,
+    /// Central dust height, galaxy radius and display light per unit of flux.
+    #[uniform(0)]
+    extent: Vec4,
+    #[uniform(0)]
+    light: [Vec4; LIGHT],
+}
+
+impl Glow {
+    fn new(model: &GalaxyModel) -> Self {
+        let f = |x: f64| x as f32;
+        let disc = |c: Component| {
+            let d = match c {
+                Component::ThinDisc => &model.thin,
+                Component::Arms => &model.arms,
+                _ => &model.thick,
+            };
+            Vec4::new(
+                f(d.scale_length_pc),
+                f(d.scale_height_pc),
+                f(model.stars_in(c)),
+                f(d.arm_strength),
+            )
+        };
+        let tables = Component::ALL.map(|c| unresolved_light(c, crate::stream::MAGNITUDE));
+        let (sin, cos) = model.bar_angle_rad.sin_cos();
+        let [long, high, across] = model.bar_pc;
+        let (spiral, dust) = (&model.spiral, &model.dust);
+        Self {
+            eye: Vec4::ZERO,
+            nucleus: Vec4::new(
+                f(model.nucleus_pc),
+                f(model.stars_in(Component::Nucleus)),
+                0.0,
+                0.0,
+            ),
+            bar: Vec4::new(
+                f(long),
+                f(high),
+                f(across),
+                f(model.stars_in(Component::Bulge)),
+            ),
+            bar_axis: Vec4::new(f(cos), f(sin), 0.0, 0.0),
+            thin: disc(Component::ThinDisc),
+            arms: disc(Component::Arms),
+            thick: disc(Component::ThickDisc),
+            spiral: Vec4::new(
+                spiral.arms as f32,
+                f(spiral.pitch_rad.tan()),
+                f(spiral.phase_rad),
+                f(spiral.reference_pc),
+            ),
+            spiral_extent: Vec4::new(
+                f(spiral.inner_pc),
+                f(spiral.outer_pc),
+                spiral.sharpness as f32,
+                f(spiral.mean()),
+            ),
+            halo: Vec4::new(
+                f(model.halo_core_pc),
+                f(model.halo_flattening),
+                f(model.radius_pc),
+                f(model.stars_in(Component::Halo) / model.halo_volume()),
+            ),
+            dust: Vec4::new(
+                f(dust.midplane_mag_per_pc),
+                f(dust.scale_length_pc),
+                f(dust.scale_height_pc),
+                f(dust.arm_strength),
+            ),
+            dust_hole: Vec4::new(
+                f(dust.hole_pc[0]),
+                f(dust.hole_pc[1]),
+                f(dust.centre_mag_per_pc),
+                f(dust.centre_pc[0]),
+            ),
+            extent: Vec4::new(f(dust.centre_pc[1]), f(model.radius_pc), 0.0, 0.0),
+            light: std::array::from_fn(|i| {
+                let [r, g, b] = tables[i / GLOW_DISTANCES][i % GLOW_DISTANCES];
+                Vec4::new(f(r), f(g), f(b), 0.0)
+            }),
+        }
+    }
 }
 
 impl Material for Glow {
@@ -84,6 +189,7 @@ fn sync(
     nav: Res<Navigation>,
     lights: Res<Lights>,
     sky_light: Option<Res<crate::sky::Sky>>,
+    mut model: Local<Option<(GalaxyModel, Glow)>>,
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -103,29 +209,27 @@ fn sync(
     let Ok((cell, parent, camera_transform)) = camera.single() else {
         return;
     };
-    let model = GalaxyModel::milky_way();
+    let (model, template) = model.get_or_insert_with(|| {
+        let model = GalaxyModel::milky_way();
+        let glow = Glow::new(&model);
+        (model, glow)
+    });
     let eye = DVec3::from_array(model.home_pc)
         + rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
-    // The glow shares the exposure metered on the streamed stars' sky.
+    let eye_far = eye
+        .as_vec3()
+        .extend((eye.length() + model.radius_pc) as f32);
+    // The glow shares the points' display light per unit of flux, and the
+    // exposure metered on the streamed stars' sky.
     let metered = sky_light.map_or(1.0, |sky| sky.exposure);
-    let gain = if nav.realistic { 1.0 } else { 0.3 } * sky_dimming(&nav, &lights) * metered;
-    let make = || Glow {
-        eye: eye.as_vec3().extend(0.0),
-        disc: Vec4::new(
-            model.thin.scale_length_pc as f32,
-            model.thin.scale_height_pc as f32,
-            model.arms.scale_height_pc as f32,
-            model.radius_pc as f32,
-        ),
-        arm: Vec4::new(
-            model.spiral.pitch_rad as f32,
-            model.spiral.reference_pc as f32,
-            model.spiral.phase_rad as f32,
-            gain,
-        ),
-    };
+    let gain = (crate::sky::POINT_LIGHT * flux_per_luminosity()) as f32
+        * sky_dimming(&nav, &lights)
+        * metered;
     if sphere.is_none() {
-        let material = materials.add(make());
+        let mut glow = template.clone();
+        glow.eye = eye_far;
+        glow.extent.z = gain;
+        let material = materials.add(glow);
         let mesh = meshes.add(Sphere::new(1.0).mesh().uv(64, 32));
         commands
             .entity(parent.parent())
@@ -168,11 +272,11 @@ fn sync(
     let sky = sphere.as_mut().expect("sphere exists");
     if materials
         .get(&sky.material)
-        .is_some_and(|glow| glow.eye.xyz() != eye.as_vec3() || glow.arm.w != gain)
+        .is_some_and(|glow| glow.eye != eye_far || glow.extent.z != gain)
         && let Some(glow) = materials.get_mut(&sky.material)
     {
-        glow.eye = eye.as_vec3().extend(0.0);
-        glow.arm.w = gain;
+        glow.eye = eye_far;
+        glow.extent.z = gain;
     }
     if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
         placement.get_mut(sky.entity)

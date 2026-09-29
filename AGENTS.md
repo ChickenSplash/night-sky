@@ -121,7 +121,8 @@
 - `GalaxyModel::dust(p)` is visual extinction in magnitudes per parsec: a
   100 pc thick disc following the arms, cleared inside the bar, plus the
   central molecular zone. It is calibrated (tested) to about 0.1 mag to the
-  pole, 0.7 mag/kpc locally and 30 mag to the centre. Nothing renders it yet.
+  pole, 0.7 mag/kpc locally and 30 mag to the centre. It currently dims and
+  reddens the diffuse glow and individual star points.
 - Every profile has a closed-form integral, so components hold exactly their
   share of `stars` (2e11). Spiral modulation averages to one around every
   circle; keep it that way, or the totals drift. The test integrates the
@@ -202,14 +203,23 @@
   flux and count per steradian, built from each batch's share at mesh time
   and removed with it; stars count at most magnitude -1, so one bright star
   is never a bright sky. It meters the galactic exposure (`Sky::exposure`,
-  easing over about 0.5 s) so the sky in view shows at `SKY_BACKGROUND`, for
-  the points and the diffuse glow alike. It stays on the CPU.
-- `diffuse.rs` adds an approximate, faint ray-integrated disc and spiral-arm
-  glow behind the points, with no dust or extinction yet. Each fragment
-  builds its own view ray from the camera, never from the sky sphere's
-  interpolated vertices. The central black hole
-  is an opaque sphere at its physical Schwarzschild radius; it is not visible
-  from home. No accretion disc or lensing yet.
+  easing over about 0.5 s) from streamed points only, targeting
+  `SKY_BACKGROUND`. Points and diffuse glow share its multiplier, but the
+  diffuse light is not included in the meter yet. It stays on the CPU. Point
+  batches bake their dust column into vertex transmissions and metered flux at
+  upload, refreshed after up to 10 pc of camera travel (1 pc near the core).
+- `population::unresolved_light(component, magnitude)` samples the same
+  tiered star distribution as the stream into a distance table: only stars
+  below the streamed magnitude limit contribute their luminosity and colour
+  to the glow. `diffuse.rs` passes the table and galaxy/dust parameters to
+  `diffuse.wgsl`. Each fragment builds its view ray from the camera, then
+  integrates model component densities through the galaxy and dust's RGB
+  extinction along it. Thin disc heights are averaged across each ray step;
+  nucleus light is integrated analytically. The background is not scattered
+  light. Star points use `GalaxyModel::dust_column` with the same RGB law;
+  attenuation happens before point brightness compression. The central
+  black hole is an opaque sphere at its physical Schwarzschild radius; it is
+  not visible from home. No accretion disc or lensing yet.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own.
   `Navigation::visit` is the visited system: `Visit::List` (a list index, at
@@ -291,9 +301,10 @@
 ## Current limitations
 
 - No N-body simulation, moons, workspace discovery or OAuth.
-- Galaxy travel and visits to generated systems work, but dust, lensing,
-  rotation and mapping ClickUp lists onto galactic stars are not implemented.
-  The glow is approximate, not a radiative transfer simulation.
+- Galaxy travel and visits to generated systems work, but scattered light,
+  lensing, rotation and mapping ClickUp lists onto galactic stars are not
+  implemented. The glow uses approximate ray integration, not a full
+  radiative transfer simulation.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.

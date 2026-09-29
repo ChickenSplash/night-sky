@@ -33,6 +33,7 @@ struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) corner: vec2<f32>,
     @location(2) colour: vec4<f32>,
+    @location(3) transmission: vec3<f32>,
     @builtin(instance_index) instance_index: u32,
 }
 
@@ -63,13 +64,19 @@ fn vertex(v: Vertex) -> Output {
     // this HDR colour; in the wireframe view it is tone-mapped by the normal
     // SDR target.
     let light = settings.values.z * ratio * settings.values.w;
-    out.peak = compress(light / (2.0 * PI * SIGMA_PX * SIGMA_PX));
+    let tint = v.colour.rgb;
+    let attenuated = tint * v.transmission;
+    let weights = vec3(0.2126, 0.7152, 0.0722);
+    let attenuation = dot(attenuated, weights) / max(dot(tint, weights), 1e-20);
+    // Dust acts before compression. Without dust, this is exactly the old
+    // sharp-point response, independent of the star's spectral tint.
+    out.peak = compress(light * attenuation / (2.0 * PI * SIGMA_PX * SIGMA_PX));
     let width = max(view.viewport.zw, vec2(1.0, 1.0));
     // Clip space spans two units per viewport width.
     clip = vec4(clip.xy + v.corner * clip.w * 2.0 * RADIUS_PX / width, clip.zw);
     out.position = clip;
     out.corner = v.corner;
-    out.colour = v.colour.rgb;
+    out.colour = attenuated / max(attenuation, 1e-20);
     return out;
 }
 
