@@ -46,6 +46,10 @@ pub enum UiCommand {
         option: Display,
         on: bool,
     },
+    /// Vertical field of view, clamped to `FOV_DEG`.
+    SetFov {
+        degrees: f32,
+    },
     /// Space the HTML panels cover at each edge of the canvas, in CSS pixels. The 3D
     /// view fits the rest, and the egui panels are not drawn.
     Panels {
@@ -138,6 +142,7 @@ pub fn apply(
                 Display::Physical => nav.physical = *on,
                 Display::Wireframe => nav.wireframe = *on,
             },
+            UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
             UiCommand::Panels {
                 top,
                 right,
@@ -221,6 +226,17 @@ mod tests {
             }],
         );
         assert!(nav(&app).velocity_marker);
+    }
+
+    #[test]
+    fn field_of_view_is_clamped_to_its_range() {
+        let set = |degrees| UiCommand::SetFov { degrees };
+        let mut app = run(space_simulation::demo_galaxy(), vec![set(75.0)]);
+        assert_eq!(nav(&app).fov_deg, 75.0);
+        send(&mut app, vec![set(10.0)]);
+        assert_eq!(nav(&app).fov_deg, 30.0);
+        send(&mut app, vec![set(500.0), set(f32::NAN)]);
+        assert_eq!(nav(&app).fov_deg, 130.0);
     }
 
     #[test]
@@ -404,6 +420,10 @@ mod tests {
                 option: Display::Orbits,
                 on: true
             }
+        );
+        assert_eq!(
+            parse(r#"{"type":"set_fov","degrees":90}"#),
+            UiCommand::SetFov { degrees: 90.0 }
         );
         assert_eq!(
             parse(r#"{"type":"pick_star","id":"g1.2.3"}"#),

@@ -172,6 +172,7 @@ struct State<'a> {
     rate: f64,
     notice: &'a str,
     display: DisplayState,
+    fov_deg: f32,
     system: Option<SystemState<'a>>,
     selected: Option<TaskDetail<'a>>,
     picked: Option<Picked>,
@@ -224,6 +225,7 @@ fn publish_state(
             physical: nav.physical,
             wireframe: nav.wireframe,
         },
+        fov_deg: nav.fov_deg,
         system: system.map(|s| {
             let [inclination, node, _] = crate::scene::page_tilt(s, nav.page);
             SystemState {

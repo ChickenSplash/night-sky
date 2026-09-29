@@ -13,8 +13,10 @@ const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'c
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers'], ['velocity_marker', 'Velocity marker']];
 // Physical exposure and wireframes apply only to realistic rendering.
 const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
-const HELP = [['Click', 'Select a star, again to visit'], ['C', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Left drag', 'Look around'], ['Right drag', 'Orbit'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Roll left / right'], ['R / F', 'Up / down'],
+const HELP = [['Click', 'Select a star, again to visit'], ['C', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Left drag', 'Look around'], ['Right drag', 'Orbit'], ['Shift + left drag', 'Field of view'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Roll left / right'], ['R / F', 'Up / down'],
   ['Shift + scroll', 'Adjust movement speed'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
+// Vertical field of view range in degrees, as `FOV_DEG` in Rust.
+const FOV = [30, 130];
 const LIST_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
 const TASK_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Due date', 'due']];
 const STATUS_RANK = { open: 0, custom: 1, done: 2, closed: 3 };
@@ -312,9 +314,24 @@ export function mount(bridge, canvas) {
     input.addEventListener('change', () => send({ type: 'set_display', option, on: input.checked }));
     return el('label', { className: 'toggle' }, input, el('span', { textContent: label }));
   };
+  // Field of view: a slider and a typed value, kept in step with Rust's state.
+  const fovRange = el('input', { type: 'range', min: FOV[0], max: FOV[1], step: 1, ariaLabel: 'Field of view' });
+  const fovNumber = el('input', { type: 'number', min: FOV[0], max: FOV[1], step: 1, ariaLabel: 'Field of view in degrees' });
+  const sendFov = input => {
+    const degrees = Number(input.value);
+    if (input.value !== '' && Number.isFinite(degrees)) send({ type: 'set_fov', degrees: Math.min(FOV[1], Math.max(FOV[0], degrees)) });
+  };
+  fovRange.addEventListener('input', () => sendFov(fovRange));
+  fovNumber.addEventListener('change', () => sendFov(fovNumber));
+  fovNumber.addEventListener('keydown', event => {
+    if (event.key === 'Enter') sendFov(fovNumber);
+  });
+  // Not a <label>: the HUD keeps focus off labels, and the number must be typable.
+  const fov = el('div', { className: 'fov' }, el('span', { textContent: 'Field of view' }), fovRange,
+    el('span', { className: 'fov-value' }, fovNumber, el('span', { className: 'muted', textContent: '°' })));
   const settings = el('div', { id: 'settings', className: 'panel floating', hidden: true, role: 'dialog', ariaLabel: 'Settings' },
     el('header', {}, el('h3', { textContent: 'Settings' }), closeSettings),
-    heading('Display'), ...DISPLAY.map(toggle),
+    heading('Display'), ...DISPLAY.map(toggle), fov,
     el('p', { className: 'muted small', textContent: 'Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.' }),
     heading('Rendering'), ...RENDERING.map(toggle),
     el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
@@ -578,6 +595,10 @@ export function mount(bridge, canvas) {
       input.checked = !!state.display?.[input.dataset.option];
       input.disabled = ['physical', 'wireframe'].includes(input.dataset.option) && !state.display?.realistic;
     }
+    // Leave a value being typed alone until it is committed.
+    const degrees = Math.round(state.fov_deg ?? 50);
+    fovRange.value = degrees;
+    if (document.activeElement !== fovNumber) fovNumber.value = degrees;
     const step = rateStep(state.rate);
     slower.disabled = step === 0;
     faster.disabled = step === RATES.length - 1;

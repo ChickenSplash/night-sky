@@ -52,6 +52,14 @@
   flies the displayed pose there. Discrete camera changes set `Navigation::fly`.
   Free-look and roll update the camera's local quaternion; left-drag turns about
   its current screen axes and repositions the target to keep the eye fixed.
+  Right-drag orbits the fixed target about the same screen axes. Every
+  keyboard control (WASD, R/F travel and Q/E roll) eases through one
+  `CameraMotion::thrust` (camera-axis travel as a fraction of `move_speed`,
+  roll in `w`) over about 0.15 s; speed changes and mouse turns stay instant.
+  The vertical field of view is `Navigation::fov_deg` (30° to 130°, default
+  50°), set from settings (`UiCommand::SetFov`) or Shift + left-drag (up
+  narrows). Hand projections (picking, overlays, table framing) use
+  `Navigation::tan_half_fov`, never a fixed 50°.
   `Navigation` and orbital positions use the page's plane axes;
   `scene::page_frame` rotates them into galactic axes, which `CameraPose` and star
   offsets use. Each page star is a cell star at its own position
@@ -181,7 +189,17 @@
   show): batches hide points that close and its sprite waits hidden. Beyond, it
   is a galactic point under the same magnitude limit. Galactic points use
   apparent flux; `sky_dimming` also stops their display brightness down with
-  the close-star physical exposure (as it does the glow).
+  the close-star physical exposure (as it does the glow). Every point is a
+  0.55 px sigma Gaussian (2 px footprint), as in a perfect camera: brightness
+  shows only in its peak, linear up to a knee and logarithmic above it, never
+  in its size. Crowds are never widened or blurred; smooth light belongs to
+  the diffuse glow.
+- `sky.rs` keeps an octahedral map (64², galactic axes) of visible stars'
+  flux and count per steradian, built from each batch's share at mesh time
+  and removed with it; stars count at most magnitude -1, so one bright star
+  is never a bright sky. It meters the galactic exposure (`Sky::exposure`,
+  easing over about 0.5 s) so the sky in view shows at `SKY_BACKGROUND`, for
+  the points and the diffuse glow alike. It stays on the CPU.
 - `diffuse.rs` adds an approximate, faint ray-integrated disc and spiral-arm
   glow behind the points, with no dust or extinction. The central black hole
   is an opaque sphere at its physical Schwarzschild radius; it is not visible

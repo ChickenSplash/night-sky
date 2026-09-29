@@ -40,6 +40,7 @@ pub fn pick_centre(
 
 /// Pick a visible streamed star along the pointer ray. The threshold is the
 /// angular size of a ten-pixel hit target at the current viewport height.
+/// `tan_half` is the tangent of half the vertical field of view.
 pub fn pick_pointer(
     field: &Starfield,
     rig: &CameraRig,
@@ -47,10 +48,10 @@ pub fn pick_pointer(
     rotation: Quat,
     pointer: [f64; 2],
     viewport: [f64; 2],
+    tan_half: f64,
 ) -> Option<PickedStar> {
     let [x, y] = pointer;
     let [width, height] = viewport;
-    let tan_half = (50.0_f64.to_radians() / 2.0).tan();
     let right = (2.0 * x - width) / height * tan_half;
     let up = (1.0 - 2.0 * y / height) * tan_half;
     let direction = (rotation * Vec3::new(right as f32, up as f32, -1.0).normalize()).as_dvec3();
@@ -278,7 +279,8 @@ mod tests {
         );
         let rig = CameraRig::default();
         let pose = CameraPose::default();
-        let x = 500.0 + 0.01 * 500.0 / (50.0_f64.to_radians() / 2.0).tan();
+        let tan_half = (50.0_f64.to_radians() / 2.0).tan();
+        let x = 500.0 + 0.01 * 500.0 / tan_half;
         let picked = pick_pointer(
             &field,
             &rig,
@@ -286,8 +288,27 @@ mod tests {
             Quat::IDENTITY,
             [x, 500.0],
             [1000.0, 1000.0],
+            tan_half,
         )
         .unwrap();
+        // A wider view puts the same star closer to the centre of the screen.
+        let wide = (120.0_f64.to_radians() / 2.0).tan();
+        let x_wide = 500.0 + 0.01 * 500.0 / wide;
+        assert!(x_wide < x);
+        assert_eq!(
+            pick_pointer(
+                &field,
+                &rig,
+                &pose,
+                Quat::IDENTITY,
+                [x_wide, 500.0],
+                [1000.0, 1000.0],
+                wide,
+            )
+            .unwrap()
+            .id,
+            picked.id
+        );
         assert_eq!(picked.id, star.id(cell));
         assert_eq!(
             picked_id(&field, &picked.id).unwrap().position_ly,
@@ -300,7 +321,8 @@ mod tests {
                 &pose,
                 Quat::IDENTITY,
                 [x + 30.0, 500.0],
-                [1000.0, 1000.0]
+                [1000.0, 1000.0],
+                tan_half,
             )
             .is_none()
         );

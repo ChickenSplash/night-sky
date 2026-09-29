@@ -229,6 +229,13 @@
 #hud .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 #hud .toggle input { accent-color: var(--accent); margin: 0; }
 #hud .toggle:has(input:disabled) { opacity: .45; cursor: default; }
+#hud .fov { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 8px; }
+#hud .fov input[type=range] { grid-column: 1 / -1; grid-row: 2; width: 100%; margin: 0; accent-color: var(--accent); }
+#hud .fov-value { display: flex; align-items: center; gap: 2px; }
+#hud .fov input[type=number] {
+  width: 56px; font: 12px ui-monospace, monospace; color: var(--text); text-align: right;
+  background: var(--control); border: 1px solid transparent; border-radius: 6px; padding: 4px 6px;
+}
 #hud .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 #hud .muted { color: var(--muted); }
 #hud .small { font-size: 11px; line-height: 1.45; }

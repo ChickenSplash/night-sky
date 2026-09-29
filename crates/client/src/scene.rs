@@ -26,7 +26,7 @@ const LEAVE_METRES: f64 = 0.04 * LY_METRES;
 /// when the selected camera range is interstellar.
 const PRECISE_SCALE_PC: f64 = 20.0 * LY_METRES / PC_METRES;
 pub const MIN_SPEED: f64 = 1.0;
-pub const MAX_SPEED: f64 = 1000.0 * LY_METRES;
+pub const MAX_SPEED: f64 = 10_000.0 * LY_METRES;
 
 fn scroll_speed(speed: f64, scroll: f32) -> f64 {
     (speed * (f64::from(scroll) * 0.35).exp()).clamp(MIN_SPEED, MAX_SPEED)
@@ -62,6 +62,24 @@ pub struct CameraVelocity {
 pub struct CameraMotion {
     orbiting: bool,
     travel_metres: DVec3,
+    /// Keyboard controls, eased towards the pressed keys so starts, stops and
+    /// turns take a moment: travel in camera axes as a fraction of
+    /// `move_speed` (x, y, z), and roll as a fraction of `ROLL_SPEED` (w).
+    thrust: Vec4,
+}
+
+/// Time constant for keyboard controls: about 95% of a change within 0.15 s.
+const THRUST_EASE_SECONDS: f32 = 0.05;
+/// Q/E roll rate at full thrust, in radians per second.
+const ROLL_SPEED: f32 = 1.5;
+
+fn ease_thrust(thrust: Vec4, wanted: Vec4, dt: f32) -> Vec4 {
+    let eased = wanted + (thrust - wanted) * (-dt / THRUST_EASE_SECONDS).exp();
+    if eased.distance_squared(wanted) < 1e-6 {
+        wanted
+    } else {
+        eased
+    }
 }
 
 pub fn measure_velocity(
@@ -371,7 +389,10 @@ pub fn controls(
     let free = nav.view == View::Orbit && !rig.flying();
     let rotating = matches!(nav.view, View::Orbit | View::Constellation) && !rig.flying();
     if !pointer && rotating {
-        if buttons.pressed(MouseButton::Left) && free {
+        let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+        if buttons.pressed(MouseButton::Left) && shift {
+            drag_fov(&mut nav, motion.delta.y);
+        } else if buttons.pressed(MouseButton::Left) && free {
             let tilt = nav
                 .system(&universe.0)
                 .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
@@ -396,6 +417,7 @@ pub fn controls(
             nav.target = eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
         }
     }
+    let mut wanted = Vec4::ZERO;
     if !keyboard {
         if keys.just_pressed(KeyCode::KeyC) {
             nav.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
@@ -421,22 +443,37 @@ pub fn controls(
         );
         let roll_input = axis(KeyCode::KeyQ, KeyCode::KeyE) as f32;
         if roll_input != 0.0 && free {
-            roll(&mut nav, roll_input * time.delta_secs() * 1.5);
+            nav.following = false;
+            wanted.w = roll_input;
         }
         if movement.length_squared() > 0.0 && free {
             nav.following = false;
-            let tilt = nav
-                .system(&universe.0)
-                .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
-            let rotation = nav.rotation;
-            let step = (rotation * movement.normalize().as_vec3()).as_dvec3()
-                * nav.move_speed
-                * time.delta_secs_f64();
-            camera_motion.travel_metres += tilt * step;
-            let eye = nav.eye.get_or_insert_with(|| tilt.inverse() * pose.eye);
-            *eye += step;
-            nav.target = *eye - (rotation * Vec3::Z).as_dvec3() * nav.distance;
+            wanted = movement.normalize().as_vec3().extend(wanted.w);
         }
+    }
+    // Flights, tracking and presets take the camera over: no coasting into them.
+    camera_motion.thrust = if free && !nav.following {
+        ease_thrust(camera_motion.thrust, wanted, time.delta_secs())
+    } else {
+        Vec4::ZERO
+    };
+    if camera_motion.thrust.w != 0.0 {
+        roll(
+            &mut nav,
+            camera_motion.thrust.w * ROLL_SPEED * time.delta_secs(),
+        );
+    }
+    let travel = camera_motion.thrust.truncate();
+    if travel != Vec3::ZERO {
+        let tilt = nav
+            .system(&universe.0)
+            .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
+        let rotation = nav.rotation;
+        let step = (rotation * travel).as_dvec3() * nav.move_speed * time.delta_secs_f64();
+        camera_motion.travel_metres += tilt * step;
+        let eye = nav.eye.get_or_insert_with(|| tilt.inverse() * pose.eye);
+        *eye += step;
+        nav.target = *eye - (rotation * Vec3::Z).as_dvec3() * nav.distance;
     }
 }
 
@@ -463,15 +500,19 @@ fn drag_look(nav: &mut Navigation, delta: Vec2, displayed_eye: Option<DVec3>) {
     nav.following = false;
 }
 
-/// Right-drag keeps its target fixed and turns around the system's vertical.
+/// Shift + left-drag: up narrows the view (zooms in), down widens it.
+fn drag_fov(nav: &mut Navigation, delta_y: f32) {
+    nav.set_fov(nav.fov_deg + delta_y * 0.15);
+}
+
+/// Right-drag keeps its target fixed and turns about the camera's own screen
+/// axes, so it follows the view when upside down or rolled.
 fn orbit(nav: &mut Navigation, delta: Vec2) {
     if delta == Vec2::ZERO {
         return;
     }
-    nav.rotation = (Quat::from_rotation_y(-delta.x * 0.005)
-        * nav.rotation
-        * Quat::from_rotation_x(-delta.y * 0.005))
-    .normalize();
+    let turn = Quat::from_rotation_y(-delta.x * 0.005) * Quat::from_rotation_x(-delta.y * 0.005);
+    nav.rotation = (nav.rotation * turn).normalize();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -627,6 +668,7 @@ pub fn place_camera(
     if let Projection::Perspective(p) = &mut *projection {
         // Render units, see `CameraPose::render_scale`.
         p.near = 0.01;
+        p.fov = nav.fov_deg.to_radians();
     }
 }
 
@@ -1409,6 +1451,7 @@ mod tests {
         *app.world_mut().resource_mut::<CameraMotion>() = CameraMotion {
             orbiting: true,
             travel_metres: travel,
+            ..default()
         };
         app.world_mut().resource_mut::<Time>().advance_by(frame);
         app.update();
@@ -1427,6 +1470,55 @@ mod tests {
                 .marker_metres_per_second,
             DVec3::ZERO
         );
+    }
+
+    #[test]
+    fn keyboard_controls_ease_in_and_out_within_about_a_fifth_of_a_second() {
+        let frame = 1.0 / 60.0;
+        let run = |mut thrust: Vec4, wanted: Vec4, seconds: f32| {
+            for _ in 0..(seconds / frame).round() as usize {
+                thrust = ease_thrust(thrust, wanted, frame);
+            }
+            thrust
+        };
+        // W/S, A/D, R/F travel and Q/E roll all follow the same ease.
+        for control in [Vec4::X, Vec4::Y, Vec4::Z, Vec4::W] {
+            for key in [control, -control] {
+                let started = run(Vec4::ZERO, key, 0.05);
+                assert!(started.length() > 0.5 && started.length() < 0.8);
+                assert!(run(Vec4::ZERO, key, 0.2).distance(key) < 0.02);
+                assert!(run(key, Vec4::ZERO, 0.2).length() < 0.02);
+                // The tail settles exactly, so a released key leaves no drift.
+                assert_eq!(run(Vec4::ZERO, key, 0.4), key);
+                assert_eq!(run(key, Vec4::ZERO, 0.4), Vec4::ZERO);
+                // Frame rate does not change the ease.
+                let coarse = ease_thrust(Vec4::ZERO, key, 0.1);
+                assert!(coarse.distance(run(Vec4::ZERO, key, 0.1)) < 1e-4);
+            }
+        }
+        // Adding A bends the path towards the diagonal rather than snapping.
+        let forward = -Vec4::Z;
+        let diagonal = Vec3::new(-1.0, 0.0, -1.0).normalize().extend(0.0);
+        let turning = run(forward, diagonal, 0.05);
+        assert!(turning.x < 0.0 && turning.x > diagonal.x);
+        // Rolling while travelling leaves the travel alone.
+        let rolling = run(forward, forward + Vec4::W, 0.05);
+        assert_eq!(rolling.truncate(), forward.truncate());
+        assert!(rolling.w > 0.5 && rolling.w < 0.8);
+    }
+
+    #[test]
+    fn shift_drag_up_zooms_in_and_down_zooms_out_within_range() {
+        let mut nav = Navigation::default();
+        // Screen y grows downwards, so dragging up is a negative delta.
+        drag_fov(&mut nav, -100.0);
+        assert!(nav.fov_deg < 50.0);
+        drag_fov(&mut nav, 200.0);
+        assert!(nav.fov_deg > 50.0);
+        drag_fov(&mut nav, -10_000.0);
+        assert_eq!(nav.fov_deg, 30.0);
+        drag_fov(&mut nav, 10_000.0);
+        assert_eq!(nav.fov_deg, 130.0);
     }
 
     #[test]
@@ -1466,6 +1558,28 @@ mod tests {
                 drag_look(&mut nav, Vec2::new(0.0, 20.0), None);
                 let change = nav.rotation * -Vec3::Z - before * -Vec3::Z;
                 assert!(change.dot(before * Vec3::Y) < -0.09);
+                assert!(change.dot(before * Vec3::X).abs() < 1e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn orbit_tracks_screen_axes_at_poles_upside_down_and_rolled() {
+        for pitch in [0.0, 0.9, std::f32::consts::FRAC_PI_2, 3.0] {
+            for roll_angle in [0.0, 0.7, std::f32::consts::FRAC_PI_2] {
+                let mut nav = Navigation {
+                    rotation: Quat::from_rotation_x(-pitch) * Quat::from_rotation_z(roll_angle),
+                    ..Navigation::default()
+                };
+                let before = nav.rotation;
+                orbit(&mut nav, Vec2::new(20.0, 0.0));
+                let change = nav.rotation * Vec3::Z - before * Vec3::Z;
+                assert!(change.dot(before * Vec3::X) < -0.09);
+                assert!(change.dot(before * Vec3::Y).abs() < 1e-5);
+                let before = nav.rotation;
+                orbit(&mut nav, Vec2::new(0.0, 20.0));
+                let change = nav.rotation * Vec3::Z - before * Vec3::Z;
+                assert!(change.dot(before * Vec3::Y) > 0.09);
                 assert!(change.dot(before * Vec3::X).abs() < 1e-5);
             }
         }

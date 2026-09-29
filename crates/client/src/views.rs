@@ -177,7 +177,7 @@ impl Navigation {
                 // room for the row's labels without giving a giant star more space.
                 let width = layout.right - layout.left;
                 let height = 7.0 * layout.unit;
-                let distance = height.max(width / aspect) * 0.5 / 25.0_f64.to_radians().tan();
+                let distance = height.max(width / aspect) * 0.5 / self.tan_half_fov();
                 Some((
                     DVec3::new((layout.left + layout.right) * 0.5, 0.0, layout.unit),
                     distance,

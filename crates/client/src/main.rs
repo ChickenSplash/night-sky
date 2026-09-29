@@ -9,6 +9,7 @@ mod galaxy_nav;
 mod network;
 mod render;
 mod scene;
+mod sky;
 #[cfg(not(target_arch = "wasm32"))]
 mod smoke;
 mod starfield;
@@ -62,6 +63,8 @@ pub struct Navigation {
     /// Camera orientation in the current system's local plane. Keeping this as
     /// a quaternion lets mouse turns follow the screen axes even past the poles.
     pub rotation: Quat,
+    /// Vertical field of view in degrees, within `FOV_DEG`.
+    pub fov_deg: f32,
     pub exaggerate: bool,
     pub labels: bool,
     pub orbits: bool,
@@ -95,6 +98,7 @@ impl Default for Navigation {
             distance: 120.0 * LY_METRES,
             move_speed: 42.0 * LY_METRES,
             rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
+            fov_deg: 50.0,
             exaggerate: false,
             labels: true,
             orbits: true,
@@ -110,7 +114,21 @@ impl Default for Navigation {
     }
 }
 
+/// Selectable vertical field of view, in degrees.
+pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
+
 impl Navigation {
+    pub fn set_fov(&mut self, degrees: f32) {
+        if degrees.is_finite() {
+            self.fov_deg = degrees.clamp(*FOV_DEG.start(), *FOV_DEG.end());
+        }
+    }
+
+    /// Tangent of half the vertical field of view, for projecting by hand.
+    pub fn tan_half_fov(&self) -> f64 {
+        (f64::from(self.fov_deg).to_radians() / 2.0).tan()
+    }
+
     pub fn system<'a>(&'a self, lists: &'a Galaxy) -> Option<&'a StarSystem> {
         match self.visit.as_ref()? {
             Visit::List(index) => lists.systems.get(*index),

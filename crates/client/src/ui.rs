@@ -188,7 +188,7 @@ impl Panels<'_> {
 
     fn footer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Click: select a star, again to visit    C: centre star    Enter: visit    LMB drag: look    RMB drag: orbit    Scroll: zoom    Shift+scroll: speed    WASD: move    Q/E: roll    R/F: up/down    Space: pause").size(11.0).color(MUTED));
+            ui.label(egui::RichText::new("Click: select a star, again to visit    C: centre star    Enter: visit    LMB drag: look    RMB drag: orbit    Shift+LMB drag: field of view    Scroll: zoom    Shift+scroll: speed    WASD: move    Q/E: roll    R/F: up/down    Space: pause").size(11.0).color(MUTED));
             ui.separator();
             ui.label(egui::RichText::new(&self.nav.notice).size(11.0).color(MUTED));
         });
@@ -294,6 +294,17 @@ impl Panels<'_> {
             if ui.checkbox(&mut on, label).changed() {
                 self.out.push(UiCommand::SetDisplay { option, on });
             }
+        }
+        let mut degrees = nav.fov_deg;
+        if ui
+            .add(
+                egui::Slider::new(&mut degrees, crate::FOV_DEG)
+                    .text("Field of view")
+                    .suffix("°"),
+            )
+            .changed()
+        {
+            self.out.push(UiCommand::SetFov { degrees });
         }
         ui.label(
             egui::RichText::new(
@@ -737,7 +748,13 @@ fn canvas_overlay(
     }
 
     if nav.velocity_marker {
-        draw_velocity_marker(&painter, rect, rig, velocity.marker_metres_per_second);
+        draw_velocity_marker(
+            &painter,
+            rect,
+            rig,
+            velocity.marker_metres_per_second,
+            nav.tan_half_fov() as f32,
+        );
     }
 
     let pointer = ctx.input(|i| i.pointer.interact_pos());
@@ -745,23 +762,17 @@ fn canvas_overlay(
     if let Some(star) = &nav.picked {
         let camera =
             rig.rotation().inverse() * (star.position_ly - rig.galactic_ly(pose)).as_vec3();
-        if camera.z < 0.0 {
-            let half = (50.0_f32.to_radians() / 2.0).tan();
-            let size = rect.height() / (2.0 * half * -camera.z);
-            let point = egui::pos2(
-                rect.center().x + camera.x * size,
-                rect.center().y - camera.y * size,
+        if let Some(point) =
+            project(rect, camera, nav.tan_half_fov() as f32).filter(|p| rect.contains(*p))
+        {
+            painter.circle_stroke(point, 10.0, egui::Stroke::new(1.5, ACCENT));
+            painter.text(
+                point + egui::vec2(16.0, -8.0),
+                egui::Align2::LEFT_CENTER,
+                crate::galaxy_nav::label(galaxy, &star.id),
+                egui::FontId::proportional(12.0),
+                ACCENT,
             );
-            if rect.contains(point) {
-                painter.circle_stroke(point, 10.0, egui::Stroke::new(1.5, ACCENT));
-                painter.text(
-                    point + egui::vec2(16.0, -8.0),
-                    egui::Align2::LEFT_CENTER,
-                    crate::galaxy_nav::label(galaxy, &star.id),
-                    egui::FontId::proportional(12.0),
-                    ACCENT,
-                );
-            }
         }
     }
     // Bevy viewport coordinates are window logical pixels; egui has a further UI scale.
@@ -850,35 +861,49 @@ fn canvas_overlay(
                 f64::from(pointer.y - rect.min.y),
             ],
             [f64::from(rect.width()), f64::from(rect.height())],
+            nav.tan_half_fov(),
         )
     {
         out.push(UiCommand::PickStar { id: star.id });
     }
 }
 
-/// Prograde (dot) and retrograde (cross) on the visible hemisphere. A direction
-/// straight along the sight line sits at the centre; sideways motion approaches
-/// the viewport edge. The far-side marker is hidden rather than reflected.
+/// Screen point of a camera-space position or direction, through the 3D
+/// camera's perspective (`tan_half` of its vertical field of view). `None`
+/// behind the camera.
+fn project(rect: egui::Rect, camera: Vec3, tan_half: f32) -> Option<egui::Pos2> {
+    if camera.z >= 0.0 {
+        return None;
+    }
+    let size = rect.height() / (2.0 * tan_half * -camera.z);
+    Some(egui::pos2(
+        rect.center().x + camera.x * size,
+        rect.center().y - camera.y * size,
+    ))
+}
+
+/// Prograde (dot) and retrograde (cross), placed where the direction of travel
+/// vanishes in the 3D view, so they sit over the scene's own motion. Each is
+/// hidden when its direction is off-screen, including pure sideways travel.
 fn draw_velocity_marker(
     painter: &egui::Painter,
     rect: egui::Rect,
     rig: &CameraRig,
     velocity: DVec3,
+    tan_half: f32,
 ) {
     if velocity.length_squared() < 1.0 || rect.width() < 60.0 || rect.height() < 60.0 {
         return;
     }
     let direction = rig.rotation().inverse() * velocity.normalize().as_vec3();
-    let radius = rect.width().min(rect.height()) * 0.43;
+    let stroke = egui::Stroke::new(1.5, ACCENT);
     for (vector, prograde) in [(direction, true), (-direction, false)] {
-        if vector.z > 0.0 {
+        let Some(point) = project(rect, vector, tan_half).filter(|p| rect.contains(*p)) else {
             continue;
-        }
-        let point = rect.center() + egui::vec2(vector.x, -vector.y) * radius;
-        let colour = if prograde { ACCENT } else { MUTED };
-        painter.circle_stroke(point, 9.0, egui::Stroke::new(1.5, colour));
+        };
+        painter.circle_stroke(point, 9.0, stroke);
         if prograde {
-            painter.circle_filled(point, 2.5, colour);
+            painter.circle_filled(point, 2.5, ACCENT);
         } else {
             for sign in [-1.0, 1.0] {
                 painter.line_segment(
@@ -886,9 +911,34 @@ fn draw_velocity_marker(
                         point + egui::vec2(-4.0, 4.0 * sign),
                         point + egui::vec2(4.0, -4.0 * sign),
                     ],
-                    egui::Stroke::new(1.5, colour),
+                    stroke,
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn travel_directions_project_through_the_camera_perspective() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1600.0, 900.0));
+        let half = |degrees: f32| (degrees.to_radians() / 2.0).tan();
+        let project = |camera| project(rect, camera, half(50.0));
+        assert_eq!(project(-Vec3::Z), Some(rect.center()));
+        // Pure sideways or backwards travel has no on-screen vanishing point.
+        assert_eq!(project(-Vec3::X), None);
+        assert_eq!(project(Vec3::Z), None);
+        // Forward and left at 45° is off the left edge of a 50° view.
+        let diagonal = Vec3::new(-1.0, 0.0, -1.0).normalize();
+        assert!(!rect.contains(project(diagonal).unwrap()));
+        // 25° up is the top edge.
+        let up = project(Vec3::new(0.0, half(50.0), -1.0)).unwrap();
+        assert!((up.y - rect.top()).abs() < 1e-3);
+        // A 120° view (about 144° wide at 16:9) brings the diagonal on screen.
+        let wide = super::project(rect, diagonal, half(120.0)).unwrap();
+        assert!(rect.contains(wide));
     }
 }

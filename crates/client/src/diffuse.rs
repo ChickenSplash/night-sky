@@ -83,6 +83,7 @@ fn sync(
     mut sphere: Option<ResMut<SkySphere>>,
     nav: Res<Navigation>,
     lights: Res<Lights>,
+    sky_light: Option<Res<crate::sky::Sky>>,
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -105,7 +106,9 @@ fn sync(
     let model = GalaxyModel::milky_way();
     let eye = DVec3::from_array(model.home_pc)
         + rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
-    let gain = if nav.realistic { 1.0 } else { 0.3 } * sky_dimming(&nav, &lights);
+    // The glow shares the exposure metered on the streamed stars' sky.
+    let metered = sky_light.map_or(1.0, |sky| sky.exposure);
+    let gain = if nav.realistic { 1.0 } else { 0.3 } * sky_dimming(&nav, &lights) * metered;
     let make = || Glow {
         eye: eye.as_vec3().extend(0.0),
         disc: Vec4::new(

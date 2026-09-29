@@ -5,6 +5,7 @@ use crate::{
     Navigation, Universe,
     render::{Lights, sky_dimming},
     scene::{CameraPose, CameraRig, SpaceCamera},
+    sky::{self, Sky},
     stream::{Starfield, StreamMetrics},
 };
 use bevy::{
@@ -52,7 +53,7 @@ const RESCAN_PC: f64 = 0.1;
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 struct StarMaterial {
     /// Parsecs per render unit, faintest visible luminosity per squared
-    /// parsec, display gain per luminosity per squared parsec, and dimming.
+    /// parsec, display light per luminosity per squared parsec, and dimming.
     #[uniform(0)]
     settings: Vec4,
     /// For batches, `PRECISE` and the visited star's body range in parsecs:
@@ -88,9 +89,16 @@ impl Material for StarMaterial {
     }
 }
 
+/// One uploaded batch and its share of the sky map.
+struct Batch {
+    entity: Entity,
+    mesh: Handle<Mesh>,
+    sky: sky::Share,
+}
+
 #[derive(Resource, Default)]
 struct Batches {
-    active: HashMap<Cell, Vec<(Entity, Handle<Mesh>)>>,
+    active: HashMap<Cell, Vec<Batch>>,
     queued: VecDeque<(Cell, usize)>,
     built_at: HashMap<Cell, DVec3>,
     material: Option<Handle<StarMaterial>>,
@@ -122,6 +130,7 @@ impl Plugin for StarfieldRenderPlugin {
         app.add_plugins(MaterialPlugin::<StarMaterial>::default())
             .init_resource::<Batches>()
             .init_resource::<Precise>()
+            .init_resource::<Sky>()
             .add_systems(
                 PostUpdate,
                 sync.after(crate::scene::draw)
@@ -158,20 +167,27 @@ fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
 }
 
 /// The same star at any distance has a stable vertex position within its cell;
-/// camera and zoom move its mesh, not a million individual vertices.
-fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize) {
+/// camera and zoom move its mesh, not a million individual vertices. Also
+/// returns the visible stars' share of the sky map, as seen from `eye`.
+fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky::Share) {
     let mut positions = Vec::with_capacity(points.len() * 3);
     let mut corners = Vec::with_capacity(points.len() * 3);
     let mut colours = Vec::with_capacity(points.len() * 3);
     let mut visible = 0;
-    let reach = MARGIN * MARGIN * reach_sq_per_luminosity(crate::stream::MAGNITUDE);
+    let mut seen = Vec::new();
+    let limit = reach_sq_per_luminosity(crate::stream::MAGNITUDE);
+    let reach = MARGIN * MARGIN * limit;
     for star in points {
-        if DVec3::from_array(star.position_pc).distance_squared(eye)
-            > f64::from(star.luminosity_solar) * reach
-        {
+        let offset = DVec3::from_array(star.position_pc) - eye;
+        let luminosity = f64::from(star.luminosity_solar);
+        let squared = offset.length_squared();
+        if squared > luminosity * reach {
             continue;
         }
         visible += 1;
+        if squared <= luminosity * limit {
+            seen.push((offset, luminosity / squared.max(1e-16)));
+        }
         let pos: [f32; 3] =
             std::array::from_fn(|axis| (star.position_pc[axis] - centre[axis]) as f32);
         let rgb = space_simulation::spectral_colour(f64::from(star.temperature_k));
@@ -190,7 +206,7 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize) {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, corners);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
-    (mesh, visible)
+    (mesh, visible, sky::share(seen.into_iter()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -202,12 +218,13 @@ fn sync(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StarMaterial>>,
     mut precise: ResMut<Precise>,
+    (mut sky, time): (ResMut<Sky>, Res<Time>),
     universe: Res<Universe>,
     nav: Res<Navigation>,
     lights: Res<Lights>,
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
-    camera: Query<(&CellCoord, &ChildOf, &GlobalTransform), With<SpaceCamera>>,
+    camera: Query<(&CellCoord, &ChildOf, &GlobalTransform, &Camera), With<SpaceCamera>>,
     mut placements: Query<
         (
             &mut Transform,
@@ -219,12 +236,27 @@ fn sync(
     >,
 ) {
     let sync_start = bevy::platform::time::Instant::now();
-    let Ok((cell, parent, camera_transform)) = camera.single() else {
+    let Ok((cell, parent, camera_transform, view)) = camera.single() else {
         return;
     };
     let pc_per_unit = pose.render_scale() / PC_METRES;
     let scale = pc_per_unit as f32;
-    let dimming = sky_dimming(&nav, &lights);
+    let gain = sky::POINT_LIGHT * flux_per_luminosity();
+    let size = view
+        .physical_viewport_size()
+        .unwrap_or(UVec2::ONE)
+        .max(UVec2::ONE);
+    let tan_half = nav.tan_half_fov();
+    let pixel = 2.0 * tan_half / f64::from(size.y);
+    sky.update(
+        time.delta_secs_f64(),
+        camera_transform.forward().as_dvec3(),
+        tan_half,
+        f64::from(size.x) / f64::from(size.y),
+        gain,
+        pixel * pixel,
+    );
+    let dimming = sky_dimming(&nav, &lights) * sky.exposure;
     // Within its body range the visited star is drawn as a body, so the batches
     // hide its point there, and it has no sprite.
     let body = nav.system(&universe.0).and_then(|system| {
@@ -237,7 +269,7 @@ fn sync(
             settings: Vec4::new(
                 scale,
                 (1.0 / reach_sq_per_luminosity(crate::stream::MAGNITUDE)) as f32,
-                (12.0 * flux_per_luminosity()) as f32,
+                gain as f32,
                 dimming,
             ),
             near: Vec4::new(precise, 0.0, 0.0, 0.0),
@@ -269,10 +301,11 @@ fn sync(
     for dropped in field.removed.drain(..) {
         metrics.loaded_at.remove(&dropped);
         batches.built_at.remove(&dropped);
-        if let Some(entities) = batches.active.remove(&dropped) {
-            for (entity, handle) in entities {
-                commands.entity(entity).despawn();
-                meshes.remove(&handle);
+        if let Some(old) = batches.active.remove(&dropped) {
+            for batch in old {
+                sky.add(&batch.sky, -1.0);
+                commands.entity(batch.entity).despawn();
+                meshes.remove(&batch.mesh);
             }
         }
         batches.queued.retain(|(cell, _)| *cell != dropped);
@@ -307,14 +340,15 @@ fn sync(
         let centre = owner.centre_pc();
         if offset == 0 {
             if let Some(old) = batches.active.remove(&owner) {
-                for (entity, handle) in old {
-                    commands.entity(entity).despawn();
-                    meshes.remove(&handle);
+                for batch in old {
+                    sky.add(&batch.sky, -1.0);
+                    commands.entity(batch.entity).despawn();
+                    meshes.remove(&batch.mesh);
                 }
             }
             batches.built_at.insert(owner, eye);
         }
-        let (geometry, visible) = mesh(&stars[offset..end], centre, eye);
+        let (geometry, visible, share) = mesh(&stars[offset..end], centre, eye);
         metrics.built_batches += 1;
         if offset == 0
             && let Some(at) = metrics.loaded_at.remove(&owner)
@@ -339,11 +373,12 @@ fn sync(
                     ChildOf(parent.parent()),
                 ))
                 .id();
-            batches
-                .active
-                .entry(owner)
-                .or_default()
-                .push((entity, handle));
+            sky.add(&share, 1.0);
+            batches.active.entry(owner).or_default().push(Batch {
+                entity,
+                mesh: handle,
+                sky: share,
+            });
         }
         if end < stars.len() {
             batches.queued.push_front((owner, end));
@@ -357,7 +392,7 @@ fn sync(
     for (&owner, entities) in &batches.active {
         let delta = (DVec3::from_array(owner.centre_pc()) - eye) * factor;
         let centre = camera_transform.translation() + delta.as_vec3();
-        for &(entity, _) in entities {
+        for &Batch { entity, .. } in entities {
             if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
                 placements.get_mut(entity)
             {
@@ -400,7 +435,7 @@ fn sync(
             if distance < BATCH_HIDE * candidate.offset_pc {
                 unready_precise = true;
             }
-            let (geometry, visible) = mesh(&[candidate.star], candidate.star.position_pc, eye);
+            let (geometry, visible, _) = mesh(&[candidate.star], candidate.star.position_pc, eye);
             if visible > 0 {
                 let handle = meshes.add(geometry);
                 let entity = commands
@@ -478,12 +513,17 @@ mod tests {
             component: space_simulation::galaxy::Component::ThinDisc,
             index: 0,
         };
-        let (geometry, count) = mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye);
+        let (geometry, count, share) = mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 1);
         assert_eq!(geometry.count_vertices(), 3);
-        let (geometry, count) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
+        // The visible star, in the direction it is seen from the eye.
+        assert_eq!(share.len(), 1);
+        assert_eq!(usize::from(share[0].0), sky::bin(DVec3::X));
+        assert_eq!(share[0].1, [0.01, 1.0]);
+        let (geometry, count, share) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 0);
         assert_eq!(geometry.count_vertices(), 0);
+        assert!(share.is_empty());
     }
 
     /// Repeats the GPU's f32 placement of a batched point: its f32 offset
