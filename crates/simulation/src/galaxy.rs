@@ -10,6 +10,9 @@
 //!   flattened halo.
 //! - Every profile has a closed-form integral, so each component holds exactly
 //!   its share of `GalaxyModel::stars`. Arms only move stars around their circle.
+//! - Interstellar dust (`GalaxyModel::dust`) is a thin disc, concentrated in the
+//!   arms, cleared by the bar and dense again in the central molecular zone.
+//!   It is visual extinction per parsec, in magnitudes.
 
 use crate::star::galactic_star;
 use crate::system::Rng;
@@ -207,6 +210,27 @@ impl Spiral {
     }
 }
 
+/// Interstellar dust, as visual (V band) extinction in magnitudes per parsec.
+/// After Drimmel & Spergel (2001) and Misiriotis et al. (2006): a disc thinner
+/// than the stars', following the arms, with a hole where the bar has swept up
+/// the gas, and the dense central molecular zone within it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dust {
+    /// In the plane at the spiral's reference radius, averaged around its
+    /// circle; between arms it is lower.
+    pub midplane_mag_per_pc: f64,
+    pub scale_length_pc: f64,
+    pub scale_height_pc: f64,
+    /// The disc fades in between these radii.
+    pub hole_pc: [f64; 2],
+    /// Arm contrast, as `Disc::arm_strength`.
+    pub arm_strength: f64,
+    /// Central molecular zone: extinction per parsec at the centre, then its
+    /// exponential radial and vertical scales.
+    pub centre_mag_per_pc: f64,
+    pub centre_pc: [f64; 2],
+}
+
 fn smoothstep(low: f64, high: f64, x: f64) -> f64 {
     let t = ((x - low) / (high - low)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -237,6 +261,7 @@ pub struct GalaxyModel {
     pub halo_core_pc: f64,
     /// Vertical axis of the halo relative to its radial ones.
     pub halo_flattening: f64,
+    pub dust: Dust,
 }
 
 impl Default for GalaxyModel {
@@ -288,6 +313,15 @@ impl GalaxyModel {
             spiral,
             halo_core_pc: 2_500.0,
             halo_flattening: 0.7,
+            dust: Dust {
+                midplane_mag_per_pc: 1.6e-3,
+                scale_length_pc: 3_000.0,
+                scale_height_pc: 100.0,
+                hole_pc: [2_000.0, 4_000.0],
+                arm_strength: 0.5,
+                centre_mag_per_pc: 0.07,
+                centre_pc: [150.0, 25.0],
+            },
         }
     }
 
@@ -362,6 +396,24 @@ impl GalaxyModel {
                 stars / total / (squared + c * c).powi(2)
             }
         }
+    }
+
+    /// Visual extinction per parsec, in magnitudes.
+    pub fn dust(&self, p: [f64; 3]) -> f64 {
+        let [x, y, z] = p;
+        let radius = x.hypot(z);
+        if radius > self.radius_pc {
+            return 0.0;
+        }
+        let d = &self.dust;
+        let disc = d.midplane_mag_per_pc
+            * ((self.spiral.reference_pc - radius) / d.scale_length_pc).exp()
+            * (-y.abs() / d.scale_height_pc).exp()
+            * smoothstep(d.hole_pc[0], d.hole_pc[1], radius)
+            * self.spiral.modulation(d.arm_strength, x, z);
+        let [across, high] = d.centre_pc;
+        let centre = d.centre_mag_per_pc * (-radius / across - y.abs() / high).exp();
+        disc + centre
     }
 
     /// Stars per cubic parsec.
@@ -457,6 +509,23 @@ mod tests {
                 "{component:?}: {stars:e} of {wanted:e}"
             );
         }
+    }
+
+    /// Visual extinction between two points, in magnitudes.
+    fn extinction(galaxy: &GalaxyModel, from: [f64; 3], to: [f64; 3]) -> f64 {
+        let steps = 200_000;
+        let length = (0..3)
+            .map(|i| (to[i] - from[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        (0..steps)
+            .map(|i| {
+                let t = (i as f64 + 0.5) / steps as f64;
+                galaxy.dust(std::array::from_fn(|a| from[a] + t * (to[a] - from[a])))
+            })
+            .sum::<f64>()
+            * length
+            / steps as f64
     }
 
     /// Stars per square parsec through the disc at a point in the plane.
@@ -597,5 +666,36 @@ mod tests {
         // Sgr A*: about 0.085 AU across its event horizon.
         let horizon = galaxy.black_hole_radius_metres() / crate::AU_METRES;
         assert!((horizon - 0.085).abs() < 0.005, "{horizon}");
+    }
+
+    #[test]
+    fn dust_dims_the_plane_and_hides_the_centre() {
+        let galaxy = GalaxyModel::milky_way();
+        let home = galaxy.home_pc;
+        let towards = |dx: f64, dy: f64, dz: f64| {
+            extinction(&galaxy, home, [home[0] + dx, home[1] + dy, home[2] + dz])
+        };
+        // Observed: about 0.1 mag out of the disc, 0.7 to 1 mag per kpc in
+        // the local plane, about 30 mag to the centre, a few to the anticentre.
+        let pole = towards(0.0, 5_000.0, 0.0);
+        assert!((0.03..0.15).contains(&pole), "{pole}");
+        let local = galaxy.dust(home) * 1_000.0;
+        assert!((0.4..1.2).contains(&local), "{local}");
+        let centre = extinction(&galaxy, home, [0.0; 3]);
+        assert!((20.0..40.0).contains(&centre), "{centre}");
+        let anticentre = towards(40_000.0, 0.0, 0.0);
+        assert!((1.0..5.0).contains(&anticentre), "{anticentre}");
+        // Arms are dustier than the gaps between them, and the bar has swept
+        // the inner disc, outside the central molecular zone.
+        let spiral = &galaxy.spiral;
+        let crest =
+            |r: f64| (r / spiral.reference_pc).ln() / spiral.pitch_rad.tan() + spiral.phase_rad;
+        let gap = PI / f64::from(spiral.arms);
+        let at = |angle: f64, r: f64| galaxy.dust([r * angle.cos(), 0.0, r * angle.sin()]);
+        let r = 10_000.0;
+        assert!(at(crest(r), r) > 2.0 * at(crest(r) + gap, r));
+        assert!(at(0.0, 1_000.0) < 0.1 * at(0.0, 5_000.0));
+        assert!(galaxy.dust([0.0; 3]) > 3.0 * at(0.0, 5_000.0));
+        assert_eq!(galaxy.dust([60_000.0, 0.0, 0.0]), 0.0);
     }
 }

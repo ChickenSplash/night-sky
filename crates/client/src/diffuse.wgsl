@@ -3,7 +3,10 @@
 #import bevy_pbr::{
     mesh_functions,
     forward_io::Vertex,
-    view_transformations::position_world_to_clip,
+    view_transformations::{
+        direction_view_to_world, frag_coord_to_ndc, position_ndc_to_view,
+        position_world_to_clip,
+    },
 }
 
 struct Glow {
@@ -15,7 +18,6 @@ struct Glow {
 
 struct Output {
     @builtin(position) position: vec4<f32>,
-    @location(0) direction: vec3<f32>,
 }
 
 @vertex
@@ -24,13 +26,16 @@ fn vertex(v: Vertex) -> Output {
     let world = mesh_functions::mesh_position_local_to_world(
         mesh_functions::get_world_from_local(v.instance_index), vec4(v.position, 1.0));
     out.position = position_world_to_clip(world.xyz);
-    out.direction = v.position;
     return out;
 }
 
 @fragment
 fn fragment(in: Output) -> @location(0) vec4<f32> {
-    let dir = normalize(in.direction);
+    // Each pixel's own view ray, from the camera, never interpolated across
+    // the sphere's triangles. The sphere is never rotated, so world axes are
+    // galactic axes.
+    let ndc = frag_coord_to_ndc(in.position).xy;
+    let dir = normalize(direction_view_to_world(position_ndc_to_view(vec3(ndc, 1.0))));
     var light = vec3(0.0);
     // Geometric intervals resolve nearby disc crossings, while still reaching
     // the far side of the galaxy. Each sample represents a path length in pc.
