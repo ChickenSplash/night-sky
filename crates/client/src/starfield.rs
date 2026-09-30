@@ -238,6 +238,7 @@ fn sync(
     mut materials: ResMut<Assets<StarMaterial>>,
     mut precise: ResMut<Precise>,
     (mut sky, time): (ResMut<Sky>, Res<Time>),
+    debug: Res<crate::diffuse::GlowDiagnostics>,
     universe: Res<Universe>,
     nav: Res<Navigation>,
     lights: Res<Lights>,
@@ -275,7 +276,11 @@ fn sync(
         gain,
         pixel * pixel,
     );
-    let dimming = sky_dimming(&nav, &lights) * sky.exposure;
+    let dimming = if debug.hide_points {
+        0.0
+    } else {
+        sky_dimming(&nav, &lights) * sky.exposure
+    };
     // Within its body range the visited star is drawn as a body, so the batches
     // hide its point there, and it has no sprite.
     let body = nav.system(&universe.0).and_then(|system| {

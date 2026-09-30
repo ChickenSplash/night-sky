@@ -169,11 +169,61 @@ struct SkySphere {
     material: Handle<Glow>,
 }
 
+/// Temporary layer diagnostic, controlled without moving the camera. G cycles
+/// the diffuse layer; H toggles point stars. This intentionally changes no
+/// population, dust parameters or simulation state.
+#[derive(Resource, Default)]
+pub(crate) struct GlowDiagnostics {
+    pub mode: u32,
+    pub hide_points: bool,
+}
+
+impl GlowDiagnostics {
+    pub fn caption(&self, stream: &str) -> String {
+        if self.mode == 0 && !self.hide_points {
+            return stream.to_owned();
+        }
+        let glow = [
+            "NORMAL / 64 STEPS",
+            "HIDDEN",
+            "NO DUST",
+            "DUST COLUMN",
+            "32 STEPS",
+            "128 STEPS",
+            "ADAPTIVE (TEST)",
+        ][self.mode as usize];
+        let points = if self.hide_points {
+            "HIDDEN"
+        } else {
+            "VISIBLE"
+        };
+        format!("{stream}\nDEBUG GLOW {glow} / POINTS {points}  ·  G: NEXT  H: TOGGLE POINTS")
+    }
+}
+
+fn diagnostic_keys(keys: Res<ButtonInput<KeyCode>>, mut debug: ResMut<GlowDiagnostics>) {
+    if keys.just_pressed(KeyCode::KeyG) {
+        debug.mode = (debug.mode + 1) % 7;
+        let mode = debug.mode;
+        info!(
+            "Glow diagnostic mode {} (0 normal, 1 hidden, 2 no dust, 3 dust column, 4 32 steps, 5 128 steps, 6 adaptive)",
+            mode
+        );
+    }
+    if keys.just_pressed(KeyCode::KeyH) {
+        debug.hide_points = !debug.hide_points;
+        let hidden = debug.hide_points;
+        info!("Point stars hidden: {}", hidden);
+    }
+}
+
 pub struct DiffusePlugin;
 impl Plugin for DiffusePlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(app, SHADER, "diffuse.wgsl", Shader::from_wgsl);
         app.add_plugins(MaterialPlugin::<Glow>::default())
+            .init_resource::<GlowDiagnostics>()
+            .add_systems(Update, diagnostic_keys)
             .add_systems(
                 PostUpdate,
                 sync.after(crate::scene::draw)
@@ -189,6 +239,7 @@ fn sync(
     nav: Res<Navigation>,
     lights: Res<Lights>,
     sky_light: Option<Res<crate::sky::Sky>>,
+    debug: Res<GlowDiagnostics>,
     mut model: Local<Option<(GalaxyModel, Glow)>>,
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
@@ -229,6 +280,7 @@ fn sync(
         let mut glow = template.clone();
         glow.eye = eye_far;
         glow.extent.z = gain;
+        glow.extent.w = debug.mode as f32;
         let material = materials.add(glow);
         let mesh = meshes.add(Sphere::new(1.0).mesh().uv(64, 32));
         commands
@@ -270,13 +322,13 @@ fn sync(
         return;
     }
     let sky = sphere.as_mut().expect("sphere exists");
-    if materials
-        .get(&sky.material)
-        .is_some_and(|glow| glow.eye != eye_far || glow.extent.z != gain)
-        && let Some(glow) = materials.get_mut(&sky.material)
+    if materials.get(&sky.material).is_some_and(|glow| {
+        glow.eye != eye_far || glow.extent.z != gain || glow.extent.w != debug.mode as f32
+    }) && let Some(glow) = materials.get_mut(&sky.material)
     {
         glow.eye = eye_far;
         glow.extent.z = gain;
+        glow.extent.w = debug.mode as f32;
     }
     if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
         placement.get_mut(sky.entity)
