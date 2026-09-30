@@ -68,6 +68,7 @@ pub enum Display {
     Labels,
     Markers,
     VelocityMarker,
+    PointDust,
     Realistic,
     Physical,
     Wireframe,
@@ -138,6 +139,7 @@ pub fn apply(
                 Display::Labels => nav.labels = *on,
                 Display::Markers => nav.markers = *on,
                 Display::VelocityMarker => nav.velocity_marker = *on,
+                Display::PointDust => nav.point_dust = *on,
                 Display::Realistic => nav.realistic = *on,
                 Display::Physical => nav.physical = *on,
                 Display::Wireframe => nav.wireframe = *on,
@@ -226,6 +228,27 @@ mod tests {
             }],
         );
         assert!(nav(&app).velocity_marker);
+    }
+
+    #[test]
+    fn star_point_dust_can_be_toggled_independently() {
+        let mut app = run(
+            space_simulation::demo_galaxy(),
+            vec![UiCommand::SetDisplay {
+                option: Display::PointDust,
+                on: false,
+            }],
+        );
+        assert!(!nav(&app).point_dust);
+        assert!(!nav(&app).realistic);
+        send(
+            &mut app,
+            vec![UiCommand::SetDisplay {
+                option: Display::PointDust,
+                on: true,
+            }],
+        );
+        assert!(nav(&app).point_dust);
     }
 
     #[test]

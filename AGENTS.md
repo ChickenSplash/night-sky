@@ -206,6 +206,10 @@
   `SKY_BACKGROUND`. It stays on the CPU. Point
   batches bake their dust column into vertex transmissions and metered flux at
   upload, refreshed after up to 10 pc of camera travel (1 pc near the core).
+  The settings' **Dust on star points** toggle bypasses transmission in the
+  point shader and swaps each batch's metered sky share between dusted and
+  clear, so already-loaded stars update without remeshing. CPU columns are
+  still prepared for instant comparisons at the same camera position.
 - Star points use `GalaxyModel::dust_column` for RGB extinction before point
   brightness compression. `black_hole.rs` draws an opaque sphere at the
   central black hole's physical Schwarzschild radius; it is not visible from

@@ -157,6 +157,12 @@ try {
   await page.waitForFunction(() => window.seen.state.display.velocity_marker === false);
   await marker.click();
   await page.waitForFunction(() => window.seen.state.display.velocity_marker === true);
+  const dust = page.locator('#settings .toggle', { hasText: 'Dust on star points' });
+  assert.equal((await seen('state')).display.point_dust, true);
+  await dust.click();
+  await page.waitForFunction(() => window.seen.state.display.point_dust === false);
+  await dust.click();
+  await page.waitForFunction(() => window.seen.state.display.point_dust === true);
   await shot('settings');
   await page.mouse.click(900, 450);
   assert.equal(await page.locator('#settings').isHidden(), true, 'Clicking the view did not close settings');

@@ -71,6 +71,8 @@ pub struct Navigation {
     /// Rings marking bodies too small to see. Hover and selection rings stay.
     pub markers: bool,
     pub velocity_marker: bool,
+    /// Apply the galaxy's dust extinction to individual star points.
+    pub point_dust: bool,
     /// Lit and glowing bodies in HDR under the wireframes.
     pub realistic: bool,
     /// One linear exposure for the frame instead of the assisted, readable one.
@@ -104,6 +106,7 @@ impl Default for Navigation {
             orbits: true,
             markers: true,
             velocity_marker: true,
+            point_dust: true,
             realistic: false,
             physical: true,
             wireframe: true,

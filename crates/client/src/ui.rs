@@ -315,6 +315,16 @@ impl Panels<'_> {
         );
         ui.add_space(8.0);
         heading(ui, "RENDERING");
+        let mut point_dust = nav.point_dust;
+        if ui
+            .checkbox(&mut point_dust, "Dust on star points")
+            .changed()
+        {
+            self.out.push(UiCommand::SetDisplay {
+                option: Display::PointDust,
+                on: point_dust,
+            });
+        }
         let mut realistic = nav.realistic;
         if ui.checkbox(&mut realistic, "Realistic lighting").changed() {
             self.out.push(UiCommand::SetDisplay {
@@ -335,7 +345,7 @@ impl Panels<'_> {
         }
         ui.label(
             egui::RichText::new(
-                "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.",
+                "Dust on star points dims and reddens individual galactic stars, independently of realistic lighting. Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.",
             )
             .size(11.0)
             .color(MUTED),

@@ -12,7 +12,7 @@ const RATES = [
 const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'constellation']];
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers'], ['velocity_marker', 'Velocity marker']];
 // Physical exposure and wireframes apply only to realistic rendering.
-const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
+const RENDERING = [['point_dust', 'Dust on star points'], ['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
 const HELP = [['Click', 'Select a star, again to visit'], ['C', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Left drag', 'Look around'], ['Right drag', 'Orbit'], ['Shift + left drag', 'Field of view'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Roll left / right'], ['R / F', 'Up / down'],
   ['Shift + scroll', 'Adjust movement speed'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 // Vertical field of view range in degrees, as `FOV_DEG` in Rust.
@@ -334,7 +334,7 @@ export function mount(bridge, canvas) {
     heading('Display'), ...DISPLAY.map(toggle), fov,
     el('p', { className: 'muted small', textContent: 'Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.' }),
     heading('Rendering'), ...RENDERING.map(toggle),
-    el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
+    el('p', { className: 'muted small', textContent: 'Dust on star points dims and reddens individual galactic stars, independently of realistic lighting. Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
     heading('Controls'),
     el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])),
     heading('Benchmark'), benchmarkButton,

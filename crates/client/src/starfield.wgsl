@@ -13,7 +13,7 @@ struct Settings { values: vec4<f32> }
 // x: batch points closer than this times their offset from the mesh origin are
 // hidden. This is smaller than the precise sprite's visibility radius, so both
 // overlap during the handoff (`starfield.rs`). y: body range in parsecs.
-// Both zero for sprites.
+// x and y are zero for sprites; z: dust extinction on when nonzero.
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> near: vec4<f32>;
 const PI: f32 = 3.14159265;
 // A point's footprint radius and Gaussian sigma, in physical pixels.
@@ -65,7 +65,7 @@ fn vertex(v: Vertex) -> Output {
     // SDR target.
     let light = settings.values.z * ratio * settings.values.w;
     let tint = v.colour.rgb;
-    let attenuated = tint * v.transmission;
+    let attenuated = select(tint, tint * v.transmission, near.z > 0.5);
     let weights = vec3(0.2126, 0.7152, 0.0722);
     let attenuation = dot(attenuated, weights) / max(dot(tint, weights), 1e-20);
     // Dust acts before compression. Without dust, this is exactly the old

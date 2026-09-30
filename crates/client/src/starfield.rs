@@ -57,8 +57,8 @@ struct StarMaterial {
     /// parsec, display light per luminosity per squared parsec, and dimming.
     #[uniform(0)]
     settings: Vec4,
-    /// For batches, `PRECISE` and the visited star's body range in parsecs:
-    /// points that close are drawn alone, or as the body. Zero for precise sprites.
+    /// For batches, `PRECISE` and the visited star's body range in parsecs;
+    /// z toggles the already-uploaded dust transmission for both kinds of point.
     #[uniform(1)]
     near: Vec4,
 }
@@ -95,7 +95,8 @@ impl Material for StarMaterial {
 struct Batch {
     entity: Entity,
     mesh: Handle<Mesh>,
-    sky: sky::Share,
+    sky_dust: sky::Share,
+    sky_clear: sky::Share,
 }
 
 #[derive(Resource, Default)]
@@ -104,6 +105,7 @@ struct Batches {
     queued: VecDeque<(Cell, usize)>,
     built_at: HashMap<Cell, DVec3>,
     material: Option<Handle<StarMaterial>>,
+    dust_on: bool,
 }
 
 /// A star that may come close enough to need a precise sprite.
@@ -171,13 +173,18 @@ fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
 /// The same star at any distance has a stable vertex position within its cell;
 /// camera and zoom move its mesh, not a million individual vertices. Also
 /// returns the visible stars' share of the sky map, as seen from `eye`.
-fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky::Share) {
+fn mesh(
+    points: &[StarPoint],
+    centre: [f64; 3],
+    eye: DVec3,
+) -> (Mesh, usize, sky::Share, sky::Share) {
     let mut positions = Vec::with_capacity(points.len() * 3);
     let mut corners = Vec::with_capacity(points.len() * 3);
     let mut colours = Vec::with_capacity(points.len() * 3);
     let mut transmissions = Vec::with_capacity(points.len() * 3);
     let mut visible = 0;
-    let mut seen = Vec::new();
+    let mut seen_dust = Vec::new();
+    let mut seen_clear = Vec::new();
     let limit = reach_sq_per_luminosity(crate::stream::MAGNITUDE);
     let reach = MARGIN * MARGIN * limit;
     static GALAXY: OnceLock<GalaxyModel> = OnceLock::new();
@@ -204,10 +211,9 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
                 + colour.blue * transmission[2] * 0.0722)
                 / (colour.red * 0.2126 + colour.green * 0.7152 + colour.blue * 0.0722)
                     .max(f32::MIN_POSITIVE);
-            seen.push((
-                offset,
-                luminosity / squared.max(1e-16) * f64::from(attenuated),
-            ));
+            let flux = luminosity / squared.max(1e-16);
+            seen_dust.push((offset, flux * f64::from(attenuated)));
+            seen_clear.push((offset, flux));
         }
         let tint = [colour.red, colour.green, colour.blue, star.luminosity_solar];
         for corner in [[-1.0, -1.0], [3.0, -1.0], [-1.0, 3.0]] {
@@ -225,7 +231,12 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, corners);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, transmissions);
-    (mesh, visible, sky::share(seen.into_iter()))
+    (
+        mesh,
+        visible,
+        sky::share(seen_dust.into_iter()),
+        sky::share(seen_clear.into_iter()),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -261,6 +272,29 @@ fn sync(
     let pc_per_unit = pose.render_scale() / PC_METRES;
     let scale = pc_per_unit as f32;
     let gain = sky::POINT_LIGHT * flux_per_luminosity();
+    // Both sky shares are baked at upload. Swap them and the shader uniform in
+    // this frame, without waiting for a million stars to be remeshed.
+    if batches.dust_on != nav.point_dust {
+        for uploaded in batches.active.values().flatten() {
+            sky.add(
+                if batches.dust_on {
+                    &uploaded.sky_dust
+                } else {
+                    &uploaded.sky_clear
+                },
+                -1.0,
+            );
+            sky.add(
+                if nav.point_dust {
+                    &uploaded.sky_dust
+                } else {
+                    &uploaded.sky_clear
+                },
+                1.0,
+            );
+        }
+        batches.dust_on = nav.point_dust;
+    }
     let size = view
         .physical_viewport_size()
         .unwrap_or(UVec2::ONE)
@@ -291,7 +325,7 @@ fn sync(
                 gain as f32,
                 dimming,
             ),
-            near: Vec4::new(precise, 0.0, 0.0, 0.0),
+            near: Vec4::new(precise, 0.0, f32::from(u8::from(nav.point_dust)), 0.0),
         })
     };
     let material = batches
@@ -303,14 +337,17 @@ fn sync(
         .get_or_insert_with(|| star_material(0.0))
         .clone();
     for (handle, hide) in [(&material, body_pc as f32), (&precise_material, 0.0)] {
-        if materials
-            .get(handle)
-            .is_some_and(|m| m.settings.x != scale || m.settings.w != dimming || m.near.y != hide)
-            && let Some(m) = materials.get_mut(handle)
+        if materials.get(handle).is_some_and(|m| {
+            m.settings.x != scale
+                || m.settings.w != dimming
+                || m.near.y != hide
+                || m.near.z != f32::from(u8::from(nav.point_dust))
+        }) && let Some(m) = materials.get_mut(handle)
         {
             m.settings.x = scale;
             m.settings.w = dimming;
             m.near.y = hide;
+            m.near.z = f32::from(u8::from(nav.point_dust));
         }
     }
     let origin = rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
@@ -322,7 +359,14 @@ fn sync(
         batches.built_at.remove(&dropped);
         if let Some(old) = batches.active.remove(&dropped) {
             for batch in old {
-                sky.add(&batch.sky, -1.0);
+                sky.add(
+                    if batches.dust_on {
+                        &batch.sky_dust
+                    } else {
+                        &batch.sky_clear
+                    },
+                    -1.0,
+                );
                 commands.entity(batch.entity).despawn();
                 meshes.remove(&batch.mesh);
             }
@@ -365,14 +409,21 @@ fn sync(
         if offset == 0 {
             if let Some(old) = batches.active.remove(&owner) {
                 for batch in old {
-                    sky.add(&batch.sky, -1.0);
+                    sky.add(
+                        if batches.dust_on {
+                            &batch.sky_dust
+                        } else {
+                            &batch.sky_clear
+                        },
+                        -1.0,
+                    );
                     commands.entity(batch.entity).despawn();
                     meshes.remove(&batch.mesh);
                 }
             }
             batches.built_at.insert(owner, eye);
         }
-        let (geometry, visible, share) = mesh(&stars[offset..end], centre, eye);
+        let (geometry, visible, sky_dust, sky_clear) = mesh(&stars[offset..end], centre, eye);
         metrics.built_batches += 1;
         if offset == 0
             && let Some(at) = metrics.loaded_at.remove(&owner)
@@ -397,11 +448,19 @@ fn sync(
                     ChildOf(parent.parent()),
                 ))
                 .id();
-            sky.add(&share, 1.0);
+            sky.add(
+                if batches.dust_on {
+                    &sky_dust
+                } else {
+                    &sky_clear
+                },
+                1.0,
+            );
             batches.active.entry(owner).or_default().push(Batch {
                 entity,
                 mesh: handle,
-                sky: share,
+                sky_dust,
+                sky_clear,
             });
         }
         if end < stars.len() {
@@ -459,7 +518,8 @@ fn sync(
             if distance < BATCH_HIDE * candidate.offset_pc {
                 unready_precise = true;
             }
-            let (geometry, visible, _) = mesh(&[candidate.star], candidate.star.position_pc, eye);
+            let (geometry, visible, _, _) =
+                mesh(&[candidate.star], candidate.star.position_pc, eye);
             if visible > 0 {
                 let handle = meshes.add(geometry);
                 let entity = commands
@@ -537,7 +597,8 @@ mod tests {
             component: space_simulation::galaxy::Component::ThinDisc,
             index: 0,
         };
-        let (geometry, count, share) = mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye);
+        let (geometry, count, share, clear) =
+            mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 1);
         assert_eq!(geometry.count_vertices(), 3);
         // The visible star, in the direction it is seen from the eye.
@@ -545,10 +606,15 @@ mod tests {
         assert_eq!(usize::from(share[0].0), sky::bin(DVec3::X));
         assert!((share[0].1[0] - 0.01).abs() < 1e-4);
         assert_eq!(share[0].1[1], 1.0);
-        let (geometry, count, share) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
+        assert!(
+            share[0].1[0] < clear[0].1[0],
+            "dust should dim the metered sky too"
+        );
+        let (geometry, count, share, clear) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 0);
         assert_eq!(geometry.count_vertices(), 0);
         assert!(share.is_empty());
+        assert!(clear.is_empty());
     }
 
     /// Repeats the GPU's f32 placement of a batched point: its f32 offset
