@@ -272,8 +272,8 @@ impl Exposure {
 }
 
 /// The galaxy shares the physical camera's stop-down near a star disc. The
-/// point and diffuse shaders use display-relative units, but must not remain
-/// bright while the local star drives the physical exposure down.
+/// point shader uses display-relative units, but must not remain bright while
+/// the local star drives the physical exposure down.
 pub fn sky_dimming(nav: &Navigation, lights: &Lights) -> f32 {
     if !nav.realistic || !nav.physical {
         return 1.0;

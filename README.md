@@ -207,8 +207,7 @@ is available it retains its last data, initially the clearly labelled demo.
   (about a million stars near home, most visible first) on a worker thread
   natively and in a 4 ms slice of each frame in the browser, and drops cells
   left behind. Batched point meshes show stars actually bright enough to see,
-  in both the wireframe and realistic views. A faint approximate glow traces
-  unresolved disc and spiral-arm light; the central black hole is modelled at
+  in both the wireframe and realistic views. The central black hole is modelled at
   its physical horizon radius. There is no dust or gravitational lensing yet.
 
 - **One galaxy (Phase 6):** lists and generated stars share one view. Scroll

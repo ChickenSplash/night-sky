@@ -189,21 +189,19 @@
   show): batches hide points that close and its sprite waits hidden. Beyond, it
   is a galactic point under the same magnitude limit. Galactic points use
   apparent flux; `sky_dimming` also stops their display brightness down with
-  the close-star physical exposure (as it does the glow). Every point is a
+  the close-star physical exposure. Every point is a
   0.55 px sigma Gaussian (2 px footprint), as in a perfect camera: brightness
   shows only in its peak, linear up to a knee and logarithmic above it, never
-  in its size. Crowds are never widened or blurred; smooth light belongs to
-  the diffuse glow.
+  in its size. Crowds are never widened or blurred.
 - `sky.rs` keeps an octahedral map (64², galactic axes) of visible stars'
   flux and count per steradian, built from each batch's share at mesh time
   and removed with it; stars count at most magnitude -1, so one bright star
   is never a bright sky. It meters the galactic exposure (`Sky::exposure`,
-  easing over about 0.5 s) so the sky in view shows at `SKY_BACKGROUND`, for
-  the points and the diffuse glow alike. It stays on the CPU.
-- `diffuse.rs` adds an approximate, faint ray-integrated disc and spiral-arm
-  glow behind the points, with no dust or extinction. The central black hole
-  is an opaque sphere at its physical Schwarzschild radius; it is not visible
-  from home. No accretion disc or lensing yet.
+  easing over about 0.5 s) so the sky in view shows at `SKY_BACKGROUND` for
+  the points. It stays on the CPU.
+- `black_hole.rs` draws an opaque sphere at the central black hole's physical
+  Schwarzschild radius; it is not visible from home. No accretion disc or
+  lensing yet. There is no diffuse glow shader.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own.
   `Navigation::visit` is the visited system: `Visit::List` (a list index, at
@@ -287,7 +285,7 @@
 - No N-body simulation, moons, workspace discovery or OAuth.
 - Galaxy travel and visits to generated systems work, but dust, lensing,
   rotation and mapping ClickUp lists onto galactic stars are not implemented.
-  The glow is approximate, not a radiative transfer simulation.
+  There is no diffuse galaxy glow.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.
