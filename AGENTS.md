@@ -122,7 +122,7 @@
   100 pc thick disc following the arms, cleared inside the bar, plus the
   central molecular zone. It is calibrated (tested) to about 0.1 mag to the
   pole, 0.7 mag/kpc locally and 30 mag to the centre. It currently dims and
-  reddens the diffuse glow and individual star points.
+  reddens individual star points.
 - Every profile has a closed-form integral, so components hold exactly their
   share of `stars` (2e11). Spiral modulation averages to one around every
   circle; keep it that way, or the totals drift. The test integrates the
@@ -194,32 +194,22 @@
   show): batches hide points that close and its sprite waits hidden. Beyond, it
   is a galactic point under the same magnitude limit. Galactic points use
   apparent flux; `sky_dimming` also stops their display brightness down with
-  the close-star physical exposure (as it does the glow). Every point is a
+  the close-star physical exposure. Every point is a
   0.55 px sigma Gaussian (2 px footprint), as in a perfect camera: brightness
   shows only in its peak, linear up to a knee and logarithmic above it, never
-  in its size. Crowds are never widened or blurred; smooth light belongs to
-  the diffuse glow.
+  in its size. Crowds are never widened or blurred.
 - `sky.rs` keeps an octahedral map (64², galactic axes) of visible stars'
   flux and count per steradian, built from each batch's share at mesh time
   and removed with it; stars count at most magnitude -1, so one bright star
   is never a bright sky. It meters the galactic exposure (`Sky::exposure`,
   easing over about 0.5 s) from streamed points only, targeting
-  `SKY_BACKGROUND`. Points and diffuse glow share its multiplier, but the
-  diffuse light is not included in the meter yet. It stays on the CPU. Point
+  `SKY_BACKGROUND`. It stays on the CPU. Point
   batches bake their dust column into vertex transmissions and metered flux at
   upload, refreshed after up to 10 pc of camera travel (1 pc near the core).
-- `population::unresolved_light(component, magnitude)` samples the same
-  tiered star distribution as the stream into a distance table: only stars
-  below the streamed magnitude limit contribute their luminosity and colour
-  to the glow. `diffuse.rs` passes the table and galaxy/dust parameters to
-  `diffuse.wgsl`. Each fragment builds its view ray from the camera, then
-  integrates model component densities through the galaxy and dust's RGB
-  extinction along it. Thin disc heights are averaged across each ray step;
-  nucleus light is integrated analytically. The background is not scattered
-  light. Star points use `GalaxyModel::dust_column` with the same RGB law;
-  attenuation happens before point brightness compression. The central
-  black hole is an opaque sphere at its physical Schwarzschild radius; it is
-  not visible from home. No accretion disc or lensing yet.
+- Star points use `GalaxyModel::dust_column` for RGB extinction before point
+  brightness compression. `black_hole.rs` draws an opaque sphere at the
+  central black hole's physical Schwarzschild radius; it is not visible from
+  home. No diffuse glow, accretion disc or lensing yet.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own.
   `Navigation::visit` is the visited system: `Visit::List` (a list index, at
@@ -303,8 +293,7 @@
 - No N-body simulation, moons, workspace discovery or OAuth.
 - Galaxy travel and visits to generated systems work, but scattered light,
   lensing, rotation and mapping ClickUp lists onto galactic stars are not
-  implemented. The glow uses approximate ray integration, not a full
-  radiative transfer simulation.
+  implemented. There is no diffuse galaxy glow.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.

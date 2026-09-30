@@ -18,7 +18,6 @@ fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(MUTED).strong());
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn draw_ui(
     interaction: (Commands, EguiContexts, MessageWriter<UiCommand>),
     universe: Res<Universe>,
@@ -36,7 +35,6 @@ pub fn draw_ui(
         Res<crate::stream::Starfield>,
         Res<crate::stream::StreamMetrics>,
     ),
-    debug: Res<crate::diffuse::GlowDiagnostics>,
     mut styled: Local<bool>,
 ) {
     let (mut commands, mut contexts, mut writer) = interaction;
@@ -122,7 +120,7 @@ pub fn draw_ui(
         &starfield,
         &exposure_caption(&nav, &lights),
         &velocity,
-        &debug.caption(&metrics.caption),
+        &metrics.caption,
         insets.0.is_none(),
         &mut out,
     );

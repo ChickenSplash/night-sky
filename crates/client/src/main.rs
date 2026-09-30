@@ -1,9 +1,9 @@
 mod actions;
 #[cfg(target_arch = "wasm32")]
 mod benchmark;
+mod black_hole;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
-mod diffuse;
 mod flight;
 mod galaxy_nav;
 mod network;
@@ -243,7 +243,7 @@ fn main() {
         render::RenderPlugin,
         stream::StreamPlugin,
         starfield::StarfieldRenderPlugin,
-        diffuse::DiffusePlugin,
+        black_hole::BlackHolePlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {

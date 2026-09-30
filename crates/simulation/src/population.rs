@@ -412,79 +412,10 @@ pub fn tiered_star(id: &str, component: Component, tier: usize) -> Star {
     tiered_formation(id, component, tier).star
 }
 
-/// Distances of the unresolved-light table: four per decade from 0.1 pc.
-pub const GLOW_DISTANCES: usize = 28;
-
-/// Distance at an unresolved-light table entry, in parsecs.
-pub fn glow_distance_pc(index: usize) -> f64 {
-    10f64.powf(index as f64 / 4.0 - 1.0)
-}
-
-/// Linear RGB of an 8-bit sRGB colour, as the point shader sees it.
-fn linear([r, g, b]: [u8; 3]) -> [f64; 3] {
-    [r, g, b].map(|c| {
-        let c = f64::from(c) / 255.0;
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    })
-}
-
-/// Light per star of a component (solar luminosities times linear colour)
-/// too faint to be streamed as a point at each tabulated distance. Sample
-/// each brightness tier with the same generator and tier shares as the star
-/// stream, then count only stars below the exact magnitude cutoff. The
-/// samples are deterministic and reused at every distance.
-pub fn unresolved_light(component: Component, magnitude: f64) -> [[f64; 3]; GLOW_DISTANCES] {
-    const SAMPLES: usize = 256;
-    let shares = tier_shares(component);
-    let reach = reach_sq_per_luminosity(magnitude);
-    let mut table = [[0.0; 3]; GLOW_DISTANCES];
-    for (tier, share) in shares.into_iter().enumerate().filter(|&(_, s)| s > 0.0) {
-        for i in 0..SAMPLES {
-            let star = tiered_star(&format!("glow:{i}"), component, tier);
-            let rgb = linear(star::spectral_colour(star.temperature_k));
-            for (k, row) in table.iter_mut().enumerate() {
-                if star.luminosity_solar * reach >= glow_distance_pc(k).powi(2) {
-                    continue;
-                }
-                for (channel, colour) in row.iter_mut().zip(rgb) {
-                    *channel += share / SAMPLES as f64 * star.luminosity_solar * colour;
-                }
-            }
-        }
-    }
-    table
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::galactic_star;
-
-    #[test]
-    fn distant_stars_are_all_glow_and_near_ones_are_points() {
-        for component in Component::ALL {
-            let light = unresolved_light(component, VISIBLE_MAGNITUDE);
-            let sum = |k: usize| light[k].iter().sum::<f64>();
-            assert!((1..GLOW_DISTANCES).all(|k| sum(k) >= sum(k - 1)));
-            // Beyond a few hundred kiloparsecs nothing is a point.
-            let total = sum(GLOW_DISTANCES - 1);
-            assert!(total > 0.0, "{component:?}");
-            // Within a parsec every star but the faintest is a point.
-            assert!(sum(4) < 1e-3 * total, "{component:?}");
-            // Raising the point magnitude limit can only remove light from
-            // the unresolved glow, even in components with bright giants.
-            let deeper = unresolved_light(component, VISIBLE_MAGNITUDE + 2.0);
-            for (at, deeper) in light.iter().zip(deeper) {
-                for (a, b) in at.iter().zip(deeper) {
-                    assert!(b <= *a + 1e-10, "{component:?}: {b} > {a}");
-                }
-            }
-        }
-    }
 
     #[test]
     fn tiers_are_bands_four_times_apart() {

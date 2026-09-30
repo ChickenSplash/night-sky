@@ -415,7 +415,7 @@ impl GalaxyModel {
     /// Visual extinction between two points in parsecs. The vertical dust
     /// profile is integrated across each segment, including plane crossings;
     /// its radial and arm variation is sampled at the segment's midplane
-    /// crossing (or midpoint). This uses the same slabs as `diffuse.wgsl`.
+    /// crossing (or midpoint). Star points use this column for reddening.
     pub fn dust_column(&self, eye: [f64; 3], star: [f64; 3]) -> f64 {
         const STEPS: usize = 64;
         let delta = std::array::from_fn::<_, 3, _>(|i| star[i] - eye[i]);

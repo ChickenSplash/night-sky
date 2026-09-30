@@ -191,7 +191,7 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
         }
         visible += 1;
         let column = galaxy.dust_column(eye.to_array(), star.position_pc);
-        // Match the glow's V-band to RGB extinction law. Keep the colour and
+        // Convert the dust column from V-band to RGB extinction. Keep the colour and
         // visibility cutoff separate: dust removes light, not a star's ID.
         let transmission = [0.75, 1.0, 1.32].map(|ratio| 10f64.powf(-0.4 * ratio * column) as f32);
         let pos: [f32; 3] =
@@ -238,7 +238,6 @@ fn sync(
     mut materials: ResMut<Assets<StarMaterial>>,
     mut precise: ResMut<Precise>,
     (mut sky, time): (ResMut<Sky>, Res<Time>),
-    debug: Res<crate::diffuse::GlowDiagnostics>,
     universe: Res<Universe>,
     nav: Res<Navigation>,
     lights: Res<Lights>,
@@ -276,11 +275,7 @@ fn sync(
         gain,
         pixel * pixel,
     );
-    let dimming = if debug.hide_points {
-        0.0
-    } else {
-        sky_dimming(&nav, &lights) * sky.exposure
-    };
+    let dimming = sky_dimming(&nav, &lights) * sky.exposure;
     // Within its body range the visited star is drawn as a body, so the batches
     // hide its point there, and it has no sprite.
     let body = nav.system(&universe.0).and_then(|system| {
