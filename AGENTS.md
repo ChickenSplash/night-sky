@@ -206,6 +206,9 @@
   `SKY_BACKGROUND`. It stays on the CPU. Point
   batches bake their dust column into vertex transmissions and metered flux at
   upload, refreshed after up to 10 pc of camera travel (1 pc near the core).
+  Refreshes stage all replacement chunks while old meshes and their sky share
+  remain visible, then swap the complete cell after its new meshes have spent
+  their hidden first frame; never retire the old cell at the first chunk.
   The settings' **Dust on star points** toggle bypasses transmission in the
   point shader and swaps each batch's metered sky share between dusted and
   clear, so already-loaded stars update without remeshing. CPU columns are

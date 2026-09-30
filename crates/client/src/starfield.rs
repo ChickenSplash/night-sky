@@ -99,9 +99,18 @@ struct Batch {
     sky_clear: sky::Share,
 }
 
+/// Build a cell's replacement while its old batches remain visible. Newly
+/// spawned mesh entities spend their first (hidden) frame here.
+struct Pending {
+    batches: Vec<Batch>,
+    built_at: DVec3,
+    complete: bool,
+}
+
 #[derive(Resource, Default)]
 struct Batches {
     active: HashMap<Cell, Vec<Batch>>,
+    pending: HashMap<Cell, Pending>,
     queued: VecDeque<(Cell, usize)>,
     built_at: HashMap<Cell, DVec3>,
     material: Option<Handle<StarMaterial>>,
@@ -357,6 +366,12 @@ fn sync(
     for dropped in field.removed.drain(..) {
         metrics.loaded_at.remove(&dropped);
         batches.built_at.remove(&dropped);
+        if let Some(pending) = batches.pending.remove(&dropped) {
+            for batch in pending.batches {
+                commands.entity(batch.entity).despawn();
+                meshes.remove(&batch.mesh);
+            }
+        }
         if let Some(old) = batches.active.remove(&dropped) {
             for batch in old {
                 sky.add(
@@ -374,9 +389,56 @@ fn sync(
         batches.queued.retain(|(cell, _)| *cell != dropped);
     }
     for added in field.added.drain(..) {
-        if !batches.queued.iter().any(|(cell, _)| *cell == added) {
-            batches.queued.push_back((added, 0));
+        // A replacement snapshot invalidates an in-progress rebuild, but the
+        // current active meshes stay visible until the new snapshot is ready.
+        if let Some(pending) = batches.pending.remove(&added) {
+            for batch in pending.batches {
+                commands.entity(batch.entity).despawn();
+                meshes.remove(&batch.mesh);
+            }
         }
+        batches.queued.retain(|(cell, _)| *cell != added);
+        batches.queued.push_back((added, 0));
+    }
+    // Promote only complete replacements built in an earlier frame. The last
+    // chunk has then passed its hidden first frame; the old cell cannot blink
+    // out while a multi-chunk upload is still in progress.
+    let ready: Vec<Cell> = batches
+        .pending
+        .iter()
+        .filter_map(|(&owner, pending)| pending.complete.then_some(owner))
+        .collect();
+    for owner in ready {
+        let pending = batches
+            .pending
+            .remove(&owner)
+            .expect("ready rebuild exists");
+        if let Some(old) = batches.active.remove(&owner) {
+            for batch in old {
+                sky.add(
+                    if batches.dust_on {
+                        &batch.sky_dust
+                    } else {
+                        &batch.sky_clear
+                    },
+                    -1.0,
+                );
+                commands.entity(batch.entity).despawn();
+                meshes.remove(&batch.mesh);
+            }
+        }
+        for batch in &pending.batches {
+            sky.add(
+                if batches.dust_on {
+                    &batch.sky_dust
+                } else {
+                    &batch.sky_clear
+                },
+                1.0,
+            );
+        }
+        batches.built_at.insert(owner, pending.built_at);
+        batches.active.insert(owner, pending.batches);
     }
     let moved: Vec<Cell> = batches
         .built_at
@@ -402,26 +464,31 @@ fn sync(
             continue;
         };
         if offset >= stars.len() {
+            if offset == 0 {
+                // An empty replacement must still retire the old cell, but
+                // only at the same promotion boundary as a non-empty one.
+                batches.pending.insert(
+                    owner,
+                    Pending {
+                        batches: Vec::new(),
+                        built_at: eye,
+                        complete: true,
+                    },
+                );
+            }
             continue;
         }
         let end = (offset + BATCH).min(stars.len());
         let centre = owner.centre_pc();
         if offset == 0 {
-            if let Some(old) = batches.active.remove(&owner) {
-                for batch in old {
-                    sky.add(
-                        if batches.dust_on {
-                            &batch.sky_dust
-                        } else {
-                            &batch.sky_clear
-                        },
-                        -1.0,
-                    );
-                    commands.entity(batch.entity).despawn();
-                    meshes.remove(&batch.mesh);
-                }
-            }
-            batches.built_at.insert(owner, eye);
+            batches.pending.insert(
+                owner,
+                Pending {
+                    batches: Vec::new(),
+                    built_at: eye,
+                    complete: false,
+                },
+            );
         }
         let (geometry, visible, sky_dust, sky_clear) = mesh(&stars[offset..end], centre, eye);
         metrics.built_batches += 1;
@@ -448,23 +515,26 @@ fn sync(
                     ChildOf(parent.parent()),
                 ))
                 .id();
-            sky.add(
-                if batches.dust_on {
-                    &sky_dust
-                } else {
-                    &sky_clear
-                },
-                1.0,
-            );
-            batches.active.entry(owner).or_default().push(Batch {
-                entity,
-                mesh: handle,
-                sky_dust,
-                sky_clear,
-            });
+            batches
+                .pending
+                .get_mut(&owner)
+                .expect("rebuild started")
+                .batches
+                .push(Batch {
+                    entity,
+                    mesh: handle,
+                    sky_dust,
+                    sky_clear,
+                });
         }
         if end < stars.len() {
             batches.queued.push_front((owner, end));
+        } else {
+            batches
+                .pending
+                .get_mut(&owner)
+                .expect("rebuild started")
+                .complete = true;
         }
         if start.elapsed() >= UPLOAD_BUDGET {
             break;
