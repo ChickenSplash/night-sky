@@ -4,8 +4,10 @@ services:
     image: task-space:local
     container_name: task-space
     restart: unless-stopped
+    # Not bound to 192.168.1.90: at boot Docker starts before DHCP assigns it,
+    # the bind fails and the restart policy never retries.
     ports:
-      - "192.168.1.90:4321:4321"
+      - "4321:4321"
     env_file:
       - path: .env
         required: false
