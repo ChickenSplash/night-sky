@@ -12,7 +12,7 @@ const RATES = [
 const VIEWS = [['Orbit', 'orbit'], ['Task table', 'table'], ['Constellation', 'constellation']];
 const DISPLAY = [['exaggerate', 'Readable planet sizes'], ['orbits', 'Orbital paths'], ['labels', 'Planet labels'], ['markers', 'Body markers'], ['velocity_marker', 'Velocity marker']];
 // Physical exposure and wireframes apply only to realistic rendering.
-const RENDERING = [['realistic', 'Realistic lighting'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
+const RENDERING = [['realistic', 'Realistic lighting'], ['galaxy_glow', 'Smooth galaxy glow (prototype)'], ['physical', 'Physical exposure'], ['wireframe', 'Wireframes over bodies']];
 const HELP = [['Click', 'Select a star, again to visit'], ['C', 'Select the centre star'], ['Enter', 'Visit the selected star'], ['Left drag', 'Look around'], ['Right drag', 'Orbit'], ['Shift + left drag', 'Field of view'], ['Scroll', 'Zoom'], ['W A S D', 'Move'], ['Q / E', 'Roll left / right'], ['R / F', 'Up / down'],
   ['Shift + scroll', 'Adjust movement speed'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 // Vertical field of view range in degrees, as `FOV_DEG` in Rust.
@@ -334,7 +334,13 @@ export function mount(bridge, canvas) {
     heading('Display'), ...DISPLAY.map(toggle), fov,
     el('p', { className: 'muted small', textContent: 'Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.' }),
     heading('Rendering'), ...RENDERING.map(toggle),
-    el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
+    el('div', { className: 'galaxy-reference' }, ...[['inside', 'Inside'], ['face_on', 'Face-on'], ['edge_on', 'Edge-on']].map(([view, label]) => {
+      const button = el('button', { type: 'button', textContent: label, ariaLabel: `Galaxy reference: ${label}` });
+      button.addEventListener('click', () => send({ type: 'galaxy_reference', view }));
+      return button;
+    })),
+    el('p', { className: 'muted small', textContent: 'Reference views for the smooth galaxy prototype. No dust or spiral detail yet.' }),
+    el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable.' }),
     heading('Controls'),
     el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])),
     heading('Benchmark'), benchmarkButton,
@@ -593,7 +599,7 @@ export function mount(bridge, canvas) {
     renderModal();
     for (const input of settings.querySelectorAll('.toggle input')) {
       input.checked = !!state.display?.[input.dataset.option];
-      input.disabled = ['physical', 'wireframe'].includes(input.dataset.option) && !state.display?.realistic;
+      input.disabled = ['galaxy_glow', 'physical', 'wireframe'].includes(input.dataset.option) && !state.display?.realistic;
     }
     // Leave a value being typed alone until it is committed.
     const degrees = Math.round(state.fov_deg ?? 50);

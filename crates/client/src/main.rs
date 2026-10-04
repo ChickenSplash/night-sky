@@ -6,6 +6,7 @@ mod black_hole;
 mod diagnostics;
 mod flight;
 mod galaxy_nav;
+mod glow;
 mod network;
 mod render;
 mod scene;
@@ -73,6 +74,7 @@ pub struct Navigation {
     pub velocity_marker: bool,
     /// Lit and glowing bodies in HDR under the wireframes.
     pub realistic: bool,
+    pub galaxy_glow: bool,
     /// One linear exposure for the frame instead of the assisted, readable one.
     pub physical: bool,
     /// Wireframes over the realistic bodies. Always drawn otherwise.
@@ -104,7 +106,8 @@ impl Default for Navigation {
             orbits: true,
             markers: true,
             velocity_marker: true,
-            realistic: false,
+            realistic: true,
+            galaxy_glow: true,
             physical: true,
             wireframe: true,
             search: String::new(),
@@ -243,6 +246,7 @@ fn main() {
         render::RenderPlugin,
         stream::StreamPlugin,
         starfield::StarfieldRenderPlugin,
+        glow::GlowPlugin,
         black_hole::BlackHolePlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))

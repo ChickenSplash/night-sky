@@ -50,6 +50,10 @@ pub enum UiCommand {
     SetFov {
         degrees: f32,
     },
+    /// Repeatable views for evaluating the smooth galaxy prototype.
+    GalaxyReference {
+        view: GalaxyReference,
+    },
     /// Space the HTML panels cover at each edge of the canvas, in CSS pixels. The 3D
     /// view fits the rest, and the egui panels are not drawn.
     Panels {
@@ -69,8 +73,51 @@ pub enum Display {
     Markers,
     VelocityMarker,
     Realistic,
+    GalaxyGlow,
     Physical,
     Wireframe,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GalaxyReference {
+    Inside,
+    FaceOn,
+    EdgeOn,
+}
+
+fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
+    use bevy::math::DVec3;
+    use space_simulation::galaxy::{GalaxyModel, PC_METRES};
+    let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+    let eye = match view {
+        GalaxyReference::Inside => home,
+        GalaxyReference::FaceOn => DVec3::new(0.0, 38000.0, 0.0),
+        GalaxyReference::EdgeOn => DVec3::new(0.0, 0.0, 38000.0),
+    };
+    let up = if view == GalaxyReference::FaceOn {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    nav.visit = None;
+    nav.page = 0;
+    nav.selected = None;
+    nav.picked = None;
+    nav.following = false;
+    nav.view = View::Orbit;
+    // Keep the normal zoom range even for an external reference eye. Otherwise
+    // the first wheel event clamps 124,000 ly to 40,000 ly and jumps inward.
+    nav.distance = (eye.length() * PC_METRES).min(40_000.0 * space_simulation::LY_METRES);
+    nav.target = (eye - home) * PC_METRES - eye.normalize() * nav.distance;
+    nav.rotation = Transform::default()
+        .looking_to((-eye).as_vec3(), up)
+        .rotation;
+    nav.eye = Some((eye - home) * PC_METRES);
+    nav.set_fov(50.0);
+    nav.realistic = true;
+    nav.fly = true;
+    nav.notice = "Smooth galaxy prototype: no dust or spiral detail yet".into();
 }
 
 /// Set once HTML panels have taken over from egui: top, right, bottom, left.
@@ -139,10 +186,12 @@ pub fn apply(
                 Display::Markers => nav.markers = *on,
                 Display::VelocityMarker => nav.velocity_marker = *on,
                 Display::Realistic => nav.realistic = *on,
+                Display::GalaxyGlow => nav.galaxy_glow = *on,
                 Display::Physical => nav.physical = *on,
                 Display::Wireframe => nav.wireframe = *on,
             },
             UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
+            UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
             UiCommand::Panels {
                 top,
                 right,
@@ -409,6 +458,12 @@ mod tests {
     fn browser_json_parses_into_commands() {
         let parse = |json| serde_json::from_str::<UiCommand>(json).unwrap();
         assert_eq!(
+            parse(r#"{"type":"galaxy_reference","view":"face_on"}"#),
+            UiCommand::GalaxyReference {
+                view: GalaxyReference::FaceOn
+            }
+        );
+        assert_eq!(
             parse(r#"{"type":"set_view","view":"constellation"}"#),
             UiCommand::SetView {
                 view: View::Constellation
@@ -431,5 +486,28 @@ mod tests {
                 id: "g1.2.3".into()
             }
         );
+    }
+
+    #[test]
+    fn reference_views_face_the_centre_and_clear_system_selection() {
+        use space_simulation::galaxy::{GalaxyModel, PC_METRES};
+        let home = bevy::math::DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        for view in [
+            GalaxyReference::Inside,
+            GalaxyReference::FaceOn,
+            GalaxyReference::EdgeOn,
+        ] {
+            let mut nav = Navigation {
+                visit: Some(crate::Visit::List(0)),
+                selected: Some(0),
+                ..default()
+            };
+            galaxy_reference(&mut nav, view);
+            let eye = nav.eye.unwrap() / PC_METRES + home;
+            let direction = (nav.rotation * Vec3::NEG_Z).as_dvec3();
+            assert!(direction.dot(-eye.normalize()) > 0.999999);
+            assert!(nav.visit.is_none() && nav.selected.is_none());
+            assert!(nav.realistic && nav.fly);
+        }
     }
 }

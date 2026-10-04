@@ -109,6 +109,8 @@
   background: var(--control); border: 1px solid var(--line);
 }
 #settings .benchmark-button { padding: 10px; border-radius: 10px; background: var(--control); text-align: left; }
+#settings .galaxy-reference { display: flex; gap: 6px; margin-top: 8px; }
+#settings .galaxy-reference button { flex: 1; padding: 8px; border-radius: 10px; background: var(--control); }
 
 #task-modal {
   position: absolute; inset: 0; pointer-events: auto; z-index: 5;

@@ -3,9 +3,9 @@
 
 use crate::{
     Navigation, Universe,
-    render::{Lights, sky_dimming},
+    render::Photometry,
     scene::{CameraPose, CameraRig, SpaceCamera},
-    sky::{self, Sky},
+    sky::{Sky, radiance_gain},
     stream::{Starfield, StreamMetrics},
 };
 use bevy::{
@@ -16,7 +16,7 @@ use bevy::{
     pbr::{Material, MaterialPipeline, MaterialPipelineKey, MeshMaterial3d},
     prelude::*,
     render::render_resource::{
-        AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+        AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
     },
     shader::ShaderRef,
 };
@@ -24,7 +24,8 @@ use big_space::prelude::*;
 use space_simulation::{
     cells::Cell,
     galaxy::PC_METRES,
-    population::{flux_per_luminosity, reach_pc, reach_sq_per_luminosity},
+    light::visual_efficiency,
+    population::{reach_pc, reach_sq_per_luminosity},
     stream::{StarPoint, gap_pc},
 };
 use std::{
@@ -49,17 +50,44 @@ const BATCH_HIDE: f64 = PRECISE * 0.25;
 const PREPARE: f64 = 2.0;
 /// Camera travel, in parsecs, before precise candidates are gathered again.
 const RESCAN_PC: f64 = 0.1;
+/// Realistic colours, log-spaced in temperature from 1,000 to 50,000 K.
+const PALETTE: usize = 32;
+
+/// Each temperature's colour with unit luminance, then its visual efficiency:
+/// light per bolometric luminosity, as the eye and the exposure see it.
+#[derive(Clone, ShaderType)]
+struct Palette {
+    colours: [Vec4; PALETTE],
+}
+
+impl Palette {
+    fn new(physical: bool) -> Self {
+        let photometry = Photometry::default();
+        Self {
+            colours: std::array::from_fn(|i| {
+                let kelvin = 1000.0 * 50f64.powf(i as f64 / (PALETTE - 1) as f64);
+                let colour = photometry.colour(kelvin, physical);
+                let efficiency = visual_efficiency(kelvin);
+                let [r, g, b] = colour.map(|c| c as f32);
+                Vec4::new(r, g, b, efficiency as f32)
+            }),
+        }
+    }
+}
 
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 struct StarMaterial {
     /// Parsecs per render unit, faintest visible luminosity per squared
-    /// parsec, display light per luminosity per squared parsec, and dimming.
+    /// parsec, display light per luminosity per squared parsec, and one for
+    /// realistic colours and visual brightness from `palette`.
     #[uniform(0)]
     settings: Vec4,
     /// For batches, `PRECISE` and the visited star's body range in parsecs:
     /// points that close are drawn alone, or as the body. Zero for precise sprites.
     #[uniform(1)]
     near: Vec4,
+    #[uniform(2)]
+    palette: Palette,
 }
 
 impl Material for StarMaterial {
@@ -89,11 +117,10 @@ impl Material for StarMaterial {
     }
 }
 
-/// One uploaded batch and its share of the sky map.
+/// One uploaded batch.
 struct Batch {
     entity: Entity,
     mesh: Handle<Mesh>,
-    sky: sky::Share,
 }
 
 #[derive(Resource, Default)]
@@ -102,6 +129,8 @@ struct Batches {
     queued: VecDeque<(Cell, usize)>,
     built_at: HashMap<Cell, DVec3>,
     material: Option<Handle<StarMaterial>>,
+    /// Whether the palette is the physical one.
+    physical: bool,
 }
 
 /// A star that may come close enough to need a precise sprite.
@@ -130,10 +159,9 @@ impl Plugin for StarfieldRenderPlugin {
         app.add_plugins(MaterialPlugin::<StarMaterial>::default())
             .init_resource::<Batches>()
             .init_resource::<Precise>()
-            .init_resource::<Sky>()
             .add_systems(
                 PostUpdate,
-                sync.after(crate::scene::draw)
+                sync.after(crate::sky::expose)
                     .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
             );
     }
@@ -167,16 +195,13 @@ fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
 }
 
 /// The same star at any distance has a stable vertex position within its cell;
-/// camera and zoom move its mesh, not a million individual vertices. Also
-/// returns the visible stars' share of the sky map, as seen from `eye`.
-fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky::Share) {
+/// camera and zoom move its mesh, not a million individual vertices.
+fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize) {
     let mut positions = Vec::with_capacity(points.len() * 3);
     let mut corners = Vec::with_capacity(points.len() * 3);
     let mut colours = Vec::with_capacity(points.len() * 3);
     let mut visible = 0;
-    let mut seen = Vec::new();
-    let limit = reach_sq_per_luminosity(crate::stream::MAGNITUDE);
-    let reach = MARGIN * MARGIN * limit;
+    let reach = MARGIN * MARGIN * reach_sq_per_luminosity(crate::stream::MAGNITUDE);
     for star in points {
         let offset = DVec3::from_array(star.position_pc) - eye;
         let luminosity = f64::from(star.luminosity_solar);
@@ -185,17 +210,16 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
             continue;
         }
         visible += 1;
-        if squared <= luminosity * limit {
-            seen.push((offset, luminosity / squared.max(1e-16)));
-        }
         let pos: [f32; 3] =
             std::array::from_fn(|axis| (star.position_pc[axis] - centre[axis]) as f32);
         let rgb = space_simulation::spectral_colour(f64::from(star.temperature_k));
         let colour = Color::srgb_u8(rgb[0], rgb[1], rgb[2]).to_linear();
         let tint = [colour.red, colour.green, colour.blue, star.luminosity_solar];
-        for corner in [[-1.0, -1.0], [3.0, -1.0], [-1.0, 3.0]] {
+        // The shader places each corner by its index, which shares the
+        // attribute with the temperature for realistic colours.
+        for corner in 0..3 {
             positions.push(pos);
-            corners.push(corner);
+            corners.push([corner as f32, star.temperature_k]);
             colours.push(tint);
         }
     }
@@ -206,7 +230,7 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize, sky
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, corners);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
-    (mesh, visible, sky::share(seen.into_iter()))
+    (mesh, visible)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -218,10 +242,9 @@ fn sync(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StarMaterial>>,
     mut precise: ResMut<Precise>,
-    (mut sky, time): (ResMut<Sky>, Res<Time>),
+    sky: Res<Sky>,
     universe: Res<Universe>,
     nav: Res<Navigation>,
-    lights: Res<Lights>,
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
     camera: Query<(&CellCoord, &ChildOf, &GlobalTransform, &Camera), With<SpaceCamera>>,
@@ -241,22 +264,23 @@ fn sync(
     };
     let pc_per_unit = pose.render_scale() / PC_METRES;
     let scale = pc_per_unit as f32;
-    let gain = sky::POINT_LIGHT * flux_per_luminosity();
     let size = view
         .physical_viewport_size()
         .unwrap_or(UVec2::ONE)
         .max(UVec2::ONE);
-    let tan_half = nav.tan_half_fov();
-    let pixel = 2.0 * tan_half / f64::from(size.y);
-    sky.update(
-        time.delta_secs_f64(),
-        camera_transform.forward().as_dvec3(),
-        tan_half,
-        f64::from(size.x) / f64::from(size.y),
-        gain,
-        pixel * pixel,
-    );
-    let dimming = sky_dimming(&nav, &lights) * sky.exposure;
+    let pixel = 2.0 * nav.tan_half_fov() / f64::from(size.y);
+    let pixel_sr = pixel * pixel;
+    // A point's light over its pixels: radiance gain over a pixel's solid angle.
+    let gain = (radiance_gain(&nav, &sky, pixel_sr) / pixel_sr) as f32;
+    let realistic = if nav.realistic { 1.0 } else { 0.0 };
+    if batches.physical != nav.physical {
+        batches.physical = nav.physical;
+        for handle in batches.material.iter().chain(&precise.material) {
+            if let Some(m) = materials.get_mut(handle) {
+                m.palette = Palette::new(nav.physical);
+            }
+        }
+    }
     // Within its body range the visited star is drawn as a body, so the batches
     // hide its point there, and it has no sprite.
     let body = nav.system(&universe.0).and_then(|system| {
@@ -269,10 +293,11 @@ fn sync(
             settings: Vec4::new(
                 scale,
                 (1.0 / reach_sq_per_luminosity(crate::stream::MAGNITUDE)) as f32,
-                gain as f32,
-                dimming,
+                gain,
+                realistic,
             ),
             near: Vec4::new(precise, 0.0, 0.0, 0.0),
+            palette: Palette::new(nav.physical),
         })
     };
     let material = batches
@@ -284,13 +309,16 @@ fn sync(
         .get_or_insert_with(|| star_material(0.0))
         .clone();
     for (handle, hide) in [(&material, body_pc as f32), (&precise_material, 0.0)] {
-        if materials
-            .get(handle)
-            .is_some_and(|m| m.settings.x != scale || m.settings.w != dimming || m.near.y != hide)
-            && let Some(m) = materials.get_mut(handle)
+        if materials.get(handle).is_some_and(|m| {
+            m.settings.x != scale
+                || m.settings.z != gain
+                || m.settings.w != realistic
+                || m.near.y != hide
+        }) && let Some(m) = materials.get_mut(handle)
         {
             m.settings.x = scale;
-            m.settings.w = dimming;
+            m.settings.z = gain;
+            m.settings.w = realistic;
             m.near.y = hide;
         }
     }
@@ -303,7 +331,6 @@ fn sync(
         batches.built_at.remove(&dropped);
         if let Some(old) = batches.active.remove(&dropped) {
             for batch in old {
-                sky.add(&batch.sky, -1.0);
                 commands.entity(batch.entity).despawn();
                 meshes.remove(&batch.mesh);
             }
@@ -341,14 +368,13 @@ fn sync(
         if offset == 0 {
             if let Some(old) = batches.active.remove(&owner) {
                 for batch in old {
-                    sky.add(&batch.sky, -1.0);
                     commands.entity(batch.entity).despawn();
                     meshes.remove(&batch.mesh);
                 }
             }
             batches.built_at.insert(owner, eye);
         }
-        let (geometry, visible, share) = mesh(&stars[offset..end], centre, eye);
+        let (geometry, visible) = mesh(&stars[offset..end], centre, eye);
         metrics.built_batches += 1;
         if offset == 0
             && let Some(at) = metrics.loaded_at.remove(&owner)
@@ -373,11 +399,9 @@ fn sync(
                     ChildOf(parent.parent()),
                 ))
                 .id();
-            sky.add(&share, 1.0);
             batches.active.entry(owner).or_default().push(Batch {
                 entity,
                 mesh: handle,
-                sky: share,
             });
         }
         if end < stars.len() {
@@ -435,7 +459,7 @@ fn sync(
             if distance < BATCH_HIDE * candidate.offset_pc {
                 unready_precise = true;
             }
-            let (geometry, visible, _) = mesh(&[candidate.star], candidate.star.position_pc, eye);
+            let (geometry, visible) = mesh(&[candidate.star], candidate.star.position_pc, eye);
             if visible > 0 {
                 let handle = meshes.add(geometry);
                 let entity = commands
@@ -513,17 +537,12 @@ mod tests {
             component: space_simulation::galaxy::Component::ThinDisc,
             index: 0,
         };
-        let (geometry, count, share) = mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye);
+        let (geometry, count) = mesh(&[point(10.0), point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 1);
         assert_eq!(geometry.count_vertices(), 3);
-        // The visible star, in the direction it is seen from the eye.
-        assert_eq!(share.len(), 1);
-        assert_eq!(usize::from(share[0].0), sky::bin(DVec3::X));
-        assert_eq!(share[0].1, [0.01, 1.0]);
-        let (geometry, count, share) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
+        let (geometry, count) = mesh(&[point(100.0)], [8200.0, 0.0, 0.0], eye);
         assert_eq!(count, 0);
         assert_eq!(geometry.count_vertices(), 0);
-        assert!(share.is_empty());
     }
 
     /// Repeats the GPU's f32 placement of a batched point: its f32 offset
