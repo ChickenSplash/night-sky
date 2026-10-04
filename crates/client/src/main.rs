@@ -7,6 +7,10 @@ mod diagnostics;
 mod flight;
 mod galaxy_nav;
 mod glow;
+#[cfg(all(target_os = "linux", feature = "gtk-ui"))]
+mod gtk_host;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_panel;
 mod network;
 mod render;
 mod scene;
@@ -16,9 +20,8 @@ mod smoke;
 mod starfield;
 mod stream;
 mod ui;
+mod ui_bridge;
 mod views;
-#[cfg(target_arch = "wasm32")]
-mod web_bridge;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -193,6 +196,16 @@ const CONNECTED: &str = "Local API connected · read-only";
 struct Inbox(Mutex<mpsc::Receiver<network::Update>>);
 
 fn main() {
+    let gtk_requested = std::env::args().any(|arg| arg == "--gtk-html-ui");
+    #[cfg(not(all(target_os = "linux", feature = "gtk-ui")))]
+    if gtk_requested {
+        eprintln!("The GTK/Wayland prototype requires Linux and --features gtk-ui");
+        std::process::exit(2);
+    }
+    if gtk_requested && std::env::args().any(|arg| arg == "--native-html-ui") {
+        eprintln!("Choose --gtk-html-ui or --native-html-ui, not both");
+        std::process::exit(2);
+    }
     #[cfg(not(target_arch = "wasm32"))]
     diagnostics::install_crash_reports();
     let smoke_test = std::env::args().any(|arg| arg == "--smoke-test");
@@ -210,37 +223,49 @@ fn main() {
         initial_nav.move_speed = initial_nav.distance * 0.35;
     }
     let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins
-            .set(bevy::log::LogPlugin {
+    #[cfg(all(target_os = "linux", feature = "gtk-ui"))]
+    let gtk_host = gtk_requested
+        .then(|| gtk_host::GtkHost::new(&mut app).expect("Cannot create GTK/Wayland host"));
+    #[allow(unused_mut)]
+    let mut plugins = DefaultPlugins
+        .set(bevy::log::LogPlugin {
+            #[cfg(not(target_arch = "wasm32"))]
+            custom_layer: diagnostics::file_layer,
+            ..default()
+        })
+        .set(WindowPlugin {
+            primary_window: (!gtk_requested).then_some(Window {
+                title: "Night Sky".into(),
+                resolution: (1440, 900).into(),
                 #[cfg(not(target_arch = "wasm32"))]
-                custom_layer: diagnostics::file_layer,
+                mode: if smoke_test {
+                    bevy::window::WindowMode::BorderlessFullscreen(
+                        bevy::window::MonitorSelection::Current,
+                    )
+                } else {
+                    bevy::window::WindowMode::Windowed
+                },
+                #[cfg(target_arch = "wasm32")]
+                canvas: Some("#space-canvas".into()),
+                #[cfg(target_arch = "wasm32")]
+                fit_canvas_to_parent: true,
+                #[cfg(target_arch = "wasm32")]
+                prevent_default_event_handling: true,
                 ..default()
-            })
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Night Sky".into(),
-                    resolution: (1440, 900).into(),
-                    #[cfg(not(target_arch = "wasm32"))]
-                    mode: if smoke_test {
-                        bevy::window::WindowMode::BorderlessFullscreen(
-                            bevy::window::MonitorSelection::Current,
-                        )
-                    } else {
-                        bevy::window::WindowMode::Windowed
-                    },
-                    #[cfg(target_arch = "wasm32")]
-                    canvas: Some("#space-canvas".into()),
-                    #[cfg(target_arch = "wasm32")]
-                    fit_canvas_to_parent: true,
-                    #[cfg(target_arch = "wasm32")]
-                    prevent_default_event_handling: true,
-                    ..default()
-                }),
-                ..default()
-            })
-            .build()
-            .disable::<TransformPlugin>(),
+            }),
+            ..default()
+        })
+        .build()
+        .disable::<TransformPlugin>();
+    #[cfg(all(target_os = "linux", feature = "gtk-ui"))]
+    if gtk_requested {
+        plugins = plugins
+            .disable::<bevy::winit::WinitPlugin>()
+            // Keep GTK lifetime and GPU presentation on the host thread in this prototype.
+            .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>();
+    }
+    app.add_plugins((
+        plugins,
         BigSpaceDefaultPlugins,
         EguiPlugin::default(),
         render::RenderPlugin,
@@ -293,7 +318,21 @@ fn main() {
         app.insert_resource(benchmark::BenchmarkFlight::default());
     }
     #[cfg(target_arch = "wasm32")]
-    web_bridge::install(&mut app);
+    ui_bridge::install(&mut app);
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::args().any(|arg| arg == "--native-html-ui") {
+        native_panel::install(&mut app).expect("Cannot start the native HTML panel prototype");
+        ui_bridge::install(&mut app);
+        // The companion window covers none of the native viewport. Keep only
+        // egui's canvas overlays, not its duplicate panels.
+        app.insert_resource(actions::PanelInsets(Some([0.0; 4])));
+    }
+    #[cfg(all(target_os = "linux", feature = "gtk-ui"))]
+    if let Some(host) = gtk_host {
+        app.insert_resource(actions::PanelInsets(Some([0.0; 4])));
+        ui_bridge::install(&mut app);
+        host.install(&mut app);
+    }
     app.run();
 }
 

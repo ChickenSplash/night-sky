@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Night Sky HTML UI prototype</title>
+  <link rel="stylesheet" href="ui/panels.css">
+  <style>
+    body { margin: 0; background: #070f1f; color: #d6e4f4; font-family: sans-serif; }
+    #space-canvas { position: fixed; inset: 0; outline: none; }
+    .benchmark-button { display: none; }
+  </style>
+</head>
+<body>
+  <div id="space-canvas" tabindex="0"></div>
+  <div id="hud"></div>
+  <script type="module">
+    import { createBridge } from './ui/bridge.js';
+    import { mount } from './ui/panels.js';
+    const bridge = createBridge();
+    const sidebar = new URLSearchParams(location.search).get('layout') === 'sidebar';
+    if (sidebar) {
+      document.body.dataset.uiLayout = 'sidebar';
+    }
+    window.spaceBridge = bridge;
+    const canvas = document.querySelector('#space-canvas');
+    // Panels call focus() when Esc returns to the view. Only the host adapter
+    // differs: the actual native viewport is a GTK widget, not a DOM canvas.
+    mount(bridge, sidebar ? {
+      focus: () => window.webkit.messageHandlers.native.postMessage('focus_viewport'),
+    } : canvas);
+    bridge.connect(json => window.webkit.messageHandlers.native.postMessage(json));
+    window.webkit.messageHandlers.native.postMessage('ready');
+    if (window.nativeSmoke) {
+      import('./ui/native-panel-smoke.js').then(module => module.run(bridge));
+    }
+  </script>
+</body>
+</html>

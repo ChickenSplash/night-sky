@@ -1,6 +1,6 @@
-//! Browser bridge for the HTML panels. JavaScript sends `UiCommand`s as JSON
-//! through `send_command`, and Rust reports back with window events whose detail is
-//! a JSON string:
+//! Shared state publisher for the HTML panels. Browser JavaScript sends JSON
+//! `UiCommand`s through `send_command`; the native companion uses stdio instead.
+//! Both deliver window events whose detail is a JSON string:
 //! - `space:galaxy` when list data arrives,
 //! - `space:state` when navigation or the clock settings change,
 //! - `space:tick` about ten times a second, for fast-moving readouts.
@@ -11,17 +11,21 @@ use crate::{Clock, Navigation, Universe};
 use bevy::prelude::*;
 use serde::Serialize;
 use space_simulation::period_seconds;
+#[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 const TICK_SECONDS: f64 = 0.1;
 
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     static QUEUE: RefCell<Vec<UiCommand>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Queues a command for the next frame. Called from JavaScript between frames.
 #[wasm_bindgen]
+#[cfg(target_arch = "wasm32")]
 pub fn send_command(json: &str) -> Result<(), JsError> {
     let command: UiCommand = serde_json::from_str(json)?;
     QUEUE.with_borrow_mut(|queue| queue.push(command));
@@ -33,10 +37,20 @@ pub fn install(app: &mut App) {
         .add_systems(Last, (publish_galaxy, publish_state, publish_tick));
 }
 
+#[cfg(target_arch = "wasm32")]
 fn receive(mut writer: MessageWriter<UiCommand>) {
     QUEUE.with_borrow_mut(|queue| {
         writer.write_batch(queue.drain(..));
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource)]
+pub struct NativeCommands(pub std::sync::Mutex<std::sync::mpsc::Receiver<UiCommand>>);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn receive(queue: Res<NativeCommands>, mut writer: MessageWriter<UiCommand>) {
+    writer.write_batch(queue.0.lock().unwrap().try_iter());
 }
 
 fn emit(name: &str, detail: &impl Serialize) {
@@ -45,6 +59,7 @@ fn emit(name: &str, detail: &impl Serialize) {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 fn dispatch(name: &str, json: &str) {
     let Some(window) = web_sys::window() else {
         return;
@@ -54,6 +69,11 @@ fn dispatch(name: &str, json: &str) {
     if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict(name, &init) {
         let _ = window.dispatch_event(&event);
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dispatch(name: &str, json: &str) {
+    crate::native_panel::publish(name, json);
 }
 
 #[derive(Serialize)]
@@ -292,6 +312,8 @@ struct Tick {
     benchmark_seconds: Option<f64>,
 }
 
+// Independent Bevy resources supplying the shared UI telemetry.
+#[allow(clippy::too_many_arguments)]
 fn publish_tick(
     time: Res<Time>,
     clock: Res<Clock>,
@@ -302,7 +324,7 @@ fn publish_tick(
     velocity: Res<crate::scene::CameraVelocity>,
     metrics: Res<crate::stream::StreamMetrics>,
     starfield: Res<crate::stream::Starfield>,
-    benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
+    #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     mut next: Local<f64>,
 ) {
     let now = time.elapsed_secs_f64();
@@ -324,7 +346,10 @@ fn publish_tick(
             stream_cells: starfield.cells.len(),
             stream_pending: starfield.pending,
             mesh_queue: metrics.mesh_queue,
+            #[cfg(target_arch = "wasm32")]
             benchmark_seconds: benchmark.map(|flight| flight.elapsed),
+            #[cfg(not(target_arch = "wasm32"))]
+            benchmark_seconds: None,
         },
     );
 }

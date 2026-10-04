@@ -18,6 +18,24 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 ## Development
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
+- Single-window Linux/Wayland experiment: `cargo run -p space-client --features
+  gtk-ui -- --gtk-html-ui`. `gtk_host.rs` owns a GTK/WebKit sidebar and a native
+  GDK subsurface for Bevy's GPU swapchain. No frame readback or WASM simulation.
+  Winit and pipelined rendering are disabled only in this mode. Drop the Bevy
+  app before destroying GDK/GTK surfaces; handle lifetimes rely on this order.
+  HTML uses the same panel sources and Rust state publisher as the browser.
+  `SPACE_NATIVE_PANEL_SMOKE=1` writes `data/logs/gtk-panel-smoke.json` and
+  `gtk-host-smoke.json`, testing GTK allocation resizing, synthetic widget input and
+  normal shutdown without global input injection. This mode closes its window.
+  Feature-specific tests and strict Clippy must also run with `--features gtk-ui`.
+  Transparent overlays, full egui removal and other OS hosts remain unimplemented.
+- Opt-in native HTML UI prototype: `cargo run -p space-client -- --native-html-ui`.
+  A separate GTK/WebKit companion window loads the unchanged browser panels,
+  with commands/state over stdio to native Bevy. `ui_bridge.rs` publishes on
+  both targets; `native_panel.rs` and `scripts/native-html-panel.py` supply the
+  native transport. No same-window embedding yet; egui canvas overlays remain.
+  `SPACE_NATIVE_PANEL_SMOKE=1` tests live control/state round-trips and saves
+  `data/logs/native-panel-smoke.json`. No network command listener is opened.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
 - `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up in both exposures).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
@@ -26,12 +44,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - The native **Save bug report** control captures state, recent client log lines and
   a screenshot under `data/logs/bug-*` for visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
-- The browser is the main target; native is a dev fallback. The browser UI is
-  HTML/CSS panels (`web/ui/`); `?ui=egui` shows the egui panels instead. Native
-  keeps egui. When HTML panels are active, egui draws only canvas markers, labels
+- The application is Linux-first, with a browser client alongside native.
+  Shared HTML/CSS panels live in `web/ui/`; the GTK native host is opt-in while
+  migration is prototyped. Default native still keeps egui; browser `?ui=egui`
+  shows its egui panels instead. When HTML panels are active, egui draws only canvas markers, labels
   and clicks; the HTML shows captions, readouts and the loading state.
   Every panel action is an ID-based `UiCommand` (`actions.rs`), shared by egui and
-  `web_bridge.rs`; Rust reports back with `space:galaxy`/`space:state`/`space:tick`
+  `ui_bridge.rs`; Rust reports back with `space:galaxy`/`space:state`/`space:tick`
   window events. Canvas labels and clicks stay in egui on every target.
 - `./scripts/dev-web.sh`: web build plus server with `web/` linked live, so
   HTML/CSS edits need only a refresh. `node scripts/test-html-ui.mjs` checks the

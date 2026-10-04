@@ -104,6 +104,75 @@ Partially filled pages remain; wholly empty pages are omitted from navigation.
 
 ## Backend and logs
 
+### Native HTML UI prototype
+
+The branch `prototype-native-html-ui` has an opt-in, **Linux/Wayland-first**
+single-window experiment:
+
+```sh
+cargo run -p space-client --features gtk-ui -- --gtk-html-ui
+```
+
+GTK owns the toplevel window. The shared HTML interface occupies the left side,
+and Bevy presents its native GPU swapchain directly to a GDK Wayland subsurface
+on the right. GTK forwards viewport keyboard, pointer and wheel events to Bevy;
+HTML inputs retain their own focus. No WASM rendering, CPU frame readback,
+Python helper or second application window is used in this mode. The sidebar
+arrangement is CSS only, not a second implementation of the controls.
+
+Requires GTK 3 and WebKit2GTK 4.1 development libraries. The optional `gtk-ui`
+feature leaves normal builds unaffected. UI assets are served through an
+allowlisted private WebKit URI scheme, with native messaging directly to Rust,
+not a network listener. External navigation is blocked. The GTK and GPU surface
+outlive the Bevy renderer during shutdown. For this prototype pipelined rendering
+is disabled, so rendering and GTK hosting stay on the main thread; performance
+parity with the regular native client is not claimed.
+
+Use `SPACE_NATIVE_PANEL_SMOKE=1` for the shared live-control test; this mode writes
+`data/logs/gtk-panel-smoke.json`, then tests a GTK sidebar-allocation resize and synthetic GTK
+widget input signals against Bevy's camera. It writes
+`data/logs/gtk-host-smoke.json` and closes the test window through the normal
+shutdown path. The synthetic input does not move the user's mouse or take global
+keyboard focus. Hardware input and compositor-driven toplevel resizing still
+need testing by the user; Wayland can ignore client toplevel-size requests.
+Run feature-specific checks with:
+
+```sh
+cargo test -p space-client --features gtk-ui
+cargo clippy -p space-client --features gtk-ui --all-targets -- -D warnings
+```
+
+This is a sidebar prototype, **not transparent HTML over the 3D view**. egui still
+provides canvas labels and picking. Windows/macOS hosting, floating overlays,
+packaging and native performance optimisation remain future work.
+
+The earlier two-window prototype remains available:
+
+```sh
+cargo run -p space-client -- --native-html-ui
+```
+
+This opt-in Linux prototype opens a GTK/WebKit **companion panel window** while
+Bevy renders the simulation natively (Vulkan on the development machine). It
+loads the exact same `web/ui/panels.js`, `panels.css` and `bridge.js` as the browser.
+Both targets also use the same Rust state publisher and `UiCommand` actions;
+only their message transport differs (browser events versus child-process stdio).
+No WASM simulation, Chromium wrapper or network command endpoint is involved.
+The host serves only five allowlisted public UI files on an ephemeral loopback
+port, so JavaScript modules have a normal origin. State and commands never use it.
+
+Requires Python with PyGObject, GTK 3 and WebKit2GTK 4.1 (already installed on the
+development machine). To exercise the actual webview against native Rust, set
+`SPACE_NATIVE_PANEL_SMOKE=1`; results go to `data/logs/native-panel-smoke.json`.
+The webview disables its dmabuf renderer to avoid an NVIDIA/Wayland protocol
+error on this machine. This does not change Bevy's rendering backend.
+
+The companion window does not test embedding or shared-window input routing.
+egui panels are suppressed in this
+mode, but egui still draws canvas labels and markers. Normal native and browser
+launches retain their existing behaviour. The prototype hides the browser-only
+star-stream benchmark and blocks external navigation in the webview.
+
 The backend serves the web client and the demo galaxy. The client checks the
 snapshot every two seconds; unchanged responses have no body, so large galaxies
 are not downloaded and rebuilt on every poll. `data/` is excluded from Git.
