@@ -11,6 +11,7 @@ use std::collections::HashSet;
 pub struct HtmlInput {
     pub rects: Vec<[f32; 4]>,
     pub ready: bool,
+    pub usable: bool,
     pub pointer: bool,
     pub keyboard: bool,
     focus: bool,

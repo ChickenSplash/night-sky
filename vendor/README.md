@@ -17,8 +17,14 @@ the renderer change; the CEF changes use `NIGHT SKY PATCH`.
   This is an experiment-specific policy, not an arbitrary-site browser sandbox.
 - **Changed files:** `Cargo.toml`, `src/browser_process/client_handler.rs`, and
   new `src/browser_process/client_handler/trusted_inline.rs`. The remaining files
-  are the crates.io 0.11.0 source (Cargo cache metadata omitted). The renderer helper does not need this patch:
+  are the crates.io 0.11.0 source (Cargo cache metadata omitted), apart from the
+  benchmark instrumentation below. The renderer helper does not need this patch:
   navigation callbacks run in the main application's browser process.
+- **Benchmark instrumentation:** `src/paint_metrics.rs`, exported from `lib.rs`,
+  and a small hook in `renderer_handler.rs` count CPU OnPaint callbacks, copied
+  buffer bytes and callback copy/publish nanoseconds. Disabled unless the native
+  benchmark explicitly enables them. These are not GPU upload timings or Bevy
+  texture-update timings; the latest-frame slots can discard intermediate paints.
 - **Regression check:** feature-enabled client tests and the core policy unit
   test. Manual focus, paste and cross-boundary drag checks remain user-run.
 - **Upgrading:** revalidate callback signatures, the inline URL format and

@@ -11,6 +11,8 @@ mod diagnostics;
 mod flight;
 mod galaxy_nav;
 mod glow;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_benchmark;
 mod network;
 mod render;
 mod scene;
@@ -213,6 +215,12 @@ fn main() {
     diagnostics::install_crash_reports();
     let smoke_test = std::env::args().any(|arg| arg == "--smoke-test");
     let mut initial_nav = Navigation::default();
+    #[cfg(not(target_arch = "wasm32"))]
+    let native_benchmark = native_benchmark::requested();
+    #[cfg(not(target_arch = "wasm32"))]
+    if native_benchmark.is_some() {
+        native_benchmark::at_home(&mut initial_nav);
+    }
     #[cfg(target_arch = "wasm32")]
     let benchmark = benchmark::requested();
     #[cfg(target_arch = "wasm32")]
@@ -242,6 +250,15 @@ fn main() {
                         "Night Sky".into()
                     },
                     resolution: (1440, 900).into(),
+                    #[cfg(not(target_arch = "wasm32"))]
+                    present_mode: if native_benchmark
+                        .as_ref()
+                        .is_some_and(|b| b.spec.presentation == "uncapped")
+                    {
+                        bevy::window::PresentMode::AutoNoVsync
+                    } else {
+                        default()
+                    },
                     #[cfg(not(target_arch = "wasm32"))]
                     mode: if smoke_test {
                         bevy::window::WindowMode::BorderlessFullscreen(
@@ -292,6 +309,9 @@ fn main() {
             scene::controls,
             #[cfg(target_arch = "wasm32")]
             benchmark::advance,
+            #[cfg(not(target_arch = "wasm32"))]
+            scene::nearby_system.run_if(native_benchmark::interactive_navigation),
+            #[cfg(target_arch = "wasm32")]
             scene::nearby_system,
             scene::place_camera,
             scene::measure_velocity,
@@ -309,6 +329,10 @@ fn main() {
     .add_systems(EguiPrimaryContextPass, ui::draw_ui);
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, smoke::exercise);
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(benchmark) = native_benchmark {
+        native_benchmark::install(&mut app, benchmark);
+    }
     #[cfg(target_arch = "wasm32")]
     if benchmark {
         app.insert_resource(benchmark::BenchmarkFlight::default());

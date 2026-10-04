@@ -95,6 +95,7 @@ This is demo data only.</textarea></label>
       emit({kind: 'layout', rects});
     }
     let paused = false;
+    let reportedReady = false;
     const pause = document.querySelector('#pause');
     pause.addEventListener('click', () => {
       emit({kind: 'command', command: {type: 'set_paused', paused: !paused}});
@@ -107,6 +108,10 @@ This is demo data only.</textarea></label>
       pause.textContent = paused ? 'Resume simulation' : 'Pause simulation';
       pause.disabled = false;
       document.querySelector('#paused').value = paused ? 'Paused' : 'Running';
+      if (!reportedReady) {
+        reportedReady = true;
+        requestAnimationFrame(() => emit({kind: 'ready'}));
+      }
     });
     window.cef?.listen('space:tick', json => {
       document.querySelector('#days').value = JSON.parse(json).days.toFixed(5);
@@ -115,6 +120,24 @@ This is demo data only.</textarea></label>
     new ResizeObserver(layout).observe(panel);
     window.addEventListener('resize', layout);
     layout();
+    // Reproducible DOM activity, explicitly not synthetic native keyboard events.
+    const benchmarkMode = document.body.dataset.benchmark;
+    if (benchmarkMode === 'active') {
+      let step = 0;
+      setInterval(() => {
+        document.querySelector('#text').value = 'WASD R/F Q/E '.repeat(++step % 8 + 1);
+        const text = document.querySelector('textarea');
+        text.scrollTop = step % 2 ? text.scrollHeight : 0;
+      }, 100);
+    }
+    if (benchmarkMode === 'animation') {
+      const animate = () => {
+        document.querySelector('#count').value = String(++count);
+        document.querySelector('#increment').style.backgroundColor = count % 2 ? '#1b3b52' : '#10233a';
+        requestAnimationFrame(animate);
+      };
+      requestAnimationFrame(animate);
+    }
   </script>
 </body>
 </html>

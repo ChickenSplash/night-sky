@@ -37,3 +37,4 @@ pub mod prelude {
     pub use cef::DraggableRegion;
     pub use cef::Rect;
 }
+pub mod paint_metrics;

@@ -228,6 +228,8 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             cef_paint_element_type_t::PET_POPUP => RenderPaintElementType::Popup,
             _ => RenderPaintElementType::View,
         };
+        // NIGHT SKY PATCH: enabled only by the native benchmark runner.
+        let measured = crate::paint_metrics::enabled().then(std::time::Instant::now);
         let texture = RenderTextureMessage {
             webview: self.webview,
             ty,
@@ -250,6 +252,9 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         #[cfg(target_os = "windows")]
         {
             let _ = self.texture_sender.send_blocking(texture);
+        }
+        if let Some(started) = measured {
+            crate::paint_metrics::record((width as u64) * (height as u64) * 4, started.elapsed().as_nanos() as u64);
         }
     }
 

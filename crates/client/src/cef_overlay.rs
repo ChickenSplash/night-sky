@@ -12,6 +12,7 @@ pub struct HtmlPanel;
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum PanelEvent {
+    Ready,
     Layout { rects: Vec<[f32; 4]> },
     Command { command: crate::actions::UiCommand },
 }
@@ -54,7 +55,14 @@ pub fn install(app: &mut App) {
     crate::cef_input::install(app);
 }
 
-fn setup(mut commands: Commands, mut materials: ResMut<Assets<WebviewUiMaterial>>) {
+fn setup(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<WebviewUiMaterial>>,
+    benchmark: Option<Res<crate::native_benchmark::Benchmark>>,
+) {
+    let mode = benchmark.as_ref().map_or("", |b| b.spec.mode.as_str());
+    let html = include_str!("../../../web/cef-overlay.html")
+        .replace("<body>", &format!("<body data-benchmark=\"{mode}\">"));
     // Overlay after both the scene and egui, with no exposure or tone mapping.
     // Match the scene's HDR format to share its output, without changing it.
     let camera = commands
@@ -76,7 +84,12 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<WebviewUiMaterial>
         // Custom native routing retains drag ownership and always sends releases.
         // Disable the plugin's alpha-filtered pointer observers and focus picker.
         Pickable::IGNORE,
-        WebviewSource::inline(include_str!("../../../web/cef-overlay.html")),
+        WebviewSource::inline(html),
+        if mode == "runtime" {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        },
         Node {
             position_type: PositionType::Absolute,
             width: Val::Percent(100.0),
@@ -99,6 +112,7 @@ fn receive(
         return;
     }
     match &event.payload {
+        PanelEvent::Ready => input.usable = true,
         PanelEvent::Layout { rects } if valid_rects(rects) => {
             input.rects.clone_from(rects);
             input.ready = true;
@@ -126,12 +140,20 @@ fn publish(
     input: Res<crate::cef_input::HtmlInput>,
     panels: Query<Entity, With<HtmlPanel>>,
     mut next: Local<f64>,
+    benchmark: Option<Res<crate::native_benchmark::Benchmark>>,
 ) {
     let now = time.elapsed_secs_f64();
     if !input.ready || now < *next {
         return;
     }
-    *next = now + 0.1;
+    *next = if benchmark
+        .as_ref()
+        .is_some_and(|b| ["runtime", "idle"].contains(&b.spec.mode.as_str()))
+    {
+        f64::INFINITY // B/C have no periodic state/readout repaint after initialisation.
+    } else {
+        now + 0.1
+    };
     for entity in &panels {
         // Same event names and field units as the browser bridge. Repeat state
         // at 10 Hz so startup/listener races and egui changes self-correct.
@@ -155,9 +177,14 @@ fn publish(
 fn sync_hdr(
     mut commands: Commands,
     nav: Res<crate::Navigation>,
-    cameras: Query<(Entity, Has<Hdr>), With<HtmlCamera>>,
+    mut cameras: Query<(Entity, Has<Hdr>, &mut Camera), With<HtmlCamera>>,
+    benchmark: Option<Res<crate::native_benchmark::Benchmark>>,
+    input: Res<crate::cef_input::HtmlInput>,
 ) {
-    for (entity, hdr) in &cameras {
+    for (entity, hdr, mut camera) in &mut cameras {
+        if input.ready && benchmark.as_ref().is_some_and(|b| b.spec.mode == "runtime") {
+            camera.is_active = false;
+        }
         if nav.realistic != hdr {
             if nav.realistic {
                 commands.entity(entity).insert(Hdr);
@@ -221,8 +248,9 @@ mod tests {
     fn html_camera_matches_hdr_without_changing_other_cameras() {
         let mut app = App::new();
         app.init_resource::<crate::Navigation>()
+            .init_resource::<crate::cef_input::HtmlInput>()
             .add_systems(Update, sync_hdr);
-        let html = app.world_mut().spawn(HtmlCamera).id();
+        let html = app.world_mut().spawn((HtmlCamera, Camera::default())).id();
         let other = app.world_mut().spawn_empty().id();
 
         app.update();

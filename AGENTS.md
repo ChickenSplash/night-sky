@@ -36,6 +36,20 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   are still required; no performance acceptance or UI migration yet.
   Test visual windows on the secondary monitor only. CEF's default Linux sandbox
   policy is disabled by this plugin; load only the bundled, CSP-restricted page.
+- `./scripts/benchmark-cef-overlay.sh --interactive`: builds separate baseline and
+  CEF release binaries under `target/cef-benchmark/`, then alternates A/B/C/D
+  plus animation and manual activity runs on visible secondary workspace 8.
+  `--build-only`, `--dry-run`, `--self-test`, `--repetitions`, `--warmup` and
+  `--seconds` support preparation and shorter suites. Native benchmark mode is
+  `--native-benchmark <config.json>`; the runner supplies the config. It warms
+  at home, waits for loader/mesh readiness, then stays still or flies towards
+  the centre at 1,000 ly/s. egui and graphics stay the same across modes.
+  Frame samples use wall time, not Bevy's capped delta. Process-tree CPU/PSS
+  samples include CEF helpers; GPU data is system-wide. Results and summaries
+  stay under `data/logs/cef-benchmark-*`. CPU OnPaint counters in the vendored
+  core are opt-in; they do not measure GPU uploads. Benchmark launches disable
+  Bevy's unfocused update throttle, without changing normal launches or the
+  desktop. Manual input acceptance is separate; no overhead acceptance yet.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
 - `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up in both exposures).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last

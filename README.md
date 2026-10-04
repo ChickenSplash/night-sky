@@ -179,10 +179,95 @@ command-gating and navigation-policy tests; keyboard focus, paste, drag boundary
 behaviour, resizing and scaling still need manual testing. No performance
 comparison has been performed.
 
-Automated checks for the updated experiment: feature-enabled client tests (73),
-normal client tests (64), the core's navigation-policy unit test, and
+Automated checks for the updated experiment: feature-enabled client tests (74),
+normal client tests (65), the core's navigation-policy unit test, and
 `node scripts/test-cef-panel.mjs` (headless DOM with a mock CEF transport, not
 native input acceptance). The browser compilation check remains feature-free.
+
+### CEF overhead benchmark (steps 5 to 7)
+
+```sh
+./scripts/benchmark-cef-overlay.sh --interactive
+```
+
+The command builds **two separate release clients** with the same optimisation:
+baseline (no CEF) and CEF-enabled. Compiled output stays in
+`target/cef-benchmark/{baseline,cef}`. It starts its own demo backend and stops
+only the processes it owns. Stop an existing server on port 4321 first.
+
+Show **workspace 8 on HDMI-A-1 at scale 1**, keep it visible and avoid other heavy
+work during measurements. Windows are fixed at 1440 × 900, placed on that monitor
+without taking focus. The runner aborts if placement, visibility or resolution
+is wrong, or if helpers cannot be cleaned up between runs. No desktop settings
+are changed. Finish the manual input acceptance checks before benchmarking.
+
+Modes (egui remains present and identical):
+
+| Mode | What runs |
+| --- | --- |
+| A, `baseline` | Native client with no CEF dependency |
+| B, `runtime` | CEF page alive; HTML node hidden and overlay camera inactive after initial sizing |
+| C, `idle` | Visible static panel; one initial state update, no periodic readouts |
+| D, `active` | Scripted text edits/scroll changes at 10 Hz plus Rust readouts at 10 Hz |
+| `animation` | Separate requestAnimationFrame repaint stress test plus readouts |
+| `interactive` | Readouts and real user typing/scrolling, with an Enter prompt after warm-up |
+
+B still creates a browser and its pixel surface, and the plugin can process paint
+buffers, even though it does not draw the overlay. D's scripted DOM activity is
+not an OS keyboard or clipboard benchmark. The optional interactive mode records
+real input separately; use only the HTML text fields and scrolling, not graphics
+settings or pause buttons. Native input acceptance is not inferred from these runs.
+
+Each mode runs a stationary scene and a wall-clock flight towards the galactic
+centre at 1,000 ly/s, with automatic star visits disabled. All use physical,
+realistic lighting, galaxy glow and 50° FOV. The runner measures both requested
+uncapped presentation and normal vsync. Bevy's unfocused 60 Hz update throttle is
+disabled **only in benchmark launches**, so keeping your primary window focused
+cannot silently cap all measurements. The compositor/driver may still constrain
+presentation; requested uncapped mode does not prove it is effectively uncapped.
+
+Defaults: three repetitions, at least 15 s warm-up and 20 s measurement per run.
+Warm-up also requires three seconds of empty loader/mesh queues and a usable
+panel where applicable. Run order rotates/reverses between repetitions.
+There are 60 automated runs (at least **35 minutes**), or 72 with interactive
+mode (at least **42 minutes**, plus prompts, readiness delays and initial builds).
+
+Useful commands:
+
+```sh
+./scripts/benchmark-cef-overlay.sh --build-only  # prepare binaries, no windows
+./scripts/benchmark-cef-overlay.sh --dry-run     # inspect ordering and duration
+./scripts/benchmark-cef-overlay.sh --self-test   # test runner, no windows
+./scripts/benchmark-cef-overlay.sh --repetitions 1 --warmup 5 --seconds 5
+```
+
+The short run is a plumbing check, not an acceptance-quality comparison.
+`--skip-build` reuses binaries and can give stale results; normal runs rebuild.
+Both release builds and automated runner tests have been checked; the native
+measurement sequence has not been run on your behalf. Start with a short run
+to validate the launch/measurement plumbing before the full suite.
+
+Results are in a timestamped `data/logs/cef-benchmark-*` directory:
+- `metadata.json`: commit, binary hashes, compiler, monitor, fixed graphics,
+  run ordering, uncompressed runtime sizes and measurement limitations.
+- Per-run `*.result.json`: raw main-loop frame intervals, median/p95/p99,
+  long-frame counts, startup readiness, paint counters and 1 Hz process/GPU samples.
+- `summary.json`: equally weighted per-run median comparisons, differences in
+  milliseconds/percentages, CPU percentage points and PSS MiB. Updated after
+  every successful run, so interrupted suites retain partial results.
+- Per-run logs and status files for diagnostics.
+
+CPU 100% means one logical core, with Bevy and helpers measured separately.
+PSS is summed across the application process tree; missing access produces null,
+not a fabricated zero. RSS is also recorded but can double-count shared memory.
+The process scope is the native client and its helpers; the fixed demo backend
+and benchmark runner are excluded from those totals.
+GPU utilisation and VRAM are **system-wide**, not application-attributed. Paint
+time covers CPU CEF buffer copy/publish, not GPU upload. GPU texture-update timing
+and compressed package size are explicitly unavailable. Startup uses a fresh
+process but does not clear OS/CEF disk caches or include dynamic-loader time.
+Share `summary.json` and the per-run results for comparison; no full UI migration
+or performance acceptance is made by this command.
 
 The backend serves the web client and the demo galaxy. The client checks the
 snapshot every two seconds; unchanged responses have no body, so large galaxies
