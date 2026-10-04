@@ -50,6 +50,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   core are opt-in; they do not measure GPU uploads. Benchmark launches disable
   Bevy's unfocused update throttle, without changing normal launches or the
   desktop. Manual input acceptance is separate; no overhead acceptance yet.
+- Continuation plan for the native HTML experiment: `docs/native-html-ui-plan.md`.
+  Read it before resuming benchmark evaluation or proposing UI migration.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
 - `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up in both exposures).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
