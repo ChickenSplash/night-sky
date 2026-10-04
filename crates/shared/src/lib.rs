@@ -16,8 +16,8 @@ pub struct StarSystem {
     /// One star per page, derived from the list and page.
     #[serde(default)]
     pub stars: Vec<Star>,
-    /// Persisted assignments from this list's pages to generated galactic stars.
-    /// Empty for legacy/demo systems until assigned by the backend.
+    /// Assignments from this list's pages to generated galactic stars.
+    /// Empty for legacy systems.
     #[serde(default)]
     pub page_stars: Vec<PageStar>,
 }
@@ -90,7 +90,7 @@ pub struct Task {
     pub name: String,
     pub description: String,
     pub status: String,
-    /// ClickUp status group: "open", "custom", "done" or "closed".
+    /// Status group: "open", "custom", "done" or "closed".
     pub status_type: String,
     /// The status's position on the list's board.
     pub status_order: u32,

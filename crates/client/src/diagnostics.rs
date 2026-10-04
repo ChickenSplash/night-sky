@@ -26,7 +26,7 @@ pub fn install_crash_reports() {
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
         let report = format!(
-            "Task Space client {} crashed at {} UTC\nThread: {}\n{info}\n\n{}\n",
+            "Night Sky client {} crashed at {} UTC\nThread: {}\n{info}\n\n{}\n",
             env!("CARGO_PKG_VERSION"),
             utc_now(),
             thread.name().unwrap_or("unnamed"),
@@ -62,7 +62,7 @@ pub fn file_layer(_: &mut App) -> Option<BoxedLayer> {
         .and_then(|()| fs::File::create(&path));
     match opened {
         Ok(mut file) => {
-            let _ = writeln!(file, "Task Space client {}", env!("CARGO_PKG_VERSION"));
+            let _ = writeln!(file, "Night Sky client {}", env!("CARGO_PKG_VERSION"));
             Some(Box::new(
                 tracing_subscriber::fmt::layer()
                     .with_ansi(false)
@@ -112,7 +112,7 @@ pub fn save_bug_report(state: &str) -> io::Result<PathBuf> {
     fs::write(
         &path,
         format!(
-            "Task Space {} · bug report · {} UTC\nOS: {}\nPID: {}\n\n{state}\n\nRecent client events:\n{recent}\n",
+            "Night Sky {} · bug report · {} UTC\nOS: {}\nPID: {}\n\n{state}\n\nRecent client events:\n{recent}\n",
             env!("CARGO_PKG_VERSION"),
             utc_now(),
             std::env::consts::OS,

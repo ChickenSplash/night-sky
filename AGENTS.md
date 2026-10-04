@@ -1,4 +1,7 @@
-# Task Space
+# Night Sky
+
+Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
+`~/Projects/Night-Sky`, and the homelab container and path `night-sky`.
 
 ## Scope and architecture
 
@@ -6,8 +9,10 @@
   `shared` (wire models), `simulation` (engine-independent orbital maths).
 - Lists are constellations of system pages (7 to 14 slots each); tasks are planets. Deep navy background (black with realistic lighting) and line-based
   wireframe bodies. Preserve real distances, with explicit visual size exaggeration.
-- Keep ClickUp access read-only until a write workflow is explicitly requested.
-- Credentials belong only in the backend. Do not expose them in API models or logs.
+- A space simulator first. Lists, pages and tasks stay as a general way of
+  tracking information; the ClickUp integration was removed and will be
+  re-approached later. The backend serves only the built-in demo galaxy.
+- Any future credentials belong only in the backend, never in API models or logs.
 - All runtime files belong in project-local `data/`; compiled output in `target/`.
 
 ## Development
@@ -33,9 +38,9 @@
   HTML panels, keyboard focus and wheel routing against `SPACE_URL` (default
   local). `test-browser.mjs` covers the egui panels on the web.
 - `./scripts/deploy-homelab.sh`: build locally and deploy to the homelab's
-  `~/homelab/task-space`. URL: `http://192.168.1.90:4321/`. Demo data only
-  by default; `--with-clickup` publishes credentials and cached tasks, so only use
-  it when the user explicitly asks.
+  `~/homelab/night-sky`. URL: `http://192.168.1.90:4321/`. Demo data only;
+  it removes any `.env` and SQLite cache left there by the former ClickUp
+  integration.
 - Docker's restart policy manages the remote service, independently of SSH sessions.
 - Keep native threading/reqwest and browser fetch/timers behind target-specific code.
 - Browser requests use same-origin `/galaxy`. Never bake a LAN IP or token into WASM.
@@ -70,7 +75,7 @@
 - Pick wireframe line density from on-screen radius; dense rings on small bodies
   merge into blobs.
 - Integrate simulation time. Never multiply lifetime elapsed time by a mutable rate.
-- Keep orbital identity stable across API reordering and edits. SQLite slots are
+- Keep orbital identity stable across reordering and edits. Task slots are
   append-only per list, including when tasks disappear from a snapshot.
 - Changing task status or deadline must not change orbital elements.
 - Planets and tasks are separate: a `Planet` is a generated body with a stable
@@ -82,7 +87,7 @@
   `space_simulation::star(id)`, `planetary_system(id)`, `planet_count(id)` and
   `plane_tilt(id)` take any star ID. Changing a key moves every body it seeds.
 - Task pages are filled in order from append-only slots; each page's capacity is
-  `planet_count(assigned_star_id)` for mapped ClickUp pages, or
+  `planet_count(assigned_star_id)` for pages mapped to cell stars, or
   `page_capacity(list_id, page)` for legacy pages. A page's whole planetary system is generated at
   once: masses, radii and orbits follow the snow line, neighbours stay Hill-stable
   and some pairs are resonant. The slot's index within its page picks its body.
@@ -91,13 +96,12 @@
   from a system's own tasks, on the server and again on the client, so fixtures
   need only slots. Table layout is presentation-only; leaving it restores current
   simulated positions. The table keeps physical radii.
-- ClickUp page-to-cell-star assignments live in SQLite `page_stars` and in the
-  snapshot's `StarSystem::page_stars`. They are unique and immutable per list/page;
-  include removed tasks' allocated slots when deciding how many pages need a
-  star. Mapped pages use the cell star's ID, position, formation and plane tilt,
-  so visiting that star from the galaxy shows the same planets, with tasks as an
-  optional overlay. The first migration moves legacy ClickUp pages once. Demo
-  lists get cell stars from the same `assign_page_stars`, without a database.
+- Page-to-cell-star assignments live in the snapshot's
+  `StarSystem::page_stars`, from `assign_page_stars`. They are unique and
+  immutable per list/page; include removed tasks' allocated slots when deciding
+  how many pages need a star. Mapped pages use the cell star's ID, position,
+  formation and plane tilt, so visiting that star from the galaxy shows the same
+  planets, with tasks as an optional overlay.
 - Each legacy page (with no cell star) has its own star (`space_simulation::star(&star_id(list_id, page))`),
   drawn in solar-neighbourhood proportions (mostly red dwarfs, a few giants and
   white dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its
@@ -109,7 +113,7 @@
   all page stars from the current angle and draws links between them.
 - Each page has its own orbital-plane tilt (`scene::page_tilt`, its star's
   `plane_tilt`), including pages in one constellation.
-- Explain demo, live, cached and failed-sync states in the interface.
+- Explain the data source (currently always the demo) in the interface.
 
 ## Galaxy model
 
@@ -244,7 +248,7 @@
   drawn and picked like any other, with no markers of their own.
   `Navigation::visit` is the visited system: `Visit::List` (a list index, at
   `Navigation::page`) or `Visit::Generated` (task-free planets built from the
-  star's ID, never added to the ClickUp `Universe`). `None` is open space,
+  star's ID, never added to the lists' `Universe`). `None` is open space,
   relative to home in galactic axes; a visit moves the camera frame to its
   star in f64, and the same `Flight` shifts the displayed pose. Orbit, table
   and constellation views work on any visited system.
@@ -327,10 +331,9 @@
 
 ## Current limitations
 
-- No N-body simulation, moons, workspace discovery or OAuth.
-- Galaxy travel, mapped ClickUp page stars and visits to generated systems work,
+- No N-body simulation, moons or task integrations (ClickUp was removed).
+- Galaxy travel, mapped list page stars and visits to generated systems work,
   but dust, lensing and galaxy rotation are not implemented. Diffuse galaxy glow
   is a smooth prototype, not yet a detailed or dust-attenuated galaxy renderer.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
-- Live ClickUp access needs the user's own `.env`; demo data is the default.

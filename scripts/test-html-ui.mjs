@@ -110,7 +110,7 @@ try {
   const byName = galaxy.lists.map(l => l.name).sort((a, b) => a.localeCompare(b));
   assert.equal(await lists.first().locator('span').textContent(), byName[0]);
   await page.locator('#nav-panel button[aria-label="Sort lists"]').click();
-  await page.locator('#nav-panel [aria-label="Sort lists"] + [role=listbox] [role=option]', { hasText: 'ClickUp order' }).click();
+  await page.locator('#nav-panel [aria-label="Sort lists"] + [role=listbox] [role=option]', { hasText: 'List order' }).click();
 
   // The chevron opens a list's tasks, grouped by status; groups fold.
   const tasksTab = page.locator('#nav-panel [role=tab]', { hasText: 'Tasks' });

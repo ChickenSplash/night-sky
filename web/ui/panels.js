@@ -17,8 +17,8 @@ const HELP = [['Click', 'Select a star, again to visit'], ['C', 'Select the cent
   ['Shift + scroll', 'Adjust movement speed'], ['Space', 'Pause'], ['Esc', 'Back to the view']];
 // Vertical field of view range in degrees, as `FOV_DEG` in Rust.
 const FOV = [30, 130];
-const LIST_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
-const TASK_SORTS = [['ClickUp order', 'default'], ['Name A–Z', 'name'], ['Due date', 'due']];
+const LIST_SORTS = [['List order', 'default'], ['Name A–Z', 'name'], ['Most tasks', 'tasks']];
+const TASK_SORTS = [['List order', 'default'], ['Name A–Z', 'name'], ['Due date', 'due']];
 const STATUS_RANK = { open: 0, custom: 1, done: 2, closed: 3 };
 const PREFS = 'space.sidebar';
 const LY = 9.4607e15;
@@ -131,7 +131,7 @@ function periodText(days) {
   return days >= 730 ? `${(days / 365.25).toFixed(1)} years` : `${days.toFixed(1)} days`;
 }
 
-// Renders only the rows in view: a live list can hold over a thousand tasks.
+// Renders only the rows in view: a list can hold over a thousand tasks.
 // `keyOf` names everything a row shows, so unchanged rows are reused rather
 // than rebuilt under the pointer.
 function virtualList(container, renderRow, keyOf) {
@@ -279,7 +279,7 @@ export function mount(bridge, canvas) {
     el('div', { className: 'row' }, groupChip),
     taskCount, taskBox);
   const nav = el('aside', { id: 'nav-panel', className: 'panel floating' },
-    el('header', {}, el('div', {}, el('h1', { textContent: 'Task / Space' }), source), hide),
+    el('header', {}, el('div', {}, el('h1', { textContent: 'Night Sky' }), source), hide),
     el('div', { className: 'tabs', role: 'tablist' }, listsTab, tasksTab),
     listsBody, tasksBody, notice);
 
@@ -421,8 +421,8 @@ export function mount(bridge, canvas) {
     el('p', { className: 'muted', textContent: 'Systems appear as each list finishes loading.' }));
   hud.append(nav, opener, gear, settings, where, modal, bar, viewCaption, rangeCaption, empty);
 
-  // Rows are reused while their list is unchanged: lists arrive one by one
-  // while ClickUp loads, and a rebuilt row would swallow a click in progress.
+  // Rows are reused while their list is unchanged: lists may arrive one by
+  // one, and a rebuilt row would swallow a click in progress.
   const listRows = new Map();
   const listRow = list => {
     const key = `${list.name}\n${list.tasks.length}`;
@@ -588,7 +588,7 @@ export function mount(bridge, canvas) {
           ['Orbital plane', `tilt ${system.tilt_deg.toFixed(0)}°, node ${system.node_deg.toFixed(0)}°`],
         ])) : null),
       task.url ? el('div', { className: 'row actions' },
-        el('a', { href: task.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Open in ClickUp ↗' })) : null,
+        el('a', { href: task.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Open task link ↗' })) : null,
     ].filter(Boolean));
   };
 

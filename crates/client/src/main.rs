@@ -219,7 +219,7 @@ fn main() {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Task Space · Mission Control".into(),
+                    title: "Night Sky".into(),
                     resolution: (1440, 900).into(),
                     #[cfg(not(target_arch = "wasm32"))]
                     mode: if smoke_test {

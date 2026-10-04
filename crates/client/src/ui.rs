@@ -168,11 +168,7 @@ impl Panels<'_> {
 
     fn header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("C L I C K U P   /   S P A C E")
-                    .size(19.0)
-                    .strong(),
-            );
+            ui.label(egui::RichText::new("N I G H T   S K Y").size(19.0).strong());
             ui.separator();
             ui.label(
                 egui::RichText::new("MISSION CONTROL")
@@ -240,7 +236,7 @@ impl Panels<'_> {
         );
         let query = nav.search.to_lowercase();
         // Searching still scans names, but egui only builds widgets for the
-        // visible rows. Some live lists have over a thousand tasks.
+        // visible rows. A list can hold over a thousand tasks.
         let matches: Vec<_> = galaxy
             .systems
             .iter()
@@ -549,7 +545,7 @@ impl Panels<'_> {
                 self.out.push(UiCommand::Follow);
             }
             if let Some(url) = planet.task.as_ref().and_then(|t| t.url.as_ref()) {
-                ui.hyperlink_to("Open task in ClickUp ↗", url);
+                ui.hyperlink_to("Open task link ↗", url);
             }
         } else {
             ui.add_space(16.0);
@@ -572,11 +568,6 @@ impl Panels<'_> {
                     text,
                 );
             }
-            ui.label(
-                egui::RichText::new("Live lists use their ClickUp status colours.")
-                    .color(MUTED)
-                    .size(11.0),
-            );
         }
     }
 

@@ -604,7 +604,7 @@ pub fn demo_galaxy() -> Galaxy {
                 let (name, description, assignee) = match named.get(slot) {
                     Some(name) => (
                         (*name).to_owned(),
-                        "A fictional task for exploring Task Space. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".to_owned(),
+                        "A fictional task for exploring Night Sky. Select a planet, follow its orbit, or jump to another system. Connect your own lists when ready.".to_owned(),
                         "Mission control".to_owned(),
                     ),
                     None => (
@@ -644,7 +644,7 @@ pub fn demo_galaxy() -> Galaxy {
         place(&mut system, tasks);
         galaxy.systems.push(system);
     }
-    // Demo tasks are overlays on the same generated population as live pages.
+    // Demo tasks are overlays on the same generated population as task-free stars.
     // Assign without a database: iteration order and the immutable IDs make
     // every placement repeatable, even on an offline first launch.
     let mut sky = crate::cells::Sky::default();
