@@ -205,10 +205,25 @@ is available it retains its last data, initially the clearly labelled demo.
   small cells nearby. Any cell gives the same stars every time.
 - The client streams the cells around the camera down to naked-eye magnitude
   (about a million stars near home, most visible first) on a worker thread
-  natively and in a 4 ms slice of each frame in the browser, and drops cells
+  natively and in a dedicated Web Worker in the browser (with a 4 ms per-frame
+  fallback if the worker fails), and drops cells
   left behind. Batched point meshes show stars actually bright enough to see,
   in both the wireframe and realistic views. The central black hole is modelled at
   its physical horizon radius. There is no dust or gravitational lensing yet.
+- **Smooth galaxy prototype:** enable **Realistic lighting** in Settings, then
+  use **Inside**, **Face-on** or **Edge-on** reference views. **Smooth galaxy glow
+  (prototype)** switches the diffuse contribution on/off without changing stars.
+  Cached, spatially batched Gaussian volume patches represent unresolved stellar
+  light. Their line integrals are analytic, not full-galaxy raymarching. The
+  glow renders at an eighth of the view's resolution per axis, only when the
+  view changes, and is scaled up into the main HDR view. Individual stars and bodies
+  remain unchanged. The disc glow deliberately averages spiral modulation.
+  Component populations are conserved across patch resolutions. A sampled RGB
+  luminosity table excludes magnitude-visible stars statistically; finite patch
+  sizes and table interpolation remain approximations, not exact per-star removal.
+  Dust, small-scale structure and external-galaxy types are later milestones.
+  `SPACE_HEADFUL=1 node scripts/test-galaxy-glow.mjs` checks the three reference
+  views and saves on/off screenshots and frame timings under `data/logs/`.
 
 - **One galaxy (Phase 6):** lists and generated stars share one view. Scroll
   out for kiloparsec-scale travel; WASD and R/F move, Shift accelerates. Click

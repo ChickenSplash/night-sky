@@ -123,6 +123,7 @@ struct DisplayState {
     markers: bool,
     velocity_marker: bool,
     realistic: bool,
+    galaxy_glow: bool,
     physical: bool,
     wireframe: bool,
 }
@@ -222,6 +223,7 @@ fn publish_state(
             markers: nav.markers,
             velocity_marker: nav.velocity_marker,
             realistic: nav.realistic,
+            galaxy_glow: nav.galaxy_glow,
             physical: nav.physical,
             wireframe: nav.wireframe,
         },

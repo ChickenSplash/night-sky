@@ -281,6 +281,11 @@ impl Panels<'_> {
         ui.separator();
         heading(ui, "DISPLAY");
         for (option, mut on, label) in [
+            (
+                Display::GalaxyGlow,
+                nav.galaxy_glow,
+                "Smooth galaxy glow (prototype)",
+            ),
             (Display::Exaggerate, nav.exaggerate, "Readable planet sizes"),
             (Display::Orbits, nav.orbits, "Orbital paths"),
             (Display::Labels, nav.labels, "Planet labels"),
@@ -340,6 +345,18 @@ impl Panels<'_> {
             .size(11.0)
             .color(MUTED),
         );
+        ui.label("Smooth galaxy reference views (no dust yet)");
+        ui.horizontal(|ui| {
+            for (view, label) in [
+                (crate::actions::GalaxyReference::Inside, "Inside"),
+                (crate::actions::GalaxyReference::FaceOn, "Face-on"),
+                (crate::actions::GalaxyReference::EdgeOn, "Edge-on"),
+            ] {
+                if ui.button(label).clicked() {
+                    self.out.push(UiCommand::GalaxyReference { view });
+                }
+            }
+        });
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {

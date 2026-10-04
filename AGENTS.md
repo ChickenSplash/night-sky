@@ -201,7 +201,31 @@
   the points. It stays on the CPU.
 - `black_hole.rs` draws an opaque sphere at the central black hole's physical
   Schwarzschild radius; it is not visible from home. No accretion disc or
-  lensing yet. There is no diffuse glow shader.
+  lensing yet.
+- `simulation::glow` builds smooth, population-normalised Gaussian volume patches
+  for the first galaxy-glow milestone, with spiral modulation averaged out only
+  in the glow. A stratified, distance-indexed RGB luminosity table statistically
+  excludes magnitude-visible stars. This is approximate at finite patch/table
+  resolution. `client::glow` batches them spatially and `glow.wgsl` integrates
+  each ellipsoid analytically, without a full-galaxy raymarch loop. Perspective
+  ellipsoid bounds and view-cone rejection limit overdraw. Every point inside
+  the patch grid sits within about 50 patches per component, each covering the
+  whole view, so cost is pixel fill: a separate glow camera (layer 30, order -1,
+  no MSAA) draws patches into a half-float image at 1/8 of the view's
+  resolution per axis (`DOWNSCALE`, chosen by comparing full to 1/32), and
+  `glow_composite.wgsl` scales it up additively at the far plane. Patch light
+  is still per view pixel. The image is redrawn only when the eye, axes, field
+  of view, size or (beyond 2x) exposure change by more than a quarter glow
+  pixel, plus `SETTLE` frames and while any pipeline compiles; otherwise the
+  composite rescales it by the exposure ratio.
+  Camera-relative origins are formed in f64 before converting to f32. Patches
+  are built lazily and hidden when disabled.
+  Glow is shown only with
+  realistic lighting and the **Smooth galaxy glow (prototype)** setting enabled.
+  Settings provide Inside, Face-on and Edge-on reference camera commands on both
+  clients. `SPACE_HEADFUL=1 node scripts/test-galaxy-glow.mjs` saves comparison
+  screenshots and on/off frame timings to `data/logs/`, on the secondary monitor.
+  Dust, detailed spiral structure and other galaxy types are not implemented yet.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own.
   `Navigation::visit` is the visited system: `Visit::List` (a list index, at
@@ -283,9 +307,9 @@
 ## Current limitations
 
 - No N-body simulation, moons, workspace discovery or OAuth.
-- Galaxy travel and visits to generated systems work, but dust, lensing,
-  rotation and mapping ClickUp lists onto galactic stars are not implemented.
-  There is no diffuse galaxy glow.
+- Galaxy travel, mapped ClickUp page stars and visits to generated systems work,
+  but dust, lensing and galaxy rotation are not implemented. Diffuse galaxy glow
+  is a smooth prototype, not yet a detailed or dust-attenuated galaxy renderer.
 - The client draws the active system procedurally with gizmos. Per-body ECS
   entities and GPU batching can be introduced when dataset size warrants them.
 - Live ClickUp access needs the user's own `.env`; demo data is the default.
