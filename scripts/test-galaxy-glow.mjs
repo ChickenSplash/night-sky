@@ -1,6 +1,6 @@
 // Fixed galaxy reference views, on/off timing and shader-error checks.
 // Headed GPU run is placed on HDMI-A-1's workspace 8 without taking focus.
-// SPACE_HEADFUL=1 node scripts/test-galaxy-glow.mjs
+// node scripts/test-galaxy-glow.mjs (SPACE_HEADLESS=1 for SwiftShader, slow)
 import { chromium } from '../tools/browser/node_modules/playwright-core/index.mjs';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -13,7 +13,8 @@ const cache = resolve(homedir(), '.cache/ms-playwright');
 const executable = process.env.SPACE_CHROMIUM || readdirSync(cache).filter(n => n.startsWith('chromium-')).sort().reverse()
   .map(n => resolve(cache, n, 'chrome-linux64/chrome')).find(existsSync);
 assert(executable, 'Chromium is required');
-const headed = process.env.SPACE_HEADFUL === '1';
+// Headed on the real GPU by default: SwiftShader takes ~250 ms a frame.
+const headed = process.env.SPACE_HEADLESS !== '1';
 const base = process.env.SPACE_URL || 'http://127.0.0.1:4321';
 mkdirSync(resolve(root, 'data/logs'), { recursive: true });
 let browser;
@@ -49,6 +50,9 @@ try {
   await page.waitForFunction(() => window.glowState?.display, null, { timeout: 60000 });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const glowToggle = page.locator('#settings input[data-option="galaxy_glow"]');
+  // Realistic lighting is the default; the glow control needs it.
+  await page.evaluate(() => window.spaceBridge.command({ type: 'set_display', option: 'realistic', on: false }));
+  await page.waitForFunction(() => !window.glowState.display.realistic);
   assert(await glowToggle.isDisabled(), 'Glow control should be disabled outside realistic lighting');
   await page.getByRole('button', { name: 'Galaxy reference: Inside', exact: true }).click();
   await page.waitForFunction(() => window.glowState.display.realistic);
@@ -57,29 +61,24 @@ try {
   const command = cmd => page.evaluate(cmd => window.spaceBridge.command(cmd), cmd);
   const timings = () => page.evaluate(async () => {
     const samples = []; let previous = await new Promise(requestAnimationFrame);
-    for (let i = 0; i < 180; i++) {
+    for (let i = 0; i < 120; i++) {
       const now = await new Promise(requestAnimationFrame);
       samples.push(now - previous); previous = now;
     }
     samples.sort((a, b) => a - b);
-    return { median_ms: samples[90], p95_ms: samples[171], p99_ms: samples[178] };
+    return { median_ms: samples[60], p95_ms: samples[114], p99_ms: samples[118] };
   });
   for (const view of (process.env.SPACE_GLOW_QUICK === '1' ? ['inside'] : ['inside', 'face_on', 'edge_on'])) {
     await command({ type: 'galaxy_reference', view });
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(5000);
     results[view] = {};
     const images = [];
     for (const on of [false, true]) {
       await command({ type: 'set_display', option: 'galaxy_glow', on });
       await page.waitForFunction(on => window.glowState.display.galaxy_glow === on, on);
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(1500);
       results[view][on ? 'on' : 'off'] = await timings();
-      images.push((await page.screenshot()).toString('base64'));
-      if (headed) {
-        const directory = resolve(root, `data/logs/glow-${view}-${on ? 'on' : 'off'}`);
-        mkdirSync(directory, { recursive: true });
-        execFileSync('dms', ['screenshot', 'output', '-o', 'HDMI-A-1', '--no-clipboard', '-d', directory]);
-      } else await page.screenshot({ path: resolve(root, `data/logs/glow-${view}-${on ? 'on' : 'off'}.png`) });
+      images.push((await page.screenshot({ path: resolve(root, `data/logs/glow-${view}-${on ? 'on' : 'off'}.png`) })).toString('base64'));
     }
     // A successful command or frame-time reading does not prove a shader drew.
     // Check central canvas pixels, excluding panels and telemetry.

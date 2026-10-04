@@ -29,8 +29,13 @@ pub fn exercise(
     rig: Res<CameraRig>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    let first = enabled.is_none();
     if !*enabled.get_or_insert_with(|| std::env::args().any(|a| a == "--smoke-test")) {
         return;
+    }
+    if first {
+        // Wireframe captures first; the realistic ones opt in from step 20.
+        nav.realistic = false;
     }
     let capture = |commands: &mut Commands, name: &str| {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

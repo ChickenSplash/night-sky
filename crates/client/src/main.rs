@@ -106,7 +106,7 @@ impl Default for Navigation {
             orbits: true,
             markers: true,
             velocity_marker: true,
-            realistic: false,
+            realistic: true,
             galaxy_glow: true,
             physical: true,
             wireframe: true,

@@ -1,277 +1,289 @@
-//! How bright the streamed sky is in each direction, on an octahedral map in
-//! galactic axes. It meters the exposure of galactic light, as an eye adapts
-//! to a bright sky.
+//! The camera's adaptation to the light in view, metered as a light meter
+//! would: the average radiance across the view. The galaxy is metered from its
+//! smooth model, every star whether streamed or not, so the exposure does not
+//! change as stars load. The visited system's stars add their own light.
+use crate::{
+    Navigation,
+    render::{self, Lights},
+    scene::{CameraPose, CameraRig, SpaceCamera},
+};
 use bevy::{math::DVec3, prelude::*};
-use space_simulation::population::flux_per_luminosity;
+use space_simulation::{
+    galaxy::{GalaxyModel, PC_METRES},
+    glow::{mean_visual_luminosity, patches},
+    light::SUN_LUMINOSITY_W,
+    population::flux_per_luminosity,
+};
+use std::f64::consts::{PI, SQRT_2, TAU};
 
-/// Bins per side of the map, about 3° each.
-pub const SIZE: usize = 64;
-/// Display value × square pixels of a magnitude-0 star's point.
+/// Display value × square pixels of a magnitude-0 star's point at the most
+/// sensitive exposure, on a `reference_pixel_sr` pixel.
 pub const POINT_LIGHT: f64 = 74.6;
-/// Galactic light is stopped down until the metered sky shows at this display
-/// value per pixel.
+/// The average radiance in view shows at this display value.
 const SKY_BACKGROUND: f64 = 0.15;
-/// Stars brighter than this apparent magnitude count as this bright in the
-/// map, so one bright star is a point, never a bright or crowded sky.
-const CAP_MAGNITUDE: f64 = -1.0;
-/// Time constant of the exposure's adaptation, in seconds.
-const ADAPT_SECONDS: f64 = 0.5;
+/// Adaptation time constants, in seconds: to a brighter view, as an eye
+/// adapts to light, and more slowly to a darker one.
+const BRIGHTER_SECONDS: f64 = 0.1;
+const DARKER_SECONDS: f64 = 0.5;
+/// Patch detail for metering: coarser than the glow's, plenty for an average.
+const DETAIL: f64 = 0.5;
 
-/// One batch's share of the map: capped apparent flux (luminosity per squared
-/// parsec) and star count, per bin.
-pub type Share = Vec<(u16, [f32; 2])>;
+/// Visual irradiance, in W m⁻², per solar luminosity per square parsec.
+pub fn irradiance_per_ratio() -> f64 {
+    SUN_LUMINOSITY_W / (4.0 * PI * PC_METRES * PC_METRES)
+}
+
+/// Solid angle of a reference pixel: one of 1080 rows over a 50° view.
+fn reference_pixel_sr() -> f64 {
+    (2.0 * 25f64.to_radians().tan() / 1080.0).powi(2)
+}
+
+/// The least physical key, as a fully dark-adapted eye: it matches the most
+/// sensitive assisted exposure on a reference pixel.
+pub fn dark_key() -> f64 {
+    irradiance_per_ratio() * render::KEY
+        / (POINT_LIGHT * flux_per_luminosity() * reference_pixel_sr())
+}
+
+/// A patch of the galaxy model, for metering.
+struct Metered {
+    position: DVec3,
+    /// Mean squared Gaussian width, in square parsecs.
+    sigma_sq: f64,
+    /// Visual solar luminosities.
+    light: f64,
+}
 
 #[derive(Resource)]
 pub struct Sky {
-    totals: Vec<[f64; 2]>,
-    solid: Vec<f64>,
-    centres: Vec<DVec3>,
-    /// Multiplier on galactic light, at most one.
+    patches: Vec<Metered>,
+    /// Physical: the radiance shown at display `KEY`, eased like an eye.
+    pub key: f64,
+    /// The physical key the view's average radiance alone asks for.
+    pub sky_key: f64,
+    /// The physical key `key` eases towards (`render::physical_key`).
+    pub target: f64,
+    /// Share of the view's average radiance from the galaxy, not the visited
+    /// system's stars.
+    pub galaxy_share: f64,
+    /// Assisted and wireframe: multiplier on galactic light, at most one, eased.
     pub exposure: f32,
+    adapted: bool,
 }
 
 impl Default for Sky {
     fn default() -> Self {
-        let bins = SIZE * SIZE;
+        let mean = mean_visual_luminosity();
+        let patches = patches(&GalaxyModel::milky_way(), DETAIL)
+            .into_iter()
+            .map(|p| Metered {
+                position: DVec3::from_array(p.position_pc),
+                sigma_sq: p.sigma_pc.iter().map(|s| s * s).sum::<f64>() / 3.0,
+                light: p.stars * mean[p.component],
+            })
+            .collect();
         Self {
-            totals: vec![[0.0; 2]; bins],
-            solid: (0..bins).map(solid_angle).collect(),
-            centres: (0..bins).map(|i| decode(bin_uv(i, [0.5, 0.5]))).collect(),
+            patches,
+            key: dark_key(),
+            sky_key: dark_key(),
+            target: dark_key(),
+            galaxy_share: 1.0,
             exposure: 1.0,
+            adapted: false,
         }
     }
 }
 
 impl Sky {
-    /// Adds a batch's share, or removes it with `sign` -1.
-    pub fn add(&mut self, share: &Share, sign: f64) {
-        for &(bin, [flux, count]) in share {
-            let total = &mut self.totals[usize::from(bin)];
-            total[0] = (total[0] + sign * f64::from(flux)).max(0.0);
-            total[1] = (total[1] + sign * f64::from(count)).max(0.0);
-        }
-    }
-
-    /// Exposure that shows the sky in view, averaged over its solid angle, at
-    /// `SKY_BACKGROUND`. `gain` is display light per unit of flux, and
-    /// `pixel_sr` a pixel's solid angle.
-    fn meter(&self, forward: DVec3, tan_half: f64, aspect: f64, gain: f64, pixel_sr: f64) -> f64 {
-        let cos_reach = tan_half
-            .mul_add(tan_half * (1.0 + aspect * aspect), 1.0)
-            .sqrt()
-            .recip();
-        let (mut flux, mut solid) = (0.0, 0.0);
-        for (i, centre) in self.centres.iter().enumerate() {
-            if centre.dot(forward) >= cos_reach {
-                flux += self.totals[i][0];
-                solid += self.solid[i];
-            }
-        }
-        if solid <= 0.0 {
-            return 1.0;
-        }
-        let background = gain * flux / solid * pixel_sr;
-        (SKY_BACKGROUND / background).min(1.0)
-    }
-
-    /// Eases the exposure towards the metered one.
-    pub fn update(
-        &mut self,
-        seconds: f64,
-        forward: DVec3,
-        tan_half: f64,
-        aspect: f64,
-        gain: f64,
-        pixel_sr: f64,
-    ) {
-        let target = self.meter(forward, tan_half, aspect, gain, pixel_sr);
-        let ease = 1.0 - (-seconds / ADAPT_SECONDS).exp();
-        let current = f64::from(self.exposure);
-        self.exposure = (current.ln() + (target.ln() - current.ln()) * ease).exp() as f32;
+    /// The galaxy's light within a cone around `forward`, as visual solar
+    /// luminosities per square parsec, seen from `eye` in galactic parsecs.
+    fn galaxy_flux(&self, eye: DVec3, forward: DVec3, solid: f64) -> f64 {
+        let cone = (1.0 - solid / TAU).clamp(-1.0, 1.0).acos();
+        self.patches
+            .iter()
+            .map(|p| {
+                let offset = p.position - eye;
+                let squared = offset.length_squared();
+                let distance = squared.sqrt();
+                // Softened so the eye inside a patch sees its finite light,
+                // exactly so at its centre.
+                let flux = p.light / (squared + p.sigma_sq);
+                let cosine = if distance > 0.0 {
+                    offset.dot(forward) / distance
+                } else {
+                    1.0
+                };
+                flux * in_cone(cosine, p.sigma_sq.sqrt() / distance, cone, solid)
+            })
+            .sum()
     }
 }
 
-/// Flux counted in the map for a star, at most `CAP_MAGNITUDE`.
-fn capped(ratio: f64) -> f64 {
-    ratio.min(10f64.powf(-0.4 * CAP_MAGNITUDE) / flux_per_luminosity())
+/// Share of a blob's light inside a cone of half-angle `cone` and solid angle
+/// `solid`, its centre `cosine` off the axis and about `width` radians wide.
+/// The narrower of two estimates: all of it within the cone's edge, or its
+/// density at the centre over the cone. Good to tens of percent, plenty for a
+/// meter, and exact for a blob all around the eye.
+fn in_cone(cosine: f64, width: f64, cone: f64, solid: f64) -> f64 {
+    let angle = cosine.clamp(-1.0, 1.0).acos();
+    let edge = 0.5 * erfc((angle - cone) / (SQRT_2 * width));
+    let kappa = (1.0 / (width * width)).clamp(1e-6, 1e8);
+    let density = kappa / (TAU * (1.0 - (-2.0 * kappa).exp())) * (kappa * (cosine - 1.0)).exp();
+    edge.min(solid * density)
 }
 
-/// Gathers stars, as direction from the eye and flux, into a share.
-pub fn share(stars: impl Iterator<Item = (DVec3, f64)>) -> Share {
-    let mut bins: Vec<(u16, [f32; 2])> = stars
-        .filter(|(direction, _)| direction.length_squared() > 0.0)
-        .map(|(direction, ratio)| (bin(direction) as u16, [capped(ratio) as f32, 1.0]))
-        .collect();
-    bins.sort_unstable_by_key(|(bin, _)| *bin);
-    bins.dedup_by(|(bin, [flux, count]), (kept, [kept_flux, kept_count])| {
-        let same = bin == kept;
-        if same {
-            *kept_flux += *flux;
-            *kept_count += *count;
-        }
-        same
-    });
-    bins
+/// Complementary error function, to about 1e-7.
+fn erfc(x: f64) -> f64 {
+    let t = 1.0 / (1.0 + 0.3275911 * x.abs());
+    let tail = (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+        + 0.254829592)
+        * t
+        * (-x * x).exp();
+    if x >= 0.0 { tail } else { 2.0 - tail }
 }
 
-fn sign(x: f64) -> f64 {
-    if x >= 0.0 { 1.0 } else { -1.0 }
+/// Solid angle of a view with these half-angle tangents.
+fn view_solid(tan_x: f64, tan_y: f64) -> f64 {
+    4.0 * (tan_x * tan_y / (1.0 + tan_x * tan_x + tan_y * tan_y).sqrt()).atan()
 }
 
-/// Map coordinates in [0, 1]² of a direction. `starfield.wgsl` repeats this.
-fn encode(direction: DVec3) -> [f64; 2] {
-    let n = direction / (direction.x.abs() + direction.y.abs() + direction.z.abs());
-    let (mut u, mut v) = (n.x, n.y);
-    if n.z < 0.0 {
-        (u, v) = ((1.0 - n.y.abs()) * sign(n.x), (1.0 - n.x.abs()) * sign(n.y));
-    }
-    [u * 0.5 + 0.5, v * 0.5 + 0.5]
-}
-
-fn decode([u, v]: [f64; 2]) -> DVec3 {
-    let (mut x, mut y) = (u * 2.0 - 1.0, v * 2.0 - 1.0);
-    let z = 1.0 - x.abs() - y.abs();
-    if z < 0.0 {
-        (x, y) = ((1.0 - y.abs()) * sign(x), (1.0 - x.abs()) * sign(y));
-    }
-    DVec3::new(x, y, z).normalize()
-}
-
-/// Row-major bin of a direction.
-pub fn bin(direction: DVec3) -> usize {
-    let [u, v] = encode(direction);
-    let index = |t: f64| ((t * SIZE as f64) as usize).min(SIZE - 1);
-    index(v) * SIZE + index(u)
-}
-
-/// A point within a bin, from its fractional position.
-fn bin_uv(bin: usize, [a, b]: [f64; 2]) -> [f64; 2] {
-    let size = SIZE as f64;
-    [
-        ((bin % SIZE) as f64 + a) / size,
-        ((bin / SIZE) as f64 + b) / size,
-    ]
-}
-
-/// Solid angle of a bin, from spherical triangles over a fine grid within it.
-fn solid_angle(bin: usize) -> f64 {
-    const STEPS: usize = 4;
-    let at = |i: usize, j: usize| {
-        decode(bin_uv(
-            bin,
-            [i as f64 / STEPS as f64, j as f64 / STEPS as f64],
-        ))
+/// Eases towards a target in log space, quicker towards a brighter view.
+fn ease(current: f64, target: f64, seconds: f64, brighter: bool) -> f64 {
+    let constant = if brighter {
+        BRIGHTER_SECONDS
+    } else {
+        DARKER_SECONDS
     };
-    let triangle = |a: DVec3, b: DVec3, c: DVec3| {
-        2.0 * a
-            .dot(b.cross(c))
-            .abs()
-            .atan2(1.0 + a.dot(b) + b.dot(c) + c.dot(a))
+    let t = 1.0 - (-seconds / constant).exp();
+    (current.ln() + (target.ln() - current.ln()) * t).exp()
+}
+
+/// Meters the view and adapts the physical key and assisted exposure to it.
+pub fn expose(
+    mut sky: ResMut<Sky>,
+    nav: Res<Navigation>,
+    lights: Res<Lights>,
+    pose: Res<CameraPose>,
+    rig: Res<CameraRig>,
+    time: Res<Time>,
+    camera: Query<(&GlobalTransform, &Camera), With<SpaceCamera>>,
+) {
+    let Ok((transform, camera)) = camera.single() else {
+        return;
     };
-    let mut total = 0.0;
-    for i in 0..STEPS {
-        for j in 0..STEPS {
-            let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
-            total += triangle(a, b, c) + triangle(a, c, d);
-        }
+    let size = camera
+        .physical_viewport_size()
+        .unwrap_or(UVec2::ONE)
+        .max(UVec2::ONE);
+    let tan_half = nav.tan_half_fov();
+    let aspect = f64::from(size.x) / f64::from(size.y);
+    let solid = view_solid(tan_half * aspect, tan_half);
+    let cone = 1.0 - solid / TAU;
+    let forward = transform.forward().as_dvec3();
+    let eye = DVec3::from_array(GalaxyModel::milky_way().home_pc)
+        + rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
+    let galaxy = sky.galaxy_flux(eye, forward, solid) / solid;
+    // The visited system's stars in view, as the irradiance of their discs.
+    let stars: f64 = lights
+        .stars
+        .iter()
+        .filter_map(|star| {
+            let offset = (star.centre - lights.eye).as_dvec3();
+            let distance = offset.length();
+            let sine = f64::from(star.radius) / distance;
+            let disc = if sine < 1.0 {
+                TAU * (1.0 - (1.0 - sine * sine).sqrt())
+            } else {
+                TAU
+            };
+            (offset.dot(forward) >= cone * distance).then_some(star.radiance * disc)
+        })
+        .sum();
+    let radiance = irradiance_per_ratio() * galaxy + stars / solid;
+    sky.galaxy_share = if radiance > 0.0 {
+        irradiance_per_ratio() * galaxy / radiance
+    } else {
+        1.0
+    };
+    sky.sky_key = (radiance * render::KEY / SKY_BACKGROUND).max(dark_key());
+    let key = render::physical_key(&lights, sky.sky_key);
+    sky.target = key;
+    let pixel = 2.0 * tan_half / f64::from(size.y);
+    let background = POINT_LIGHT * flux_per_luminosity() * galaxy * pixel * pixel;
+    let exposure = (SKY_BACKGROUND / background).min(1.0);
+    if sky.adapted {
+        let seconds = time.delta_secs_f64();
+        sky.key = ease(sky.key, key, seconds, key > sky.key);
+        let current = f64::from(sky.exposure);
+        sky.exposure = ease(current, exposure, seconds, exposure < current) as f32;
+    } else {
+        (sky.key, sky.exposure, sky.adapted) = (key, exposure as f32, true);
     }
-    total
+}
+
+/// Display value per unit of galactic radiance, in visual solar luminosities
+/// per square parsec per steradian. Physical exposure shares the frame's key
+/// with every body; otherwise galactic light has its own exposure, as before,
+/// in display value × square pixels per luminosity per square parsec on a
+/// `pixel_sr` pixel.
+pub fn radiance_gain(nav: &Navigation, sky: &Sky, pixel_sr: f64) -> f64 {
+    if nav.realistic && nav.physical {
+        irradiance_per_ratio() * render::KEY / sky.key
+    } else {
+        POINT_LIGHT * flux_per_luminosity() * f64::from(sky.exposure) * pixel_sr
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn bins_cover_the_whole_sky_once() {
-        let total: f64 = Sky::default().solid.iter().sum();
-        assert!((total / (4.0 * std::f64::consts::PI) - 1.0).abs() < 1e-2);
-        for direction in [
-            DVec3::X,
-            -DVec3::X,
-            DVec3::new(0.3, -0.8, -0.52),
-            DVec3::new(-0.6, 0.1, 0.79),
-            -DVec3::Z,
-        ] {
-            let direction = direction.normalize();
-            let centre = decode(bin_uv(bin(direction), [0.5, 0.5]));
-            // Within a bin's diagonal, about 4° at the most stretched bins.
-            assert!(centre.angle_between(direction) < 5f64.to_radians());
-        }
+    fn sky() -> Sky {
+        Sky::default()
     }
 
     #[test]
-    fn shares_merge_bins_and_cap_bright_stars() {
-        let cap = capped(f64::INFINITY);
-        let share = share(
-            [
-                (DVec3::X, 1.0),
-                (DVec3::X * 3.0, 2.0),
-                (-DVec3::Y, 1e9),
-                (DVec3::ZERO, 5.0),
-            ]
-            .into_iter(),
-        );
-        assert_eq!(share.len(), 2);
-        let east = share.iter().find(|(b, _)| usize::from(*b) == bin(DVec3::X));
-        assert_eq!(east.unwrap().1, [3.0, 2.0]);
-        let south = share
-            .iter()
-            .find(|(b, _)| usize::from(*b) == bin(-DVec3::Y));
-        assert_eq!(south.unwrap().1, [cap as f32, 1.0]);
+    fn a_blob_around_the_eye_fills_the_view_evenly() {
+        let solid = view_solid(0.8, 0.47);
+        let cone = (1.0 - solid / TAU).acos();
+        let share = in_cone(1.0, 1e6, cone, solid);
+        assert!((share / (solid / (4.0 * PI)) - 1.0).abs() < 1e-3);
+        // A small blob is all inside when ahead, and none of it when behind.
+        assert!((in_cone(1.0, 1e-3, cone, solid) - 1.0).abs() < 1e-6);
+        assert!(in_cone(-1.0, 1e-3, cone, solid) < 1e-9);
     }
 
     #[test]
-    fn a_bright_sky_stops_the_exposure_down_and_a_dark_one_does_not() {
-        let (gain, pixel_sr) = (POINT_LIGHT * flux_per_luminosity(), 7.6e-7);
-        let tan_half = 25f64.to_radians().tan();
-        let meter = |sky: &Sky| sky.meter(-DVec3::X, tan_half, 16.0 / 9.0, gain, pixel_sr);
-        let mut sky = Sky::default();
-        assert_eq!(meter(&sky), 1.0);
-        // Home-like: a few thousand faint stars over the whole sky.
-        let faint = (0..5000).map(|i| {
-            let t = f64::from(i) * 2.399;
-            let y = 1.0 - 2.0 * (f64::from(i) + 0.5) / 5000.0;
-            let r = (1.0 - y * y).sqrt();
-            (DVec3::new(r * t.cos(), y, r * t.sin()), 0.01)
-        });
-        sky.add(&share(faint), 1.0);
-        assert_eq!(meter(&sky), 1.0);
-        // One very bright star straight ahead is capped: still a point.
-        sky.add(&share([(-DVec3::X, 1e6)].into_iter()), 1.0);
-        assert_eq!(meter(&sky), 1.0);
-        // A crowded bulge ahead: 1e5 stars at the magnitude limit per bin,
-        // dozens per pixel.
-        let crowd: Share = (0..SIZE * SIZE)
-            .filter(|&i| sky.centres[i].dot(-DVec3::X) > 0.7)
-            .map(|i| (i as u16, [1e5 * 2e-3, 1e5]))
-            .collect();
-        sky.add(&crowd, 1.0);
-        let stopped = meter(&sky);
-        assert!(stopped < 0.5, "{stopped}");
-        sky.add(&crowd, -1.0);
-        assert_eq!(meter(&sky), 1.0);
+    fn the_galactic_centre_is_far_brighter_than_the_view_away_from_it() {
+        let sky = sky();
+        let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        let solid = view_solid(0.8, 0.47);
+        let towards = sky.galaxy_flux(home, -DVec3::X, solid);
+        let away = sky.galaxy_flux(home, DVec3::Y, solid);
+        assert!(towards > 10.0 * away, "{towards} {away}");
+        // At the centre, the sky is many times brighter than from home.
+        let centre = sky.galaxy_flux(DVec3::new(10.0, 0.0, 0.0), -DVec3::X, solid);
+        assert!(centre > 100.0 * towards, "{centre} {towards}");
     }
 
     #[test]
-    fn exposure_adapts_over_about_half_a_second() {
-        let mut sky = Sky::default();
-        let crowd: Share = (0..SIZE * SIZE)
-            .map(|i| (i as u16, [1e4 * sky.solid[i] as f32, 1.0]))
-            .collect();
-        sky.add(&crowd, 1.0);
-        let gain = POINT_LIGHT * flux_per_luminosity();
-        let step = |sky: &mut Sky, seconds| {
-            sky.update(seconds, DVec3::X, 0.47, 1.0, gain, 7.6e-7);
-            sky.exposure
+    fn home_stays_dark_adapted_and_the_centre_stops_down() {
+        let sky = sky();
+        let solid = view_solid(0.8, 0.47);
+        let key = |eye: DVec3, forward| {
+            let galaxy = sky.galaxy_flux(eye, forward, solid) / solid;
+            (irradiance_per_ratio() * galaxy * render::KEY / SKY_BACKGROUND).max(dark_key())
         };
-        let first = step(&mut sky, 1.0 / 60.0);
-        assert!(first < 1.0 && first > 0.9, "{first}");
-        for _ in 0..180 {
-            step(&mut sky, 1.0 / 60.0);
-        }
-        let settled = f64::from(sky.exposure);
-        let target = sky.meter(DVec3::X, 0.47, 1.0, gain, 7.6e-7);
-        assert!((settled / target - 1.0).abs() < 0.01);
+        let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        assert_eq!(key(home, -DVec3::X), dark_key());
+        assert!(key(DVec3::new(10.0, 0.0, 0.0), -DVec3::X) > 100.0 * dark_key());
+    }
+
+    #[test]
+    fn adaptation_is_quicker_to_light_than_to_dark() {
+        let brighter = ease(1.0, 100.0, 0.1, true);
+        let darker = ease(100.0, 1.0, 0.1, false);
+        assert!(brighter.ln() > (100.0 / darker).ln());
+        assert!((ease(1.0, 100.0, 10.0, true) / 100.0 - 1.0).abs() < 1e-9);
     }
 }

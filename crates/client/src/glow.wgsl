@@ -75,10 +75,6 @@ fn erf(x: f32) -> f32 {
     let x = clamp((log2(distance) * 0.30103 + 1.0) * (31.0 / 6.0), 0.0, 31.0);
     let i = min(i32(x), 30); let base = i32(in.data.w) * 32 + i;
     let luminosity = mix(settings.light[base].rgb, settings.light[base+1].rgb, x-f32(i));
-    let forward = settings.forward.xyz;
-    // Light per view pixel, not per (larger) glow pixel.
-    let pixel = 2.0 * settings.projection.x / max(settings.values.x, 1.0);
-    let cosine = max(dot(dir, forward), 0.0);
-    let pixel_sr = pixel*pixel*cosine*cosine*cosine;
-    return vec4(luminosity * density * integral * pixel_sr * settings.values.z * settings.values.w, 0.0);
+    // Radiance, so independent of pixel size, at the frame's exposure.
+    return vec4(luminosity * density * integral * settings.values.z, 0.0);
 }

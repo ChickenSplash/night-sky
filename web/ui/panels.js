@@ -340,7 +340,7 @@ export function mount(bridge, canvas) {
       return button;
     })),
     el('p', { className: 'muted small', textContent: 'Reference views for the smooth galaxy prototype. No dust or spiral detail yet.' }),
-    el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.' }),
+    el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable.' }),
     heading('Controls'),
     el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])),
     heading('Benchmark'), benchmarkButton,

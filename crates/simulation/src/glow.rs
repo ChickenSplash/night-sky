@@ -3,7 +3,7 @@
 //! population, so tessellation changes do not change the represented light.
 use crate::{
     galaxy::{Component, GalaxyModel},
-    light::blackbody_colour,
+    light::{blackbody_colour, visual_efficiency},
     population,
 };
 
@@ -104,7 +104,9 @@ pub fn distance(index: usize) -> f64 {
     10f64.powf(-1.0 + index as f64 * 6.0 / (DISTANCES - 1) as f64)
 }
 
-/// Mean RGB luminosity per star *below* the point renderer's magnitude limit.
+/// Mean visual RGB luminosity per star *below* the point renderer's magnitude
+/// limit. Which stars are resolved follows their luminosity, as streaming
+/// does; their light is visual, as the eye and the camera's exposure see it.
 /// Stratified samples include rare bright populations without a huge census.
 pub fn unresolved_table() -> Vec<[f32; 4]> {
     let mut table = vec![[0.0; 4]; 6 * DISTANCES];
@@ -117,19 +119,36 @@ pub fn unresolved_table() -> Vec<[f32; 4]> {
             for sample in 0..64 {
                 let star = population::tiered_star(&format!("glow:{sample}"), component, tier);
                 let colour = blackbody_colour(star.temperature_k);
+                let visual = star.luminosity_solar * visual_efficiency(star.temperature_k);
                 for i in 0..DISTANCES {
                     if star.luminosity_solar * reach >= distance(i).powi(2) {
                         continue;
                     }
                     for (channel, value) in colour.into_iter().enumerate() {
                         table[component as usize * DISTANCES + i][channel] +=
-                            (share / 64.0 * star.luminosity_solar * value) as f32;
+                            (share / 64.0 * visual * value) as f32;
                     }
                 }
             }
         }
     }
     table
+}
+
+/// Mean visual luminosity per star of each component, resolved or not, from
+/// the same stratified samples as `unresolved_table`.
+pub fn mean_visual_luminosity() -> [f64; 6] {
+    Component::ALL.map(|component| {
+        let mut total = 0.0;
+        for (tier, share) in population::tier_shares(component).into_iter().enumerate() {
+            for sample in 0..64 {
+                let star = population::tiered_star(&format!("glow:{sample}"), component, tier);
+                total +=
+                    share / 64.0 * star.luminosity_solar * visual_efficiency(star.temperature_k);
+            }
+        }
+        total
+    })
 }
 
 #[cfg(test)]
@@ -180,6 +199,19 @@ mod tests {
                 }
             }
             assert!(component[DISTANCES - 1][0] > 0.0);
+        }
+    }
+    #[test]
+    fn unresolved_light_approaches_the_mean_from_far_away() {
+        let table = unresolved_table();
+        for (component, mean) in mean_visual_luminosity().into_iter().enumerate() {
+            let far = table[component * DISTANCES + DISTANCES - 1];
+            let y = crate::light::luminance([far[0], far[1], far[2]].map(f64::from));
+            // From 100 kpc almost nothing is resolved.
+            assert!(
+                y <= mean * 1.001 && y > mean * 0.9,
+                "{component}: {y} of {mean}"
+            );
         }
     }
 }

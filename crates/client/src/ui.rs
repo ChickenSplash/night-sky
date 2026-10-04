@@ -18,17 +18,20 @@ fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(MUTED).strong());
 }
 
+type Overlay<'w> = (
+    Res<'w, Markers>,
+    Res<'w, PanelInsets>,
+    Res<'w, Lights>,
+    Res<'w, CameraVelocity>,
+    Res<'w, crate::sky::Sky>,
+);
+
 pub fn draw_ui(
     interaction: (Commands, EguiContexts, MessageWriter<UiCommand>),
     universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
-    overlay: (
-        Res<Markers>,
-        Res<PanelInsets>,
-        Res<Lights>,
-        Res<CameraVelocity>,
-    ),
+    overlay: Overlay,
     camera_state: (
         Res<CameraRig>,
         Res<CameraPose>,
@@ -40,7 +43,7 @@ pub fn draw_ui(
     let (mut commands, mut contexts, mut writer) = interaction;
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
-    let (markers, insets, lights, velocity) = overlay;
+    let (markers, insets, lights, velocity, sky) = overlay;
     let (rig, pose, starfield, metrics) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -118,7 +121,7 @@ pub fn draw_ui(
         &rig,
         &pose,
         &starfield,
-        &exposure_caption(&nav, &lights),
+        &exposure_caption(&nav, &lights, &sky),
         &velocity,
         &metrics.caption,
         insets.0.is_none(),
@@ -340,7 +343,7 @@ impl Panels<'_> {
         }
         ui.label(
             egui::RichText::new(
-                "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Assisted exposure keeps faint planets and stars readable; physical exposure shows true contrast.",
+                "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable.",
             )
             .size(11.0)
             .color(MUTED),

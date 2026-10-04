@@ -4,9 +4,8 @@
 //! has changed. A full-view quad then scales that image up into the 3D view.
 use crate::{
     Navigation,
-    render::{Lights, sky_dimming},
     scene::{CameraPose, CameraRig, SpaceCamera},
-    sky::{self, Sky},
+    sky::{Sky, radiance_gain},
 };
 use bevy::{
     asset::{RenderAssetUsages, load_internal_asset, uuid_handle},
@@ -34,7 +33,6 @@ use bevy::{
 use space_simulation::{
     galaxy::{GalaxyModel, PC_METRES},
     glow::{DISTANCES, patches, unresolved_table},
-    population::flux_per_luminosity,
 };
 use std::sync::{
     Arc,
@@ -53,7 +51,8 @@ const DOWNSCALE: u32 = 8;
 
 #[derive(Clone, ShaderType)]
 struct Settings {
-    /// View height in pixels, unused, photometric gain and exposure.
+    /// Unused, unused, display value per visual solar luminosity per square
+    /// parsec per steradian (`sky::radiance_gain`), unused.
     values: Vec4,
     origin: Vec4,
     right: Vec4,
@@ -203,7 +202,7 @@ impl Plugin for GlowPlugin {
         .insert_resource(compiling.clone())
         .add_systems(
             PostUpdate,
-            sync.after(crate::scene::draw)
+            sync.after(crate::sky::expose)
                 .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         );
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
@@ -372,7 +371,6 @@ fn sync(
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
     sky: Res<Sky>,
-    lights: Res<Lights>,
     compiling: Res<Compiling>,
     mut assets: GlowAssets,
     space: Query<(&GlobalTransform, &Camera), With<SpaceCamera>>,
@@ -420,7 +418,10 @@ fn sync(
         up: camera_transform.up().into(),
         tan_half_fov: nav.tan_half_fov() as f32,
         size,
-        exposure: sky.exposure * sky_dimming(&nav, &lights),
+        exposure: {
+            let pixel = 2.0 * nav.tan_half_fov() / f64::from(size.y);
+            radiance_gain(&nav, &sky, pixel * pixel) as f32
+        },
     };
     if glow.drawn.is_none_or(|drawn| !view.matches(&drawn)) || compiling.0.load(Ordering::Relaxed) {
         glow.settle = SETTLE;
@@ -447,12 +448,7 @@ fn sync(
         for (centre, handle) in &glow.batches {
             if let Some(material) = materials.get_mut(handle) {
                 let settings = &mut material.settings;
-                settings.values = Vec4::new(
-                    size.y as f32,
-                    0.0,
-                    (sky::POINT_LIGHT * flux_per_luminosity()) as f32,
-                    view.exposure,
-                );
+                settings.values = Vec4::new(0.0, 0.0, view.exposure, 0.0);
                 settings.origin = (*centre - view.eye).as_vec3().extend(0.0);
                 settings.right = camera_transform.right().extend(0.0);
                 settings.up = view.up.extend(0.0);

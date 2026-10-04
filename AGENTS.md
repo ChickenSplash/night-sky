@@ -188,17 +188,24 @@
   visited star is a body only within `scene::body_range` (where its planets
   show): batches hide points that close and its sprite waits hidden. Beyond, it
   is a galactic point under the same magnitude limit. Galactic points use
-  apparent flux; `sky_dimming` also stops their display brightness down with
-  the close-star physical exposure. Every point is a
+  apparent flux, scaled by `sky::radiance_gain`. Realistic, their colour and
+  visual efficiency come from a blackbody palette by temperature (the vertex
+  corner attribute carries the corner index and temperature); which stars
+  load still follows bolometric luminosity. Every point is a
   0.55 px sigma Gaussian (2 px footprint), as in a perfect camera: brightness
   shows only in its peak, linear up to a knee and logarithmic above it, never
   in its size. Crowds are never widened or blurred.
-- `sky.rs` keeps an octahedral map (64², galactic axes) of visible stars'
-  flux and count per steradian, built from each batch's share at mesh time
-  and removed with it; stars count at most magnitude -1, so one bright star
-  is never a bright sky. It meters the galactic exposure (`Sky::exposure`,
-  easing over about 0.5 s) so the sky in view shows at `SKY_BACKGROUND` for
-  the points. It stays on the CPU.
+- `sky.rs` meters the view on the CPU (about 0.3 ms): the smooth galaxy model
+  (coarse glow patches of every star, resolved or not, at their mean visual
+  luminosity), so the exposure never changes as stars stream in, plus the
+  visited system's stars in view. The average radiance in view shows at
+  `SKY_BACKGROUND`. `Sky::key` is the physical key (radiance shown at display
+  `KEY`), the brightest of that, the subject's and a filling star disc
+  (`render::physical_key`), never below `dark_key` (a dark-adapted eye).
+  `Sky::exposure` is the assisted/wireframe galactic multiplier, at most one.
+  Both ease like an eye: about 0.1 s to a brighter view, 0.5 s to a darker.
+  `sky::radiance_gain` is the one conversion from galactic light to display
+  value, shared by points and glow.
 - `black_hole.rs` draws an opaque sphere at the central black hole's physical
   Schwarzschild radius; it is not visible from home. No accretion disc or
   lensing yet.
@@ -219,17 +226,18 @@
   image at 1/8 of the view's resolution per axis (`DOWNSCALE`, chosen by
   comparing full to 1/32), and
   `glow_composite.wgsl` scales it up additively at the far plane, with a cubic
-  B-spline (four bilinear taps), not plain bilinear. Patch light is still per
-  view pixel. The image is redrawn only when the eye, axes, field
-  of view, size or (beyond 2x) exposure change by more than a quarter glow
-  pixel, plus `SETTLE` frames and while any pipeline compiles; otherwise the
-  composite rescales it by the exposure ratio.
+  B-spline (four bilinear taps), not plain bilinear. Patch light is radiance
+  times `sky::radiance_gain`, visual (eye-weighted), so it matches the points
+  and bodies under physical exposure. The image is redrawn only when the eye,
+  axes, field of view, size or (beyond 2x) exposure change by more than a
+  quarter glow pixel, plus `SETTLE` frames and while any pipeline compiles;
+  otherwise the composite rescales it by the exposure ratio.
   Camera-relative origins are formed in f64 before converting to f32. Patches
   are built lazily and hidden when disabled.
   Glow is shown only with
   realistic lighting and the **Smooth galaxy glow (prototype)** setting enabled.
   Settings provide Inside, Face-on and Edge-on reference camera commands on both
-  clients. `SPACE_HEADFUL=1 node scripts/test-galaxy-glow.mjs` saves comparison
+  clients. `node scripts/test-galaxy-glow.mjs` saves comparison
   screenshots and on/off frame timings to `data/logs/`, on the secondary monitor.
   Dust, detailed spiral structure and other galaxy types are not implemented yet.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
@@ -271,8 +279,12 @@
 
 ## Realistic rendering
 
-- Optional (`Navigation::realistic`); the wireframe bodies are the default and
-  must stay unchanged when it is off (galactic stars appear in both modes).
+- On by default (`Navigation::realistic`); the wireframe bodies must stay
+  unchanged when it is off (galactic stars appear in both modes). The smoke
+  test turns it off for its wireframe captures.
+  `render::exposure_caption` shows the key (and stops from `dark_key`), its
+  target and which candidate set it (subject, view or star disc), and the
+  view's galaxy/star split, from values `sky::expose` already computes.
   Photometry lives in `space_simulation::light`;
   exposure, the pools and the HDR camera in `crates/client/src/render.rs`,
   with the shaders in `body.wgsl` and `point.wgsl`.
@@ -289,8 +301,11 @@
   read red. Brightness is visual, not bolometric.
 - Assisted exposure compresses contrast around the planets, exposes the star
   field on its own and floors planet brightness. Physical exposure (default) is
-  one linear exposure per frame; it stops down as a star disc fills the view
-  (`Exposure::adapt`), so a close star shows its surface.
+  one linear exposure per frame for bodies, galactic points and glow alike, at
+  `Sky::key`; it stops down as a star disc fills the view (`Exposure::adapt`),
+  so a close star shows its surface, and beside a sunlit planet the galaxy
+  falls below display range, as in a real camera. Bevy's tone mapping is the
+  frame's one tone curve.
 - Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
   over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
   spread integrates to its whole light, exposed as if spread over a point-sized
