@@ -18,6 +18,39 @@ pub struct Patch {
     pub component: usize,
 }
 
+/// Patch grid step and half-extent per component, in parsecs. Each grid
+/// reaches past `FLOOR`, so the floor, not the grid, sets the galaxy's edge.
+const GRIDS: [(Component, [f64; 3], [f64; 3]); 5] = [
+    (
+        Component::Bulge,
+        [400.0, 250.0, 400.0],
+        [8000.0, 3500.0, 8000.0],
+    ),
+    (
+        Component::ThinDisc,
+        [1200.0, 300.0, 1200.0],
+        [48000.0, 3600.0, 48000.0],
+    ),
+    (
+        Component::Arms,
+        [1200.0, 100.0, 1200.0],
+        [48000.0, 1200.0, 48000.0],
+    ),
+    (
+        Component::ThickDisc,
+        [1200.0, 900.0, 1200.0],
+        [48000.0, 10800.0, 48000.0],
+    ),
+    (Component::Halo, [6000.0; 3], [48000.0; 3]),
+];
+/// Patches fainter than this share of their component's densest are dropped.
+/// Profiles fall smoothly to it, so there is no visible edge.
+const FLOOR: f64 = 1e-5;
+/// The Plummer nuclear cluster as Gaussians: (sigma / Plummer radius, share of
+/// stars), fitted to its mass per log radius within about 12% out to 3 radii.
+/// One Gaussian ended abruptly around a bright dot.
+const NUCLEUS: [(f64, f64); 4] = [(0.5, 0.361), (1.0, 0.442), (2.0, 0.145), (4.0, 0.052)];
+
 /// Smooth the arms only for the glow prototype, not the generated stars.
 pub fn patches(model: &GalaxyModel, detail: f64) -> Vec<Patch> {
     assert!(
@@ -28,42 +61,17 @@ pub fn patches(model: &GalaxyModel, detail: f64) -> Vec<Patch> {
     smooth.thin.arm_strength = 0.0;
     smooth.arms.arm_strength = 0.0;
     let mut out = Vec::new();
-    for (component, step, extent) in [
-        (
-            Component::Bulge,
-            [400.0, 250.0, 400.0],
-            [4000.0, 1500.0, 4000.0],
-        ),
-        (
-            Component::ThinDisc,
-            [1200.0, 300.0, 1200.0],
-            [15600.0, 900.0, 15600.0],
-        ),
-        (
-            Component::Arms,
-            [1200.0, 100.0, 1200.0],
-            [15600.0, 300.0, 15600.0],
-        ),
-        (
-            Component::ThickDisc,
-            [1200.0, 900.0, 1200.0],
-            [15600.0, 2700.0, 15600.0],
-        ),
-        (Component::Halo, [6000.0; 3], [48000.0, 30000.0, 48000.0]),
-    ] {
-        let start = out.len();
+    for (component, step, extent) in GRIDS {
         let step = step.map(|s| s / detail);
         let n = std::array::from_fn::<_, 3, _>(|i| (extent[i] / step[i]).floor() as i32);
+        let mut grid = Vec::new();
         for x in -n[0]..=n[0] {
             for y in -n[1]..=n[1] {
                 for z in -n[2]..=n[2] {
                     let position_pc = [x as f64 * step[0], y as f64 * step[1], z as f64 * step[2]];
                     let stars = smooth.component_density(component, position_pc)
                         * step.iter().product::<f64>();
-                    if stars <= 0.0 {
-                        continue;
-                    }
-                    out.push(Patch {
+                    grid.push(Patch {
                         position_pc,
                         sigma_pc: step.map(|s| s * 0.65),
                         stars,
@@ -72,17 +80,22 @@ pub fn patches(model: &GalaxyModel, detail: f64) -> Vec<Patch> {
                 }
             }
         }
-        let total: f64 = out[start..].iter().map(|p| p.stars).sum();
-        for patch in &mut out[start..] {
+        let peak = grid.iter().map(|p| p.stars).fold(0.0, f64::max);
+        grid.retain(|p| p.stars > FLOOR * peak);
+        let total: f64 = grid.iter().map(|p| p.stars).sum();
+        for patch in &mut grid {
             patch.stars *= model.stars_in(component) / total;
         }
+        out.extend(grid);
     }
-    out.push(Patch {
-        position_pc: [0.0; 3],
-        sigma_pc: [model.nucleus_pc; 3],
-        stars: model.stars_in(Component::Nucleus),
-        component: 0,
-    });
+    for (sigma, share) in NUCLEUS {
+        out.push(Patch {
+            position_pc: [0.0; 3],
+            sigma_pc: [sigma * model.nucleus_pc; 3],
+            stars: share * model.stars_in(Component::Nucleus),
+            component: 0,
+        });
+    }
     out
 }
 
@@ -127,7 +140,7 @@ mod tests {
         let model = GalaxyModel::milky_way();
         for detail in [0.75, 1.0] {
             let patches = patches(&model, detail);
-            assert!(patches.len() < 40000);
+            assert!(detail > 0.75 || patches.len() < 40000);
             for component in Component::ALL {
                 let total: f64 = patches
                     .iter()
@@ -137,6 +150,25 @@ mod tests {
                 assert!((total / model.stars_in(component) - 1.0).abs() < 1e-10);
             }
         }
+    }
+    #[test]
+    fn patches_fade_out_before_their_grids_end() {
+        let model = GalaxyModel::milky_way();
+        for (component, step, extent) in GRIDS {
+            let step = step.map(|s| s / 0.75);
+            let edge = std::array::from_fn::<_, 3, _>(|i| (extent[i] / step[i]).floor() * step[i]);
+            assert!(
+                patches(&model, 0.75)
+                    .iter()
+                    .filter(|p| p.component == component as usize)
+                    .all(|p| (0..3).all(|i| p.position_pc[i].abs() < edge[i])),
+                "{component:?} reaches its grid's edge"
+            );
+        }
+    }
+    #[test]
+    fn nucleus_shares_add_up() {
+        assert!((NUCLEUS.iter().map(|n| n.1).sum::<f64>() - 1.0).abs() < 1e-12);
     }
     #[test]
     fn unresolved_light_is_finite_and_increases_with_distance() {

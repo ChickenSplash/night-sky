@@ -6,7 +6,13 @@ struct Output { @builtin(position) position: vec4<f32>, @location(0) @interpolat
 @vertex fn vertex(v: Vertex) -> Output {
     var out: Output;
     let centre = v.position + settings.origin.xyz;
-    let sigma = vec3(v.data.x, v.data.y, v.data.x);
+    // Widen patches to at least half a glow pixel, keeping their light, so a
+    // patch smaller than a pixel (the nuclear cluster) does not flicker as it
+    // crosses pixel centres.
+    let pixel = 2.0 * settings.projection.x / settings.projection.w;
+    let blur = 0.5 * pixel * length(centre);
+    let widened = sqrt(v.data.xy * v.data.xy + blur * blur);
+    let sigma = vec3(widened.x, widened.y, widened.x);
     let forward = settings.forward.xyz;
     let right = settings.right.xyz;
     let up = settings.up.xyz;
@@ -41,7 +47,7 @@ struct Output { @builtin(position) position: vec4<f32>, @location(0) @interpolat
             clip = vec4(2.0,2.0,0.0,1.0);
         }
     }
-    out.position = clip; out.centre = centre; out.data = v.data;
+    out.position = clip; out.centre = centre; out.data = vec4(widened, v.data.zw);
     return out;
 }
 fn erf(x: f32) -> f32 {

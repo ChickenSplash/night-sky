@@ -206,15 +206,21 @@
   for the first galaxy-glow milestone, with spiral modulation averaged out only
   in the glow. A stratified, distance-indexed RGB luminosity table statistically
   excludes magnitude-visible stars. This is approximate at finite patch/table
-  resolution. `client::glow` batches them spatially and `glow.wgsl` integrates
-  each ellipsoid analytically, without a full-galaxy raymarch loop. Perspective
-  ellipsoid bounds and view-cone rejection limit overdraw. Every point inside
-  the patch grid sits within about 50 patches per component, each covering the
-  whole view, so cost is pixel fill: a separate glow camera (layer 30, order -1,
-  no MSAA) draws patches into a half-float image at 1/8 of the view's
-  resolution per axis (`DOWNSCALE`, chosen by comparing full to 1/32), and
-  `glow_composite.wgsl` scales it up additively at the far plane. Patch light
-  is still per view pixel. The image is redrawn only when the eye, axes, field
+  resolution. Patch grids reach past `FLOOR` (1e-5 of each component's
+  densest patch), so profiles fade out instead of stopping at a grid edge
+  (tested). The nuclear cluster is four Gaussians fitted to its Plummer
+  profile. `client::glow` batches them spatially and `glow.wgsl` integrates
+  each ellipsoid analytically, without a full-galaxy raymarch loop, widening
+  each to at least half a glow pixel (keeping its light) so sub-pixel patches
+  never flicker. Perspective ellipsoid bounds and view-cone rejection limit
+  overdraw. Every point inside the patch grid sits within about 50 patches per
+  component, each covering the whole view, so cost is pixel fill: a separate
+  glow camera (layer 30, order -1, no MSAA) draws patches into a half-float
+  image at 1/8 of the view's resolution per axis (`DOWNSCALE`, chosen by
+  comparing full to 1/32), and
+  `glow_composite.wgsl` scales it up additively at the far plane, with a cubic
+  B-spline (four bilinear taps), not plain bilinear. Patch light is still per
+  view pixel. The image is redrawn only when the eye, axes, field
   of view, size or (beyond 2x) exposure change by more than a quarter glow
   pixel, plus `SETTLE` frames and while any pipeline compiles; otherwise the
   composite rescales it by the exposure ratio.
