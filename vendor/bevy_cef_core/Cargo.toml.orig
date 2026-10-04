@@ -1,0 +1,64 @@
+[package]
+name = "bevy_cef_core"
+description = "Core library for bevy_cef"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+bevy = { workspace = true }
+bevy_remote = { workspace = true }
+uuid = { version = "1" }
+cef = { workspace = true }
+cef-dll-sys = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+async-channel = { workspace = true }
+raw-window-handle = { workspace = true }
+
+[features]
+default = ["browser"]
+# Development marker. Also enables `log` so the debug render-process binary
+# (`bevy_cef_debug_render_process`, which builds this crate with
+# `features = ["debug"]`) emits the same diagnostics the browser process does.
+debug = ["log"]
+# Routes the crate's internal diagnostics through `bevy::log`: gates the
+# `cef_error!`/`cef_warn!` wrapper macros and pulls in `bevy/bevy_log` so the
+# macros resolve even in a render-process build (which otherwise omits the
+# renderer features). Off by default — the macros then compile to no-ops.
+log = ["bevy/bevy_log"]
+# Enables the browser-process side of the integration: webview lifecycle,
+# materials, input handling, asset scheme, etc. Pulls in the Bevy renderer
+# features needed by that code. Disable this for the render-process subprocess
+# binary, which only needs `bevy::platform` for shared types.
+browser = [
+    "bevy/bevy_asset",
+    "bevy/bevy_log",
+    "bevy/bevy_pbr",
+    "bevy/bevy_sprite",
+    "bevy/bevy_window",
+    "bevy/picking",
+    "dep:metal",
+    "dep:objc",
+    "dep:objc2-core-foundation",
+    "dep:objc2-io-surface",
+    "dep:wgpu",
+]
+
+# Used only by `browser_process::accelerated_paint` (macOS GPU OSR), so they are
+# optional and activated by the `browser` feature — the render-process subprocess
+# binaries (default-features = false) must not pull the wgpu/Metal stack.
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { version = "0.32", optional = true }
+objc = { version = "0.2", optional = true }
+objc2-core-foundation = { version = "0.3", optional = true }
+objc2-io-surface = { version = "0.3", optional = true }
+wgpu = { version = "27", default-features = false, optional = true }
+
+[lints]
+workspace = true

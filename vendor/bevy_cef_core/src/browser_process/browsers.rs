@@ -1,0 +1,775 @@
+#[cfg(not(target_os = "windows"))]
+use crate::browser_process::BrpHandler;
+#[cfg(not(target_os = "windows"))]
+use crate::browser_process::ClientHandlerBuilder;
+#[cfg(not(target_os = "windows"))]
+use crate::browser_process::client_handler::{IpcEventRaw, JsEmitEventHandler};
+use crate::prelude::IntoString;
+use crate::prelude::*;
+#[cfg(not(target_os = "windows"))]
+use async_channel::Sender;
+use bevy::platform::collections::HashMap;
+use bevy::prelude::*;
+#[cfg(not(target_os = "windows"))]
+use bevy_remote::BrpMessage;
+use cef::{
+    Browser, BrowserHost, BrowserSettings, CompositionUnderline, ImplBrowser, ImplBrowserHost,
+    ImplFrame, ImplListValue, ImplProcessMessage, MouseButtonType, ProcessId, Range, WindowInfo,
+    process_message_create,
+};
+#[cfg(not(target_os = "windows"))]
+use cef::{
+    CefString, Client, DictionaryValue, ImplDictionaryValue, ImplRequestContext, RequestContext,
+    RequestContextSettings, browser_host_create_browser_sync, dictionary_value_create,
+};
+use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
+#[cfg(not(target_os = "windows"))]
+#[allow(deprecated)]
+use raw_window_handle::RawWindowHandle;
+#[cfg(not(target_os = "windows"))]
+use std::cell::Cell;
+#[cfg(not(target_os = "windows"))]
+use std::rc::Rc;
+
+pub(crate) mod devtool_render_handler;
+mod keyboard;
+
+use crate::browser_process::browsers::devtool_render_handler::DevToolRenderHandlerBuilder;
+#[cfg(not(target_os = "windows"))]
+use crate::browser_process::display_handler::{
+    AddressChangedSenderInner, DisplayHandlerBuilder, SystemCursorIconSenderInner,
+    TitleChangedSenderInner,
+};
+#[cfg(not(target_os = "windows"))]
+use crate::browser_process::drag_handler::{DragHandlerBuilder, DraggableRegionSenderInner};
+#[cfg(not(target_os = "windows"))]
+use crate::browser_process::load_handler::{LoadHandlerBuilder, LoadHandlerSenderInner};
+pub use keyboard::*;
+
+pub struct WebviewBrowser {
+    pub client: Browser,
+    pub host: BrowserHost,
+    pub size: SharedViewSize,
+    pub dpr: SharedDpr,
+    #[cfg(target_os = "linux")]
+    pub view_slot: SharedTexture,
+    #[cfg(target_os = "linux")]
+    pub popup_slot: SharedTexture,
+    /// [macOS GPU OSR] Latest IOSurface retained by `on_accelerated_paint`
+    /// (Approach 2). Drained by the main-world collect system for extraction
+    /// into the render world, where `WebviewBlitNode` imports + blits it.
+    #[cfg(target_os = "macos")]
+    pub latest_iosurface: crate::browser_process::accelerated_paint::SharedRetainedIoSurface,
+}
+
+/// Editor commands dispatched to a webview's focused frame.
+///
+/// On macOS the windowless (OSR) browser has no real `NSView`, so the AppKit
+/// key-binding → editor-command translation never runs and shortcuts like ⌘C
+/// never reach Blink's editor. The embedder detects those shortcuts and
+/// dispatches the matching command via [`Browsers::exec_edit_command`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditCommand {
+    Copy,
+    Cut,
+    Paste,
+    SelectAll,
+    Undo,
+    Redo,
+}
+
+#[derive(Default)]
+pub struct Browsers {
+    browsers: HashMap<Entity, WebviewBrowser>,
+}
+
+impl Browsers {
+    #[cfg(not(target_os = "windows"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_browser(
+        &mut self,
+        webview: Entity,
+        uri: &str,
+        webview_size: Vec2,
+        initial_dpr: f32,
+        requester: Requester,
+        ipc_event_sender: Sender<IpcEventRaw>,
+        brp_sender: Sender<BrpMessage>,
+        system_cursor_icon_sender: SystemCursorIconSenderInner,
+        drag_regions_sender: DraggableRegionSenderInner,
+        load_handler_sender: LoadHandlerSenderInner,
+        address_changed_sender: AddressChangedSenderInner,
+        title_changed_sender: TitleChangedSenderInner,
+        initialize_scripts: &[String],
+        _window_handle: Option<RawWindowHandle>,
+    ) {
+        let mut context = Self::request_context(requester);
+        let size: SharedViewSize = Rc::new(Cell::new(webview_size));
+        let dpr: SharedDpr = Rc::new(Cell::new(initial_dpr));
+        #[cfg(target_os = "linux")]
+        let view_slot: SharedTexture = Rc::new(Cell::new(None));
+        #[cfg(target_os = "linux")]
+        let popup_slot: SharedTexture = Rc::new(Cell::new(None));
+        #[cfg(target_os = "macos")]
+        let latest_iosurface: crate::browser_process::accelerated_paint::SharedRetainedIoSurface =
+            Rc::new(std::cell::RefCell::new(None));
+        let browser = browser_host_create_browser_sync(
+            Some(&WindowInfo {
+                windowless_rendering_enabled: true as _,
+                external_begin_frame_enabled: true as _,
+                // macOS GPU OSR: ask CEF to deliver GPU shared textures (IOSurface)
+                // via on_accelerated_paint instead of CPU buffers via on_paint.
+                #[cfg(target_os = "macos")]
+                shared_texture_enabled: true as _,
+                #[cfg(target_os = "macos")]
+                parent_view: match _window_handle {
+                    Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr(),
+                    _ => std::ptr::null_mut(),
+                },
+                // Windowless rendering does not require a parent window handle on Linux.
+                #[cfg(target_os = "linux")]
+                parent_window: 0,
+                ..Default::default()
+            }),
+            Some(&mut self.client_handler(
+                webview,
+                size.clone(),
+                #[cfg(target_os = "linux")]
+                view_slot.clone(),
+                #[cfg(target_os = "linux")]
+                popup_slot.clone(),
+                dpr.clone(),
+                ipc_event_sender,
+                brp_sender,
+                system_cursor_icon_sender,
+                drag_regions_sender,
+                load_handler_sender,
+                address_changed_sender,
+                #[cfg(target_os = "macos")]
+                latest_iosurface.clone(),
+                title_changed_sender,
+            )),
+            Some(&uri.into()),
+            Some(&BrowserSettings {
+                windowless_frame_rate: 60,
+                ..Default::default()
+            }),
+            Self::create_extra_info(initialize_scripts).as_mut(),
+            context.as_mut(),
+        )
+        .expect("Failed to create browser");
+        let host = browser.host().expect("Failed to get browser host");
+        let webview_browser = WebviewBrowser {
+            host,
+            client: browser,
+            size,
+            dpr,
+            #[cfg(target_os = "linux")]
+            view_slot,
+            #[cfg(target_os = "linux")]
+            popup_slot,
+            #[cfg(target_os = "macos")]
+            latest_iosurface,
+        };
+
+        self.browsers.insert(webview, webview_browser);
+    }
+
+    pub fn send_external_begin_frame(&mut self) {
+        for browser in self.browsers.values_mut() {
+            browser.host.send_external_begin_frame();
+        }
+    }
+
+    /// [macOS GPU OSR] Drains the latest retained IOSurface for every webview
+    /// that has received a new accelerated-paint frame since the last call
+    /// (Approach 2).
+    ///
+    /// Returns `(entity, RetainedIoSurface)` pairs, **transferring ownership** of
+    /// the retain (the +1 IOSurface use-count) to the caller. This is essential
+    /// under pipelined rendering: the render world consumes the surface one frame
+    /// behind the main world, so the retain must travel with the data — reading a
+    /// raw pointer that `on_accelerated_paint` may release on the next main-world
+    /// frame would dereference a freed IOSurface (segfault in Metal's
+    /// `newTextureWithDescriptor:iosurface:`).
+    ///
+    /// A webview that fails the `keep` predicate (e.g. its surface
+    /// `Handle<Image>` is not allocated yet) is NOT drained: the retain stays in
+    /// its latest-frame slot so the frame can be collected once the consumer is
+    /// ready. This matters for static pages — under external begin-frames CEF
+    /// never repaints undamaged content, so dropping the only delivered frame
+    /// would leave the webview on its black placeholder forever. The slot is
+    /// latest-wins, so a deferred frame is bounded to one retained surface per
+    /// webview.
+    ///
+    /// A webview with no new frame this call yields nothing; its owned GPU
+    /// texture already holds the last good contents, so sampling stays correct.
+    #[cfg(target_os = "macos")]
+    pub fn take_latest_webview_iosurfaces(
+        &self,
+        keep: impl Fn(Entity) -> bool,
+    ) -> Vec<(
+        Entity,
+        crate::browser_process::accelerated_paint::RetainedIoSurface,
+    )> {
+        self.browsers
+            .iter()
+            .filter_map(|(entity, b)| {
+                if !keep(*entity) {
+                    return None;
+                }
+                b.latest_iosurface
+                    .borrow_mut()
+                    .take()
+                    .map(|retained| (*entity, retained))
+            })
+            .collect()
+    }
+
+    pub fn send_mouse_move<'a>(
+        &self,
+        webview: &Entity,
+        buttons: impl IntoIterator<Item = &'a MouseButton>,
+        position: Vec2,
+        mouse_leave: bool,
+    ) {
+        if let Some(browser) = self.get_focused_browser(webview) {
+            let mouse_event = cef::MouseEvent {
+                x: position.x as i32,
+                y: position.y as i32,
+                modifiers: modifiers_from_mouse_buttons(buttons),
+            };
+            browser
+                .host
+                .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
+        }
+    }
+
+    pub fn send_mouse_click(
+        &self,
+        webview: &Entity,
+        position: Vec2,
+        button: PointerButton,
+        mouse_up: bool,
+    ) {
+        if let Some(browser) = self.get_focused_browser(webview) {
+            let mouse_event = cef::MouseEvent {
+                x: position.x as i32,
+                y: position.y as i32,
+                modifiers: match button {
+                    PointerButton::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
+                    PointerButton::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
+                    PointerButton::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
+                } as _, // No modifiers for simplicity
+            };
+            let mouse_button = match button {
+                PointerButton::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
+                PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
+                _ => cef_mouse_button_type_t::MBT_LEFT,
+            };
+            browser.host.set_focus(true as _);
+            browser.host.send_mouse_click_event(
+                Some(&mouse_event),
+                MouseButtonType::from(mouse_button),
+                mouse_up as _,
+                1,
+            );
+        }
+    }
+
+    /// [`SendMouseWheelEvent`](https://cef-builds.spotifycdn.com/docs/106.1/classCefBrowserHost.html#acd5d057bd5230baa9a94b7853ba755f7)
+    pub fn send_mouse_wheel(&self, webview: &Entity, position: Vec2, delta: Vec2) {
+        if let Some(browser) = self.get_focused_browser(webview) {
+            let mouse_event = cef::MouseEvent {
+                x: position.x as i32,
+                y: position.y as i32,
+                modifiers: 0,
+            };
+            browser
+                .host
+                .send_mouse_wheel_event(Some(&mouse_event), delta.x as _, delta.y as _);
+        }
+    }
+
+    #[inline]
+    pub fn send_key(&self, webview: &Entity, event: cef::KeyEvent) {
+        if let Some(browser) = self.get_focused_browser(webview) {
+            browser.host.send_key_event(Some(&event));
+        }
+    }
+
+    /// Dispatches an editor command to the webview's focused frame.
+    ///
+    /// No-op when the webview has no browser or no focused frame. Used on macOS
+    /// to make clipboard/editing shortcuts work under windowless rendering,
+    /// where CEF does not translate key events into editor commands itself.
+    #[inline]
+    pub fn exec_edit_command(&self, webview: &Entity, cmd: EditCommand) {
+        if let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.focused_frame()
+        {
+            match cmd {
+                EditCommand::Copy => frame.copy(),
+                EditCommand::Cut => frame.cut(),
+                EditCommand::Paste => frame.paste(),
+                EditCommand::SelectAll => frame.select_all(),
+                EditCommand::Undo => frame.undo(),
+                EditCommand::Redo => frame.redo(),
+            }
+        }
+    }
+
+    /// Sets the CEF input focus state for a webview's browser.
+    ///
+    /// Uses a direct lookup (not `get_focused_browser`) because this is what
+    /// *grants* focus; gating on existing focus would make focusing impossible.
+    pub fn set_focus(&self, webview: &Entity, focused: bool) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.host.set_focus(focused as _);
+        }
+    }
+
+    pub fn emit_event(&self, webview: &Entity, id: impl Into<String>, event: &serde_json::Value) {
+        if let Some(mut process_message) =
+            process_message_create(Some(&PROCESS_MESSAGE_HOST_EMIT.into()))
+            && let Some(argument_list) = process_message.argument_list()
+            && let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.main_frame()
+        {
+            argument_list.set_string(0, Some(&id.into().as_str().into()));
+            argument_list.set_string(1, Some(&event.to_string().as_str().into()));
+            frame.send_process_message(
+                ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
+                Some(&mut process_message),
+            );
+        };
+    }
+
+    pub fn resize(&self, webview: &Entity, size: Vec2) {
+        if let Some(browser) = self.browsers.get(webview) {
+            #[cfg(not(target_os = "windows"))]
+            browser.size.set(size);
+            #[cfg(target_os = "windows")]
+            {
+                *browser.size.lock().unwrap() = size;
+            }
+            browser.host.was_resized();
+        }
+    }
+
+    /// Update the stored device scale factor for the webview's backing browser.
+    ///
+    /// Must be called before [`Self::notify_screen_info_changed`] — otherwise
+    /// CEF re-queries `GetScreenInfo` with the stale value.
+    pub fn set_dpr(&self, webview: &Entity, dpr: f32) {
+        if let Some(browser) = self.browsers.get(webview) {
+            #[cfg(not(target_os = "windows"))]
+            browser.dpr.set(dpr);
+            #[cfg(target_os = "windows")]
+            {
+                *browser.dpr.lock().unwrap() = dpr;
+            }
+        }
+    }
+
+    /// Tell CEF to re-query screen info and force Blink to reflow at the new DPR.
+    ///
+    /// `notify_screen_info_changed` alone updates Chromium's cached screen
+    /// metrics but does not run `ResizeRootLayer` / `SynchronizeVisualProperties`.
+    /// Only `was_resized()` pushes new `VisualProperties` (including the new
+    /// `device_scale_factor`) to Blink. Without the pair, the CSS viewport
+    /// ends up laid out as `view_rect × DSF` DIP wide and on-screen text
+    /// shrinks by exactly `1/DSF`. Matches the cefclient OSR convention
+    /// (`tests/cefclient/browser/osr_window_win.cc::SetDeviceScaleFactor`).
+    pub fn notify_screen_info_changed(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.host.notify_screen_info_changed();
+            browser.host.was_resized();
+        }
+    }
+
+    /// Closes the browser associated with the given webview entity.
+    ///
+    /// The browser will be removed from the hash map after closing.
+    pub fn close(&mut self, webview: &Entity) {
+        if let Some(browser) = self.browsers.remove(webview) {
+            browser.host.close_browser(true as _);
+            debug!("Closed browser with webview: {:?}", webview);
+        }
+    }
+
+    /// Drains the latest texture from each webview's view and popup slots.
+    ///
+    /// Linux-only: the CPU `OnPaint` path. macOS uses the GPU IOSurface path.
+    #[cfg(target_os = "linux")]
+    pub fn try_receive_textures(&self) -> impl Iterator<Item = RenderTextureMessage> + '_ {
+        self.browsers.values().flat_map(|b| {
+            [b.view_slot.take(), b.popup_slot.take()]
+                .into_iter()
+                .flatten()
+        })
+    }
+
+    /// Shows the DevTools for the specified webview.
+    pub fn show_devtool(&self, webview: &Entity) {
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        browser.host.show_dev_tools(
+            Some(&WindowInfo::default()),
+            Some(&mut ClientHandlerBuilder::new(DevToolRenderHandlerBuilder::build()).build()),
+            Some(&BrowserSettings::default()),
+            None,
+        );
+    }
+
+    /// Closes the DevTools for the specified webview.
+    pub fn close_devtools(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.host.close_dev_tools();
+        }
+    }
+
+    /// Navigate backwards.
+    ///
+    /// ## Reference
+    ///
+    /// - [`GoBack`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#a85b02760885c070e4ad2a2705cea56cb)
+    pub fn go_back(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview)
+            && browser.client.can_go_back() == 1
+        {
+            browser.client.go_back();
+        }
+    }
+
+    /// Navigate forwards.
+    ///
+    /// ## Reference
+    ///
+    /// - [`GoForward`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#aa8e97fc210ee0e73f16b2d98482419d0)
+    pub fn go_forward(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview)
+            && browser.client.can_go_forward() == 1
+        {
+            browser.client.go_forward();
+        }
+    }
+
+    /// Returns whether the webview can navigate back in history.
+    ///
+    /// Returns `false` if the entity is not a known browser.
+    ///
+    /// ## Reference
+    ///
+    /// - [`CanGoBack`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#a3a4f4327a498a8b6a498abb9e2b2ecf3)
+    pub fn can_go_back(&self, webview: &Entity) -> bool {
+        self.browsers
+            .get(webview)
+            .is_some_and(|b| b.client.can_go_back() == 1)
+    }
+
+    /// Returns whether the webview can navigate forward in history.
+    ///
+    /// Returns `false` if the entity is not a known browser.
+    ///
+    /// ## Reference
+    ///
+    /// - [`CanGoForward`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#a6537bcc556f449284e3c1b76c8d26de1)
+    pub fn can_go_forward(&self, webview: &Entity) -> bool {
+        self.browsers
+            .get(webview)
+            .is_some_and(|b| b.client.can_go_forward() == 1)
+    }
+
+    /// Navigate a specific webview to a new URL.
+    pub fn navigate(&self, webview: &Entity, url: &str) {
+        if let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.main_frame()
+        {
+            frame.load_url(Some(&url.into()));
+        }
+    }
+
+    /// Reload a specific webview's current page.
+    pub fn reload_webview(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.main_frame()
+        {
+            let url = frame.url().into_string();
+            frame.load_url(Some(&url.as_str().into()));
+        }
+    }
+
+    /// Returns the current zoom level for the specified webview.
+    ///
+    /// ## Reference
+    ///
+    /// - [`GetZoomLevel`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowserHost.html#a524d4a358287dab284c0dfec6d6d229e)
+    pub fn zoom_level(&self, webview: &Entity) -> Option<f64> {
+        self.browsers
+            .get(webview)
+            .map(|browser| browser.host.zoom_level())
+    }
+
+    /// Sets the zoom level for the specified webview.
+    ///
+    /// ## Reference
+    ///
+    /// - [`SetZoomLevel`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowserHost.html#af2b7bf250ac78345117cd575190f2f7b)
+    pub fn set_zoom_level(&self, webview: &Entity, zoom_level: f64) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.host.set_zoom_level(zoom_level);
+        }
+    }
+
+    /// Sets whether the audio is muted for the specified webview.
+    ///
+    /// ## Reference
+    ///
+    /// - [`SetAudioMuted`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowserHost.html#a153d179c9ff202c8bb8869d2e9a820a2)
+    pub fn set_audio_muted(&self, webview: &Entity, muted: bool) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.host.set_audio_muted(muted as _);
+        }
+    }
+
+    #[inline]
+    pub fn reload(&self) {
+        for browser in self.browsers.values() {
+            if let Some(frame) = browser.client.main_frame() {
+                let url = frame.url().into_string();
+                info!("Reloading browser with URL: {}", url);
+                frame.load_url(Some(&url.as_str().into()));
+            }
+        }
+    }
+
+    /// ## Reference
+    ///
+    /// - [`ImeSetComposition`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowserHost.html#a567b41fb2d3917843ece3b57adc21ebe)
+    pub fn set_ime_composition(&self, text: &str, cursor_utf16: Option<u32>) {
+        let underlines = make_underlines_for(text, cursor_utf16.map(|i| (i, i)));
+        let i = text.encode_utf16().count();
+        let selection_range = Range {
+            from: i as _,
+            to: i as _,
+        };
+        for browser in self
+            .browsers
+            .values()
+            .filter(|b| b.client.focused_frame().is_some())
+        {
+            let replacement_range = Self::ime_caret_range_for();
+            browser.host.ime_set_composition(
+                Some(&text.into()),
+                Some(&underlines),
+                Some(&replacement_range),
+                Some(&selection_range),
+            );
+        }
+    }
+
+    /// ## Reference
+    ///
+    /// [`ImeCancelComposition`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowserHost.html#ac12a8076859d0c1e58e55080f698e7a9)
+    pub fn ime_cancel_composition(&self) {
+        for browser in self
+            .browsers
+            .values()
+            .filter(|b| b.client.focused_frame().is_some())
+        {
+            browser.host.ime_cancel_composition();
+        }
+    }
+
+    /// ## Reference
+    ///
+    /// [`ImeSetComposition`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowserHost.html#a567b41fb2d3917843ece3b57adc21ebe)
+    pub fn ime_finish_composition(&self, keep_selection: bool) {
+        for browser in self
+            .browsers
+            .values()
+            .filter(|b| b.client.focused_frame().is_some())
+        {
+            browser.host.ime_finish_composing_text(keep_selection as _);
+        }
+    }
+
+    pub fn set_ime_commit_text(&self, text: &str) {
+        for browser in self
+            .browsers
+            .values()
+            .filter(|b| b.client.focused_frame().is_some())
+        {
+            let replacement_range = Self::ime_caret_range_for();
+            browser
+                .host
+                .ime_commit_text(Some(&text.into()), Some(&replacement_range), 0);
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn request_context(requester: Requester) -> Option<RequestContext> {
+        let mut context = cef::request_context_create_context(
+            Some(&RequestContextSettings::default()),
+            Some(&mut RequestContextHandlerBuilder::build()),
+        );
+        if let Some(context) = context.as_mut() {
+            context.register_scheme_handler_factory(
+                Some(&SCHEME_CEF.into()),
+                Some(&HOST_CEF.into()),
+                Some(&mut LocalSchemaHandlerBuilder::build(requester)),
+            );
+            crate::custom_scheme::register_custom_scheme_factories(context);
+        }
+        context
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[allow(clippy::too_many_arguments)]
+    fn client_handler(
+        &self,
+        webview: Entity,
+        size: SharedViewSize,
+        #[cfg(target_os = "linux")] view_slot: SharedTexture,
+        #[cfg(target_os = "linux")] popup_slot: SharedTexture,
+        dpr: SharedDpr,
+        ipc_event_sender: Sender<IpcEventRaw>,
+        brp_sender: Sender<BrpMessage>,
+        system_cursor_icon_sender: SystemCursorIconSenderInner,
+        drag_regions_sender: DraggableRegionSenderInner,
+        load_handler_sender: LoadHandlerSenderInner,
+        address_changed_sender: AddressChangedSenderInner,
+        #[cfg(target_os = "macos")]
+        latest_iosurface: crate::browser_process::accelerated_paint::SharedRetainedIoSurface,
+        title_changed_sender: TitleChangedSenderInner,
+    ) -> Client {
+        #[cfg(target_os = "macos")]
+        let render_handler =
+            RenderHandlerBuilder::build(webview, size.clone(), dpr, latest_iosurface);
+        #[cfg(target_os = "linux")]
+        let render_handler =
+            RenderHandlerBuilder::build(webview, view_slot, popup_slot, size.clone(), dpr);
+        ClientHandlerBuilder::new(render_handler)
+            .with_display_handler(DisplayHandlerBuilder::build(
+                webview,
+                system_cursor_icon_sender,
+                address_changed_sender,
+                title_changed_sender,
+            ))
+            .with_drag_handler(DragHandlerBuilder::build(webview, drag_regions_sender))
+            .with_load_handler(LoadHandlerBuilder::build(webview, load_handler_sender))
+            .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
+            .with_message_handler(BrpHandler::new(brp_sender))
+            .build()
+    }
+
+    #[inline]
+    fn ime_caret_range_for() -> Range {
+        // Use sentinel replacement range to indicate caret position
+        Range {
+            from: u32::MAX,
+            to: u32::MAX,
+        }
+    }
+
+    #[inline]
+    fn get_focused_browser(&self, webview: &Entity) -> Option<&WebviewBrowser> {
+        self.browsers
+            .get(webview)
+            .and_then(|b| b.client.focused_frame().is_some().then_some(b))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn create_extra_info(scripts: &[String]) -> Option<DictionaryValue> {
+        if scripts.is_empty() {
+            return None;
+        }
+        let extra = dictionary_value_create()?;
+        extra.set_string(
+            Some(&CefString::from(INIT_SCRIPT_KEY)),
+            Some(&CefString::from(scripts.join(";").as_str())),
+        );
+        Some(extra)
+    }
+}
+
+#[allow(clippy::unnecessary_cast)]
+pub fn modifiers_from_mouse_buttons<'a>(buttons: impl IntoIterator<Item = &'a MouseButton>) -> u32 {
+    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0 as u32;
+    for button in buttons {
+        match button {
+            MouseButton::Left => {
+                modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0 as u32
+            }
+            MouseButton::Right => {
+                modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0 as u32
+            }
+            MouseButton::Middle => {
+                modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0 as u32
+            }
+            _ => {}
+        }
+    }
+    modifiers
+}
+
+pub fn make_underlines_for(
+    text: &str,
+    selection_utf16: Option<(u32, u32)>,
+) -> Vec<CompositionUnderline> {
+    let len16 = utf16_len(text);
+
+    let base = CompositionUnderline {
+        size: size_of::<CompositionUnderline>(),
+        range: Range { from: 0, to: len16 },
+        color: 0,
+        background_color: 0,
+        thick: 0,
+        style: Default::default(),
+    };
+
+    if let Some((from, to)) = selection_utf16
+        && from < to
+    {
+        let sel = CompositionUnderline {
+            size: size_of::<CompositionUnderline>(),
+            range: Range { from, to },
+            color: 0,
+            background_color: 0,
+            thick: 1,
+            style: Default::default(),
+        };
+        return vec![base, sel];
+    }
+    vec![base]
+}
+
+#[inline]
+fn utf16_len(s: &str) -> u32 {
+    s.encode_utf16().count() as u32
+}
+
+#[allow(dead_code)]
+fn utf16_index_from_byte(s: &str, byte_idx: usize) -> u32 {
+    s[..byte_idx].encode_utf16().count() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::modifiers_from_mouse_buttons;
+    use bevy::prelude::*;
+
+    #[test]
+    #[allow(clippy::unnecessary_cast)]
+    fn test_modifiers_from_mouse_buttons() {
+        let buttons = vec![&MouseButton::Left, &MouseButton::Right];
+        let modifiers = modifiers_from_mouse_buttons(buttons);
+        assert_eq!(
+            modifiers,
+            cef_dll_sys::cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0 as u32
+                | cef_dll_sys::cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0 as u32
+        );
+    }
+}

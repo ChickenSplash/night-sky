@@ -18,15 +18,22 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 ## Development
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
-- Opt-in CEF overlay experiment (steps 1 and 2 only):
+- Opt-in CEF overlay experiment (steps 1 to 4):
   `./scripts/setup-cef-overlay.sh`, then `./scripts/run-cef-overlay.sh`.
   Feature `cef-ui` pins `bevy_cef` 0.11.0 for Bevy 0.18.1; normal native and
   browser builds do not initialise CEF. SDK/tools/cache stay in `data/`,
   compiled output in `target/`. `cef_overlay.rs` draws the self-contained
   `web/cef-overlay.html` on a full-window transparent UI surface, using a
   separate overlay camera matching the scene's HDR format with no tone mapping.
-  Bevy's windowing and pipelined renderer stay enabled. Input isolation,
-  application commands and performance comparisons are not implemented yet.
+  Bevy's windowing and pipelined renderer stay enabled. `cef_input.rs` routes
+  pointer input before egui, retains drag ownership through release, and gates
+  camera keyboard input while HTML is focused (Escape releases focus). The panel
+  reports logical hit rectangles, sends only `UiCommand::SetPaused`, and receives
+  `space:state`/`space:tick` pause and simulated-day readouts at 10 Hz.
+  HTML radio controls replace `<select>` because CEF popup composition is unsupported.
+  `vendor/bevy_cef_core` adds an opt-in pre-navigation inline-only gate and
+  denies new browser windows. Manual interaction tests and overhead comparisons
+  are still required; no performance acceptance or UI migration yet.
   Test visual windows on the secondary monitor only. CEF's default Linux sandbox
   policy is disabled by this plugin; load only the bundled, CSP-restricted page.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.

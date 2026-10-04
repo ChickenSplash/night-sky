@@ -9,7 +9,7 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; width: 100%; height: 100%; background: transparent; }
     body { font: 14px system-ui, sans-serif; color: #d6e4f4; }
-    button, input, select { font: inherit; color: inherit; background: #10233a; border: 1px solid #385269; border-radius: 10px; padding: 9px 12px; }
+    button, input, textarea { font: inherit; color: inherit; background: #10233a; border: 1px solid #385269; border-radius: 10px; padding: 9px 12px; }
     button { cursor: pointer; }
     button:hover { background: #1b3b52; }
     :focus-visible { outline: 2px solid #63d6f0; outline-offset: 3px; }
@@ -21,6 +21,11 @@
     p { color: #9fb4ca; line-height: 1.5; }
     label { display: grid; gap: 8px; margin: 16px 0; }
     input { width: 100%; min-width: 0; }
+    textarea { width: 100%; resize: vertical; }
+    fieldset { border: 1px solid #385269; border-radius: 10px; margin: 16px 0; }
+    fieldset label { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+    input[type="radio"] { width: auto; accent-color: #63d6f0; }
+    button:disabled { opacity: .65; cursor: default; }
     .row { display: flex; align-items: center; gap: 12px; }
     output { color: #63d6f0; }
     #show { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); }
@@ -34,8 +39,22 @@
     <p>This panel is rendered by Chromium. The universe behind it is still native Bevy.</p>
     <label>Text field<input id="text" type="text" placeholder="Type here" autocomplete="off"></label>
     <div class="row"><button id="increment">Increment</button><output id="count" aria-live="polite">0</output></div>
-    <label>Panel position<select id="position"><option value="centre">Centre</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option></select></label>
-    <small>Rendering proof of concept only. Camera input isolation is not implemented yet. Typing movement keys may move the scene.</small>
+    <fieldset><legend>Panel position</legend>
+      <label><input type="radio" name="position" value="centre" checked>Centre</label>
+      <label><input type="radio" name="position" value="top-right">Top right</label>
+      <label><input type="radio" name="position" value="bottom-left">Bottom left</label>
+    </fieldset>
+    <div class="row"><button id="pause" disabled>Connecting to Rust…</button><output id="paused">Waiting</output></div>
+    <p>Simulation: <output id="days">0.00000</output> days</p>
+    <label>Scroll test<textarea rows="3" aria-label="Scroll and paste test">Scroll here without zooming the scene.
+WASD, R/F and Q/E belong to HTML while focused.
+Select this text, copy and paste.
+Use Tab and Shift+Tab between controls.
+Drag a selection outside the panel and release.
+Escape returns keyboard focus to the scene.
+Click empty space to fly again.
+This is demo data only.</textarea></label>
+    <small>Escape or an empty-space click returns focus to the scene. Readouts come from Rust at 10 Hz. Data source: built-in demo.</small>
   </section>
   <button id="show" hidden>Show HTML panel</button>
   <script>
@@ -45,17 +64,57 @@
     document.querySelector('#increment').addEventListener('click', () => {
       document.querySelector('#count').value = String(++count);
     });
-    document.querySelector('#position').addEventListener('change', event => {
+    document.querySelectorAll('[name="position"]').forEach(control => control.addEventListener('change', event => {
       panel.dataset.position = event.target.value;
-    });
+      layout();
+    }));
     document.querySelector('#close').addEventListener('click', () => {
       panel.hidden = true;
       show.hidden = false;
+      layout();
     });
     show.addEventListener('click', () => {
       panel.hidden = false;
       show.hidden = true;
+      layout();
     });
+    // Trusted embedded page only. Native CEF also denies external navigation
+    // before loading and rejects new browser windows.
+    document.addEventListener('click', event => {
+      if (event.target.closest('a')) event.preventDefault();
+    }, true);
+    document.addEventListener('submit', event => event.preventDefault(), true);
+    document.addEventListener('dragover', event => event.preventDefault());
+    document.addEventListener('drop', event => event.preventDefault());
+    const emit = payload => window.cef?.emit(payload);
+    function layout() {
+      const rects = [panel, show].filter(el => !el.hidden).map(el => {
+        const r = el.getBoundingClientRect();
+        return [r.x, r.y, r.width, r.height];
+      });
+      emit({kind: 'layout', rects});
+    }
+    let paused = false;
+    const pause = document.querySelector('#pause');
+    pause.addEventListener('click', () => {
+      emit({kind: 'command', command: {type: 'set_paused', paused: !paused}});
+      // Do not claim success locally. The Rust state event acknowledges it.
+      pause.disabled = true;
+    });
+    window.cef?.listen('space:state', json => {
+      const state = JSON.parse(json);
+      paused = state.paused;
+      pause.textContent = paused ? 'Resume simulation' : 'Pause simulation';
+      pause.disabled = false;
+      document.querySelector('#paused').value = paused ? 'Paused' : 'Running';
+    });
+    window.cef?.listen('space:tick', json => {
+      document.querySelector('#days').value = JSON.parse(json).days.toFixed(5);
+    });
+    window.cef?.listen('space:blur', () => document.activeElement?.blur());
+    new ResizeObserver(layout).observe(panel);
+    window.addEventListener('resize', layout);
+    layout();
   </script>
 </body>
 </html>

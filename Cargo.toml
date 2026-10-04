@@ -19,6 +19,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 [patch.crates-io]
 # Skips frames instead of panicking on NVIDIA surface timeouts. See vendor/README.md.
 bevy_render = { path = "vendor/bevy_render" }
+bevy_cef_core = { path = "vendor/bevy_cef_core" }
 
 [profile.web-release]
 inherits = "release"

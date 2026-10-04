@@ -120,15 +120,37 @@ Setup downloads the pinned CEF SDK and builds its helper process into local
 system packages. The run script builds both processes and stops its server on
 exit. Linux setup is provided; Windows/macOS packaging has not been tested.
 
-The panel has a text field, JavaScript counter, hide/show buttons and a position
-selector. It starts centred and can float at the top right or bottom left.
+The panel has a text field, JavaScript counter, hide/show buttons and position
+radio buttons. It starts centred and can float at the top right or bottom left.
 Resize the window to check layout. Existing egui panels remain available.
 The HTML is embedded at compile time, so edits require rebuilding.
 
-**This implements rendering only (experiment steps 1 and 2).** Camera input
-isolation, a Rust command/state bridge and overhead benchmarks are still pending.
-Typing WASD or other movement keys may move the scene. A rendered panel is not
-evidence of input correctness or acceptable performance.
+**Experiment steps 1 to 4 are implemented, awaiting manual interaction testing.**
+Native input routing uses logical HTML hit rectangles, explicit keyboard focus
+and press-to-release drag ownership, rather than transparent pixels alone.
+It filters egui input under the HTML surface as well as camera controls. Escape
+or an empty-space click releases HTML focus; keys held during the handoff must
+be released before camera keyboard controls resume. Window focus loss releases
+captured mouse buttons. Camera thrust is stopped while a UI owns keyboard input.
+
+The **Pause simulation** button sends `UiCommand::SetPaused` through the existing
+application command handler. Rust acknowledges pause state and publishes
+simulated days through `space:state`/`space:tick` at 10 Hz, including changes from
+egui or the scene's Space shortcut. The counter remains a local JavaScript test.
+The broken standard `<select>` is replaced by radio buttons, avoiding Chromium's
+separate popup surface.
+
+Manual acceptance checks, not yet claimed as passing:
+- Type WASD, R/F and Q/E without moving or rolling the camera; select, paste,
+  Tab and Shift+Tab between controls.
+- Scroll the panel and the scroll-test text box without zooming the scene.
+- Click/drag empty space, press Escape after focusing HTML, and drag across
+  panel boundaries in both directions before releasing. Check for stuck input.
+- Pause/resume from HTML and egui; verify the day readout freezes and resumes
+  and both UIs agree on pause state. Check hide/show, position controls and resize.
+
+Performance comparisons (steps 5 onward) remain pending. No UI migration or
+overhead acceptance follows from successful compilation or unit tests.
 
 `bevy_cef` 0.11.0 matches the project's Bevy 0.18.1. On Linux its UI frames pass
 through CPU pixel buffers before GPU texture upload; the native universe is not
@@ -139,18 +161,28 @@ native universe, so the sample does not use it.
 CEF ships native libraries and helper processes. The plugin disables Chromium's
 sandbox by default on Linux; this experiment loads only an embedded local page
 with a restrictive content security policy, no network assets or navigation links.
+The vendored core's optional `trusted-inline-only` feature rejects external
+navigation before it starts and denies new browser windows. The command receiver
+accepts only pause commands from this panel, not every `UiCommand` variant.
 It is not intended for arbitrary websites or untrusted HTML.
 
 Normal native launches (`./scripts/run.sh`) and the browser UI remain unchanged.
 Build with `--features cef-ui` and launch with `--cef-html-ui` to opt in. Use the
 setup/run scripts to supply the project-local SDK and library search path.
 
-Initial verification on Linux/Wayland with NVIDIA Vulkan: the centred HTML panel
+Initial rendering verification on Linux/Wayland with NVIDIA Vulkan: the centred HTML panel
 renders over the native starfield, with transparency outside it, and the window
 closes normally. Native client tests (64), feature-enabled tests (65), strict
 Clippy with and without the feature, and the normal browser compilation check
-pass. Position controls, keyboard focus, resizing and scaling still need manual
-testing; no performance comparison has been performed.
+passed for steps 1 and 2. The new input/bridge work adds automated ownership,
+command-gating and navigation-policy tests; keyboard focus, paste, drag boundary
+behaviour, resizing and scaling still need manual testing. No performance
+comparison has been performed.
+
+Automated checks for the updated experiment: feature-enabled client tests (73),
+normal client tests (64), the core's navigation-policy unit test, and
+`node scripts/test-cef-panel.mjs` (headless DOM with a mock CEF transport, not
+native input acceptance). The browser compilation check remains feature-free.
 
 The backend serves the web client and the demo galaxy. The client checks the
 snapshot every two seconds; unchanged responses have no body, so large galaxies

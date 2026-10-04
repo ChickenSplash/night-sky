@@ -3,6 +3,8 @@ mod actions;
 mod benchmark;
 mod black_hole;
 #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
+mod cef_input;
+#[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
 mod cef_overlay;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
@@ -233,6 +235,7 @@ fn main() {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
+                    ime_enabled: cef_requested,
                     title: if cef_requested {
                         "Night Sky · CEF overlay".into()
                     } else {

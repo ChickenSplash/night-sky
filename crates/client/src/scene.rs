@@ -357,6 +357,9 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
 
 #[allow(clippy::too_many_arguments)]
 pub fn controls(
+    #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))] html: Option<
+        Res<crate::cef_input::HtmlInput>,
+    >,
     time: Res<Time>,
     input: (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
     motion: Res<AccumulatedMouseMotion>,
@@ -384,6 +387,15 @@ pub fn controls(
         .ctx_mut()
         .map(|ctx| (ctx.is_pointer_over_area(), ctx.wants_keyboard_input()))
         .unwrap_or_default();
+    #[cfg(not(all(not(target_arch = "wasm32"), feature = "cef-ui")))]
+    let html_keyboard = false;
+    #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
+    let html_keyboard = html.as_ref().is_some_and(|h| h.keyboard);
+    #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
+    let (pointer, keyboard) = (
+        pointer || html.as_ref().is_some_and(|h| h.pointer),
+        keyboard || html_keyboard,
+    );
     // Flights are short; camera input resumes when they land. Constellations
     // orbit their auto-framed centre, but cannot zoom or translate.
     let free = nav.view == View::Orbit && !rig.flying();
@@ -452,7 +464,7 @@ pub fn controls(
         }
     }
     // Flights, tracking and presets take the camera over: no coasting into them.
-    camera_motion.thrust = if free && !nav.following {
+    camera_motion.thrust = if free && !nav.following && !html_keyboard {
         ease_thrust(camera_motion.thrust, wanted, time.delta_secs())
     } else {
         Vec4::ZERO
