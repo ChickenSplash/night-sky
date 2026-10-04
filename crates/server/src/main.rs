@@ -1,6 +1,3 @@
-mod clickup;
-mod storage;
-
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
@@ -28,123 +25,24 @@ async fn main() -> Result<()> {
     let root = std::env::var_os("SPACE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
-    dotenvy::from_path(root.join(".env")).ok();
-    std::fs::create_dir_all(root.join("data"))?;
-    let db_path = root.join("data/space.sqlite3");
-    storage::initialise(&db_path)?;
-    let token = std::env::var("CLICKUP_TOKEN").unwrap_or_default();
-    let mut lists: Vec<String> = std::env::var("CLICKUP_LIST_IDS")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect();
-    anyhow::ensure!(
-        lists
-            .iter()
-            .all(|id| id.bytes().all(|b| b.is_ascii_digit())),
-        "CLICKUP_LIST_IDS must contain numeric list IDs"
-    );
-    anyhow::ensure!(
-        token.is_empty() == lists.is_empty(),
-        "Set both CLICKUP_TOKEN and CLICKUP_LIST_IDS, or leave both empty for demo mode"
-    );
-    lists.sort();
-    lists.dedup();
-    let cache_key = lists.join(",");
-    let initial = if lists.is_empty() {
-        demo_galaxy()
-    } else {
-        storage::load(&db_path, &cache_key)?
-            .map(|mut g| -> Result<Galaxy> {
-                // Older caches used other layouts; derive bodies from slots again.
-                for system in &mut g.systems {
-                    storage::assign_page_stars(&db_path, system)?;
-                }
-                space_simulation::shape_galaxy(&mut g);
-                g.source = "ClickUp · cached, awaiting sync".into();
-                Ok(g)
-            })
-            .transpose()?
-            .unwrap_or_else(|| Galaxy {
-                source: "ClickUp · connecting".into(),
-                systems: vec![],
-            })
-    };
     // A client may survive a backend restart: its old ETag must not match the
     // first snapshot of the new process even when both have revision zero.
     let generation = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos();
     let state: AppState = Arc::new(RwLock::new(Snapshot {
-        galaxy: initial,
+        galaxy: demo_galaxy(),
         generation,
         revision: 0,
     }));
     let bind = std::env::var("SPACE_BIND").unwrap_or_else(|_| "127.0.0.1:4321".into());
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
-        .context("Cannot bind port 4321. Is another Task Space server running?")?;
-    if !lists.is_empty() {
-        let client = clickup::ClickUp::new(&token)?;
-        let state = state.clone();
-        tokio::spawn(async move {
-            loop {
-                let mut failures = 0;
-                for (index, id) in lists.iter().enumerate() {
-                    {
-                        let mut snapshot = state.write().await;
-                        snapshot.galaxy.source =
-                            format!("ClickUp · loading list {}/{}", index + 1, lists.len());
-                        snapshot.revision += 1;
-                    }
-                    println!("Loading list {}/{} ({id})", index + 1, lists.len());
-                    match client.system(id, &db_path).await {
-                        Ok(system) => {
-                            println!("Loaded {}: {} tasks", system.name, system.tasks().count());
-                            let snapshot = {
-                                let mut snapshot = state.write().await;
-                                let galaxy = &mut snapshot.galaxy;
-                                if let Some(existing) =
-                                    galaxy.systems.iter_mut().find(|s| s.id == system.id)
-                                {
-                                    *existing = system;
-                                } else {
-                                    galaxy.systems.push(system);
-                                }
-                                snapshot.revision += 1;
-                                snapshot.galaxy.clone()
-                            };
-                            if let Err(err) = storage::save(&db_path, &cache_key, &snapshot) {
-                                eprintln!("Could not save cache: {err}");
-                            }
-                        }
-                        Err(err) => {
-                            failures += 1;
-                            eprintln!("List {id} sync failed: {err:#}");
-                        }
-                    }
-                }
-                let mut snapshot = state.write().await;
-                snapshot.galaxy.source = if failures == 0 {
-                    format!("ClickUp · {} lists synced (5 minute refresh)", lists.len())
-                } else {
-                    format!(
-                        "ClickUp · {failures}/{} lists failed; see server log",
-                        lists.len()
-                    )
-                };
-                snapshot.revision += 1;
-                drop(snapshot);
-                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-            }
-        });
-    }
+        .context("Cannot bind port 4321. Is another Night Sky server running?")?;
     let app = Router::new()
         .route(
             "/health",
-            get(|| async { Json(serde_json::json!({"service": "task-space", "status": "ok"})) }),
+            get(|| async { Json(serde_json::json!({"service": "night-sky", "status": "ok"})) }),
         )
         .route("/galaxy", get(galaxy))
         .fallback_service(ServeDir::new(root.join("web/dist")).precompressed_gzip())
@@ -154,7 +52,7 @@ async fn main() -> Result<()> {
             axum::http::HeaderValue::from_static("no-cache"),
         ))
         .with_state(state);
-    println!("Task Space: http://{bind} (Ctrl+C to stop)");
+    println!("Night Sky: http://{bind} (Ctrl+C to stop)");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             tokio::signal::ctrl_c().await.ok();

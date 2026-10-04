@@ -1,19 +1,21 @@
 services:
-  task-space:
+  night-sky:
     build: ./bundle
-    image: task-space:local
-    container_name: task-space
+    image: night-sky:local
+    container_name: night-sky
     restart: unless-stopped
     # Not bound to 192.168.1.90: at boot Docker starts before DHCP assigns it,
     # the bind fails and the restart policy never retries.
     ports:
       - "4321:4321"
-    env_file:
-      - path: .env
-        required: false
     volumes:
       - ./data:/app/data
-    networks: [default, edge]
+    networks:
+      default:
+      edge:
+        # The tunnel's public hostname still points at task-space:4321 in the
+        # Cloudflare dashboard. Remove once it points at night-sky:4321.
+        aliases: [task-space]
     logging:
       driver: json-file
       options:
@@ -22,7 +24,7 @@ services:
 
 networks:
   # Created by the cloudflared stack. The tunnel's public hostname points at
-  # http://task-space:4321, which cloudflared resolves on this network.
+  # http://night-sky:4321, which cloudflared resolves on this network.
   edge:
     name: edge
     external: true

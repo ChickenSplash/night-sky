@@ -1,6 +1,6 @@
-# Task Space
+# Night Sky
 
-A Rust mission-control view of your tasks, available natively and in a browser. Each list is a constellation of systems with at most ten tasks each;
+A Rust space simulator, available natively and in a browser, that also keeps track of lists of tasks. Each list is a constellation of systems with at most ten tasks each;
 each task is a wireframe planet. Deep blue space, physical distances, Keplerian
 orbits, and a practical task inspector.
 
@@ -15,10 +15,12 @@ serves the files and runs the Rust API; the viewing device does the rendering.
 Use a current desktop browser with hardware acceleration enabled. WebGL 2 works
 over the LAN HTTP URL, so this deployment does not require WebGPU or HTTPS.
 
-Deployment files, credentials and the database live at
-`/home/ecorreia/homelab/task-space` on the homelab. Docker restarts the
-`task-space` container automatically after a reboot. The service is published
-on the homelab's LAN address, with no public tunnel route configured.
+Deployment files live at
+`/home/ecorreia/homelab/night-sky` on the homelab. Docker restarts the
+`night-sky` container automatically after a reboot. The service is published
+on the homelab's LAN address, and publicly at
+**https://space.chickensplash.dpdns.org** through the Cloudflare tunnel on the
+`edge` network.
 
 To rebuild and redeploy from this project:
 
@@ -27,16 +29,14 @@ To rebuild and redeploy from this project:
 ```
 
 This builds on the development PC, transfers the browser bundle and backend over
-SSH, and restarts the container. By default the homelab serves demo data only:
-the script removes any `.env` and task cache there, so visitors never see real
-tasks. `./scripts/deploy-homelab.sh --with-clickup` publishes your credentials
-and, on first deployment, the local SQLite cache. Credentials stay outside the
-image and web directory.
+SSH, and restarts the container. The homelab serves the built-in demo data. The
+script also removes any `.env` and task cache left there by the former ClickUp
+integration.
 
 After SSHing into the homelab, view logs with:
 
 ```sh
-docker logs --tail 50 task-space
+docker logs --tail 50 night-sky
 ```
 
 ### Native desktop
@@ -47,8 +47,8 @@ docker logs --tail 50 task-space
 
 The first build downloads dependencies and compiles Bevy. Subsequent launches
 reuse `target/`. Closing the window also stops the backend started by this script.
-No ClickUp credentials are needed for the demo. Its six fictional lists contain
-473 stable tasks, forming multi-star constellations without any live data.
+The data is a built-in demo: six fictional lists contain 473 stable tasks,
+forming multi-star constellations.
 
 Requirements: Rust via rustup, clang, LLD, pkgconf, Wayland/X11 development
 libraries and a Vulkan-capable graphics driver. These are already installed on
@@ -102,28 +102,15 @@ Search selects a task's page automatically. Pages use permanent slots, so edits,
 API reordering and task removals never move surviving tasks between systems.
 Partially filled pages remain; wholly empty pages are omitted from navigation.
 
-## Connect ClickUp (optional)
+## Backend and logs
 
-1. Copy `.env.example` to `.env` inside this folder.
-2. Set a personal API token in `CLICKUP_TOKEN`.
-3. Set one or more comma-separated numeric list IDs in `CLICKUP_LIST_IDS`.
-4. Restart `./scripts/run.sh`.
+The backend serves the web client and the demo galaxy. The client checks the
+snapshot every two seconds; unchanged responses have no body, so large galaxies
+are not downloaded and rebuilt on every poll. `data/` is excluded from Git.
+Native development binds to `127.0.0.1:4321`; Docker binds internally to
+`0.0.0.0:4321` and publishes only the homelab LAN address. There is no task
+integration for now: ClickUp support was removed, to be revisited later.
 
-The backend only performs GET requests to ClickUp. It includes closed tasks,
-paginates each list, and refreshes every five minutes. The client checks the
-local snapshot every two seconds; unchanged responses have no body, so large
-galaxies are not downloaded and rebuilt on every poll. Lists appear incrementally during initial sync,
-with progress shown in the interface. Subtasks/moons and tasks added to a list from
-another home list are not included yet.
-
-Tokens remain in the backend, never in the `/galaxy` response or browser bundle.
-`.env` and `data/` are excluded from Git. Native development binds to
-`127.0.0.1:4321`; Docker binds internally to `0.0.0.0:4321` and publishes only
-the homelab LAN address. The app uses one configured ClickUp account; all LAN
-visitors see that account's configured lists. OAuth/per-user login is not implemented.
-
-On a list sync error the backend retains that list's previous data and continues
-loading the other lists. The final status reports failed lists.
 Native backend errors are recorded in `data/server.log`; client events and
 renderer warnings in `data/logs/client.log`, with the previous session in
 `data/logs/client.previous.log`. Panics leave timestamped
@@ -136,14 +123,7 @@ Smoke tests write `data/logs/smoke-client.log` separately. Deployment errors
 are in Docker logs. A recoverable NVIDIA/Wayland surface timeout skips a frame
 and logs a rate-limited warning instead of crashing. The local renderer patch
 is documented in `vendor/README.md`.
-Cached tasks, stable orbital slots and ClickUp page-to-galactic-star assignments
-are stored in `data/space.sqlite3`. Keep this database to preserve layout across
-task deletions and subsequent additions. A new task is appended to the next free
-slot rather than rearranging existing planets. On the first run with this mapping,
-existing ClickUp pages move once from legacy list-generated stars to assigned
-galactic stars; their assignments and subsequent task orbits then remain stable.
-The demo retains its legacy page stars for now. No star represents a catalogued
-astronomical object.
+No star represents a catalogued astronomical object.
 
 Local endpoints:
 
@@ -170,9 +150,8 @@ is available it retains its last data, initially the clearly labelled demo.
   **Readable planet sizes** exaggerates radii in Orbit view, not positions or periods.
 - Each page is a separate star system with a stable, independently random orbital
   plane (poles uniform over the sphere). The telemetry panel shows the current
-  page's tilt. Live ClickUp pages occupy distinct, visible cell stars near galactic
-  home, with their real generated positions and planetary systems, and so do
-  demo pages. Constellation view moves nothing: it zooms out from the current
+  page's tilt. List pages occupy distinct, visible cell stars near galactic
+  home, with their real generated positions and planetary systems. Constellation view moves nothing: it zooms out from the current
   angle until every page star fits and joins them with lines. Orbit and Task table
   retain physical orbital distances. Camera flights roll between planes; open
   space uses galactic axes.
@@ -242,7 +221,7 @@ is available it retains its last data, initially the clearly labelled demo.
 
 ```text
 crates/client/       Bevy scene, controls, web bridge and egui dev UI
-crates/server/       Axum API, ClickUp adapter and SQLite storage
+crates/server/       Axum API serving the demo galaxy and web client
 crates/shared/       Serializable API models and offline demo
 crates/simulation/   Orbital mechanics, clock, galaxy model and deterministic layout
 assets/             Reserved for project assets
