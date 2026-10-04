@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>Night Sky CEF overlay</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; background: transparent; }
+    body { font: 14px system-ui, sans-serif; color: #d6e4f4; }
+    button, input, select { font: inherit; color: inherit; background: #10233a; border: 1px solid #385269; border-radius: 10px; padding: 9px 12px; }
+    button { cursor: pointer; }
+    button:hover { background: #1b3b52; }
+    :focus-visible { outline: 2px solid #63d6f0; outline-offset: 3px; }
+    #panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(370px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; padding: 22px; border-radius: 20px; border: 1px solid #385269; background: rgba(7, 15, 31, .96); box-shadow: 0 12px 32px rgba(0, 0, 0, .35); }
+    #panel[data-position="top-right"] { left: auto; right: 24px; top: 24px; transform: none; }
+    #panel[data-position="bottom-left"] { left: 24px; top: auto; bottom: 24px; transform: none; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    h1 { font-size: 17px; margin: 0; }
+    p { color: #9fb4ca; line-height: 1.5; }
+    label { display: grid; gap: 8px; margin: 16px 0; }
+    input { width: 100%; min-width: 0; }
+    .row { display: flex; align-items: center; gap: 12px; }
+    output { color: #63d6f0; }
+    #show { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); }
+    [hidden] { display: none !important; }
+    small { color: #9fb4ca; line-height: 1.5; display: block; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <section id="panel" aria-label="HTML overlay proof of concept">
+    <header><h1>Native scene + HTML</h1><button id="close" aria-label="Hide HTML panel">×</button></header>
+    <p>This panel is rendered by Chromium. The universe behind it is still native Bevy.</p>
+    <label>Text field<input id="text" type="text" placeholder="Type here" autocomplete="off"></label>
+    <div class="row"><button id="increment">Increment</button><output id="count" aria-live="polite">0</output></div>
+    <label>Panel position<select id="position"><option value="centre">Centre</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option></select></label>
+    <small>Rendering proof of concept only. Camera input isolation is not implemented yet. Typing movement keys may move the scene.</small>
+  </section>
+  <button id="show" hidden>Show HTML panel</button>
+  <script>
+    const panel = document.querySelector('#panel');
+    const show = document.querySelector('#show');
+    let count = 0;
+    document.querySelector('#increment').addEventListener('click', () => {
+      document.querySelector('#count').value = String(++count);
+    });
+    document.querySelector('#position').addEventListener('change', event => {
+      panel.dataset.position = event.target.value;
+    });
+    document.querySelector('#close').addEventListener('click', () => {
+      panel.hidden = true;
+      show.hidden = false;
+    });
+    show.addEventListener('click', () => {
+      panel.hidden = false;
+      show.hidden = true;
+    });
+  </script>
+</body>
+</html>

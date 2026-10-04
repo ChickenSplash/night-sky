@@ -2,6 +2,8 @@ mod actions;
 #[cfg(target_arch = "wasm32")]
 mod benchmark;
 mod black_hole;
+#[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
+mod cef_overlay;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
 mod flight;
@@ -193,6 +195,18 @@ const CONNECTED: &str = "Local API connected · read-only";
 struct Inbox(Mutex<mpsc::Receiver<network::Update>>);
 
 fn main() {
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(target_os = "macos"),
+        feature = "cef-ui"
+    ))]
+    bevy_cef::prelude::early_exit_if_subprocess();
+    let cef_requested = std::env::args().any(|arg| arg == "--cef-html-ui");
+    #[cfg(not(all(not(target_arch = "wasm32"), feature = "cef-ui")))]
+    if cef_requested {
+        eprintln!("The native CEF overlay requires --features cef-ui");
+        std::process::exit(2);
+    }
     #[cfg(not(target_arch = "wasm32"))]
     diagnostics::install_crash_reports();
     let smoke_test = std::env::args().any(|arg| arg == "--smoke-test");
@@ -219,7 +233,11 @@ fn main() {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Night Sky".into(),
+                    title: if cef_requested {
+                        "Night Sky · CEF overlay".into()
+                    } else {
+                        "Night Sky".into()
+                    },
                     resolution: (1440, 900).into(),
                     #[cfg(not(target_arch = "wasm32"))]
                     mode: if smoke_test {
@@ -294,6 +312,10 @@ fn main() {
     }
     #[cfg(target_arch = "wasm32")]
     web_bridge::install(&mut app);
+    #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
+    if cef_requested {
+        cef_overlay::install(&mut app);
+    }
     app.run();
 }
 

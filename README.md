@@ -104,6 +104,54 @@ Partially filled pages remain; wholly empty pages are omitted from navigation.
 
 ## Backend and logs
 
+### Native CEF overlay experiment
+
+On `prototype-cef-overlay`, the opt-in `cef-ui` feature adds a Chromium-rendered
+HTML panel over the existing native Bevy scene. It does not run the simulation
+as WASM, replace Bevy's window host, or reuse the GTK sidebar experiment.
+
+```sh
+./scripts/setup-cef-overlay.sh
+./scripts/run-cef-overlay.sh
+```
+
+Setup downloads the pinned CEF SDK and builds its helper process into local
+`data/` directories, without changing global Cargo configuration or installing
+system packages. The run script builds both processes and stops its server on
+exit. Linux setup is provided; Windows/macOS packaging has not been tested.
+
+The panel has a text field, JavaScript counter, hide/show buttons and a position
+selector. It starts centred and can float at the top right or bottom left.
+Resize the window to check layout. Existing egui panels remain available.
+The HTML is embedded at compile time, so edits require rebuilding.
+
+**This implements rendering only (experiment steps 1 and 2).** Camera input
+isolation, a Rust command/state bridge and overhead benchmarks are still pending.
+Typing WASD or other movement keys may move the scene. A rendered panel is not
+evidence of input correctness or acceptable performance.
+
+`bevy_cef` 0.11.0 matches the project's Bevy 0.18.1. On Linux its UI frames pass
+through CPU pixel buffers before GPU texture upload; the native universe is not
+read back. A third overlay camera matches the scene's HDR format without applying
+scene exposure or tone mapping to the UI. CSS backdrop blur cannot see the
+native universe, so the sample does not use it.
+
+CEF ships native libraries and helper processes. The plugin disables Chromium's
+sandbox by default on Linux; this experiment loads only an embedded local page
+with a restrictive content security policy, no network assets or navigation links.
+It is not intended for arbitrary websites or untrusted HTML.
+
+Normal native launches (`./scripts/run.sh`) and the browser UI remain unchanged.
+Build with `--features cef-ui` and launch with `--cef-html-ui` to opt in. Use the
+setup/run scripts to supply the project-local SDK and library search path.
+
+Initial verification on Linux/Wayland with NVIDIA Vulkan: the centred HTML panel
+renders over the native starfield, with transparency outside it, and the window
+closes normally. Native client tests (64), feature-enabled tests (65), strict
+Clippy with and without the feature, and the normal browser compilation check
+pass. Position controls, keyboard focus, resizing and scaling still need manual
+testing; no performance comparison has been performed.
+
 The backend serves the web client and the demo galaxy. The client checks the
 snapshot every two seconds; unchanged responses have no body, so large galaxies
 are not downloaded and rebuilt on every poll. `data/` is excluded from Git.

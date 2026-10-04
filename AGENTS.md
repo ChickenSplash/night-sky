@@ -18,6 +18,17 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 ## Development
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
+- Opt-in CEF overlay experiment (steps 1 and 2 only):
+  `./scripts/setup-cef-overlay.sh`, then `./scripts/run-cef-overlay.sh`.
+  Feature `cef-ui` pins `bevy_cef` 0.11.0 for Bevy 0.18.1; normal native and
+  browser builds do not initialise CEF. SDK/tools/cache stay in `data/`,
+  compiled output in `target/`. `cef_overlay.rs` draws the self-contained
+  `web/cef-overlay.html` on a full-window transparent UI surface, using a
+  separate overlay camera matching the scene's HDR format with no tone mapping.
+  Bevy's windowing and pipelined renderer stay enabled. Input isolation,
+  application commands and performance comparisons are not implemented yet.
+  Test visual windows on the secondary monitor only. CEF's default Linux sandbox
+  policy is disabled by this plugin; load only the bundled, CSP-restricted page.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
 - `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up in both exposures).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
