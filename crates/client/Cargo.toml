@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-# Native-only proof of concept. Browser and normal native builds do not use CEF.
+# Native HTML is the default; --no-default-features builds the lightweight egui fallback.
+default = ["cef-ui"]
 cef-ui = ["dep:bevy_cef", "dep:bevy_cef_core"]
 
 [dependencies]
@@ -36,7 +37,7 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["CustomEvent", "CustomEventInit", "EventTarget", "Window", "Location", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent"] }
+web-sys = { version = "0.3", features = ["CustomEvent", "CustomEventInit", "EventTarget", "Window", "Location", "UrlSearchParams", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent"] }
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -8,6 +8,12 @@ use serde::Deserialize;
 #[derive(Message, Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiCommand {
+    /// Native diagnostics, handled separately from navigation.
+    SaveBugReport,
+    /// Explicit user click on a task link, opened by the native desktop.
+    OpenExternal {
+        url: String,
+    },
     /// Select the visible star nearest the centre of the view.
     PickCentre,
     /// Select a streamed star by stable ID, or visit it on a second click.
@@ -139,6 +145,7 @@ pub fn apply(
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
     for command in commands.read() {
         match command {
+            UiCommand::SaveBugReport | UiCommand::OpenExternal { .. } => {}
             UiCommand::PickCentre => {
                 nav.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
             }

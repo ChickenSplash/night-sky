@@ -40,7 +40,7 @@ impl Link {
                 galaxy
                     .systems
                     .iter()
-                    .map(|s| s.planets.len())
+                    .map(|s| s.tasks().count())
                     .sum::<usize>(),
                 galaxy.source
             );

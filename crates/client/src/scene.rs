@@ -7,7 +7,6 @@ use bevy::{
     math::{DQuat, DVec3},
     prelude::*,
 };
-use bevy_egui::EguiContexts;
 use big_space::prelude::*;
 use space_shared::{Orbit, Spin, StarSystem};
 use space_simulation::{
@@ -316,18 +315,24 @@ pub struct Marker {
 #[derive(Resource, Default)]
 pub struct Markers(pub Vec<Marker>);
 
-pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) {
+pub fn setup(
+    mut commands: Commands,
+    mut gizmo_store: ResMut<GizmoConfigStore>,
+    mode: Res<crate::UiMode>,
+) {
     // UI owns the full window; the 3D camera owns only the unobscured centre.
-    commands.spawn((
-        Camera2d,
-        Camera {
-            order: 1,
-            clear_color: ClearColorConfig::None,
-            ..default()
-        },
-        bevy_egui::PrimaryEguiContext,
-        bevy::camera::visibility::RenderLayers::layer(31),
-    ));
+    if !mode.html {
+        commands.spawn((
+            Camera2d,
+            Camera {
+                order: 1,
+                clear_color: ClearColorConfig::None,
+                ..default()
+            },
+            bevy_egui::PrimaryEguiContext,
+            bevy::camera::visibility::RenderLayers::layer(31),
+        ));
+    }
     let (config, _) = gizmo_store.config_mut::<DefaultGizmoConfigGroup>();
     config.line.width = 1.25;
     commands.init_resource::<CameraPose>();
@@ -364,7 +369,7 @@ pub fn controls(
     input: (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
     motion: Res<AccumulatedMouseMotion>,
     mut wheel: MessageReader<MouseWheel>,
-    mut contexts: EguiContexts,
+    mut contexts: Query<&mut bevy_egui::EguiContext>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
     universe: Res<Universe>,
@@ -384,8 +389,14 @@ pub fn controls(
         })
         .sum::<f32>();
     let (pointer, keyboard) = contexts
-        .ctx_mut()
-        .map(|ctx| (ctx.is_pointer_over_area(), ctx.wants_keyboard_input()))
+        .iter_mut()
+        .next()
+        .map(|mut ctx| {
+            (
+                ctx.get_mut().is_pointer_over_area(),
+                ctx.get_mut().wants_keyboard_input(),
+            )
+        })
         .unwrap_or_default();
     #[cfg(not(all(not(target_arch = "wasm32"), feature = "cef-ui")))]
     let html_keyboard = false;

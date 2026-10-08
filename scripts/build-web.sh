@@ -16,7 +16,7 @@ if [[ ! -x "$tool/wasm-bindgen" ]]; then
         -o tools/wasm-bindgen.tar.gz
     tar -xzf tools/wasm-bindgen.tar.gz -C tools
 fi
-cargo build --locked -p space-client -p star-worker --target wasm32-unknown-unknown --profile web-release
+cargo build --locked -p space-client -p star-worker --no-default-features --target wasm32-unknown-unknown --profile web-release
 mkdir -p web/dist
 "$tool/wasm-bindgen" --target web --no-typescript --out-dir web/dist --out-name space_client \
     target/wasm32-unknown-unknown/web-release/space-client.wasm

@@ -5,7 +5,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 ## Scope and architecture
 
-- Native Linux and browser/WASM clients. Rust workspace: `client` (Bevy/egui), `server` (Axum),
+- Native Linux and browser/WASM clients. Rust workspace: `client` (Bevy/shared HTML, egui fallback), `server` (Axum),
   `shared` (wire models), `simulation` (engine-independent orbital maths).
 - Lists are constellations of system pages (7 to 14 slots each); tasks are planets. Deep navy background (black with realistic lighting) and line-based
   wireframe bodies. Preserve real distances, with explicit visual size exaggeration.
@@ -17,23 +17,30 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 ## Development
 
-- `./scripts/run.sh`: build and start both processes, clean up backend on exit.
-- Opt-in CEF overlay experiment (steps 1 to 4):
-  `./scripts/setup-cef-overlay.sh`, then `./scripts/run-cef-overlay.sh`.
-  Feature `cef-ui` pins `bevy_cef` 0.11.0 for Bevy 0.18.1; normal native and
-  browser builds do not initialise CEF. SDK/tools/cache stay in `data/`,
-  compiled output in `target/`. `cef_overlay.rs` draws the self-contained
-  `web/cef-overlay.html` on a full-window transparent UI surface, using a
-  separate overlay camera matching the scene's HDR format with no tone mapping.
-  Bevy's windowing and pipelined renderer stay enabled. `cef_input.rs` routes
-  pointer input before egui, retains drag ownership through release, and gates
-  camera keyboard input while HTML is focused (Escape releases focus). The panel
-  reports logical hit rectangles, sends only `UiCommand::SetPaused`, and receives
-  `space:state`/`space:tick` pause and simulated-day readouts at 10 Hz.
-  HTML radio controls replace `<select>` because CEF popup composition is unsupported.
-  `vendor/bevy_cef_core` adds an opt-in pre-navigation inline-only gate and
-  denies new browser windows. Manual interaction tests and overhead comparisons
-  are still required; no performance acceptance or UI migration yet.
+- `./scripts/run.sh`: build and start both processes with shared HTML UI by default,
+  clean up backend on exit. `--ui=egui` builds without CEF and selects the full fallback.
+- Native HTML setup: `./scripts/setup-native-ui.sh` (one-time project-local runtime).
+  Default feature `cef-ui` pins `bevy_cef` 0.11.0 for Bevy 0.18.1. Browser builds
+  use `--no-default-features` and never initialise CEF. SDK/tools/cache stay in
+  `data/`; compiled output stays in `target/`. `build.rs` bundles `web/native.html`
+  and the shared `web/ui/` sources into one trusted embedded page. `cef_overlay.rs`
+  composites it with a camera matching scene HDR, without tone mapping.
+  `cef_input.rs` retains drag ownership and gates keyboard camera input while
+  typing; Escape releases focus. Hit rectangles include menus/modal backdrops
+  and track animated bounds. Commands use the full shared ID-based architecture.
+  In-page dropdowns avoid unsupported Chromium popup surfaces. `vendor/bevy_cef_core`
+  preserves the pre-navigation inline-only gate and denies new CEF windows.
+  The user accepted the 60/60 small-panel benchmark and approved full migration
+  on 2026-10-05; full-UI performance, manual input acceptance and packaging remain
+  separate checks. `test-native-ui.mjs` tests the bundled frontend with mock CEF;
+  `test-native-bridge.mjs` tests an existing native client's real bridge via opt-in
+  loopback DevTools (`SPACE_UI_DEBUG_PORT`, off by default), not OS input.
+  Known regression: native CEF annotations lag the scene. Short source-to-CPU-pixel
+  probes measured about 61 ms at the plugin's default 30 Hz, about 40 ms with an
+  experimental 60 Hz request. Neither is frame-synchronised; production cadence
+  remains unchanged. `diagnose-native-ui-latency.mjs 30|60` runs a bounded,
+  self-cleaning secondary-monitor diagnostic. See the handoff for data/limitations
+  and the proposed native Bevy annotation path (no egui), not yet implemented.
   Test visual windows on the secondary monitor only. CEF's default Linux sandbox
   policy is disabled by this plugin; load only the bundled, CSP-restricted page.
 - `./scripts/benchmark-cef-overlay.sh --interactive`: builds separate baseline and
@@ -43,15 +50,17 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `--seconds` support preparation and shorter suites. Native benchmark mode is
   `--native-benchmark <config.json>`; the runner supplies the config. It warms
   at home, waits for loader/mesh readiness, then stays still or flies towards
-  the centre at 1,000 ly/s. egui and graphics stay the same across modes.
+  the centre at 1,000 ly/s. Graphics stay the same; baseline uses full egui and CEF
+  modes use full HTML. New results are not identical-workload small-panel overhead.
   Frame samples use wall time, not Bevy's capped delta. Process-tree CPU/PSS
   samples include CEF helpers; GPU data is system-wide. Results and summaries
   stay under `data/logs/cef-benchmark-*`. CPU OnPaint counters in the vendored
   core are opt-in; they do not measure GPU uploads. Benchmark launches disable
   Bevy's unfocused update throttle, without changing normal launches or the
-  desktop. Manual input acceptance is separate; no overhead acceptance yet.
-- Continuation plan for the native HTML experiment: `docs/native-html-ui-plan.md`.
-  Read it before resuming benchmark evaluation or proposing UI migration.
+  desktop. Manual input acceptance is separate; small-panel overhead is accepted,
+  but full-panel overhead has not yet been evaluated.
+- Shared HTML implementation/handoff: `docs/native-html-ui-plan.md`.
+  Read it before resuming native UI or benchmark work.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
 - `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up in both exposures).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
@@ -60,13 +69,14 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - The native **Save bug report** control captures state, recent client log lines and
   a screenshot under `data/logs/bug-*` for visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
-- The browser is the main target; native is a dev fallback. The browser UI is
-  HTML/CSS panels (`web/ui/`); `?ui=egui` shows the egui panels instead. Native
-  keeps egui. When HTML panels are active, egui draws only canvas markers, labels
-  and clicks; the HTML shows captions, readouts and the loading state.
+- The browser is the main target; native is a dev fallback. Both use shared
+  HTML/CSS panels and transparent canvas annotations (`web/ui/`). Browser
+  `?ui=egui` and native `--ui=egui` select the complete egui interface instead.
+  HTML mode does not initialise egui. `html_canvas.rs` owns f64 projection,
+  viewport and planet/star picking; `annotations.js` draws labels/rings/velocity.
   Every panel action is an ID-based `UiCommand` (`actions.rs`), shared by egui and
-  `web_bridge.rs`; Rust reports back with `space:galaxy`/`space:state`/`space:tick`
-  window events. Canvas labels and clicks stay in egui on every target.
+  `ui_bridge.rs`; Rust reports back with `space:galaxy`/`space:state`/`space:tick`
+  and `space:overlay` events. Native CEF's adapter forwards these to window events.
 - `./scripts/dev-web.sh`: web build plus server with `web/` linked live, so
   HTML/CSS edits need only a refresh. `node scripts/test-html-ui.mjs` checks the
   HTML panels, keyboard focus and wheel routing against `SPACE_URL` (default

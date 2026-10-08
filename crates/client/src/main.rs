@@ -5,12 +5,16 @@ mod black_hole;
 #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
 mod cef_input;
 #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
+mod cef_latency;
+#[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
 mod cef_overlay;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
 mod flight;
 mod galaxy_nav;
 mod glow;
+#[cfg(any(target_arch = "wasm32", feature = "cef-ui"))]
+mod html_canvas;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_benchmark;
 mod network;
@@ -22,9 +26,9 @@ mod smoke;
 mod starfield;
 mod stream;
 mod ui;
+#[cfg(any(target_arch = "wasm32", feature = "cef-ui"))]
+mod ui_bridge;
 mod views;
-#[cfg(target_arch = "wasm32")]
-mod web_bridge;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -38,6 +42,11 @@ use std::sync::{Mutex, mpsc};
 pub struct Universe(pub Galaxy);
 #[derive(Resource, Default)]
 pub struct Clock(pub SimulationClock);
+
+#[derive(Resource, Clone, Copy)]
+pub struct UiMode {
+    pub html: bool,
+}
 
 /// The star system the camera is at. List pages and generated systems are
 /// both galactic stars; a list page adds its tasks.
@@ -205,10 +214,18 @@ fn main() {
         feature = "cef-ui"
     ))]
     bevy_cef::prelude::early_exit_if_subprocess();
-    let cef_requested = std::env::args().any(|arg| arg == "--cef-html-ui");
+    #[cfg(not(target_arch = "wasm32"))]
+    let html_ui = !std::env::args().any(|arg| arg == "--ui=egui");
+    #[cfg(target_arch = "wasm32")]
+    let html_ui = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .and_then(|q| web_sys::UrlSearchParams::new_with_str(&q).ok())
+        .and_then(|params| params.get("ui"))
+        .is_none_or(|ui| ui != "egui");
+    let cef_requested = html_ui && cfg!(not(target_arch = "wasm32"));
     #[cfg(not(all(not(target_arch = "wasm32"), feature = "cef-ui")))]
     if cef_requested {
-        eprintln!("The native CEF overlay requires --features cef-ui");
+        eprintln!("HTML UI requires the default CEF feature. Use --ui=egui for this build.");
         std::process::exit(2);
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -244,11 +261,7 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     ime_enabled: cef_requested,
-                    title: if cef_requested {
-                        "Night Sky · CEF overlay".into()
-                    } else {
-                        "Night Sky".into()
-                    },
+                    title: "Night Sky".into(),
                     resolution: (1440, 900).into(),
                     #[cfg(not(target_arch = "wasm32"))]
                     present_mode: if native_benchmark
@@ -280,7 +293,6 @@ fn main() {
             .build()
             .disable::<TransformPlugin>(),
         BigSpaceDefaultPlugins,
-        EguiPlugin::default(),
         render::RenderPlugin,
         stream::StreamPlugin,
         starfield::StarfieldRenderPlugin,
@@ -288,11 +300,8 @@ fn main() {
         black_hole::BlackHolePlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
-    .insert_resource(bevy_egui::EguiGlobalSettings {
-        auto_create_primary_context: false,
-        ..default()
-    })
     .insert_resource(Universe(demo_galaxy()))
+    .insert_resource(UiMode { html: html_ui })
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
@@ -325,10 +334,25 @@ fn main() {
             .after(TransformSystems::Propagate)
             .before(bevy_egui::EguiPostUpdateSet::EndPass)
             .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
-    )
-    .add_systems(EguiPrimaryContextPass, ui::draw_ui);
+    );
+    if html_ui {
+        #[cfg(any(target_arch = "wasm32", feature = "cef-ui"))]
+        ui_bridge::install(&mut app);
+        #[cfg(any(target_arch = "wasm32", feature = "cef-ui"))]
+        html_canvas::install(&mut app);
+    } else {
+        app.insert_resource(bevy_egui::EguiGlobalSettings {
+            auto_create_primary_context: false,
+            ..default()
+        })
+        .add_plugins(EguiPlugin::default())
+        .add_systems(EguiPrimaryContextPass, ui::draw_ui);
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    app.add_systems(Update, smoke::exercise);
+    app.add_systems(
+        Update,
+        (smoke::exercise, ui::native_commands.after(actions::apply)),
+    );
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(benchmark) = native_benchmark {
         native_benchmark::install(&mut app, benchmark);
@@ -337,8 +361,6 @@ fn main() {
     if benchmark {
         app.insert_resource(benchmark::BenchmarkFlight::default());
     }
-    #[cfg(target_arch = "wasm32")]
-    web_bridge::install(&mut app);
     #[cfg(all(not(target_arch = "wasm32"), feature = "cef-ui"))]
     if cef_requested {
         cef_overlay::install(&mut app);

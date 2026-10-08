@@ -3,7 +3,7 @@
 export function createBridge() {
   let send = null;
   const pending = [];
-  const listeners = { galaxy: [], state: [], tick: [] };
+  const listeners = { galaxy: [], state: [], tick: [], overlay: [] };
   const latest = {};
   for (const name of Object.keys(listeners)) {
     window.addEventListener(`space:${name}`, event => {

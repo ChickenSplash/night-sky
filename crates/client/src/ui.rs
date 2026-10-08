@@ -1,4 +1,4 @@
-use crate::actions::{Display, PanelInsets, UiCommand};
+use crate::actions::{Display, UiCommand};
 use crate::views::View;
 use crate::{
     Clock, Navigation, Universe,
@@ -14,13 +14,51 @@ const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(99, 214, 240);
 const PANEL: egui::Color32 = egui::Color32::from_rgb(7, 15, 31);
 
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+pub fn native_commands(
+    mut events: MessageReader<UiCommand>,
+    mut commands: Commands,
+    universe: Res<Universe>,
+    mut nav: ResMut<Navigation>,
+    clock: Res<Clock>,
+    rig: Res<CameraRig>,
+    pose: Res<CameraPose>,
+    field: Res<crate::stream::Starfield>,
+) {
+    for event in events.read() {
+        match event {
+            UiCommand::SaveBugReport => {
+                nav.notice = save_bug_report(
+                    &mut commands,
+                    &universe.0,
+                    &nav,
+                    &clock.0,
+                    (&rig, &pose),
+                    &field,
+                )
+            }
+            UiCommand::OpenExternal { url } => {
+                if let Ok(url) = reqwest::Url::parse(url)
+                    && ["http", "https"].contains(&url.scheme())
+                    && let Err(error) = std::process::Command::new("xdg-open")
+                        .arg(url.as_str())
+                        .spawn()
+                {
+                    nav.notice = format!("Could not open task link: {error}");
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(MUTED).strong());
 }
 
 type Overlay<'w> = (
     Res<'w, Markers>,
-    Res<'w, PanelInsets>,
     Res<'w, Lights>,
     Res<'w, CameraVelocity>,
     Res<'w, crate::sky::Sky>,
@@ -43,7 +81,7 @@ pub fn draw_ui(
     let (mut commands, mut contexts, mut writer) = interaction;
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
-    let (markers, insets, lights, velocity, sky) = overlay;
+    let (markers, lights, velocity, sky) = overlay;
     let (rig, pose, starfield, metrics) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -63,39 +101,29 @@ pub fn draw_ui(
     }
 
     let mut out = Vec::new();
-    let mut rect = ctx.available_rect();
-    if let Some([top, right, bottom, left]) = insets.0 {
-        // HTML panels cover the canvas edges; the 3D view fits the space between.
-        let scale = ctx.zoom_factor();
-        rect = egui::Rect::from_min_max(
-            rect.min + egui::vec2(left, top) / scale,
-            rect.max - egui::vec2(right, bottom) / scale,
+    let mut panels = Panels {
+        galaxy: &universe.0,
+        nav: &mut nav,
+        clock: &clock.0,
+        out: &mut out,
+        report: false,
+    };
+    panels.show(ctx);
+    let report = panels.report;
+    #[cfg(not(target_arch = "wasm32"))]
+    if report {
+        nav.notice = save_bug_report(
+            &mut commands,
+            &universe.0,
+            &nav,
+            &clock.0,
+            (&rig, &pose),
+            &starfield,
         );
-    } else {
-        let mut panels = Panels {
-            galaxy: &universe.0,
-            nav: &mut nav,
-            clock: &clock.0,
-            out: &mut out,
-            report: false,
-        };
-        panels.show(ctx);
-        let report = panels.report;
-        rect = ctx.available_rect();
-        #[cfg(not(target_arch = "wasm32"))]
-        if report {
-            nav.notice = save_bug_report(
-                &mut commands,
-                &universe.0,
-                &nav,
-                &clock.0,
-                (&rig, &pose),
-                &starfield,
-            );
-        }
-        #[cfg(target_arch = "wasm32")]
-        let _ = report;
     }
+    #[cfg(target_arch = "wasm32")]
+    let _ = report;
+    let mut rect = ctx.available_rect();
     if rect.width() < 1.0 || rect.height() < 1.0 {
         rect = egui::Rect::from_min_size(rect.min, egui::vec2(1.0, 1.0));
     }
@@ -124,14 +152,12 @@ pub fn draw_ui(
         &exposure_caption(&nav, &lights, &sky),
         &velocity,
         &metrics.caption,
-        insets.0.is_none(),
         &mut out,
     );
     writer.write_batch(out);
 }
 
-/// The egui panels: the native client's UI, and the browser's until HTML panels
-/// take over. They only read state; every change is a `UiCommand`.
+/// The explicitly selected egui fallback. Changes use the same `UiCommand`s.
 struct Panels<'a> {
     galaxy: &'a Galaxy,
     nav: &'a mut Navigation,
@@ -673,8 +699,7 @@ fn save_bug_report(
     }
 }
 
-/// Labels, hover rings and clicks on the 3D view itself. These stay in egui on
-/// every target: they move every frame and there can be hundreds of them.
+/// Labels, hover rings and clicks for the explicit egui fallback only.
 #[allow(clippy::too_many_arguments)]
 fn canvas_overlay(
     ctx: &egui::Context,
@@ -688,11 +713,9 @@ fn canvas_overlay(
     exposure: &str,
     velocity: &CameraVelocity,
     stream_caption: &str,
-    // HTML panels show the loading state and view captions themselves.
-    captions: bool,
     out: &mut Vec<UiCommand>,
 ) {
-    if captions && galaxy.systems.is_empty() {
+    if galaxy.systems.is_empty() {
         egui::Area::new(egui::Id::new("loading-state"))
             .fixed_pos(rect.center() - egui::vec2(160.0, 45.0))
             .show(ctx, |ui| {
@@ -709,7 +732,7 @@ fn canvas_overlay(
             egui::Id::new("annotations"),
         ))
         .with_clip_rect(rect);
-    if captions {
+    {
         painter.text(
             rect.left_top() + egui::vec2(24.0, 24.0),
             egui::Align2::LEFT_TOP,

@@ -22,6 +22,7 @@
   <div id="hud" hidden></div>
   <script type="module">
     import { createBridge } from './ui/bridge.js';
+    import { mountAnnotations } from './ui/annotations.js';
     // `?ui=egui` shows the egui panels instead, for debugging.
     const htmlUi = new URLSearchParams(location.search).get('ui') !== 'egui';
     // Created before the renderer starts, so no state event is missed.
@@ -51,6 +52,7 @@
       if (htmlUi) {
         document.querySelector('#hud').hidden = false;
         (await import('./ui/panels.js')).mount(bridge, canvas);
+        mountAnnotations(bridge);
       }
       try {
         await wasm.default();

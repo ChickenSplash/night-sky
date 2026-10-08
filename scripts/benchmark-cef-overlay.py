@@ -149,9 +149,9 @@ def check_window(pid, monitor_id):
 
 
 def build(env):
-    subprocess.run(['./scripts/setup-cef-overlay.sh'], cwd=ROOT, env=env, check=True)
+    subprocess.run(['./scripts/setup-native-ui.sh'], cwd=ROOT, env=env, check=True)
     paths = {}
-    for name, features in [('baseline', []), ('cef', ['--features', 'space-client/cef-ui'])]:
+    for name, features in [('baseline', ['--no-default-features']), ('cef', [])]:
         directory = ROOT / 'target/cef-benchmark' / name
         subprocess.run(['cargo', 'build', '--release', '--locked', '-p', 'space-client', '-p', 'space-server',
                         '--target-dir', str(directory), '-j', '6', *features], cwd=ROOT, env=env, check=True)
@@ -191,12 +191,14 @@ def run_job(folder, number, job, args, paths, monitor):
     result_path = config.with_suffix('.result.json')
     executable = paths['baseline' if mode == 'baseline' else 'cef'] / 'space-client'
     command = [str(executable), '--native-benchmark', str(config)]
+    if mode == 'baseline':
+        command.append('--ui=egui')
     if mode != 'baseline':
         library_path = str(ROOT / 'data/cef-sdk')
         if os.environ.get('LD_LIBRARY_PATH'):
             library_path += ':' + os.environ['LD_LIBRARY_PATH']
         command = ['env', f'CEF_PATH={ROOT / "data/cef-sdk"}',
-                   f'LD_LIBRARY_PATH={library_path}', *command, '--cef-html-ui']
+                   f'LD_LIBRARY_PATH={library_path}', *command]
     shell = 'cd ' + shlex.quote(str(ROOT)) + ' && exec ' + shlex.join(command) + ' > ' + shlex.quote(str(folder / f'{name}.log')) + ' 2>&1'
     lua = 'hl.dsp.exec_cmd(' + json.dumps('bash -c ' + shlex.quote(shell)) + ", { workspace = '8 silent', no_focus = true, float = true, size = '1440 900', center = true })"
     print(f'[{number}] {mode} · {presentation} · {workload} · repeat {repetition}', flush=True)

@@ -1,9 +1,10 @@
-//! Browser bridge for the HTML panels. JavaScript sends `UiCommand`s as JSON
-//! through `send_command`, and Rust reports back with window events whose detail is
+//! Shared state contract for HTML panels. Browser and CEF transports send the same
+//! ID-based `UiCommand`s, and Rust reports back with events whose detail is
 //! a JSON string:
 //! - `space:galaxy` when list data arrives,
 //! - `space:state` when navigation or the clock settings change,
 //! - `space:tick` about ten times a second, for fast-moving readouts.
+#[cfg(target_arch = "wasm32")]
 use crate::actions::UiCommand;
 use crate::scene::CameraPose;
 use crate::views::View;
@@ -11,16 +12,20 @@ use crate::{Clock, Navigation, Universe};
 use bevy::prelude::*;
 use serde::Serialize;
 use space_simulation::period_seconds;
+#[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 const TICK_SECONDS: f64 = 0.1;
 
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     static QUEUE: RefCell<Vec<UiCommand>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Queues a command for the next frame. Called from JavaScript between frames.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn send_command(json: &str) -> Result<(), JsError> {
     let command: UiCommand = serde_json::from_str(json)?;
@@ -29,22 +34,56 @@ pub fn send_command(json: &str) -> Result<(), JsError> {
 }
 
 pub fn install(app: &mut App) {
-    app.add_systems(PreUpdate, receive)
-        .add_systems(Last, (publish_galaxy, publish_state, publish_tick));
+    app.insert_resource(BridgeReady(cfg!(target_arch = "wasm32")))
+        .add_message::<UiEvent>()
+        .add_systems(
+            Last,
+            (publish_galaxy, publish_state, publish_tick).run_if(ready),
+        );
+    #[cfg(target_arch = "wasm32")]
+    app.add_systems(PreUpdate, receive).add_systems(
+        Last,
+        browser_events
+            .after(publish_tick)
+            .after(publish_state)
+            .after(publish_galaxy)
+            .after(crate::html_canvas::publish),
+    );
 }
 
+#[derive(Resource, Default)]
+pub struct BridgeReady(pub bool);
+fn ready(ready: Res<BridgeReady>) -> bool {
+    ready.0
+}
+
+#[derive(Message)]
+pub struct UiEvent {
+    pub name: &'static str,
+    pub json: String,
+}
+
+#[cfg(target_arch = "wasm32")]
 fn receive(mut writer: MessageWriter<UiCommand>) {
     QUEUE.with_borrow_mut(|queue| {
         writer.write_batch(queue.drain(..));
     });
 }
 
-fn emit(name: &str, detail: &impl Serialize) {
+pub fn emit(writer: &mut MessageWriter<UiEvent>, name: &'static str, detail: &impl Serialize) {
     if let Ok(json) = serde_json::to_string(detail) {
-        dispatch(name, &json);
+        writer.write(UiEvent { name, json });
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn browser_events(mut events: MessageReader<UiEvent>) {
+    for event in events.read() {
+        dispatch(event.name, &event.json);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn dispatch(name: &str, json: &str) {
     let Some(window) = web_sys::window() else {
         return;
@@ -81,12 +120,17 @@ struct GalaxySummary<'a> {
     lists: Vec<ListSummary<'a>>,
 }
 
-fn publish_galaxy(universe: Res<Universe>) {
-    if !universe.is_changed() {
+pub fn publish_galaxy(
+    universe: Res<Universe>,
+    ready: Res<BridgeReady>,
+    mut writer: MessageWriter<UiEvent>,
+) {
+    if !universe.is_changed() && !ready.is_changed() {
         return;
     }
     let galaxy = &universe.0;
     emit(
+        &mut writer,
         "space:galaxy",
         &GalaxySummary {
             source: &galaxy.source,
@@ -187,11 +231,13 @@ struct Picked {
     pages: Option<usize>,
 }
 
-fn publish_state(
+pub fn publish_state(
     universe: Res<Universe>,
     nav: Res<Navigation>,
     clock: Res<Clock>,
     mut last: Local<String>,
+    ready: Res<BridgeReady>,
+    mut writer: MessageWriter<UiEvent>,
 ) {
     let system = nav.system(&universe.0);
     let planet = system.and_then(|s| nav.selected.and_then(|i| s.planets.get(i)));
@@ -266,8 +312,11 @@ fn publish_state(
     let Ok(json) = serde_json::to_string(&state) else {
         return;
     };
-    if *last != json {
-        dispatch("space:state", &json);
+    if *last != json || ready.is_changed() {
+        writer.write(UiEvent {
+            name: "space:state",
+            json: json.clone(),
+        });
         *last = json;
     }
 }
@@ -292,7 +341,8 @@ struct Tick {
     benchmark_seconds: Option<f64>,
 }
 
-fn publish_tick(
+#[allow(clippy::too_many_arguments)]
+pub fn publish_tick(
     time: Res<Time>,
     clock: Res<Clock>,
     pose: Res<CameraPose>,
@@ -302,8 +352,9 @@ fn publish_tick(
     velocity: Res<crate::scene::CameraVelocity>,
     metrics: Res<crate::stream::StreamMetrics>,
     starfield: Res<crate::stream::Starfield>,
-    benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
+    #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     mut next: Local<f64>,
+    mut writer: MessageWriter<UiEvent>,
 ) {
     let now = time.elapsed_secs_f64();
     if now < *next {
@@ -311,6 +362,7 @@ fn publish_tick(
     }
     *next = now + TICK_SECONDS;
     emit(
+        &mut writer,
         "space:tick",
         &Tick {
             days: clock.0.seconds / 86_400.0,
@@ -324,7 +376,35 @@ fn publish_tick(
             stream_cells: starfield.cells.len(),
             stream_pending: starfield.pending,
             mesh_queue: metrics.mesh_queue,
+            #[cfg(target_arch = "wasm32")]
             benchmark_seconds: benchmark.map(|flight| flight.elapsed),
+            #[cfg(not(target_arch = "wasm32"))]
+            benchmark_seconds: None,
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ready_handshake_publishes_snapshot_even_after_initial_change_was_missed() {
+        let mut app = App::new();
+        app.insert_resource(Universe(space_simulation::demo_galaxy()))
+            .init_resource::<BridgeReady>()
+            .add_message::<UiEvent>()
+            .add_systems(Last, publish_galaxy.run_if(ready));
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Messages<UiEvent>>().len(), 0);
+        app.world_mut().resource_mut::<BridgeReady>().0 = true;
+        app.update();
+        let events = app.world().resource::<Messages<UiEvent>>();
+        let mut cursor = events.get_cursor();
+        let event = cursor.read(events).next().unwrap();
+        assert_eq!(event.name, "space:galaxy");
+        let value: serde_json::Value = serde_json::from_str(&event.json).unwrap();
+        assert_eq!(value["lists"].as_array().unwrap().len(), 6);
+    }
 }

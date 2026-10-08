@@ -12,9 +12,10 @@ the renderer change; the CEF changes use `NIGHT SKY PATCH`.
 - **Change:** the opt-in `trusted-inline-only` feature adds a CEF request handler
   that permits only `cef://localhost/__inline__/{id}` documents, denies opening
   URLs from a tab, and denies new browser windows with a lifespan handler.
-  Enabled only by the native client's optional `cef-ui` dependency. CSP still
+  Enabled by the native client's default `cef-ui` feature (the feature-free egui
+  fallback does not use CEF). CSP still
   blocks external subresources, frames, workers and forms in the bundled page.
-  This is an experiment-specific policy, not an arbitrary-site browser sandbox.
+  This is a trusted native UI policy, not an arbitrary-site browser sandbox.
 - **Changed files:** `Cargo.toml`, `src/browser_process/client_handler.rs`, and
   new `src/browser_process/client_handler/trusted_inline.rs`. The remaining files
   are the crates.io 0.11.0 source (Cargo cache metadata omitted), apart from the

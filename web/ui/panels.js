@@ -1,4 +1,4 @@
-// The browser UI: HTML panels around the 3D view. Every change goes to Rust as a
+// Shared native/browser HTML panels around the 3D view. Every change goes to Rust as a
 // command, and every panel redraws from the state Rust sends back. Open the
 // client with `?ui=egui` for the old egui panels.
 const YEAR = 31_557_600;
@@ -177,7 +177,7 @@ export function mount(bridge, canvas) {
   // Sidebar: a floating panel with a tab of lists and a tab of the current
   // list's tasks. It slides away, and its choices persist between visits.
   const prefs = loadPrefs();
-  const save = () => localStorage.setItem(PREFS, JSON.stringify(prefs));
+  const save = () => { try { localStorage.setItem(PREFS, JSON.stringify(prefs)); } catch { /* Inline CEF pages may have no persistent origin. */ } };
   const round = (name, label, className = 'round') => el('button', { className, title: label, ariaLabel: label }, icon(name));
   // A styled dropdown: the browser's own <select> menu cannot be themed.
   let openMenu = null;
@@ -343,8 +343,13 @@ export function mount(bridge, canvas) {
     el('p', { className: 'muted small', textContent: 'Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable.' }),
     heading('Controls'),
     el('dl', { className: 'keys' }, ...HELP.flatMap(([key, action]) => [el('dt', {}, el('kbd', { textContent: key })), el('dd', { textContent: action })])),
-    heading('Benchmark'), benchmarkButton,
-    el('p', { className: 'muted small', textContent: 'Reloads with no stars loaded, then flies 15 seconds from home towards the galactic centre at 1,000 ly/s. Results appear on screen and in the browser console.' }));
+    ...(!bridge.native ? [heading('Benchmark'), benchmarkButton,
+      el('p', { className: 'muted small', textContent: 'Reloads with no stars loaded, then flies 15 seconds from home towards the galactic centre at 1,000 ly/s. Results appear on screen and in the browser console.' })] : []));
+  if (bridge.native) {
+    const report = el('button', { type: 'button', textContent: 'Save bug report' });
+    report.addEventListener('click', () => send({ type: 'save_bug_report' }));
+    settings.append(heading('Diagnostics'), report);
+  }
   const setSettings = open => {
     settings.hidden = !open;
     gear.classList.toggle('active', open);

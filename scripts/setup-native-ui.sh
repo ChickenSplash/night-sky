@@ -16,4 +16,4 @@ if [[ ! -x "$CEF_PATH/bin/bevy_cef_render_process" ]]; then
     cargo install bevy_cef_render_process --version 0.11.0 --locked \
         --root "$CEF_PATH" --target-dir target/cef-tools
 fi
-echo "CEF overlay SDK ready in $CEF_PATH"
+echo "Native HTML UI runtime ready in $CEF_PATH"

@@ -42,7 +42,9 @@ docker logs --tail 50 night-sky
 ### Native desktop
 
 ```sh
+./scripts/setup-native-ui.sh  # one-time project-local CEF runtime setup
 ./scripts/run.sh
+./scripts/run.sh --ui=egui    # complete egui fallback, built without CEF
 ```
 
 The first build downloads dependencies and compiles Bevy. Subsequent launches
@@ -104,87 +106,49 @@ Partially filled pages remain; wholly empty pages are omitted from navigation.
 
 ## Backend and logs
 
-### Native CEF overlay experiment
+### Shared HTML UI
 
-On `prototype-cef-overlay`, the opt-in `cef-ui` feature adds a Chromium-rendered
-HTML panel over the existing native Bevy scene. It does not run the simulation
-as WASM, replace Bevy's window host, or reuse the GTK sidebar experiment.
+Native and browser clients use the same panels, styling and canvas annotations
+in `web/ui/`. Native CEF is enabled by default; `--ui=egui` selects the complete
+egui fallback, equivalent to the browser's `?ui=egui`. HTML mode does not start
+egui. Bevy still owns the simulation, window and 3D rendering.
 
-```sh
-./scripts/setup-cef-overlay.sh
-./scripts/run-cef-overlay.sh
-```
+`setup-native-ui.sh` downloads the pinned runtime and builds its helper under
+`data/`, without global installation or Cargo changes. `run.sh` supplies the
+runtime/library paths, builds both processes and cleans up its server on exit.
+The fallback is built with `--no-default-features` and needs no CEF runtime.
+Native assets are embedded by `build.rs`, so frontend edits require rebuilding.
 
-Setup downloads the pinned CEF SDK and builds its helper process into local
-`data/` directories, without changing global Cargo configuration or installing
-system packages. The run script builds both processes and stops its server on
-exit. Linux setup is provided; Windows/macOS packaging has not been tested.
+The bridge uses the same ID-based commands and galaxy/state/tick contracts on
+both clients. Native hit rectangles include menus and modal backdrops; input
+retains its drag owner through release. Escape returns keyboard control to the
+scene, and held keys must be released before camera controls resume.
+Labels, rings and velocity markers use a shared transparent canvas, with Rust
+projection and picking. Native Settings also includes **Save bug report**.
 
-The panel has a text field, JavaScript counter, hide/show buttons and position
-radio buttons. It starts centred and can float at the top right or bottom left.
-Resize the window to check layout. Existing egui panels remain available.
-The HTML is embedded at compile time, so edits require rebuilding.
+`bevy_cef` 0.11.0 stays pinned to Bevy 0.18.1. The overlay camera matches scene
+HDR without tone mapping the UI. CSS backdrop blur cannot see the native scene.
+In-page dropdowns avoid unsupported Chromium popup composition.
 
-**Experiment steps 1 to 4 are implemented, awaiting manual interaction testing.**
-Native input routing uses logical HTML hit rectangles, explicit keyboard focus
-and press-to-release drag ownership, rather than transparent pixels alone.
-It filters egui input under the HTML surface as well as camera controls. Escape
-or an empty-space click releases HTML focus; keys held during the handoff must
-be released before camera keyboard controls resume. Window focus loss releases
-captured mouse buttons. Camera thrust is stopped while a UI owns keyboard input.
+CEF disables the Linux sandbox. Only the bundled CSP-restricted trusted page is
+loaded; the vendored inline-only navigation gate and new-window denial remain.
+Task links open through the desktop only on explicit HTTP(S) link clicks.
+Windows/macOS packaging and finished installers are not yet validated.
 
-The **Pause simulation** button sends `UiCommand::SetPaused` through the existing
-application command handler. Rust acknowledges pause state and publishes
-simulated days through `space:state`/`space:tick` at 10 Hz, including changes from
-egui or the scene's Space shortcut. The counter remains a local JavaScript test.
-The broken standard `<select>` is replaced by radio buttons, avoiding Chromium's
-separate popup surface.
+`node scripts/test-native-ui.mjs` tests the actual bundle with a mock transport.
+Native OS typing, clipboard, drag boundaries and DPI still require manual
+acceptance. Full implementation context and remaining checks:
+[`docs/native-html-ui-plan.md`](docs/native-html-ui-plan.md).
 
-Manual acceptance checks, not yet claimed as passing:
-- Type WASD, R/F and Q/E without moving or rolling the camera; select, paste,
-  Tab and Shift+Tab between controls.
-- Scroll the panel and the scroll-test text box without zooming the scene.
-- Click/drag empty space, press Escape after focusing HTML, and drag across
-  panel boundaries in both directions before releasing. Check for stuck input.
-- Pause/resume from HTML and egui; verify the day readout freezes and resumes
-  and both UIs agree on pause state. Check hide/show, position controls and resize.
+Known native regression: HTML canvas labels/markers trail the 3D scene because
+CEF paints asynchronously at a default approximately 30 Hz. Short diagnostics
+measured approximately 61 ms from annotation generation to returned CPU pixels;
+an experimental 60 Hz request reduced it to approximately 40 ms, not frame sync.
+The production setting is unchanged. A bounded secondary-monitor probe is
+`node scripts/diagnose-native-ui-latency.mjs 30` (or `60`). Details, scroll-tag
+measurements and remaining rendering work are recorded in the handoff.
 
-Performance comparisons (steps 5 onward) remain pending. No UI migration or
-overhead acceptance follows from successful compilation or unit tests.
-
-`bevy_cef` 0.11.0 matches the project's Bevy 0.18.1. On Linux its UI frames pass
-through CPU pixel buffers before GPU texture upload; the native universe is not
-read back. A third overlay camera matches the scene's HDR format without applying
-scene exposure or tone mapping to the UI. CSS backdrop blur cannot see the
-native universe, so the sample does not use it.
-
-CEF ships native libraries and helper processes. The plugin disables Chromium's
-sandbox by default on Linux; this experiment loads only an embedded local page
-with a restrictive content security policy, no network assets or navigation links.
-The vendored core's optional `trusted-inline-only` feature rejects external
-navigation before it starts and denies new browser windows. The command receiver
-accepts only pause commands from this panel, not every `UiCommand` variant.
-It is not intended for arbitrary websites or untrusted HTML.
-
-Normal native launches (`./scripts/run.sh`) and the browser UI remain unchanged.
-Build with `--features cef-ui` and launch with `--cef-html-ui` to opt in. Use the
-setup/run scripts to supply the project-local SDK and library search path.
-
-Initial rendering verification on Linux/Wayland with NVIDIA Vulkan: the centred HTML panel
-renders over the native starfield, with transparency outside it, and the window
-closes normally. Native client tests (64), feature-enabled tests (65), strict
-Clippy with and without the feature, and the normal browser compilation check
-passed for steps 1 and 2. The new input/bridge work adds automated ownership,
-command-gating and navigation-policy tests; keyboard focus, paste, drag boundary
-behaviour, resizing and scaling still need manual testing. No performance
-comparison has been performed.
-
-Automated checks for the updated experiment: feature-enabled client tests (74),
-normal client tests (65), the core's navigation-policy unit test, and
-`node scripts/test-cef-panel.mjs` (headless DOM with a mock CEF transport, not
-native input acceptance). The browser compilation check remains feature-free.
-
-### CEF overhead benchmark (steps 5 to 7)
+### Native UI comparison benchmark
 
 ```sh
 ./scripts/benchmark-cef-overlay.sh --interactive
@@ -201,14 +165,14 @@ without taking focus. The runner aborts if placement, visibility or resolution
 is wrong, or if helpers cannot be cleaned up between runs. No desktop settings
 are changed. Finish the manual input acceptance checks before benchmarking.
 
-Modes (egui remains present and identical):
+Modes (baseline uses egui; CEF modes use the shared HTML UI):
 
 | Mode | What runs |
 | --- | --- |
-| A, `baseline` | Native client with no CEF dependency |
+| A, `baseline` | Full egui client built without CEF |
 | B, `runtime` | CEF page alive; HTML node hidden and overlay camera inactive after initial sizing |
-| C, `idle` | Visible static panel; one initial state update, no periodic readouts |
-| D, `active` | Scripted text edits/scroll changes at 10 Hz plus Rust readouts at 10 Hz |
+| C, `idle` | Visible shared panels and normal state/readouts, no scripted editing |
+| D, `active` | Scripted search edits at 10 Hz plus normal Rust state/readouts |
 | `animation` | Separate requestAnimationFrame repaint stress test plus readouts |
 | `interactive` | Readouts and real user typing/scrolling, with an Enter prompt after warm-up |
 
@@ -243,9 +207,10 @@ Useful commands:
 
 The short run is a plumbing check, not an acceptance-quality comparison.
 `--skip-build` reuses binaries and can give stale results; normal runs rebuild.
-Both release builds and automated runner tests have been checked; the native
-measurement sequence has not been run on your behalf. Start with a short run
-to validate the launch/measurement plumbing before the full suite.
+The historical small-panel suite completed 60/60 runs on 2026-10-05, and the
+user accepted its memory/CPU/frame-time overhead. Those measurements preceded
+the full migration. New suites compare complete alternative UIs, not an identical
+egui application plus a tiny panel, so do not conflate the two sets of results.
 
 Results are in a timestamped `data/logs/cef-benchmark-*` directory:
 - `metadata.json`: commit, binary hashes, compiler, monitor, fixed graphics,
@@ -266,8 +231,8 @@ GPU utilisation and VRAM are **system-wide**, not application-attributed. Paint
 time covers CPU CEF buffer copy/publish, not GPU upload. GPU texture-update timing
 and compressed package size are explicitly unavailable. Startup uses a fresh
 process but does not clear OS/CEF disk caches or include dynamic-loader time.
-Share `summary.json` and the per-run results for comparison; no full UI migration
-or performance acceptance is made by this command.
+Share `summary.json` and the per-run results for comparison; full-UI performance
+acceptance is separate from the accepted historical small-panel result.
 
 The backend serves the web client and the demo galaxy. The client checks the
 snapshot every two seconds; unchanged responses have no body, so large galaxies
@@ -385,7 +350,7 @@ is available it retains its last data, initially the clearly labelled demo.
 ## Project structure
 
 ```text
-crates/client/       Bevy scene, controls, web bridge and egui dev UI
+crates/client/       Bevy scene, controls, shared HTML bridge and egui fallback
 crates/server/       Axum API serving the demo galaxy and web client
 crates/shared/       Serializable API models and offline demo
 crates/simulation/   Orbital mechanics, clock, galaxy model and deterministic layout
@@ -440,10 +405,10 @@ following, display options, keyboard focus and wheel routing. It saves
 
 ## Browser UI
 
-The browser is the main client; the native window is a developer fallback that
-keeps the egui panels, smoke test and bug reports. In the browser, HTML/CSS
-panels in `web/ui/` surround the 3D view, and `?ui=egui` brings back the egui
-panels. Run `./scripts/dev-web.sh` to serve the browser client with `web/` linked
+The browser is the main client; native remains a developer fallback with smoke
+tests and bug reports. Both use the shared HTML/CSS panels and canvas annotations
+in `web/ui/`. Browser `?ui=egui` and native `--ui=egui` select the full egui
+interface instead. Run `./scripts/dev-web.sh` to serve the browser client with `web/` linked
 live, so HTML and CSS edits need only a refresh.
 
 ## Next milestones

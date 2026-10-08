@@ -1,10 +1,10 @@
-//! Opt-in native HTML proof: transparent rendering, input ownership and a tiny bridge.
+//! Native transport and transparent composition for the shared HTML UI.
 use bevy::{
     camera::visibility::RenderLayers, core_pipeline::tonemapping::Tonemapping, prelude::*,
     render::view::Hdr,
 };
 use bevy_cef::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Component)]
 pub struct HtmlPanel;
@@ -14,17 +14,8 @@ pub struct HtmlPanel;
 enum PanelEvent {
     Ready,
     Layout { rects: Vec<[f32; 4]> },
+    Focus { keyboard: bool },
     Command { command: crate::actions::UiCommand },
-}
-
-#[derive(Serialize)]
-struct PanelState {
-    paused: bool,
-}
-
-#[derive(Serialize)]
-struct PanelTick {
-    days: f64,
 }
 
 #[derive(Component)]
@@ -32,27 +23,47 @@ struct HtmlCamera;
 
 pub fn install(app: &mut App) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let cache = root.join("data/cef-overlay");
+    let cache = root.join("data/cef-ui");
     std::fs::create_dir_all(root.join("data/logs")).expect("Cannot create CEF log directory");
+    let mut config = CommandLineConfig::default()
+        .with_switch("disable-background-networking")
+        .with_switch_value(
+            "log-file",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/logs/cef-ui.log"),
+        );
+    // Explicit development-only opt-in, never expose a debugging port by default.
+    if let Some(port) = std::env::var("SPACE_UI_DEBUG_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .filter(|p| *p >= 1024)
+    {
+        static DEBUG_PORT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        config = config
+            .with_switch_value(
+                "remote-debugging-port",
+                DEBUG_PORT.get_or_init(|| port.to_string()).as_str(),
+            )
+            .with_switch_value("remote-debugging-address", "127.0.0.1");
+    }
     app.add_plugins(CefPlugin {
         root_cache_path: Some(cache.to_string_lossy().into_owned()),
-        command_line_config: CommandLineConfig::default()
-            .with_switch("disable-background-networking")
-            .with_switch_value(
-                "log-file",
-                concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../data/logs/cef-overlay.log"
-                ),
-            ),
+        command_line_config: config,
         ..default()
     })
     .add_plugins(JsEmitEventPlugin::<PanelEvent>::default())
     .add_observer(receive)
     .add_systems(Startup, setup)
     .add_systems(Update, sync_hdr)
-    .add_systems(Last, publish);
+    .add_systems(
+        Last,
+        publish
+            .after(crate::html_canvas::publish)
+            .after(crate::ui_bridge::publish_galaxy)
+            .after(crate::ui_bridge::publish_state)
+            .after(crate::ui_bridge::publish_tick),
+    );
     crate::cef_input::install(app);
+    crate::cef_latency::install(app);
 }
 
 fn setup(
@@ -61,9 +72,9 @@ fn setup(
     benchmark: Option<Res<crate::native_benchmark::Benchmark>>,
 ) {
     let mode = benchmark.as_ref().map_or("", |b| b.spec.mode.as_str());
-    let html = include_str!("../../../web/cef-overlay.html")
+    let html = include_str!(concat!(env!("OUT_DIR"), "/native-ui.html"))
         .replace("<body>", &format!("<body data-benchmark=\"{mode}\">"));
-    // Overlay after both the scene and egui, with no exposure or tone mapping.
+    // Overlay after the scene, with no exposure or tone mapping.
     // Match the scene's HDR format to share its output, without changing it.
     let camera = commands
         .spawn((
@@ -79,7 +90,7 @@ fn setup(
         ))
         .id();
     commands.spawn((
-        Name::new("CEF HTML overlay proof of concept"),
+        Name::new("Shared HTML UI"),
         HtmlPanel,
         // Custom native routing retains drag ownership and always sends releases.
         // Disable the plugin's alpha-filtered pointer observers and focus picker.
@@ -107,27 +118,30 @@ fn receive(
     panels: Query<(), With<HtmlPanel>>,
     mut input: ResMut<crate::cef_input::HtmlInput>,
     mut writer: MessageWriter<crate::actions::UiCommand>,
+    mut ready: ResMut<crate::ui_bridge::BridgeReady>,
 ) {
     if panels.get(event.webview).is_err() {
         return;
     }
     match &event.payload {
-        PanelEvent::Ready => input.usable = true,
+        PanelEvent::Ready => {
+            input.usable = true;
+            ready.0 = true;
+        }
         PanelEvent::Layout { rects } if valid_rects(rects) => {
             input.rects.clone_from(rects);
             input.ready = true;
         }
-        PanelEvent::Command {
-            command: command @ crate::actions::UiCommand::SetPaused { .. },
-        } => {
+        PanelEvent::Focus { keyboard } => input.set_dom_focus(*keyboard),
+        PanelEvent::Command { command } => {
             writer.write(command.clone());
         }
-        _ => {} // This experiment cannot issue unrelated application commands.
+        _ => {}
     }
 }
 
 fn valid_rects(rects: &[[f32; 4]]) -> bool {
-    rects.len() <= 8
+    rects.len() <= 128
         && rects
             .iter()
             .all(|r| r.iter().all(|v| v.is_finite()) && r[2] >= 0.0 && r[3] >= 0.0)
@@ -135,42 +149,17 @@ fn valid_rects(rects: &[[f32; 4]]) -> bool {
 
 fn publish(
     mut commands: Commands,
-    time: Res<Time>,
-    clock: Res<crate::Clock>,
-    input: Res<crate::cef_input::HtmlInput>,
     panels: Query<Entity, With<HtmlPanel>>,
-    mut next: Local<f64>,
-    benchmark: Option<Res<crate::native_benchmark::Benchmark>>,
+    mut events: MessageReader<crate::ui_bridge::UiEvent>,
 ) {
-    let now = time.elapsed_secs_f64();
-    if !input.ready || now < *next {
-        return;
-    }
-    *next = if benchmark
-        .as_ref()
-        .is_some_and(|b| ["runtime", "idle"].contains(&b.spec.mode.as_str()))
-    {
-        f64::INFINITY // B/C have no periodic state/readout repaint after initialisation.
-    } else {
-        now + 0.1
-    };
-    for entity in &panels {
-        // Same event names and field units as the browser bridge. Repeat state
-        // at 10 Hz so startup/listener races and egui changes self-correct.
-        commands.trigger(HostEmitEvent::new(
-            entity,
-            "space:state",
-            &PanelState {
-                paused: clock.0.paused,
-            },
-        ));
-        commands.trigger(HostEmitEvent::new(
-            entity,
-            "space:tick",
-            &PanelTick {
-                days: clock.0.seconds / 86_400.0,
-            },
-        ));
+    for event in events.read() {
+        for entity in &panels {
+            commands.trigger(HostEmitEvent {
+                webview: entity,
+                id: event.name.into(),
+                payload: event.json.clone(),
+            });
+        }
     }
 }
 
@@ -200,10 +189,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bridge_only_queues_pause_commands_from_the_panel() {
+    fn bridge_queues_all_shared_commands_only_from_the_panel() {
         use crate::actions::UiCommand;
         let mut app = App::new();
         app.init_resource::<crate::cef_input::HtmlInput>()
+            .init_resource::<crate::ui_bridge::BridgeReady>()
             .add_message::<UiCommand>()
             .add_observer(receive);
         let panel = app.world_mut().spawn(HtmlPanel).id();
@@ -222,7 +212,10 @@ mod tests {
         let mut cursor = messages.get_cursor();
         assert_eq!(
             cursor.read(messages).cloned().collect::<Vec<_>>(),
-            vec![UiCommand::SetPaused { paused: true }]
+            vec![
+                UiCommand::SetPaused { paused: true },
+                UiCommand::SetRate { rate: 42.0 }
+            ]
         );
     }
 
@@ -231,7 +224,7 @@ mod tests {
         assert!(valid_rects(&[[0.0, 20.0, 100.0, 200.0]]));
         assert!(!valid_rects(&[[0.0, 0.0, -1.0, 10.0]]));
         assert!(!valid_rects(&[[f32::NAN, 0.0, 1.0, 1.0]]));
-        assert!(!valid_rects(&[[0.0; 4]; 9]));
+        assert!(!valid_rects(&[[0.0; 4]; 129]));
         let command: PanelEvent = serde_json::from_str(
             r#"{"kind":"command","command":{"type":"set_paused","paused":true}}"#,
         )

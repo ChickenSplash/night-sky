@@ -56,9 +56,9 @@ pub fn requested() -> Option<Benchmark> {
         "Baseline requires the feature-free release build"
     );
     assert_eq!(
-        args.iter().any(|a| a == "--cef-html-ui"),
-        spec.mode != "baseline",
-        "CEF launch flag and mode must agree"
+        args.iter().any(|a| a == "--ui=egui"),
+        spec.mode == "baseline",
+        "UI launch flag and mode must agree"
     );
     std::fs::write(path.with_extension("pid"), std::process::id().to_string())
         .expect("Write benchmark PID");
