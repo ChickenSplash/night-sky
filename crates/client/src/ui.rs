@@ -215,9 +215,6 @@ enum Row<'a> {
 
 impl Panels<'_> {
     fn show(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("footer")
-            .frame(egui::Frame::new().fill(PANEL).inner_margin(12))
-            .show(ctx, |ui| self.footer(ui));
         egui::SidePanel::left("navigation")
             .exact_width(300.0)
             .resizable(false)
@@ -245,23 +242,16 @@ impl Panels<'_> {
         self.sidebar.settings = open;
     }
 
-    fn footer(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Click: select a star, again to visit    C: centre star    Enter: visit    LMB drag: look    RMB drag: orbit    Shift+LMB drag: field of view    Scroll: zoom    Shift+scroll: speed    WASD: move    Q/E: roll    R/F: up/down    Space: pause").size(11.0).color(MUTED));
-            ui.separator();
-            ui.label(egui::RichText::new(&self.nav.notice).size(11.0).color(MUTED));
-        });
-    }
-
     fn navigation(&mut self, ui: &mut egui::Ui) {
         let (galaxy, nav, sidebar) = (self.galaxy, &mut *self.nav, &mut *self.sidebar);
         heading(ui, "01 / LIST CONSTELLATIONS");
         muted(
             ui,
             format!(
-                "{} lists in your local universe\n{}",
+                "{} lists in your local universe\n{}\n{}",
                 galaxy.systems.len(),
-                galaxy.source
+                galaxy.source,
+                nav.notice
             ),
         );
         ui.horizontal(|ui| {
