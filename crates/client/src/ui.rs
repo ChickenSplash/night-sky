@@ -216,16 +216,13 @@ enum Row<'a> {
 impl Panels<'_> {
     fn show(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("navigation")
-            .exact_width(300.0)
-            .resizable(false)
-            .frame(egui::Frame::new().fill(PANEL).inner_margin(20))
-            .show(ctx, |ui| self.navigation(ui));
-        egui::SidePanel::right("inspector")
-            .exact_width(300.0)
+            .exact_width(320.0)
             .resizable(false)
             .frame(egui::Frame::new().fill(PANEL).inner_margin(20))
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
+                egui::ScrollArea::vertical()
+                    .id_salt("sidebar")
+                    .show(ui, |ui| self.sidebar(ui));
             });
         egui::TopBottomPanel::bottom("time-controls")
             .frame(egui::Frame::new().fill(PANEL).inner_margin(14))
@@ -242,9 +239,26 @@ impl Panels<'_> {
         self.sidebar.settings = open;
     }
 
-    fn navigation(&mut self, ui: &mut egui::Ui) {
+    /// Every section in one column, each collapsible.
+    fn sidebar(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .selectable_label(self.sidebar.settings, "⚙ Settings")
+            .clicked()
+        {
+            self.sidebar.settings = !self.sidebar.settings;
+        }
+        let section = |title: &str| {
+            egui::CollapsingHeader::new(egui::RichText::new(title).size(11.0).color(MUTED).strong())
+                .default_open(true)
+        };
+        section("01 / LIST CONSTELLATIONS").show(ui, |ui| self.lists(ui));
+        section("02 / TASK INDEX").show(ui, |ui| self.tasks(ui));
+        section("03 / TELEMETRY").show(ui, |ui| self.telemetry(ui));
+        section("04 / SELECTED PLANET").show(ui, |ui| self.selection(ui));
+    }
+
+    fn lists(&mut self, ui: &mut egui::Ui) {
         let (galaxy, nav, sidebar) = (self.galaxy, &mut *self.nav, &mut *self.sidebar);
-        heading(ui, "01 / LIST CONSTELLATIONS");
         muted(
             ui,
             format!(
@@ -300,9 +314,10 @@ impl Panels<'_> {
                     }
                 }
             });
-        ui.add_space(8.0);
-        ui.separator();
-        heading(ui, "02 / TASK INDEX");
+    }
+
+    fn tasks(&mut self, ui: &mut egui::Ui) {
+        let (galaxy, nav, sidebar) = (self.galaxy, &mut *self.nav, &mut *self.sidebar);
         let search = ui.add(
             egui::TextEdit::singleline(&mut nav.search)
                 .hint_text("Search all task planets…")
@@ -379,7 +394,8 @@ impl Panels<'_> {
         // visible rows. A list can hold over a thousand tasks.
         egui::ScrollArea::vertical()
             .id_salt("task-index")
-            .auto_shrink([false, false])
+            .auto_shrink([false, true])
+            .max_height(360.0)
             .show_rows(ui, ROW, rows.len(), |ui, range| {
                 for row in &rows[range] {
                     match row {
@@ -537,20 +553,8 @@ impl Panels<'_> {
         }
     }
 
-    fn inspector(&mut self, ui: &mut egui::Ui) {
+    fn telemetry(&mut self, ui: &mut egui::Ui) {
         let (galaxy, nav) = (self.galaxy, &*self.nav);
-        ui.horizontal(|ui| {
-            heading(ui, "03 / TELEMETRY");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .selectable_label(self.sidebar.settings, "⚙ Settings")
-                    .clicked()
-                {
-                    self.sidebar.settings = !self.sidebar.settings;
-                }
-            });
-        });
-        ui.add_space(8.0);
         let Some(system) = nav.system(galaxy) else {
             star_controls(ui, galaxy, nav, self.out);
             ui.label(
@@ -649,7 +653,14 @@ impl Panels<'_> {
             self.report = true;
         }
         star_controls(ui, galaxy, nav, self.out);
-        ui.separator();
+    }
+
+    fn selection(&mut self, ui: &mut egui::Ui) {
+        let (galaxy, nav) = (self.galaxy, &*self.nav);
+        let Some(system) = nav.system(galaxy) else {
+            muted(ui, "Visit a system to inspect its planets.");
+            return;
+        };
         if let Some(planet) = nav.selected.and_then(|i| system.planets.get(i)) {
             heading(
                 ui,
