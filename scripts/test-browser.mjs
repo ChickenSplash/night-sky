@@ -58,20 +58,20 @@ try {
   // The client opens in the galaxy, relative to home.
   await page.screenshot({ path: resolve(root, 'data/web-galaxy.png') });
   // Clicks target the egui panels at 1600 x 1000.
-  await page.mouse.click(150, 199); // First list.
+  await page.mouse.click(150, 145); // First list.
   await page.waitForTimeout(2500);
   assert.equal((await state()).list, fixture.systems[0].id);
   assert.equal((await state()).view, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-list.png') });
-  await page.mouse.click(1430, 164); // Task table preset.
+  await page.mouse.click(1430, 115); // Task table preset.
   await page.waitForTimeout(2500);
   assert.equal((await state()).view, 'table');
   await page.screenshot({ path: resolve(root, 'data/web-table.png') });
-  await page.mouse.click(1450, 246); // Next system page.
+  await page.mouse.click(1450, 197); // Next system page.
   await page.waitForTimeout(2500);
   assert.equal((await state()).page, 1);
   await page.screenshot({ path: resolve(root, 'data/web-table-next-page.png') });
-  await page.mouse.click(1370, 205); // Constellation preset.
+  await page.mouse.click(1370, 156); // Constellation preset.
   await page.waitForTimeout(2500);
   assert.equal((await state()).view, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-constellation.png') });

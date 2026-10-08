@@ -215,9 +215,6 @@ enum Row<'a> {
 
 impl Panels<'_> {
     fn show(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("header")
-            .frame(egui::Frame::new().fill(PANEL).inner_margin(18))
-            .show(ctx, |ui| self.header(ui));
         egui::TopBottomPanel::bottom("footer")
             .frame(egui::Frame::new().fill(PANEL).inner_margin(12))
             .show(ctx, |ui| self.footer(ui));
@@ -248,31 +245,6 @@ impl Panels<'_> {
         self.sidebar.settings = open;
     }
 
-    fn header(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("N I G H T   S K Y").size(19.0).strong());
-            ui.separator();
-            ui.label(
-                egui::RichText::new("MISSION CONTROL")
-                    .color(ACCENT)
-                    .size(11.0),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .selectable_label(self.sidebar.settings, "⚙ Settings")
-                    .clicked()
-                {
-                    self.sidebar.settings = !self.sidebar.settings;
-                }
-                ui.label(
-                    egui::RichText::new(&self.galaxy.source)
-                        .color(MUTED)
-                        .size(12.0),
-                );
-            });
-        });
-    }
-
     fn footer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("Click: select a star, again to visit    C: centre star    Enter: visit    LMB drag: look    RMB drag: orbit    Shift+LMB drag: field of view    Scroll: zoom    Shift+scroll: speed    WASD: move    Q/E: roll    R/F: up/down    Space: pause").size(11.0).color(MUTED));
@@ -286,7 +258,11 @@ impl Panels<'_> {
         heading(ui, "01 / LIST CONSTELLATIONS");
         muted(
             ui,
-            format!("{} lists in your local universe", galaxy.systems.len()),
+            format!(
+                "{} lists in your local universe\n{}",
+                galaxy.systems.len(),
+                galaxy.source
+            ),
         );
         ui.horizontal(|ui| {
             ui.add(
@@ -573,7 +549,17 @@ impl Panels<'_> {
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
         let (galaxy, nav) = (self.galaxy, &*self.nav);
-        heading(ui, "03 / TELEMETRY");
+        ui.horizontal(|ui| {
+            heading(ui, "03 / TELEMETRY");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .selectable_label(self.sidebar.settings, "⚙ Settings")
+                    .clicked()
+                {
+                    self.sidebar.settings = !self.sidebar.settings;
+                }
+            });
+        });
         ui.add_space(8.0);
         let Some(system) = nav.system(galaxy) else {
             star_controls(ui, galaxy, nav, self.out);
