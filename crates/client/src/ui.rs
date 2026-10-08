@@ -480,10 +480,6 @@ impl Panels<'_> {
         if let Some(degrees) = terminal::slider(ui, "fov", nav.fov_deg, lo..=hi, "°") {
             self.out.push(UiCommand::SetFov { degrees });
         }
-        terminal::note(
-            ui,
-            "Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.",
-        );
         terminal::heading(ui, "rendering");
         if terminal::check(ui, nav.realistic, "Realistic lighting", true) {
             self.out.push(UiCommand::SetDisplay {
@@ -505,10 +501,6 @@ impl Panels<'_> {
                 self.out.push(UiCommand::SetDisplay { option, on: !on });
             }
         }
-        terminal::note(
-            ui,
-            "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable.",
-        );
         terminal::heading(ui, "galaxy reference views");
         ui.horizontal_wrapped(|ui| {
             for (view, label) in [
