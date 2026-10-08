@@ -27,7 +27,7 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
-    const text = document.querySelector('#hud .caption.bottom')?.textContent ?? '';
+    const text = window.space?.state()?.stream ?? '';
     return /STAR STREAM \[WEB WORKER\] [1-9]\d* stars/.test(text);
   }, null, { timeout: 90_000 });
   assert.deepEqual(errors.filter(error => !error.includes('Using exceptions for control flow')), []);

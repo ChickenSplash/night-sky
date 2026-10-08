@@ -5,6 +5,7 @@ host=ecorreia@192.168.1.90
 remote=/home/ecorreia/homelab/night-sky
 ./scripts/build-web.sh
 cargo build --locked --release -p space-server
+rm -rf deploy/bundle/web
 mkdir -p deploy/bundle/web
 cp target/release/space-server deploy/bundle/space-server
 cp deploy/Dockerfile deploy/bundle/Dockerfile

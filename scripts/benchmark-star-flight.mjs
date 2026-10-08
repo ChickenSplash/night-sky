@@ -32,8 +32,8 @@ try {
     if (!String(error).includes('Using exceptions for control flow')) errors.push(String(error));
   });
   await page.goto(`${base}/?benchmark=star-flight`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-  await page.waitForFunction(() => window.starBenchmark?.done, null, { timeout: 180_000 });
-  const results = await page.evaluate(() => window.starBenchmark);
+  await page.waitForFunction(() => window.space?.state()?.benchmark?.done, null, { timeout: 180_000 });
+  const results = await page.evaluate(() => window.space.state().benchmark);
   assert.deepEqual(errors, [], 'Browser runtime errors');
   assert.equal(results.initial_loaded_stars, 0);
   assert(results.final && results.samples.length >= 10,

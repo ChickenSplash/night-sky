@@ -1,4 +1,4 @@
-use crate::actions::{Display, PanelInsets, UiCommand};
+use crate::actions::{Display, GalaxyReference, UiCommand};
 use crate::views::View;
 use crate::{
     Clock, Navigation, Universe,
@@ -7,24 +7,95 @@ use crate::{
 };
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiContexts, egui};
-use space_shared::Galaxy;
+use space_shared::{Galaxy, StarSystem, Task};
 use space_simulation::{AU_METRES, LY_METRES, SimulationClock, period_seconds};
+use std::collections::HashSet;
 
 const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(99, 214, 240);
 const PANEL: egui::Color32 = egui::Color32::from_rgb(7, 15, 31);
+const ROW: f32 = 30.0;
 
 fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(MUTED).strong());
 }
 
+fn muted(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.label(egui::RichText::new(text).size(11.0).color(MUTED));
+}
+
+fn tint(colour: [u8; 3]) -> egui::Color32 {
+    egui::Color32::from_rgb(colour[0], colour[1], colour[2])
+}
+
 type Overlay<'w> = (
     Res<'w, Markers>,
-    Res<'w, PanelInsets>,
     Res<'w, Lights>,
     Res<'w, CameraVelocity>,
     Res<'w, crate::sky::Sky>,
 );
+
+/// Panel choices that are not part of the scene.
+pub struct Sidebar {
+    styled: bool,
+    settings: bool,
+    list_filter: String,
+    list_sort: ListSort,
+    task_sort: TaskSort,
+    group: bool,
+    /// Folded status groups, by lower-case status.
+    collapsed: HashSet<String>,
+}
+
+impl Default for Sidebar {
+    fn default() -> Self {
+        Self {
+            styled: false,
+            settings: false,
+            list_filter: String::new(),
+            list_sort: ListSort::Default,
+            task_sort: TaskSort::Default,
+            group: true,
+            collapsed: HashSet::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ListSort {
+    Default,
+    Name,
+    Tasks,
+}
+
+impl ListSort {
+    const ALL: [Self; 3] = [Self::Default, Self::Name, Self::Tasks];
+    fn label(self) -> &'static str {
+        match self {
+            Self::Default => "List order",
+            Self::Name => "Name A–Z",
+            Self::Tasks => "Most tasks",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TaskSort {
+    Default,
+    Name,
+    Due,
+}
+
+impl TaskSort {
+    const ALL: [Self; 3] = [Self::Default, Self::Name, Self::Due];
+    fn label(self) -> &'static str {
+        match self {
+            Self::Default => "List order",
+            Self::Name => "Name A–Z",
+            Self::Due => "Due date",
+        }
+    }
+}
 
 pub fn draw_ui(
     interaction: (Commands, EguiContexts, MessageWriter<UiCommand>),
@@ -38,17 +109,17 @@ pub fn draw_ui(
         Res<crate::stream::Starfield>,
         Res<crate::stream::StreamMetrics>,
     ),
-    mut styled: Local<bool>,
+    mut sidebar: Local<Sidebar>,
 ) {
     let (mut commands, mut contexts, mut writer) = interaction;
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
-    let (markers, insets, lights, velocity, sky) = overlay;
+    let (markers, lights, velocity, sky) = overlay;
     let (rig, pose, starfield, metrics) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    if !*styled {
+    if !sidebar.styled {
         let mut style = (*ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.panel_fill = PANEL;
@@ -59,43 +130,34 @@ pub fn draw_ui(
         style.spacing.item_spacing = egui::vec2(10.0, 10.0);
         style.spacing.button_padding = egui::vec2(12.0, 8.0);
         ctx.set_style(style);
-        *styled = true;
+        sidebar.styled = true;
     }
 
     let mut out = Vec::new();
-    let mut rect = ctx.available_rect();
-    if let Some([top, right, bottom, left]) = insets.0 {
-        // HTML panels cover the canvas edges; the 3D view fits the space between.
-        let scale = ctx.zoom_factor();
-        rect = egui::Rect::from_min_max(
-            rect.min + egui::vec2(left, top) / scale,
-            rect.max - egui::vec2(right, bottom) / scale,
+    let mut panels = Panels {
+        galaxy: &universe.0,
+        nav: &mut nav,
+        clock: &clock.0,
+        sidebar: &mut sidebar,
+        out: &mut out,
+        report: false,
+    };
+    panels.show(ctx);
+    let report = panels.report;
+    #[cfg(not(target_arch = "wasm32"))]
+    if report {
+        nav.notice = save_bug_report(
+            &mut commands,
+            &universe.0,
+            &nav,
+            &clock.0,
+            (&rig, &pose),
+            &starfield,
         );
-    } else {
-        let mut panels = Panels {
-            galaxy: &universe.0,
-            nav: &mut nav,
-            clock: &clock.0,
-            out: &mut out,
-            report: false,
-        };
-        panels.show(ctx);
-        let report = panels.report;
-        rect = ctx.available_rect();
-        #[cfg(not(target_arch = "wasm32"))]
-        if report {
-            nav.notice = save_bug_report(
-                &mut commands,
-                &universe.0,
-                &nav,
-                &clock.0,
-                (&rig, &pose),
-                &starfield,
-            );
-        }
-        #[cfg(target_arch = "wasm32")]
-        let _ = report;
     }
+    #[cfg(target_arch = "wasm32")]
+    let _ = report;
+    let mut rect = ctx.available_rect();
     if rect.width() < 1.0 || rect.height() < 1.0 {
         rect = egui::Rect::from_min_size(rect.min, egui::vec2(1.0, 1.0));
     }
@@ -124,21 +186,31 @@ pub fn draw_ui(
         &exposure_caption(&nav, &lights, &sky),
         &velocity,
         &metrics.caption,
-        insets.0.is_none(),
         &mut out,
     );
     writer.write_batch(out);
 }
 
-/// The egui panels: the native client's UI, and the browser's until HTML panels
-/// take over. They only read state; every change is a `UiCommand`.
+/// The egui panels. They only read state; every change is a `UiCommand`.
 struct Panels<'a> {
     galaxy: &'a Galaxy,
     nav: &'a mut Navigation,
     clock: &'a SimulationClock,
+    sidebar: &'a mut Sidebar,
     out: &'a mut Vec<UiCommand>,
     /// Save bug report was clicked.
     report: bool,
+}
+
+/// A row of the task index: a status group's heading, or a task.
+enum Row<'a> {
+    Group {
+        key: String,
+        name: &'a str,
+        colour: [u8; 3],
+        count: usize,
+    },
+    Task(&'a StarSystem, usize, &'a Task),
 }
 
 impl Panels<'_> {
@@ -150,12 +222,12 @@ impl Panels<'_> {
             .frame(egui::Frame::new().fill(PANEL).inner_margin(12))
             .show(ctx, |ui| self.footer(ui));
         egui::SidePanel::left("navigation")
-            .exact_width(270.0)
+            .exact_width(300.0)
             .resizable(false)
             .frame(egui::Frame::new().fill(PANEL).inner_margin(20))
             .show(ctx, |ui| self.navigation(ui));
         egui::SidePanel::right("inspector")
-            .exact_width(280.0)
+            .exact_width(300.0)
             .resizable(false)
             .frame(egui::Frame::new().fill(PANEL).inner_margin(20))
             .show(ctx, |ui| {
@@ -164,6 +236,16 @@ impl Panels<'_> {
         egui::TopBottomPanel::bottom("time-controls")
             .frame(egui::Frame::new().fill(PANEL).inner_margin(14))
             .show(ctx, |ui| self.time_controls(ui));
+        let mut open = self.sidebar.settings;
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .default_width(340.0)
+            .default_height(640.0)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
+            });
+        self.sidebar.settings = open;
     }
 
     fn header(&mut self, ui: &mut egui::Ui) {
@@ -176,6 +258,12 @@ impl Panels<'_> {
                     .size(11.0),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .selectable_label(self.sidebar.settings, "⚙ Settings")
+                    .clicked()
+                {
+                    self.sidebar.settings = !self.sidebar.settings;
+                }
                 ui.label(
                     egui::RichText::new(&self.galaxy.source)
                         .color(MUTED)
@@ -194,28 +282,48 @@ impl Panels<'_> {
     }
 
     fn navigation(&mut self, ui: &mut egui::Ui) {
-        let (galaxy, nav) = (self.galaxy, &mut *self.nav);
-        heading(ui, "01 / NAVIGATION");
-        ui.add_space(8.0);
-        ui.heading("List constellations");
-        ui.label(
-            egui::RichText::new(format!(
-                "{} lists in your local universe",
-                galaxy.systems.len()
-            ))
-            .color(MUTED),
+        let (galaxy, nav, sidebar) = (self.galaxy, &mut *self.nav, &mut *self.sidebar);
+        heading(ui, "01 / LIST CONSTELLATIONS");
+        muted(
+            ui,
+            format!("{} lists in your local universe", galaxy.systems.len()),
         );
-        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut sidebar.list_filter)
+                    .hint_text("Filter lists…")
+                    .desired_width(130.0),
+            );
+            egui::ComboBox::from_id_salt("list-sort")
+                .selected_text(sidebar.list_sort.label())
+                .show_ui(ui, |ui| {
+                    for sort in ListSort::ALL {
+                        ui.selectable_value(&mut sidebar.list_sort, sort, sort.label());
+                    }
+                });
+        });
+        let filter = sidebar.list_filter.trim().to_lowercase();
+        let mut lists: Vec<_> = galaxy
+            .systems
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| filter.is_empty() || s.name.to_lowercase().contains(&filter))
+            .collect();
+        match sidebar.list_sort {
+            ListSort::Default => {}
+            ListSort::Name => lists.sort_by_key(|(_, s)| s.name.to_lowercase()),
+            ListSort::Tasks => lists.sort_by_key(|(_, s)| std::cmp::Reverse(s.tasks().count())),
+        }
         egui::ScrollArea::vertical()
             .id_salt("systems")
-            .max_height(180.0)
+            .max_height(170.0)
             .show(ui, |ui| {
-                for (i, system) in galaxy.systems.iter().enumerate() {
+                for (i, system) in lists {
                     let active = nav.list() == Some(i);
                     let text = format!("{}\n{} task planets", system.name, system.tasks().count());
                     if ui
                         .add_sized(
-                            [ui.available_width(), 54.0],
+                            [ui.available_width(), 48.0],
                             egui::Button::new(text).selected(active),
                         )
                         .clicked()
@@ -226,65 +334,148 @@ impl Panels<'_> {
                     }
                 }
             });
-        ui.add_space(14.0);
+        ui.add_space(8.0);
         ui.separator();
         heading(ui, "02 / TASK INDEX");
-        ui.add(
+        let search = ui.add(
             egui::TextEdit::singleline(&mut nav.search)
                 .hint_text("Search all task planets…")
                 .desired_width(f32::INFINITY),
         );
-        let query = nav.search.to_lowercase();
-        // Searching still scans names, but egui only builds widgets for the
-        // visible rows. A list can hold over a thousand tasks.
-        let matches: Vec<_> = galaxy
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("task-sort")
+                .selected_text(sidebar.task_sort.label())
+                .show_ui(ui, |ui| {
+                    for sort in TaskSort::ALL {
+                        ui.selectable_value(&mut sidebar.task_sort, sort, sort.label());
+                    }
+                });
+            ui.checkbox(&mut sidebar.group, "Group by status");
+        });
+        let query = nav.search.trim().to_lowercase();
+        // The current list's tasks, or every list's while searching.
+        let mut matches: Vec<_> = galaxy
             .systems
             .iter()
             .enumerate()
             .filter(|(si, _)| !query.is_empty() || nav.list() == Some(*si))
-            .flat_map(|(si, system)| {
+            .flat_map(|(_, system)| {
                 system
                     .tasks()
                     .filter(|(_, task)| {
                         query.is_empty() || task.name.to_lowercase().contains(&query)
                     })
-                    .map(move |(pi, task)| (si, pi, system, task))
+                    .map(move |(pi, task)| (system, pi, task))
             })
             .collect();
+        match sidebar.task_sort {
+            TaskSort::Default => {}
+            TaskSort::Name => matches.sort_by_key(|(_, _, t)| t.name.to_lowercase()),
+            TaskSort::Due => matches.sort_by_key(|(_, _, t)| t.due_date_ms.unwrap_or(i64::MAX)),
+        }
+        let total = matches.len();
+        let rows = if sidebar.group {
+            group_rows(matches, &sidebar.collapsed)
+        } else {
+            matches
+                .into_iter()
+                .map(|(s, pi, t)| Row::Task(s, pi, t))
+                .collect()
+        };
+        let shown = rows.iter().filter(|r| matches!(r, Row::Task(..))).count();
+        // Enter finds the first task in view.
+        if search.lost_focus()
+            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+            && let Some(Row::Task(system, _, task)) =
+                rows.iter().find(|r| matches!(r, Row::Task(..)))
+        {
+            self.out.push(UiCommand::FindTask {
+                list: system.id.clone(),
+                task: task.id.clone(),
+            });
+        }
+        muted(
+            ui,
+            format!(
+                "{total} task{}{}{}",
+                if total == 1 { "" } else { "s" },
+                if query.is_empty() { "" } else { " matching" },
+                if total > shown {
+                    format!(" · {} folded", total - shown)
+                } else {
+                    String::new()
+                }
+            ),
+        );
+        let selected_list = nav.list();
+        let selected = nav.selected;
+        // Searching still scans names, but egui only builds widgets for the
+        // visible rows. A list can hold over a thousand tasks.
         egui::ScrollArea::vertical()
             .id_salt("task-index")
-            .max_height((ui.available_height() - 180.0).clamp(60.0, 240.0))
-            .show_rows(ui, 30.0, matches.len(), |ui, range| {
-                for &(si, pi, system, task) in &matches[range] {
-                    let c = task.colour;
-                    let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
-                    let text = egui::RichText::new(format!("· {}", task.name)).color(tint);
-                    if ui
-                        .add_sized(
-                            [ui.available_width(), 30.0],
-                            egui::Button::selectable(
-                                nav.list() == Some(si) && nav.selected == Some(pi),
-                                text,
-                            ),
-                        )
-                        .clicked()
-                    {
-                        self.out.push(UiCommand::FindTask {
-                            list: system.id.clone(),
-                            task: task.id.clone(),
-                        });
+            .auto_shrink([false, false])
+            .show_rows(ui, ROW, rows.len(), |ui, range| {
+                for row in &rows[range] {
+                    match row {
+                        Row::Group {
+                            key,
+                            name,
+                            colour,
+                            count,
+                        } => {
+                            let folded = sidebar.collapsed.contains(key);
+                            let text = egui::RichText::new(format!(
+                                "{} {}  ({count})",
+                                if folded { "⏵" } else { "⏷" },
+                                name.to_uppercase()
+                            ))
+                            .size(11.0)
+                            .strong()
+                            .color(tint(*colour));
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), ROW],
+                                    egui::Button::selectable(false, text),
+                                )
+                                .clicked()
+                                && !sidebar.collapsed.remove(key)
+                            {
+                                sidebar.collapsed.insert(key.clone());
+                            }
+                        }
+                        Row::Task(system, pi, task) => {
+                            let active = selected_list
+                                .is_some_and(|i| galaxy.systems[i].id == system.id)
+                                && selected == Some(*pi);
+                            let due = task
+                                .due_date_ms
+                                .map(|ms| format!("   {}", due_short(ms)))
+                                .unwrap_or_default();
+                            let text = egui::RichText::new(format!("· {}{due}", task.name))
+                                .color(tint(task.colour));
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), ROW],
+                                    egui::Button::selectable(active, text).truncate(),
+                                )
+                                .on_hover_text(&task.name)
+                                .clicked()
+                            {
+                                self.out.push(UiCommand::FindTask {
+                                    list: system.id.clone(),
+                                    task: task.id.clone(),
+                                });
+                            }
+                        }
                     }
                 }
             });
-        ui.add_space(12.0);
-        ui.separator();
+    }
+
+    fn settings(&mut self, ui: &mut egui::Ui) {
+        let nav = &*self.nav;
         heading(ui, "DISPLAY");
         for (option, mut on, label) in [
-            (
-                Display::GalaxyGlow,
-                nav.galaxy_glow,
-                "Smooth galaxy glow (prototype)",
-            ),
             (Display::Exaggerate, nav.exaggerate, "Readable planet sizes"),
             (Display::Orbits, nav.orbits, "Orbital paths"),
             (Display::Labels, nav.labels, "Planet labels"),
@@ -310,14 +501,11 @@ impl Panels<'_> {
         {
             self.out.push(UiCommand::SetFov { degrees });
         }
-        ui.label(
-            egui::RichText::new(
-                "Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.",
-            )
-            .size(11.0)
-            .color(MUTED),
+        muted(
+            ui,
+            "Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.",
         );
-        ui.add_space(8.0);
+        ui.separator();
         heading(ui, "RENDERING");
         let mut realistic = nav.realistic;
         if ui.checkbox(&mut realistic, "Realistic lighting").changed() {
@@ -326,7 +514,13 @@ impl Panels<'_> {
                 on: realistic,
             });
         }
+        // These apply only to realistic rendering.
         for (option, mut on, label) in [
+            (
+                Display::GalaxyGlow,
+                nav.galaxy_glow,
+                "Smooth galaxy glow (prototype)",
+            ),
             (Display::Physical, nav.physical, "Physical exposure"),
             (Display::Wireframe, nav.wireframe, "Wireframes over bodies"),
         ] {
@@ -337,25 +531,44 @@ impl Panels<'_> {
                 self.out.push(UiCommand::SetDisplay { option, on });
             }
         }
-        ui.label(
-            egui::RichText::new(
-                "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable.",
-            )
-            .size(11.0)
-            .color(MUTED),
+        muted(
+            ui,
+            "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star. Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable.",
         );
-        ui.label("Smooth galaxy reference views (no dust yet)");
+        ui.label("Smooth galaxy reference views");
         ui.horizontal(|ui| {
             for (view, label) in [
-                (crate::actions::GalaxyReference::Inside, "Inside"),
-                (crate::actions::GalaxyReference::FaceOn, "Face-on"),
-                (crate::actions::GalaxyReference::EdgeOn, "Edge-on"),
+                (GalaxyReference::Inside, "Inside"),
+                (GalaxyReference::FaceOn, "Face-on"),
+                (GalaxyReference::EdgeOn, "Edge-on"),
             ] {
                 if ui.button(label).clicked() {
                     self.out.push(UiCommand::GalaxyReference { view });
                 }
             }
         });
+        muted(ui, "No dust or spiral detail yet.");
+        ui.separator();
+        heading(ui, "CONTROLS");
+        egui::Grid::new("controls").num_columns(2).show(ui, |ui| {
+            for (key, action) in HELP {
+                ui.label(egui::RichText::new(key).monospace().color(ACCENT));
+                ui.label(action);
+                ui.end_row();
+            }
+        });
+        #[cfg(target_arch = "wasm32")]
+        {
+            ui.separator();
+            heading(ui, "BENCHMARK");
+            if ui.button("Run star-stream benchmark").clicked() {
+                crate::benchmark::restart();
+            }
+            muted(
+                ui,
+                "Reloads with no stars loaded, then flies 15 seconds from home towards the galactic centre at 1,000 ly/s. Results appear on screen and in the browser console.",
+            );
+        }
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
@@ -395,7 +608,7 @@ impl Panels<'_> {
                     page: pages[current - 1],
                 });
             }
-            ui.label(format!("Page {} / {}", current + 1, pages.len()));
+            ui.label(format!("System {} / {}", current + 1, pages.len().max(1)));
             if ui
                 .add_enabled(current + 1 < pages.len(), egui::Button::new("›"))
                 .clicked()
@@ -418,29 +631,33 @@ impl Panels<'_> {
             .color(MUTED),
         );
         if let Some(star) = system.star(nav.page) {
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · {}\n{:.2} solar masses · {:.0} K",
-                    star.kind, star.spectral, star.mass_solar, star.temperature_k
-                ))
-                .color(MUTED),
-            );
+            ui.collapsing("Star", |ui| {
+                facts(
+                    ui,
+                    "star",
+                    [
+                        ("Type", format!("{} · {}", star.kind, star.spectral)),
+                        ("Mass", format!("{:.2} solar masses", star.mass_solar)),
+                        ("Radius", star_radius_text(star.radius_solar)),
+                        ("Temperature", format!("{:.0} K", star.temperature_k)),
+                        (
+                            "Luminosity",
+                            format!("{} solar", luminosity_text(star.luminosity_solar)),
+                        ),
+                        ("Rotation", rotation_text(star.spin.period_hours)),
+                        ("Axial tilt", tilt_text(star.spin.tilt_rad)),
+                    ],
+                );
+            });
         }
         let p = crate::scene::page_origin_ly(system, nav.page);
-        ui.label(
-            egui::RichText::new(format!(
-                "Page star position (ly)\n{:+.2}  {:+.2}  {:+.2}",
-                p.x, p.y, p.z
-            ))
-            .monospace()
-            .size(11.0)
-            .color(MUTED),
-        );
         let [inclination, node, _] = crate::scene::page_tilt(system, nav.page);
         ui.label(
             egui::RichText::new(format!(
-                "Page {} plane tilt {:.0}°, node {:.0}°",
-                nav.page + 1,
+                "Star position (ly)\n{:+.2}  {:+.2}  {:+.2}\nOrbital plane tilt {:.0}°, node {:.0}°",
+                p.x,
+                p.y,
+                p.z,
                 inclination.to_degrees(),
                 node.to_degrees()
             ))
@@ -469,77 +686,69 @@ impl Panels<'_> {
             ui.add_space(4.0);
             ui.heading(planet.label());
             if let Some(task) = &planet.task {
-                let c = task.colour;
-                ui.colored_label(
-                    egui::Color32::from_rgb(c[0], c[1], c[2]),
-                    task.status.to_uppercase(),
-                );
-                ui.label(&task.description);
-                ui.separator();
-                ui.label(format!(
-                    "Assigned: {}",
-                    if task.assignees.is_empty() {
-                        "Nobody".into()
-                    } else {
-                        task.assignees.join(", ")
-                    }
-                ));
-                if let Some(due) = task.due_date_ms {
-                    let now = crate::network::now_ms();
-                    let days = (due - now) as f64 / 86_400_000.0;
-                    ui.label(if days < 0.0 {
-                        format!("Due date: {:.1} days ago", -days)
-                    } else {
-                        format!("Due in {days:.1} days")
-                    });
+                ui.colored_label(tint(task.colour), task.status.to_uppercase());
+                if task.description.is_empty() {
+                    ui.label(egui::RichText::new("No description.").color(MUTED));
+                } else {
+                    ui.label(&task.description);
                 }
+                facts(
+                    ui,
+                    "task",
+                    [
+                        (
+                            "Assigned",
+                            if task.assignees.is_empty() {
+                                "Nobody".into()
+                            } else {
+                                task.assignees.join(", ")
+                            },
+                        ),
+                        (
+                            "Due",
+                            task.due_date_ms.map_or("No due date".into(), due_text),
+                        ),
+                        ("List", system.name.clone()),
+                        ("Designation", planet.designation.clone()),
+                    ],
+                );
             } else {
                 ui.label(egui::RichText::new(&planet.designation).color(MUTED));
                 ui.label(egui::RichText::new("No task on this planet.").color(MUTED));
             }
             ui.add_space(6.0);
             heading(ui, "ORBITAL ELEMENTS");
-            egui::Grid::new("elements").num_columns(2).show(ui, |ui| {
-                for (label, value) in [
+            let period_days = period_seconds(&planet.orbit, system.mass(planet.page())) / 86400.0;
+            facts(
+                ui,
+                "elements",
+                [
+                    ("Type", planet.class.clone()),
+                    ("Mass", mass_text(planet.mass_earth)),
+                    ("Physical radius", format!("{:.0} km", planet.radius_km)),
                     (
                         "Semi-major axis",
                         format!("{:.3} AU", planet.orbit.semi_major_au),
                     ),
                     ("Eccentricity", format!("{:.3}", planet.orbit.eccentricity)),
-                    (
-                        "Orbital period",
-                        format!(
-                            "{:.1} days",
-                            period_seconds(&planet.orbit, system.mass(planet.page())) / 86400.0
-                        ),
-                    ),
-                    ("Physical radius", format!("{:.0} km", planet.radius_km)),
-                    ("Type", planet.class.clone()),
-                    ("Mass", format!("{:.4} Earth masses", planet.mass_earth)),
+                    ("Orbital period", period_text(period_days)),
                     (
                         "Rotation",
                         if planet.spin.locked {
-                            "Tidally locked".into()
+                            format!("Tidally locked · {}", period_text(period_days))
                         } else {
-                            format!("{:.1} hours", planet.spin.period_hours)
+                            rotation_text(planet.spin.period_hours)
                         },
                     ),
-                    (
-                        "Axial tilt",
-                        format!("{:.1}°", planet.spin.tilt_rad.to_degrees()),
-                    ),
+                    ("Axial tilt", tilt_text(planet.spin.tilt_rad)),
                     (
                         "Resonance",
                         planet.resonance.map_or("None".into(), |[p, q]| {
                             format!("{p}:{q} with inner neighbour")
                         }),
                     ),
-                ] {
-                    ui.label(egui::RichText::new(label).color(MUTED));
-                    ui.label(value);
-                    ui.end_row();
-                }
-            });
+                ],
+            );
             ui.add_space(10.0);
             if ui.button("◎  Follow this planet").clicked() {
                 self.out.push(UiCommand::Follow);
@@ -563,22 +772,29 @@ impl Panels<'_> {
                 ("To do", [169, 154, 238]),
                 ("Complete", [100, 220, 169]),
             ] {
-                ui.colored_label(
-                    egui::Color32::from_rgb(colour[0], colour[1], colour[2]),
-                    text,
-                );
+                ui.colored_label(tint(colour), text);
             }
         }
     }
 
     fn time_controls(&mut self, ui: &mut egui::Ui) {
         let clock = self.clock;
+        let step = rate_step(clock.rate);
         ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(step > 0, egui::Button::new("«"))
+                .on_hover_text("Slow time down")
+                .clicked()
+            {
+                self.out.push(UiCommand::SetRate {
+                    rate: RATES[step - 1].1,
+                });
+            }
             if ui
                 .button(if clock.paused {
                     "▶  Resume"
                 } else {
-                    "Ⅱ  Pause"
+                    "⏸  Pause"
                 })
                 .clicked()
             {
@@ -586,19 +802,119 @@ impl Panels<'_> {
                     paused: !clock.paused,
                 });
             }
-            for (label, rate) in RATES {
-                if ui.selectable_label(clock.rate == rate, label).clicked() {
-                    self.out.push(UiCommand::SetRate { rate });
-                }
+            if ui
+                .add_enabled(step + 1 < RATES.len(), egui::Button::new("»"))
+                .on_hover_text("Speed time up")
+                .clicked()
+            {
+                self.out.push(UiCommand::SetRate {
+                    rate: RATES[step + 1].1,
+                });
+            }
+            if ui
+                .selectable_label(clock.rate == 1.0, "Real time")
+                .clicked()
+            {
+                self.out.push(UiCommand::SetRate { rate: 1.0 });
             }
             ui.separator();
             ui.label(
-                egui::RichText::new(format!("T + {:.2} days", clock.seconds / 86400.0))
+                egui::RichText::new(if clock.paused {
+                    "Paused"
+                } else {
+                    RATES[step].0
+                })
+                .color(MUTED),
+            );
+            ui.label(
+                egui::RichText::new(elapsed_text(clock.seconds / 86400.0))
                     .monospace()
                     .color(ACCENT),
             );
         });
     }
+}
+
+/// Status groups follow the board: open, then custom, then done and closed.
+fn group_rows<'a>(
+    tasks: Vec<(&'a StarSystem, usize, &'a Task)>,
+    collapsed: &HashSet<String>,
+) -> Vec<Row<'a>> {
+    struct Group<'a> {
+        key: String,
+        task: &'a Task,
+        rank: u32,
+        tasks: Vec<(&'a StarSystem, usize, &'a Task)>,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    for entry in tasks {
+        let key = entry.2.status.to_lowercase();
+        match groups.iter_mut().find(|g| g.key == key) {
+            Some(group) => group.tasks.push(entry),
+            None => groups.push(Group {
+                key,
+                task: entry.2,
+                rank: status_rank(entry.2),
+                tasks: vec![entry],
+            }),
+        }
+    }
+    groups.sort_by(|a, b| {
+        (a.rank, a.task.status_order, &a.task.status).cmp(&(
+            b.rank,
+            b.task.status_order,
+            &b.task.status,
+        ))
+    });
+    let mut rows = Vec::new();
+    for group in groups {
+        let folded = collapsed.contains(&group.key);
+        rows.push(Row::Group {
+            name: &group.task.status,
+            colour: group.task.colour,
+            count: group.tasks.len(),
+            key: group.key,
+        });
+        if !folded {
+            rows.extend(
+                group
+                    .tasks
+                    .into_iter()
+                    .map(|(s, pi, t)| Row::Task(s, pi, t)),
+            );
+        }
+    }
+    rows
+}
+
+fn status_rank(task: &Task) -> u32 {
+    match task.status_type.as_str() {
+        "open" => 0,
+        "custom" => 1,
+        "done" => 2,
+        "closed" => 3,
+        _ => {
+            let status = task.status.to_lowercase();
+            if ["complete", "done", "closed"]
+                .iter()
+                .any(|word| status.contains(word))
+            {
+                2
+            } else {
+                1
+            }
+        }
+    }
+}
+
+fn facts<const N: usize>(ui: &mut egui::Ui, id: &str, rows: [(&str, String); N]) {
+    egui::Grid::new(id).num_columns(2).show(ui, |ui| {
+        for (label, value) in rows {
+            ui.label(egui::RichText::new(label).color(MUTED));
+            ui.label(value);
+            ui.end_row();
+        }
+    });
 }
 
 /// The selected star, from anywhere in the galaxy, and how to visit it.
@@ -612,17 +928,156 @@ fn star_controls(ui: &mut egui::Ui, galaxy: &Galaxy, nav: &Navigation, out: &mut
             out.push(UiCommand::FrameSystem);
         }
     }
-    if ui.button("Select centre star (F)").clicked() {
+    if ui.button("Select centre star (C)").clicked() {
         out.push(UiCommand::PickCentre);
     }
 }
 
-const RATES: [(&str, f64); 4] = [
-    ("Real time", 1.0),
-    ("1 hr/s", 3600.0),
-    ("1 day/s", 86400.0),
-    ("30 days/s", 2_592_000.0),
+const HELP: [(&str, &str); 13] = [
+    ("Click", "Select a star, again to visit"),
+    ("C", "Select the centre star"),
+    ("Enter", "Visit the selected star"),
+    ("Left drag", "Look around"),
+    ("Right drag", "Orbit"),
+    ("Shift + left drag", "Field of view"),
+    ("Scroll", "Zoom"),
+    ("Shift + scroll", "Adjust movement speed"),
+    ("W A S D", "Move"),
+    ("Q / E", "Roll left / right"),
+    ("R / F", "Up / down"),
+    ("Space", "Pause"),
+    ("Esc", "Leave a text field"),
 ];
+
+const YEAR: f64 = 31_557_600.0;
+/// Simulated seconds per real second, from real time up to a century a second.
+const RATES: [(&str, f64); 16] = [
+    ("Real time", 1.0),
+    ("10 s/s", 10.0),
+    ("1 min/s", 60.0),
+    ("10 min/s", 600.0),
+    ("1 hr/s", 3600.0),
+    ("6 hr/s", 21_600.0),
+    ("1 day/s", 86_400.0),
+    ("3 days/s", 259_200.0),
+    ("1 week/s", 604_800.0),
+    ("30 days/s", 2_592_000.0),
+    ("90 days/s", 7_776_000.0),
+    ("1 yr/s", YEAR),
+    ("3 yr/s", 3.0 * YEAR),
+    ("10 yr/s", 10.0 * YEAR),
+    ("30 yr/s", 30.0 * YEAR),
+    ("100 yr/s", 100.0 * YEAR),
+];
+
+/// The step on the rate ladder nearest to a rate, on a log scale.
+fn rate_step(rate: f64) -> usize {
+    let distance = |r: f64| (r / rate).ln().abs();
+    (0..RATES.len())
+        .min_by(|&a, &b| distance(RATES[a].1).total_cmp(&distance(RATES[b].1)))
+        .unwrap_or(0)
+}
+
+fn elapsed_text(days: f64) -> String {
+    if days >= 365.25 {
+        format!("T + {:.2} yr", days / 365.25)
+    } else {
+        format!("T + {days:.2} days")
+    }
+}
+
+const JUPITER_MASSES: f64 = 317.83;
+
+fn mass_text(earths: f64) -> String {
+    if earths >= 0.1 * JUPITER_MASSES {
+        format!("{:.2} Jupiter masses", earths / JUPITER_MASSES)
+    } else if earths < 0.1 {
+        format!("{earths:.4} Earth masses")
+    } else {
+        format!("{earths:.2} Earth masses")
+    }
+}
+
+fn period_text(days: f64) -> String {
+    if days >= 730.0 {
+        format!("{:.1} years", days / 365.25)
+    } else {
+        format!("{days:.1} days")
+    }
+}
+
+fn rotation_text(hours: f64) -> String {
+    if hours >= 48.0 {
+        period_text(hours / 24.0)
+    } else if hours >= 2.0 {
+        format!("{hours:.1} hours")
+    } else {
+        format!("{:.0} minutes", hours * 60.0)
+    }
+}
+
+fn tilt_text(radians: f64) -> String {
+    let degrees = radians.to_degrees();
+    format!(
+        "{degrees:.1}°{}",
+        if degrees > 90.0 { " · retrograde" } else { "" }
+    )
+}
+
+fn star_radius_text(solar: f64) -> String {
+    if solar < 0.05 {
+        format!("{:.0} km", solar * 695_700.0)
+    } else {
+        format!("{solar:.2} solar radii")
+    }
+}
+
+fn luminosity_text(solar: f64) -> String {
+    if solar < 0.01 {
+        format!("{solar:.1e}")
+    } else if solar < 10.0 {
+        format!("{solar:.3}")
+    } else {
+        format!("{solar:.0}")
+    }
+}
+
+/// Day, month and year of a Unix time in milliseconds (UTC).
+fn civil_date(ms: i64) -> (i64, &'static str, i64) {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    // Howard Hinnant's days-to-civil algorithm.
+    let z = ms.div_euclid(86_400_000) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (day, MONTHS[month as usize - 1], year)
+}
+
+fn due_short(ms: i64) -> String {
+    let days = (ms - crate::network::now_ms()) as f64 / 86_400_000.0;
+    if days.abs() < 1.0 {
+        "Today".into()
+    } else if days < 0.0 {
+        format!("{:.0}d late", -days)
+    } else if days > 45.0 {
+        let (day, month, _) = civil_date(ms);
+        format!("{day} {month}")
+    } else {
+        format!("in {days:.0}d")
+    }
+}
+
+fn due_text(ms: i64) -> String {
+    let (day, month, year) = civil_date(ms);
+    format!("{day} {month} {year} · {}", due_short(ms).to_lowercase())
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn save_bug_report(
@@ -673,8 +1128,7 @@ fn save_bug_report(
     }
 }
 
-/// Labels, hover rings and clicks on the 3D view itself. These stay in egui on
-/// every target: they move every frame and there can be hundreds of them.
+/// Captions, labels, hover rings and clicks on the 3D view itself.
 #[allow(clippy::too_many_arguments)]
 fn canvas_overlay(
     ctx: &egui::Context,
@@ -688,11 +1142,9 @@ fn canvas_overlay(
     exposure: &str,
     velocity: &CameraVelocity,
     stream_caption: &str,
-    // HTML panels show the loading state and view captions themselves.
-    captions: bool,
     out: &mut Vec<UiCommand>,
 ) {
-    if captions && galaxy.systems.is_empty() {
+    if galaxy.systems.is_empty() {
         egui::Area::new(egui::Id::new("loading-state"))
             .fixed_pos(rect.center() - egui::vec2(160.0, 45.0))
             .show(ctx, |ui| {
@@ -709,54 +1161,52 @@ fn canvas_overlay(
             egui::Id::new("annotations"),
         ))
         .with_clip_rect(rect);
-    if captions {
-        painter.text(
-            rect.left_top() + egui::vec2(24.0, 24.0),
-            egui::Align2::LEFT_TOP,
-            if nav.visit.is_none() {
-                "GALAXY / LIGHT YEARS"
-            } else if nav.view == View::Table {
-                "TASK TABLE / TRUE SIZES · ORBITS CONTINUE"
-            } else if nav.view == View::Constellation {
-                "LIST CONSTELLATION / SELECT A SYSTEM"
-            } else {
-                "SYSTEM VIEW / ASTRONOMICAL UNITS"
-            },
-            egui::FontId::monospace(11.0),
-            MUTED,
-        );
-        let distance = if pose.distance > LY_METRES * 0.01 {
-            format!("{:.3} ly", pose.distance / LY_METRES)
+    painter.text(
+        rect.left_top() + egui::vec2(24.0, 24.0),
+        egui::Align2::LEFT_TOP,
+        if nav.visit.is_none() {
+            "GALAXY / LIGHT YEARS"
+        } else if nav.view == View::Table {
+            "TASK TABLE / TRUE SIZES · ORBITS CONTINUE"
+        } else if nav.view == View::Constellation {
+            "LIST CONSTELLATION / SELECT A SYSTEM"
         } else {
-            format!("{:.4} AU", pose.distance / AU_METRES)
-        };
-        painter.text(
-            rect.left_bottom() + egui::vec2(24.0, -68.0),
-            egui::Align2::LEFT_BOTTOM,
-            format!(
-                "SET SPEED {}   /   VELOCITY {}\n{}\nCAMERA RANGE {distance}   /   {}",
-                speed_label(nav.move_speed).to_uppercase(),
-                speed_label(velocity.metres_per_second.length()).to_uppercase(),
-                exposure.to_uppercase(),
-                if nav.following {
-                    "TRACKING"
-                } else if nav.view != View::Orbit {
-                    "AUTO-FRAMED PRESET"
-                } else {
-                    "FREE NAVIGATION"
-                }
-            ),
-            egui::FontId::monospace(11.0),
-            MUTED,
-        );
-        painter.text(
-            rect.left_bottom() + egui::vec2(24.0, -20.0),
-            egui::Align2::LEFT_BOTTOM,
-            stream_caption,
-            egui::FontId::monospace(11.0),
-            MUTED,
-        );
-    }
+            "SYSTEM VIEW / ASTRONOMICAL UNITS"
+        },
+        egui::FontId::monospace(11.0),
+        MUTED,
+    );
+    let distance = if pose.distance > LY_METRES * 0.01 {
+        format!("{:.3} ly", pose.distance / LY_METRES)
+    } else {
+        format!("{:.4} AU", pose.distance / AU_METRES)
+    };
+    painter.text(
+        rect.left_bottom() + egui::vec2(24.0, -68.0),
+        egui::Align2::LEFT_BOTTOM,
+        format!(
+            "SET SPEED {}   /   VELOCITY {}\n{}\nCAMERA RANGE {distance}   /   {}",
+            speed_label(nav.move_speed).to_uppercase(),
+            speed_label(velocity.metres_per_second.length()).to_uppercase(),
+            exposure.to_uppercase(),
+            if nav.following {
+                "TRACKING"
+            } else if nav.view != View::Orbit {
+                "AUTO-FRAMED PRESET"
+            } else {
+                "FREE NAVIGATION"
+            }
+        ),
+        egui::FontId::monospace(11.0),
+        MUTED,
+    );
+    painter.text(
+        rect.left_bottom() + egui::vec2(24.0, -20.0),
+        egui::Align2::LEFT_BOTTOM,
+        stream_caption,
+        egui::FontId::monospace(11.0),
+        MUTED,
+    );
 
     if nav.velocity_marker {
         draw_velocity_marker(
@@ -768,8 +1218,11 @@ fn canvas_overlay(
         );
     }
 
-    let pointer = ctx.input(|i| i.pointer.interact_pos());
-    let mut click = ctx.input(|i| i.pointer.primary_clicked());
+    // Windows such as Settings float over the view; clicks there are theirs.
+    let pointer = ctx
+        .input(|i| i.pointer.interact_pos())
+        .filter(|_| !ctx.is_pointer_over_area());
+    let mut click = pointer.is_some() && ctx.input(|i| i.pointer.primary_clicked());
     if let Some(star) = &nav.picked {
         let camera =
             rig.rotation().inverse() * (star.position_ly - rig.galactic_ly(pose)).as_vec3();
@@ -951,5 +1404,15 @@ mod tests {
         // A 120° view (about 144° wide at 16:9) brings the diagonal on screen.
         let wide = super::project(rect, diagonal, half(120.0)).unwrap();
         assert!(rect.contains(wide));
+    }
+
+    #[test]
+    fn civil_dates_and_rates() {
+        // 2026-10-08T00:00:00Z
+        assert_eq!(civil_date(1_791_417_600_000), (8, "Oct", 2026));
+        assert_eq!(civil_date(0), (1, "Jan", 1970));
+        assert_eq!(rate_step(1.0), 0);
+        assert_eq!(rate_step(86_400.0), 6);
+        assert_eq!(rate_step(1e12), RATES.len() - 1);
     }
 }

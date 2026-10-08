@@ -1,5 +1,7 @@
 mod actions;
 #[cfg(target_arch = "wasm32")]
+mod automation;
+#[cfg(target_arch = "wasm32")]
 mod benchmark;
 mod black_hole;
 #[cfg(not(target_arch = "wasm32"))]
@@ -17,8 +19,6 @@ mod starfield;
 mod stream;
 mod ui;
 mod views;
-#[cfg(target_arch = "wasm32")]
-mod web_bridge;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -259,7 +259,6 @@ fn main() {
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
     .insert_resource(initial_nav)
-    .init_resource::<actions::PanelInsets>()
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
     .add_systems(
@@ -290,10 +289,15 @@ fn main() {
     app.add_systems(Update, smoke::exercise);
     #[cfg(target_arch = "wasm32")]
     if benchmark {
-        app.insert_resource(benchmark::BenchmarkFlight::default());
+        app.insert_resource(benchmark::BenchmarkFlight::default())
+            .add_systems(Last, benchmark::record)
+            .add_systems(
+                EguiPrimaryContextPass,
+                benchmark::results_window.after(ui::draw_ui),
+            );
     }
     #[cfg(target_arch = "wasm32")]
-    web_bridge::install(&mut app);
+    automation::install(&mut app);
     app.run();
 }
 

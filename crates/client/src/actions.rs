@@ -1,6 +1,6 @@
-//! Every panel action goes through `UiCommand`, whether it comes from egui or the
-//! browser's HTML panels. Lists and tasks are named by ID, so a data refresh that
-//! reorders them cannot redirect a click.
+//! Every panel action goes through `UiCommand`, whether it comes from egui or a
+//! browser test script (`automation.rs`). Lists and tasks are named by ID, so a
+//! data refresh that reorders them cannot redirect a click.
 use crate::{Clock, Navigation, Universe, views::View};
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -53,14 +53,6 @@ pub enum UiCommand {
     /// Repeatable views for evaluating the smooth galaxy prototype.
     GalaxyReference {
         view: GalaxyReference,
-    },
-    /// Space the HTML panels cover at each edge of the canvas, in CSS pixels. The 3D
-    /// view fits the rest, and the egui panels are not drawn.
-    Panels {
-        top: f32,
-        right: f32,
-        bottom: f32,
-        left: f32,
     },
 }
 
@@ -120,17 +112,11 @@ fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
     nav.notice = "Smooth galaxy prototype: no dust or spiral detail yet".into();
 }
 
-/// Set once HTML panels have taken over from egui: top, right, bottom, left.
-#[derive(Resource, Default)]
-pub struct PanelInsets(pub Option<[f32; 4]>);
-
-#[allow(clippy::too_many_arguments)]
 pub fn apply(
     mut commands: MessageReader<UiCommand>,
     universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
-    mut insets: ResMut<PanelInsets>,
     field: Res<crate::stream::Starfield>,
     rig: Res<crate::scene::CameraRig>,
     pose: Res<crate::scene::CameraPose>,
@@ -192,12 +178,6 @@ pub fn apply(
             },
             UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
             UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
-            UiCommand::Panels {
-                top,
-                right,
-                bottom,
-                left,
-            } => insets.0 = Some([*top, *right, *bottom, *left].map(|v| v.max(0.0))),
         }
     }
 }
@@ -217,7 +197,6 @@ mod tests {
             .insert_resource(Universe(galaxy))
             .init_resource::<Navigation>()
             .init_resource::<Clock>()
-            .init_resource::<PanelInsets>()
             .init_resource::<crate::stream::Starfield>()
             .init_resource::<crate::scene::CameraRig>()
             .init_resource::<crate::scene::CameraPose>()
@@ -455,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_json_parses_into_commands() {
+    fn script_json_parses_into_commands() {
         let parse = |json| serde_json::from_str::<UiCommand>(json).unwrap();
         assert_eq!(
             parse(r#"{"type":"galaxy_reference","view":"face_on"}"#),

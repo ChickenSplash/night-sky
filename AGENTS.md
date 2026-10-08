@@ -26,17 +26,20 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - The native **Save bug report** control captures state, recent client log lines and
   a screenshot under `data/logs/bug-*` for visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
-- The browser is the main target; native is a dev fallback. The browser UI is
-  HTML/CSS panels (`web/ui/`); `?ui=egui` shows the egui panels instead. Native
-  keeps egui. When HTML panels are active, egui draws only canvas markers, labels
-  and clicks; the HTML shows captions, readouts and the loading state.
-  Every panel action is an ID-based `UiCommand` (`actions.rs`), shared by egui and
-  `web_bridge.rs`; Rust reports back with `space:galaxy`/`space:state`/`space:tick`
-  window events. Canvas labels and clicks stay in egui on every target.
-- `./scripts/dev-web.sh`: web build plus server with `web/` linked live, so
-  HTML/CSS edits need only a refresh. `node scripts/test-html-ui.mjs` checks the
-  HTML panels, keyboard focus and wheel routing against `SPACE_URL` (default
-  local). `test-browser.mjs` covers the egui panels on the web.
+- The browser is the main target; native is a dev fallback. Both use the same
+  egui interface (`ui.rs`), drawn in the same frame as the scene: side panels,
+  time controls, a Settings window and canvas captions, labels and clicks.
+  There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
+  `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
+  (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
+  `ui::Sidebar`, not `Navigation`.
+- `automation.rs` (browser only) is a test hook, not a UI: `window.space.command`
+  sends a `UiCommand` as JSON and `window.space.state()` reads a small snapshot
+  (list, page, view, display options, stream caption, benchmark results).
+- `./scripts/dev-web.sh`: web build plus server with `index.html` and
+  `star-worker.js` linked live. `node scripts/test-browser.mjs` clicks the egui
+  panels at 1600 x 1000 and checks the results through `window.space`; update its
+  coordinates when the panel layout changes.
 - `./scripts/deploy-homelab.sh`: build locally and deploy to the homelab's
   `~/homelab/night-sky`. URL: `http://192.168.1.90:4321/`. Demo data only;
   it removes any `.env` and SQLite cache left there by the former ClickUp
@@ -171,9 +174,11 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   wait, render-sync time and frame-time percentiles once per second; the
   bottom-left 3D caption shows these below camera range on both clients.
   Instrumentation does not change loading policy.
-  The browser settings' **Run star-stream benchmark** reloads into a fresh,
+  The browser Settings' **Run star-stream benchmark** reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
-  1,000 ly/s for 15 s without auto-visits. `?benchmark=star-flight` is the
+  1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each
+  `StreamMetrics::sample`, logs the results to the console and shows them in an
+  egui window with a JSON download. `?benchmark=star-flight` is the
   identical route used by `SPACE_HEADFUL=1 node scripts/benchmark-star-flight.mjs
   <label>`; it writes JSON results under `data/logs/`. Headless SwiftShader is
   too slow for meaningful comparisons, so use headed Chromium on Wayland.
