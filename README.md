@@ -275,10 +275,11 @@ hook.
 
 The browser is the main client; the native window is a developer fallback that
 adds the smoke test and bug reports. Both use the same egui panels, drawn in the
-same frame as the 3D view: lists and the task index on the left (filter, sort and
-group by status), the visited system and selected planet on the right, time
-controls below, and display, rendering, controls and the star-stream benchmark
-under **Settings**.
+same frame as the 3D view. The left sidebar holds collapsible sections: lists,
+the task index (filter, sort and group by status), the visited system and the
+selected planet. Time controls run along the bottom. The round ⚙ button at the
+top right slides in a terminal-style settings window: display, rendering, field
+of view, controls and the star-stream benchmark. Esc or `[ × ]` closes it.
 
 ## Next milestones
 

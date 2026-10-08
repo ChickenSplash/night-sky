@@ -17,6 +17,7 @@ mod sky;
 mod smoke;
 mod starfield;
 mod stream;
+mod terminal;
 mod ui;
 mod views;
 

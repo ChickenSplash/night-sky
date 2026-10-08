@@ -58,23 +58,35 @@ try {
   // The client opens in the galaxy, relative to home.
   await page.screenshot({ path: resolve(root, 'data/web-galaxy.png') });
   // Clicks target the egui panels at 1600 x 1000.
-  await page.mouse.click(150, 145); // First list.
+  await page.mouse.click(168, 174); // First list.
   await page.waitForTimeout(2500);
   assert.equal((await state()).list, fixture.systems[0].id);
   assert.equal((await state()).view, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-list.png') });
-  await page.mouse.click(1430, 115); // Task table preset.
+  await page.mouse.click(90, 34); // Fold the lists section, lifting the view buttons.
+  await page.waitForTimeout(1000);
+  await page.mouse.click(148, 646); // Task table preset.
   await page.waitForTimeout(2500);
   assert.equal((await state()).view, 'table');
   await page.screenshot({ path: resolve(root, 'data/web-table.png') });
-  await page.mouse.click(1450, 197); // Next system page.
+  await page.mouse.click(168, 728); // Next system page.
   await page.waitForTimeout(2500);
   assert.equal((await state()).page, 1);
   await page.screenshot({ path: resolve(root, 'data/web-table-next-page.png') });
-  await page.mouse.click(1370, 156); // Constellation preset.
+  await page.mouse.click(88, 687); // Constellation preset.
   await page.waitForTimeout(2500);
   assert.equal((await state()).view, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-constellation.png') });
+  // The round button slides the settings window in; its first row is a checkbox.
+  const exaggerate = (await state()).display.exaggerate;
+  await page.mouse.click(1568, 32);
+  // egui caps each animation step, so the slide is slow at SwiftShader frame rates.
+  await page.waitForTimeout(5000);
+  await page.mouse.click(1430, 102); // Readable planet sizes.
+  await page.waitForFunction(on => window.space.state().display.exaggerate === on, !exaggerate, { timeout: 5000 });
+  await page.screenshot({ path: resolve(root, 'data/web-settings.png') });
+  await page.mouse.click(1548, 38); // Close.
+  await page.waitForTimeout(5000);
   // Exercise event handling and resize, not just the initial WebAssembly boot.
   await page.mouse.move(750, 400);
   await page.mouse.down({ button: 'right' });
@@ -86,7 +98,7 @@ try {
   await page.screenshot({ path: resolve(root, 'data/web-resized.png') });
   assert.equal(await page.locator('#loading').evaluate(el => el.style.display), 'none', 'A renderer error overlay appeared');
   assert.deepEqual(errors, [], 'Browser runtime errors');
-  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, galaxy/table/constellation/input/resize, private-file isolation.');
+  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, galaxy/table/constellation/settings/input/resize, private-file isolation.');
 } finally {
   writeFileSync(resolve(root, 'data/browser-console.log'), [...logs, ...errors].join('\n'));
   await browser.close();

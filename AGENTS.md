@@ -27,8 +27,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   a screenshot under `data/logs/bug-*` for visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
 - The browser is the main target; native is a dev fallback. Both use the same
-  egui interface (`ui.rs`), drawn in the same frame as the scene: side panels,
-  time controls, a Settings window and canvas captions, labels and clicks.
+  egui interface (`ui.rs`), drawn in the same frame as the scene: a left
+  sidebar of collapsible sections, time controls, a settings window and canvas
+  captions, labels and clicks. Settings is the new terminal style
+  (`terminal.rs`): a round top-right button that fades out as a translucent
+  black, Hyprland-like window (cyan-to-green border, `GAP` from every edge)
+  slides in from the right, with text-mode checkboxes, slider and buttons.
+  Other panels move to this style over time.
   There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
