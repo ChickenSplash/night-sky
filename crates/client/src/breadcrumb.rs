@@ -91,15 +91,20 @@ pub fn text(trail: &[Crumb]) -> String {
         .join(" › ")
 }
 
-const FILL: egui::Color32 = egui::Color32::from_rgba_premultiplied(4, 9, 19, 190);
-const STROKE: egui::Color32 = egui::Color32::from_rgb(30, 52, 74);
-const LINK: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
+const LINK: egui::Color32 = egui::Color32::from_rgb(150, 174, 202);
 const HOVER: egui::Color32 = egui::Color32::from_rgb(99, 214, 240);
-const CURRENT: egui::Color32 = egui::Color32::from_rgb(232, 240, 250);
+const CURRENT: egui::Color32 = egui::Color32::from_rgb(238, 244, 252);
 const SIZE: f32 = 13.0;
-const MARGIN: egui::Vec2 = egui::vec2(16.0, 14.0);
+const MARGIN: egui::Vec2 = egui::vec2(20.0, 16.0);
+/// The soft halo behind the text, so it reads over bright stars and the
+/// galaxy band without a box: a dark ring at the letter edges (`HALO_EDGE`
+/// opacity, 1 px out), fading through a fainter one (`HALO_FADE`, 2 px out).
+/// Overlapping copies make it densest right at the letters.
+const HALO_EDGE: u8 = 130;
+const HALO_FADE: u8 = 45;
 
-/// Draws the trail at the top left of the 3D view, under any window.
+/// Draws the trail as free-floating text at the top left of the 3D view,
+/// under any window.
 pub fn show(
     ctx: &egui::Context,
     rect: egui::Rect,
@@ -110,44 +115,59 @@ pub fn show(
         .order(egui::Order::Background)
         .fixed_pos(rect.left_top() + MARGIN)
         .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(FILL)
-                .stroke(egui::Stroke::new(1.0, STROKE))
-                .corner_radius(6)
-                .inner_margin(egui::Margin::symmetric(12, 7))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    ui.horizontal(|ui| {
-                        for (index, crumb) in trail.iter().enumerate() {
-                            if index > 0 {
-                                ui.label(egui::RichText::new("›").size(SIZE).color(LINK));
-                            }
-                            let current = index + 1 == trail.len();
-                            if crumb_button(ui, &crumb.label, current).clicked() {
-                                out.push(crumb.go.clone());
-                            }
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.horizontal(|ui| {
+                for (index, crumb) in trail.iter().enumerate() {
+                    if index > 0 {
+                        halo_text(ui, "›", egui::Sense::hover(), |_| LINK);
+                    }
+                    let current = index + 1 == trail.len();
+                    let clicked = halo_text(ui, &crumb.label, egui::Sense::click(), |response| {
+                        if response.hovered() {
+                            HOVER
+                        } else if current {
+                            CURRENT
+                        } else {
+                            LINK
                         }
-                    });
-                });
+                    })
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked();
+                    if clicked {
+                        out.push(crumb.go.clone());
+                    }
+                }
+            });
         });
 }
 
-fn crumb_button(ui: &mut egui::Ui, label: &str, current: bool) -> egui::Response {
+/// Text with a soft dark halo, coloured once its response (hover) is known.
+fn halo_text(
+    ui: &mut egui::Ui,
+    text: &str,
+    sense: egui::Sense,
+    colour: impl FnOnce(&egui::Response) -> egui::Color32,
+) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(
-        label.to_owned(),
+        text.to_owned(),
         egui::FontId::proportional(SIZE),
         egui::Color32::PLACEHOLDER,
     );
-    let (rect, response) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
-    let colour = if response.hovered() {
-        HOVER
-    } else if current {
-        CURRENT
-    } else {
-        LINK
-    };
-    ui.painter().galley(rect.min, galley, colour);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let (rect, response) = ui.allocate_exact_size(galley.size(), sense);
+    let painter = ui.painter();
+    for (radius, alpha, steps) in [(2.0, HALO_FADE, 16), (1.0, HALO_EDGE, 8)] {
+        for step in 0..steps {
+            let angle = std::f32::consts::TAU * step as f32 / steps as f32;
+            let offset = egui::vec2(angle.cos(), angle.sin()) * radius;
+            painter.galley(
+                rect.min + offset,
+                galley.clone(),
+                egui::Color32::from_black_alpha(alpha),
+            );
+        }
+    }
+    painter.galley(rect.min, galley, colour(&response));
+    response
 }
 
 #[cfg(test)]

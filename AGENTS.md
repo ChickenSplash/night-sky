@@ -32,8 +32,11 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   sidebar of collapsible sections, time controls, a plain egui Settings window
   (opened from the sidebar's ⚙ Settings), a breadcrumb and canvas captions,
   labels and clicks.
-- The breadcrumb (`breadcrumb.rs`) sits at the top left of the 3D view, under
-  any window. `breadcrumb::trail` builds it each frame from `Navigation`:
+- The breadcrumb (`breadcrumb.rs`) is free-floating text at the top left of
+  the 3D view, under any window, with no container. A soft dark halo (two
+  rings of translucent black copies, `HALO_EDGE` at 1 px and `HALO_FADE` at
+  2 px) keeps it readable over star discs and the galaxy band; it vanishes
+  on dark space. Reuse `halo_text` for other text drawn over the scene. `breadcrumb::trail` builds it each frame from `Navigation`:
   `Milky Way`, the open list, the star the camera is at (`location`; a list's
   stars are `System n` as the page controls number them, others their
   catalogue name), then a selected planet of that star (its designation). A
