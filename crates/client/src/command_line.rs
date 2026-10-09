@@ -12,8 +12,8 @@ pub struct Usage {
     pub about: &'static str,
 }
 
-/// Every `UiCommand`, by its serde name. The test below fails to compile
-/// when a variant is added without an entry here.
+/// Every `UiCommand`, by its serde name. A test fails, naming the command,
+/// when a variant has no entry here or an entry's fields do not match.
 pub const USAGE: [Usage; 14] = [
     Usage {
         name: "pick_centre",
@@ -182,25 +182,40 @@ mod tests {
     use crate::actions::{Display, GalaxyReference};
     use crate::views::View;
 
+    /// Every `UiCommand` name, as serde lists them when it meets an unknown one.
+    fn variants() -> Vec<String> {
+        let err = serde_json::from_str::<UiCommand>(r#"{"type":"?"}"#).unwrap_err();
+        let err = err.to_string();
+        let (_, list) = err.split_once("expected one of").unwrap();
+        list.split('`')
+            .skip(1)
+            .step_by(2)
+            .map(String::from)
+            .collect()
+    }
+
     #[test]
     fn every_command_has_usage() {
-        // Exhaustive, so a new variant must be added here and to `USAGE`.
-        let name = |command: &UiCommand| match command {
-            UiCommand::PickCentre => "pick_centre",
-            UiCommand::PickStar { .. } => "pick_star",
-            UiCommand::Jump { .. } => "jump",
-            UiCommand::FindTask { .. } => "find_task",
-            UiCommand::Inspect { .. } => "inspect",
-            UiCommand::ShowPage { .. } => "show_page",
-            UiCommand::SetView { .. } => "set_view",
-            UiCommand::FrameSystem => "frame_system",
-            UiCommand::Follow => "follow",
-            UiCommand::SetPaused { .. } => "set_paused",
-            UiCommand::SetRate { .. } => "set_rate",
-            UiCommand::SetDisplay { .. } => "set_display",
-            UiCommand::SetFov { .. } => "set_fov",
-            UiCommand::GalaxyReference { .. } => "galaxy_reference",
-        };
+        let variants = variants();
+        assert!(variants.len() >= USAGE.len(), "{variants:?}");
+        let missing: Vec<_> = variants
+            .iter()
+            .filter(|v| !USAGE.iter().any(|u| u.name == *v))
+            .collect();
+        let unknown: Vec<_> = USAGE
+            .iter()
+            .map(|u| u.name)
+            .filter(|name| !variants.iter().any(|v| v == name))
+            .collect();
+        assert!(
+            missing.is_empty() && unknown.is_empty(),
+            "command_line::USAGE is out of step with UiCommand. \
+             Add a USAGE entry for: {missing:?}. Remove or rename: {unknown:?}."
+        );
+    }
+
+    #[test]
+    fn every_usage_parses() {
         for usage in &USAGE {
             let args: Vec<_> = usage
                 .fields
@@ -216,8 +231,12 @@ mod tests {
                 })
                 .collect();
             let line = format!("{} {}", usage.name, args.join(" "));
-            let command = parse(&line).unwrap_or_else(|err| panic!("{line}: {err}"));
-            assert_eq!(name(&command), usage.name);
+            if let Err(err) = parse(&line) {
+                panic!(
+                    "USAGE entry `{}` does not match UiCommand's fields: {line}: {err}",
+                    usage.name
+                );
+            }
         }
     }
 

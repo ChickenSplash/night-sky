@@ -45,8 +45,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `set_display option=orbits on=false`, or `UiCommand` JSON) into the same
   `UiCommand`s as the panels; `help` and `clear` are console built-ins.
   Commands and their errors are logged under the `console` target. Every
-  `UiCommand` needs a `command_line::USAGE` entry (a test's exhaustive match
-  enforces it); any future terminal or script input should reuse `parse`. It uses the terminal
+  `UiCommand` needs a `command_line::USAGE` entry (tests compare it with
+  serde's variant list and parse each entry, naming any mismatch); any future terminal or script input should reuse `parse`. It uses the terminal
   look (`terminal.rs`): a translucent black, Hyprland-like window with a light
   grey border and text-mode checkboxes and buttons.
   There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
