@@ -291,7 +291,7 @@ Debugging has its own window, toggled with `` ` `` or F3 on both clients:
 | `terminal` | A command line and its output |
 | `perf` | Frame time graph, star-stream metrics |
 | `render` | Exposure readout, galaxy glow, physical exposure, wireframes over bodies, galaxy reference views |
-| `state` | Camera, navigation, visited star and clock values |
+| `state` | Camera, navigation (location, open list, camera anchor), anchor star and clock values |
 | `tools` | Save bug report (native), star-stream benchmark (browser) |
 
 The terminal tab runs any panel action by name: `help` lists them, for

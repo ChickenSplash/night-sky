@@ -38,8 +38,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   tab shows errors and warnings logged while it was hidden), `terminal` (a
   command line and its output), `perf` (frame graph, star-stream metrics),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
-  bodies, galaxy reference views), `state` (camera, navigation, visited star,
-  clock) and `tools` (bug report natively, star-stream benchmark in the
+  bodies, galaxy reference views), `state` (camera; navigation: location,
+  open list, anchor, page, view, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
   browser). New debug readouts and switches go there, not in Settings or the
   canvas.
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
@@ -222,8 +222,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   placed by an f64 subtraction takes over (built at `PREPARE` times the radius,
   so its hidden frame is spent). The batch remains until a quarter of that
   radius, and is not culled while the precise sprite is still unplaced. The
-  visited star is a body only within `scene::body_range` (where its planets
-  show): batches hide points that close and its sprite waits hidden. Beyond, it
+  visited star is a body only while the camera is at it (`scene::body_range`,
+  where its planets show): batches hide points within that range and its
+  sprite waits hidden. Elsewhere, it
   is a galactic point under the same magnitude limit. Galactic points use
   apparent flux, scaled by `sky::radiance_gain`. Realistic, their colour and
   visual efficiency come from a blackbody palette by temperature (the vertex
@@ -279,18 +280,30 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Dust, detailed spiral structure and other galaxy types are not implemented yet.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own.
-  `Navigation::visit` is the visited system: `Visit::List` (a list index, at
+  `Navigation::visit` is the system the camera is anchored to (at, flying to,
+  or showing as a constellation): `Visit::List` (a list index, at
   `Navigation::page`) or `Visit::Generated` (task-free planets built from the
   star's ID, never added to the lists' `Universe`). `None` is open space,
   relative to home in galactic axes; a visit moves the camera frame to its
   star in f64, and the same `Flight` shifts the displayed pose. Orbit, table
   and constellation views work on any visited system.
-- Free flight automatically activates a nearby loaded star's list page or
-  generated system at 0.02 ly, without flying, reframing or changing movement
-  speed. It restores the previous explicit visit beyond 0.04 ly. Frame changes
-  preserve the camera eye despite f32 quaternion rounding. Body visibility and
-  render scale follow physical proximity, not the zoom/range setting, so the
-  same point-to-body handoff works after clicking Visit or drifting in.
+- Where the camera is and which list is open are separate:
+  `Navigation::location` (the visit while `Navigation::arrived`) is physical,
+  and `Navigation::list` is the open list (a `Visit::List`, kept in
+  constellation view). `scene::locate` sets `arrived` every frame: within
+  `system_range` of the page star (0.02 ly, or 4 times the outermost apoapsis
+  if wider) it arrives, and it leaves beyond `LEAVE_FACTOR` (2) times that.
+  Constellation view is never at a star, and a flight arrives only on getting
+  there. Clicking Visit and drifting in arrive the same way. Leaving in orbit
+  view, however the visit began, returns to open space and closes the list;
+  there is no restoring a previous visit.
+- Free flight in open space automatically activates a loaded star's list page
+  or generated system within 0.02 ly, without flying, reframing or changing
+  movement speed. Frame changes preserve the camera eye despite f32 quaternion
+  rounding. Bodies are drawn (`scene::body_range`) and render scale tightens
+  only while `arrived`, which follows physical proximity, not the zoom/range
+  setting, so the same point-to-body handoff works after clicking Visit or
+  drifting in.
   Close-up star size exaggeration also follows physical eye distance, never a
   potentially interstellar camera range that would put the eye inside its shell.
 - During free-look and free flight, `Navigation::eye` is the authoritative f64

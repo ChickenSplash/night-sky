@@ -20,8 +20,11 @@ use std::f64::consts::TAU;
 /// Beyond this camera range stars draw at their true separation. Planet
 /// visibility also depends on the actual size of the current page's system.
 const WIDE_METRES: f64 = 0.02 * LY_METRES;
+/// Free flight this close to a loaded star makes it the visited system.
 const APPROACH_METRES: f64 = 0.02 * LY_METRES;
-const LEAVE_METRES: f64 = 0.04 * LY_METRES;
+/// The camera leaves a system beyond this multiple of its `system_range`, so
+/// the boundary cannot flicker.
+const LEAVE_FACTOR: f64 = 2.0;
 /// Keep nearby streamed points well clear of the camera's near clip plane even
 /// when the selected camera range is interstellar.
 const PRECISE_SCALE_PC: f64 = 20.0 * LY_METRES / PC_METRES;
@@ -158,14 +161,6 @@ pub struct CameraRig {
     warned_stall: bool,
 }
 
-/// An implicit system visit, preserving the explicit selection for when the
-/// camera leaves. It never starts a flight or re-frames the camera.
-#[derive(Resource, Default)]
-pub struct NearbySystem {
-    id: Option<String>,
-    prior: Option<(Option<crate::Visit>, u32)>,
-}
-
 fn rebase(
     nav: &mut Navigation,
     rig: &CameraRig,
@@ -202,46 +197,45 @@ fn rebase(
     nav.following = false;
 }
 
-/// Use the same star body and planetary system when arriving by free flight as
-/// when arriving by clicking Visit. Only cells already streamed in are eligible.
-pub fn nearby_system(
+/// Whether the camera is at a system `distance` metres from its star: within
+/// `range` to arrive, and until `LEAVE_FACTOR` times it once there.
+fn within(arrived: bool, distance: f64, range: f64) -> bool {
+    distance < if arrived { LEAVE_FACTOR * range } else { range }
+}
+
+/// Track where the camera physically is (`Navigation::arrived`). Arriving by
+/// free flight uses the same star body and planetary system as clicking Visit;
+/// only cells already streamed in are eligible, and it never starts a flight or
+/// re-frames the camera. Leaving a system in orbit view, however it was
+/// reached, returns to open space without moving the eye.
+pub fn locate(
     #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     field: Res<crate::stream::Starfield>,
     lists: Res<Universe>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
     mut nav: ResMut<Navigation>,
-    mut nearby: ResMut<NearbySystem>,
 ) {
+    let eye_ly = rig.galactic_ly(&pose);
+    let arrived = nav.arrived;
+    // The constellation frames a whole list from afar, so it is never at a star.
+    nav.arrived = rig.placed()
+        && nav.view != View::Constellation
+        && nav.system(&lists.0).is_some_and(|s| {
+            let distance = (page_origin_ly(s, nav.page) - eye_ly).length() * LY_METRES;
+            within(arrived, distance, system_range(s, nav.page))
+        });
     #[cfg(target_arch = "wasm32")]
     if benchmark.is_some() {
         return;
     }
-    if nav.fly {
-        // A deliberate visit supersedes the implicit one.
-        nearby.id = None;
-        nearby.prior = None;
-    }
-    if nav.view != View::Orbit || rig.flying() || nav.fly {
+    // Flights and presets are deliberate: wait until they land.
+    if nav.view != View::Orbit || rig.flying() || nav.fly || !rig.placed() || nav.arrived {
         return;
     }
-    let eye_ly = rig.galactic_ly(&pose);
-    if nearby.id.is_some() {
-        let current = nav.system(&lists.0).map(|s| page_origin_ly(s, nav.page));
-        if current.is_some_and(|star| (star - eye_ly).length() * LY_METRES < LEAVE_METRES) {
-            return;
-        }
-        let (prior, page) = nearby.prior.take().unwrap_or((None, 0));
-        rebase(&mut nav, &rig, pose.eye, &lists.0, prior, page);
-        nearby.id = None;
+    if nav.system(&lists.0).is_some() {
+        rebase(&mut nav, &rig, pose.eye, &lists.0, None, 0);
         // Let place_camera switch the displayed frame before another handoff.
-        return;
-    }
-    // If the explicitly visited star is close, it already owns the body handoff.
-    if nav
-        .system(&lists.0)
-        .is_some_and(|s| (page_origin_ly(s, nav.page) - eye_ly).length() * LY_METRES < LEAVE_METRES)
-    {
         return;
     }
     let eye_pc =
@@ -278,14 +272,18 @@ pub fn nearby_system(
     } else {
         return;
     };
-    nearby.prior = Some((nav.visit.clone(), nav.page));
     rebase(&mut nav, &rig, pose.eye, &lists.0, Some(visit), page);
-    nearby.id = Some(id);
+    nav.arrived = true;
 }
 
 impl CameraRig {
     pub fn flying(&self) -> bool {
         self.flight.is_some()
+    }
+
+    /// Whether the camera has been placed yet. Before that, its pose means nothing.
+    pub fn placed(&self) -> bool {
+        self.shown.is_some()
     }
 
     /// The displayed camera in galactic axes, in light years from home.
@@ -333,7 +331,6 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
     config.line.width = 1.25;
     commands.init_resource::<CameraPose>();
     commands.init_resource::<CameraRig>();
-    commands.init_resource::<NearbySystem>();
     commands.init_resource::<CameraVelocity>();
     commands.init_resource::<CameraMotion>();
     commands.init_resource::<Markers>();
@@ -648,7 +645,7 @@ pub fn place_camera(
         + frame * (LY_METRES / PC_METRES)
         + pose.eye / PC_METRES;
     pose.scale_distance = proximity_scale_distance(&field, eye_pc, shown.distance);
-    if system.is_some_and(|s| pose.eye.length() <= planet_visibility_range(s, frame_page)) {
+    if nav.arrived {
         pose.scale_distance = pose.scale_distance.min(pose.eye.length().max(20_000_000.0));
     }
     pose.layout = shown.layout;
@@ -757,9 +754,10 @@ const ORBIT: Color = Color::srgb(0.075, 0.17, 0.25);
 const RING_PIXELS: f32 = 6.0;
 const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
 
-/// Keep even unusually wide systems visible at their initial fitted range and
-/// while following an outer planet. Small systems retain the original cutoff.
-fn planet_visibility_range(system: &StarSystem, page: u32) -> f64 {
+/// Within this range of its star the camera arrives at a system. Even unusually
+/// wide systems include their initial fitted range and an outer planet being
+/// followed. Small systems keep the original cutoff.
+fn system_range(system: &StarSystem, page: u32) -> f64 {
     let outer_apoapsis = system
         .on_page(page)
         .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
@@ -767,12 +765,13 @@ fn planet_visibility_range(system: &StarSystem, page: u32) -> f64 {
     WIDE_METRES.max(4.0 * outer_apoapsis * space_simulation::AU_METRES)
 }
 
-/// Within this range of the visited star, in metres, its planets and body are
-/// drawn. Beyond it the star is a galactic point like any other, bound by the
-/// same magnitude limit, and the planets are hidden.
-pub fn body_range(system: &StarSystem, pose: &CameraPose) -> Option<f64> {
-    let range = planet_visibility_range(system, pose.page);
-    (pose.eye.length() <= range).then_some(range)
+/// While the camera is at the visited system, its planets and body are drawn
+/// and this is how far from its star, in metres, they can be. Elsewhere the
+/// star is a galactic point like any other, bound by the same magnitude limit,
+/// and the planets are hidden.
+pub fn body_range(nav: &Navigation, system: &StarSystem, pose: &CameraPose) -> Option<f64> {
+    nav.arrived
+        .then(|| LEAVE_FACTOR * system_range(system, pose.page))
 }
 
 /// Exaggeration is a screen-space aid, not an orbit-sized shell tied to zoom.
@@ -1137,7 +1136,7 @@ pub fn draw(
     };
     // During a page-to-page flight the camera may still be near the departure
     // star. Do not draw the destination's AU-scale orbits from interstellar range.
-    let planets_shown = body_range(system, &pose).is_some();
+    let planets_shown = body_range(&nav, system, &pose).is_some();
     let canvas = Canvas {
         camera,
         view,
@@ -1221,16 +1220,25 @@ mod tests {
             distance: nav.distance,
             ..default()
         };
+        let rig = CameraRig {
+            shown: Some(Pose {
+                target: nav.target,
+                distance: nav.distance,
+                rotation: nav.rotation,
+                layout: 0.0,
+            }),
+            ..default()
+        };
         let mut app = App::new();
         app.insert_resource(field)
             .insert_resource(Universe(space_simulation::demo_galaxy()))
-            .insert_resource(CameraRig::default())
+            .insert_resource(rig)
             .insert_resource(pose)
             .insert_resource(nav)
-            .init_resource::<NearbySystem>()
-            .add_systems(Update, nearby_system);
+            .add_systems(Update, locate);
         app.update();
         let nav = app.world().resource::<Navigation>();
+        assert!(nav.arrived);
         assert_eq!(
             nav.system(&app.world().resource::<Universe>().0)
                 .unwrap()
@@ -1248,11 +1256,17 @@ mod tests {
         assert!((actual_eye - eye).length() < 100_000.0);
         assert_eq!(rig.frame_ly, DVec3::ZERO);
         let tilt = page_frame(system, 0);
+        let range = system_range(system, 0);
 
-        // Leaving the system restores open space without moving the eye.
-        let departing_eye = DVec3::X * (LEAVE_METRES * 1.1);
+        // Still there just beyond the arrival range, so the boundary cannot flicker.
         let frame = position_ly;
         app.world_mut().resource_mut::<CameraRig>().frame_ly = frame;
+        app.world_mut().resource_mut::<CameraPose>().eye = DVec3::X * (range * 1.5);
+        app.update();
+        assert!(app.world().resource::<Navigation>().arrived);
+
+        // Leaving the system restores open space without moving the eye.
+        let departing_eye = DVec3::X * (LEAVE_FACTOR * range * 1.1);
         app.world_mut().resource_mut::<CameraPose>().eye = departing_eye;
         {
             let mut nav = app.world_mut().resource_mut::<Navigation>();
@@ -1262,9 +1276,95 @@ mod tests {
         }
         app.update();
         let nav = app.world().resource::<Navigation>();
-        assert!(nav.visit.is_none());
+        assert!(nav.visit.is_none() && !nav.arrived);
         let restored_eye = nav.eye.unwrap();
         assert!((restored_eye - (frame * LY_METRES + departing_eye)).length() < 100_000.0);
+    }
+
+    /// A visited list's star, with the camera placed `eye` from it in `view`.
+    fn visited_list(eye: DVec3, view: View) -> App {
+        let galaxy = space_simulation::demo_galaxy();
+        let page = galaxy.systems[0].first_page();
+        let frame_ly = page_origin_ly(&galaxy.systems[0], page);
+        let nav = Navigation {
+            visit: Some(crate::Visit::List(0)),
+            page,
+            view,
+            eye: Some(eye),
+            ..default()
+        };
+        let rig = CameraRig {
+            shown: Some(Pose {
+                target: DVec3::ZERO,
+                distance: nav.distance,
+                rotation: nav.rotation,
+                layout: 0.0,
+            }),
+            frame_ly,
+            ..default()
+        };
+        let mut app = App::new();
+        app.insert_resource(crate::stream::Starfield::default())
+            .insert_resource(Universe(galaxy))
+            .insert_resource(rig)
+            .insert_resource(CameraPose {
+                eye,
+                distance: nav.distance,
+                page,
+                ..default()
+            })
+            .insert_resource(nav)
+            .add_systems(Update, locate);
+        app
+    }
+
+    #[test]
+    fn leaving_a_visited_list_star_returns_to_open_space_and_closes_the_list() {
+        let mut app = visited_list(DVec3::X * (5.0 * AU_METRES), View::Orbit);
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert!(nav.arrived && nav.list() == Some(0));
+        assert!(
+            nav.location(&app.world().resource::<Universe>().0)
+                .is_some()
+        );
+
+        let far = DVec3::X * (LEAVE_FACTOR * WIDE_METRES * 50.0);
+        app.world_mut().resource_mut::<CameraPose>().eye = far;
+        app.world_mut().resource_mut::<Navigation>().eye = Some(far);
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert!(!nav.arrived && nav.visit.is_none() && nav.list().is_none());
+    }
+
+    #[test]
+    fn a_constellation_keeps_its_list_open_away_from_every_star() {
+        let mut app = visited_list(DVec3::X * (5.0 * LY_METRES), View::Constellation);
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert!(!nav.arrived && nav.list() == Some(0));
+        assert!(
+            nav.location(&app.world().resource::<Universe>().0)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_flight_is_not_at_its_destination_until_it_arrives() {
+        let mut app = visited_list(DVec3::X * (5.0 * LY_METRES), View::Orbit);
+        app.world_mut().resource_mut::<Navigation>().fly = true;
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert!(!nav.arrived && nav.list() == Some(0));
+    }
+
+    #[test]
+    fn arriving_and_leaving_have_a_margin_between_them() {
+        let range = WIDE_METRES;
+        assert!(within(false, 0.9 * range, range));
+        assert!(!within(false, 1.1 * range, range));
+        assert!(within(true, 1.1 * range, range));
+        assert!(!within(true, LEAVE_FACTOR * range * 1.01, range));
     }
 
     #[test]
@@ -1277,7 +1377,12 @@ mod tests {
             scale_distance: APPROACH_METRES * 0.5,
             ..default()
         };
-        assert!(body_range(system, &pose).is_some());
+        let nav = Navigation {
+            arrived: true,
+            ..default()
+        };
+        assert!(body_range(&nav, system, &pose).is_some());
+        assert!(body_range(&Navigation::default(), system, &pose).is_none());
         assert!(pose.render_scale() < pose.distance / 1000.0);
     }
 
@@ -1633,11 +1738,11 @@ mod tests {
     fn wide_orbits_remain_visible_at_their_fitted_camera_range() {
         let mut system = space_simulation::demo_galaxy().systems.remove(0);
         let page = system.first_page();
-        let normal = planet_visibility_range(&system, page);
+        let normal = system_range(&system, page);
         system.planets[0].orbit.semi_major_au = 5_183.534;
         system.planets[0].orbit.eccentricity = 0.057;
         let apoapsis = 5_183.534 * 1.057 * AU_METRES;
-        let wide = planet_visibility_range(&system, page);
+        let wide = system_range(&system, page);
         assert!(wide > 0.02 * LY_METRES);
         assert!(wide >= 3.1 * apoapsis);
         assert!(wide > normal);

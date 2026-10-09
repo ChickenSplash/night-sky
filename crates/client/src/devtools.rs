@@ -645,16 +645,31 @@ fn state(
     );
     terminal::heading(ui, "navigation");
     let system = nav.system(galaxy);
+    let star = |system: Option<&space_shared::StarSystem>| {
+        system
+            .and_then(|s| s.page_star(nav.page))
+            .map(|star| crate::galaxy_nav::label(galaxy, &star.id))
+    };
     terminal::facts(
         ui,
         "debug-navigation",
         &[
             (
-                "visit",
+                "location",
+                star(nav.location(galaxy)).unwrap_or_else(|| "open space".into()),
+            ),
+            (
+                "list",
+                nav.list()
+                    .and_then(|i| galaxy.systems.get(i))
+                    .map_or("none".into(), |s| s.name.clone()),
+            ),
+            (
+                "anchor",
                 match &nav.visit {
-                    None => "open space".into(),
-                    Some(Visit::List(_)) => format!("list {}", system.map_or("?", |s| &s.name)),
-                    Some(Visit::Generated(s)) => format!("generated {}", s.id),
+                    None => "home".into(),
+                    Some(Visit::List(_)) => star(system).unwrap_or_else(|| "?".into()),
+                    Some(Visit::Generated(s)) => s.name.clone(),
                 },
             ),
             ("page", nav.page.to_string()),
@@ -676,7 +691,7 @@ fn state(
     );
     if let Some(system) = system {
         let [inclination, node, _] = crate::scene::page_tilt(system, nav.page);
-        terminal::heading(ui, "visited star");
+        terminal::heading(ui, "anchor star");
         terminal::facts(
             ui,
             "debug-star",
@@ -754,8 +769,9 @@ fn save_bug_report(
     let (galaxy, clock) = (&universe.0, &clock.0);
     let system = nav.system(galaxy);
     let state = format!(
-        "System ID: {}\nList: {}\nPage: {}\nView: {:?}\nFollowing: {}\nSelection: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
+        "System ID: {}\nArrived: {}\nList: {}\nPage: {}\nView: {:?}\nFollowing: {}\nSelection: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
         system.map_or("none", |s| s.id.as_str()),
+        nav.arrived,
         nav.list().is_some(),
         nav.page,
         nav.view,

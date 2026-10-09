@@ -60,8 +60,13 @@ pub struct Navigation {
     pub page: u32,
     pub view: views::View,
     pub viewport: Option<bevy::camera::Viewport>,
-    /// `None` in open space, where the camera is relative to home.
+    /// The system the camera is anchored to: the one it is at, is flying to,
+    /// or whose list is shown as a constellation. `None` in open space, where
+    /// the camera is relative to home. See `location` for where it actually is.
     pub visit: Option<Visit>,
+    /// Whether the camera is at the visited star, by physical distance. Set
+    /// each frame by `scene::locate`.
+    pub arrived: bool,
     /// Set by clicks, C or page controls. Selecting never moves the camera;
     /// visiting a star or following a planet does.
     pub selection: Option<Selection>,
@@ -104,6 +109,7 @@ impl Default for Navigation {
             view: views::View::Orbit,
             viewport: None,
             visit: None,
+            arrived: false,
             selection: None,
             following: false,
             target: DVec3::ZERO,
@@ -172,7 +178,14 @@ impl Navigation {
         self.selection = selection;
     }
 
-    /// The visited list, if the camera is at one of its pages.
+    /// The system the camera is physically at, on `page`. `None` in open space,
+    /// in constellation view and while a flight is still on its way in.
+    pub fn location<'a>(&'a self, lists: &'a Galaxy) -> Option<&'a StarSystem> {
+        self.system(lists).filter(|_| self.arrived)
+    }
+
+    /// The open list: the visited star's list, whether the camera is at it,
+    /// flying to it or showing its constellation. It closes in open space.
     pub fn list(&self) -> Option<usize> {
         match self.visit {
             Some(Visit::List(index)) => Some(index),
@@ -302,7 +315,7 @@ fn main() {
             scene::controls,
             #[cfg(target_arch = "wasm32")]
             benchmark::advance,
-            scene::nearby_system,
+            scene::locate,
             scene::place_camera,
             scene::measure_velocity,
         )
