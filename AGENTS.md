@@ -34,22 +34,30 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
   movable, resizable window toggled by ` or F3 on both clients (the public
   site included), with tabs `log` (an in-memory console of the last 2,000
-  tracing events from `devtools::log_layers`, with level filter, grep and a
-  command line; the tab shows errors and warnings logged while it was hidden),
-  `perf` (frame graph, star-stream metrics), `render` (exposure readout,
-  galaxy glow, physical exposure, wireframes over bodies, galaxy reference
-  views), `state` (camera, navigation, visited star, clock) and `tools` (bug
-  report natively, star-stream benchmark in the browser). New debug readouts
-  and switches go there, not in Settings or the canvas.
-  The command line parses text with `command_line::parse` (`set_view table`,
-  `set_display option=orbits on=false`, or `UiCommand` JSON) into the same
-  `UiCommand`s as the panels; `help` and `clear` are console built-ins.
-  Commands and their errors are logged under the `console` target. Every
-  `UiCommand` needs a `command_line::USAGE` entry (tests compare it with
-  serde's variant list and parse each entry, naming any mismatch); any future terminal or script input should reuse `parse`. It uses the terminal
-  look (`terminal.rs`): a translucent black, Hyprland-like window with a light
-  grey border and text-mode checkboxes and buttons.
-  There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
+  tracing events from `devtools::log_layers`, with level filter and grep; the
+  tab shows errors and warnings logged while it was hidden), `terminal` (a
+  command line and its output), `perf` (frame graph, star-stream metrics),
+  `render` (exposure readout, galaxy glow, physical exposure, wireframes over
+  bodies, galaxy reference views), `state` (camera, navigation, visited star,
+  clock) and `tools` (bug report natively, star-stream benchmark in the
+  browser). New debug readouts and switches go there, not in Settings or the
+  canvas.
+- Typed commands live in `command_line.rs`. The terminal tab and, natively,
+  standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
+  `Typed` messages; `command_line::run` parses them with `parse`
+  (`set_view table`, `set_display option=orbits on=false`, or `UiCommand`
+  JSON) into the same `UiCommand`s as the panels, before `actions::apply`.
+  `help` is built in; `clear` empties the terminal tab and is handled by the
+  window. Echoes, help and errors are logged under `command_line::TARGET`
+  (`console`), which is what the terminal tab shows, so they also reach the
+  log file and the launching terminal. Any new input source should send
+  `Typed` too. Every `UiCommand` needs a `command_line::USAGE` entry (tests
+  compare it with serde's variant list and parse each entry, naming any
+  mismatch).
+- The debug window uses the terminal look (`terminal.rs`): a translucent
+  black, Hyprland-like window with a light grey border and text-mode
+  checkboxes and buttons.
+- There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
   `ui::Sidebar`, not `Navigation`.

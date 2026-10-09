@@ -90,20 +90,18 @@ try {
   const glow = (await state()).display.galaxy_glow;
   await page.keyboard.press('Backquote');
   await page.waitForTimeout(1500);
-  await page.mouse.click(1095, 74); // render tab.
+  await page.mouse.click(1188, 74); // render tab.
   await page.waitForTimeout(1500);
   await page.mouse.click(1060, 199); // Smooth galaxy glow (prototype).
   await page.waitForFunction(on => window.space.state().display.galaxy_glow === on, !glow, { timeout: 5000 });
   await page.screenshot({ path: resolve(root, 'data/web-debug.png') });
-  // The log tab's command line runs typed commands.
-  await page.mouse.click(966, 74); // log tab.
+  // The terminal tab focuses its command line, which runs typed commands.
+  await page.mouse.click(1040, 74); // terminal tab.
   await page.waitForTimeout(1500);
-  await page.mouse.click(1200, 627); // Command line.
-  await page.waitForTimeout(1000);
   await page.keyboard.type('set_display labels false');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.space.state().display.labels === false, null, { timeout: 5000 });
-  await page.screenshot({ path: resolve(root, 'data/web-console.png') });
+  await page.screenshot({ path: resolve(root, 'data/web-terminal.png') });
   await page.keyboard.press('Escape'); // Leave the command line so ` closes the window.
   await page.keyboard.press('Backquote');
   await page.waitForTimeout(1500);
@@ -118,7 +116,7 @@ try {
   await page.screenshot({ path: resolve(root, 'data/web-resized.png') });
   assert.equal(await page.locator('#loading').evaluate(el => el.style.display), 'none', 'A renderer error overlay appeared');
   assert.deepEqual(errors, [], 'Browser runtime errors');
-  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, galaxy/table/constellation/settings/debug/console/input/resize, private-file isolation.');
+  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, galaxy/table/constellation/settings/debug/terminal/input/resize, private-file isolation.');
 } finally {
   writeFileSync(resolve(root, 'data/browser-console.log'), [...logs, ...errors].join('\n'));
   await browser.close();

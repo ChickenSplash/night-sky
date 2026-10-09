@@ -1,9 +1,110 @@
-//! Typed commands for the debug console: `set_view table`,
-//! `set_display option=orbits on=false`, or a `UiCommand` as JSON. Arguments
-//! fill a command's fields in order, or by name; quote values with spaces, or
-//! IDs that look like numbers.
-use crate::actions::UiCommand;
+//! Typed commands: `set_view table`, `set_display option=orbits on=false`, or
+//! a `UiCommand` as JSON. Arguments fill a command's fields in order, or by
+//! name; quote values with spaces, or IDs that look like numbers.
+//!
+//! Lines come from the debug window's terminal tab or, natively, from the
+//! terminal that started the app, as `Typed` messages. `run` handles both the
+//! same way and logs its output under `TARGET`.
+use crate::actions::{self, UiCommand};
+use bevy::prelude::*;
 use serde_json::{Map, Value};
+
+/// The log target of typed commands and their output.
+pub const TARGET: &str = "console";
+
+#[derive(Message)]
+pub struct Typed {
+    pub line: String,
+    pub source: Source,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Source {
+    /// The debug window's terminal tab.
+    Window,
+    /// Standard input, natively.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Stdin,
+}
+
+pub struct CommandLinePlugin;
+
+impl Plugin for CommandLinePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<Typed>()
+            .add_systems(Update, run.before(actions::apply));
+        #[cfg(not(target_arch = "wasm32"))]
+        app.insert_resource(Stdin(std::sync::Mutex::new(read_stdin())))
+            .add_systems(Update, forward_stdin.before(run));
+    }
+}
+
+/// Runs typed lines as commands. The echo, help and errors are logged, so they
+/// reach the terminal tab, the log file, bug reports and the launching terminal.
+fn run(mut typed: MessageReader<Typed>, mut commands: MessageWriter<UiCommand>) {
+    for Typed { line, source } in typed.read() {
+        let line = line.trim();
+        info!(target: TARGET, "> {line}");
+        match line {
+            "help" => {
+                info!(target: TARGET, "help · clear · or a UiCommand as JSON");
+                for usage in &USAGE {
+                    info!(target: TARGET, "{:<27} {}", synopsis(usage), usage.about);
+                }
+            }
+            // The window clears its own terminal tab.
+            "clear" if *source == Source::Stdin => {
+                info!(target: TARGET, "clear empties the debug window's terminal tab; Ctrl+L clears this terminal");
+            }
+            line => match parse(line) {
+                Ok(command) => {
+                    commands.write(command);
+                }
+                Err(err) => warn!(target: TARGET, "{err}"),
+            },
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource)]
+struct Stdin(std::sync::Mutex<std::sync::mpsc::Receiver<String>>);
+
+/// Reads standard input on its own thread until it closes. A detached launch
+/// has none, and the thread ends at once.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_stdin() -> std::sync::mpsc::Receiver<String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("stdin commands".into())
+        .spawn(move || {
+            for line in std::io::stdin().lines().map_while(Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        warn!("Cannot read commands from the terminal: {err}");
+    }
+    receiver
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn forward_stdin(stdin: Res<Stdin>, mut typed: MessageWriter<Typed>) {
+    let Ok(receiver) = stdin.0.lock() else {
+        return;
+    };
+    typed.write_batch(
+        receiver
+            .try_iter()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| Typed {
+                line,
+                source: Source::Stdin,
+            }),
+    );
+}
 
 /// A command's name, its fields in positional order, and what it does.
 pub struct Usage {

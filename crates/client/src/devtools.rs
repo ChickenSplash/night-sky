@@ -2,7 +2,7 @@
 //! star-stream timings, rendering switches, internal state and tools. ` or F3
 //! toggles it on both clients. Drawn in the terminal look (`terminal.rs`).
 use crate::actions::{Display, GalaxyReference, UiCommand};
-use crate::command_line;
+use crate::command_line::{self, Source, Typed};
 use crate::render::{Lights, exposure_caption};
 use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
 use crate::stream::{Starfield, StreamMetrics};
@@ -132,6 +132,7 @@ impl Fields for Message {
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
     Log,
+    Terminal,
     Perf,
     Render,
     State,
@@ -139,8 +140,9 @@ enum Tab {
 }
 
 impl Tab {
-    const ALL: [(Self, &str); 5] = [
+    const ALL: [(Self, &str); 6] = [
         (Self::Log, "log"),
+        (Self::Terminal, "terminal"),
         (Self::Perf, "perf"),
         (Self::Render, "render"),
         (Self::State, "state"),
@@ -157,7 +159,11 @@ pub struct DevTools {
     grep: String,
     /// Errors and warnings logged since the log tab was last shown.
     unseen: [usize; 2],
-    /// The console's command line, and earlier commands, oldest first.
+    /// The terminal tab's output: the `console` target's log lines.
+    terminal: VecDeque<Line>,
+    /// Focus the command line on the next frame.
+    focus: bool,
+    /// The command line, and earlier commands, oldest first.
     command: String,
     history: Vec<String>,
     /// The history entry the arrow keys have recalled.
@@ -179,6 +185,8 @@ impl Default for DevTools {
             levels: [true; 4],
             grep: String::new(),
             unseen: [0; 2],
+            terminal: VecDeque::new(),
+            focus: false,
             command: String::new(),
             history: Vec::new(),
             recalled: None,
@@ -199,12 +207,17 @@ impl DevTools {
             if let Some(unseen) = self.unseen.get_mut(line.level) {
                 *unseen += 1;
             }
+            if line.target == command_line::TARGET {
+                self.terminal.push_back(line.clone());
+            }
             self.lines.push_back(line.clone());
         }
         self.seen = log.total;
         drop(log);
-        while self.lines.len() > LOG_LINES {
-            self.lines.pop_front();
+        for lines in [&mut self.lines, &mut self.terminal] {
+            while lines.len() > LOG_LINES {
+                lines.pop_front();
+            }
         }
     }
 }
@@ -228,13 +241,18 @@ type Rendering<'w> = (
 );
 
 pub fn draw(
-    interaction: (EguiContexts, MessageWriter<UiCommand>, Commands),
+    interaction: (
+        EguiContexts,
+        MessageWriter<UiCommand>,
+        MessageWriter<Typed>,
+        Commands,
+    ),
     scene: Scene,
     camera: Camera,
     rendering: Rendering,
     mut tools: Local<DevTools>,
 ) {
-    let (mut contexts, mut writer, mut commands) = interaction;
+    let (mut contexts, mut writer, mut typed, mut commands) = interaction;
     #[cfg(target_arch = "wasm32")]
     let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
@@ -258,12 +276,14 @@ pub fn draw(
         return;
     }
     let mut out = Vec::new();
+    let mut lines = Vec::new();
     let mut report = false;
     let mut open = true;
     terminal::window(ctx, "debug", &mut open, |ui| {
         ui.horizontal(|ui| {
             for (tab, label) in Tab::ALL {
                 if terminal::tab(ui, label, tools.tab == tab) {
+                    tools.focus = tab == Tab::Terminal && tools.tab != tab;
                     tools.tab = tab;
                 }
                 if tab == Tab::Log && tools.tab != Tab::Log {
@@ -276,8 +296,9 @@ pub fn draw(
         match tools.tab {
             Tab::Log => {
                 tools.unseen = [0; 2];
-                log(ui, &mut tools, &mut out);
+                log(ui, &mut tools);
             }
+            Tab::Terminal => terminal_tab(ui, &mut tools, &mut lines),
             tab => {
                 egui::ScrollArea::vertical()
                     .id_salt("debug-tab")
@@ -306,6 +327,10 @@ pub fn draw(
     #[cfg(target_arch = "wasm32")]
     let _ = report;
     writer.write_batch(out);
+    typed.write_batch(lines.into_iter().map(|line| Typed {
+        line,
+        source: Source::Window,
+    }));
 }
 
 /// Errors and warnings logged out of sight, such as `2 err 5 warn`.
@@ -326,7 +351,7 @@ fn unseen_badges(ui: &mut egui::Ui, unseen: [usize; 2]) {
     }
 }
 
-fn log(ui: &mut egui::Ui, tools: &mut DevTools, out: &mut Vec<UiCommand>) {
+fn log(ui: &mut egui::Ui, tools: &mut DevTools) {
     ui.horizontal(|ui| {
         for (i, level) in LEVELS.iter().enumerate() {
             if terminal::toggle(ui, tools.levels[i], level) {
@@ -353,12 +378,9 @@ fn log(ui: &mut egui::Ui, tools: &mut DevTools, out: &mut Vec<UiCommand>) {
     );
     let font = egui::FontId::monospace(12.0);
     let height = ui.fonts_mut(|f| f.row_height(&font));
-    // The command line takes the last row.
-    let prompt = ui.fonts_mut(|f| f.row_height(&terminal::font())) + 12.0;
     egui::ScrollArea::both()
         .id_salt("debug-log")
         .auto_shrink(false)
-        .max_height((ui.available_height() - prompt).max(height))
         .stick_to_bottom(true)
         .show_rows(ui, height, rows.len(), |ui, range| {
             ui.style_mut().spacing.item_spacing.y = 0.0;
@@ -377,18 +399,66 @@ fn log(ui: &mut egui::Ui, tools: &mut DevTools, out: &mut Vec<UiCommand>) {
                 ui.add(egui::Label::new(job).wrap_mode(egui::TextWrapMode::Extend));
             }
         });
-    ui.add_space(4.0);
-    command_line(ui, tools, out);
 }
 
-/// `> command`: Enter runs it, the arrow keys recall earlier ones.
-fn command_line(ui: &mut egui::Ui, tools: &mut DevTools, out: &mut Vec<UiCommand>) {
+/// Commands and their output, with the command line below.
+fn terminal_tab(ui: &mut egui::Ui, tools: &mut DevTools, lines: &mut Vec<String>) {
+    let font = egui::FontId::monospace(12.0);
+    let height = ui.fonts_mut(|f| f.row_height(&font));
+    let prompt = ui.fonts_mut(|f| f.row_height(&terminal::font())) + 12.0;
+    if tools.terminal.is_empty() {
+        terminal::note(
+            ui,
+            "Type help for the commands. On the desktop, the terminal that ran ./scripts/run.sh takes them too.",
+        );
+    }
+    egui::ScrollArea::both()
+        .id_salt("debug-terminal")
+        .auto_shrink(false)
+        .max_height((ui.available_height() - prompt).max(height))
+        .stick_to_bottom(true)
+        .show_rows(ui, height, tools.terminal.len(), |ui, range| {
+            ui.style_mut().spacing.item_spacing.y = 0.0;
+            for line in tools.terminal.range(range) {
+                let colour = if line.text.starts_with("> ") {
+                    terminal::CYAN
+                } else if line.level < 2 {
+                    level_colour(line.level)
+                } else {
+                    TEXT
+                };
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&line.text)
+                            .font(font.clone())
+                            .color(colour),
+                    )
+                    .wrap_mode(egui::TextWrapMode::Extend),
+                );
+            }
+        });
+    ui.add_space(4.0);
+    if let Some(line) = command_line(ui, tools) {
+        // Clearing is the window's own business; everything else runs as typed.
+        if line.trim() == "clear" {
+            tools.terminal.clear();
+        } else {
+            lines.push(line);
+        }
+    }
+}
+
+/// `> command`: Enter returns it, the arrow keys recall earlier ones.
+fn command_line(ui: &mut egui::Ui, tools: &mut DevTools) -> Option<String> {
     let response = ui
         .horizontal(|ui| {
             let width = ui.available_width() - 24.0;
             terminal::input(ui, ">", &mut tools.command, width)
         })
         .inner;
+    if std::mem::take(&mut tools.focus) {
+        response.request_focus();
+    }
     if response.has_focus() {
         // Up steps back through the history; down past the newest clears the line.
         let steps = ui.input(|i| {
@@ -412,36 +482,19 @@ fn command_line(ui: &mut egui::Ui, tools: &mut DevTools, out: &mut Vec<UiCommand
             }
         }
     }
-    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-        let line = std::mem::take(&mut tools.command);
-        tools.recalled = None;
-        if !line.trim().is_empty() {
-            if tools.history.last() != Some(&line) {
-                tools.history.push(line.clone());
-            }
-            run(&line, tools, out);
-        }
-        response.request_focus();
+    if !(response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+        return None;
     }
-}
-
-/// Runs a typed command. Commands and their errors go to the log, so they
-/// also reach the log file and bug reports.
-fn run(line: &str, tools: &mut DevTools, out: &mut Vec<UiCommand>) {
-    info!(target: "console", "> {line}");
-    match line.trim() {
-        "clear" => tools.lines.clear(),
-        "help" => {
-            info!(target: "console", "help · clear · or a UiCommand as JSON");
-            for usage in &command_line::USAGE {
-                info!(target: "console", "{:<27} {}", command_line::synopsis(usage), usage.about);
-            }
-        }
-        line => match command_line::parse(line) {
-            Ok(command) => out.push(command),
-            Err(err) => warn!(target: "console", "{err}"),
-        },
+    response.request_focus();
+    let line = std::mem::take(&mut tools.command);
+    tools.recalled = None;
+    if line.trim().is_empty() {
+        return None;
     }
+    if tools.history.last() != Some(&line) {
+        tools.history.push(line.clone());
+    }
+    Some(line)
 }
 
 fn level_colour(level: usize) -> egui::Color32 {
