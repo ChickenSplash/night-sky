@@ -36,7 +36,7 @@ pub enum UiCommand {
     /// Visits the picked star, or re-frames the visited system.
     FrameSystem,
     Follow,
-    /// Clear the selection, else go one level up the breadcrumb trail.
+    /// Reframe a tracked planet's system, else clear selection or climb the trail.
     Up,
     SetPaused {
         paused: bool,
@@ -169,7 +169,9 @@ pub fn apply(
             }
             UiCommand::Follow => nav.focus_selected(galaxy),
             UiCommand::Up => {
-                if nav.selection.is_some() {
+                if nav.following && nav.selected_planet().is_some() {
+                    nav.frame(galaxy);
+                } else if nav.selection.is_some() {
                     nav.select(None);
                 } else if let Some(next) = crate::breadcrumb::up(&nav, galaxy) {
                     queue.push_front(next);
@@ -540,5 +542,97 @@ mod tests {
         // The galaxy is the top.
         send(&mut app, vec![UiCommand::Up]);
         assert!(nav(&app).visit.is_none());
+    }
+
+    #[test]
+    fn up_from_a_tracked_planet_frames_its_system_then_climbs_to_its_parent() {
+        use space_simulation::{cells::Cell, galaxy::GalaxyModel};
+        let galaxy = space_simulation::demo_galaxy();
+        let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
+        let star = Sky::default().cell_star_at(cell, 0).unwrap();
+        let generated = crate::galaxy_nav::generated(&star.id, bevy::math::DVec3::ZERO).unwrap();
+        for visit in [
+            crate::Visit::List(0),
+            crate::Visit::Generated(Box::new(generated)),
+        ] {
+            let mut app = run(galaxy.clone(), vec![]);
+            let (page, planet_id, distance) = {
+                let nav = &mut app.world_mut().resource_mut::<Navigation>();
+                let page = match &visit {
+                    crate::Visit::List(index) => galaxy.systems[*index].pages()[1],
+                    crate::Visit::Generated(system) => system.first_page(),
+                };
+                nav.arrive(visit, page, &galaxy);
+                nav.arrived = true;
+                let system = nav.system(&galaxy).unwrap();
+                (
+                    page,
+                    system.on_page(page).next().unwrap().id.clone(),
+                    crate::presentation::fit_distance(system, page),
+                )
+            };
+            send(
+                &mut app,
+                vec![UiCommand::Inspect { planet: planet_id }, UiCommand::Follow],
+            );
+            assert!(nav(&app).following);
+            assert!(nav(&app).distance < distance);
+            app.world_mut().resource_mut::<Navigation>().fly = false;
+            send(&mut app, vec![UiCommand::Up]);
+            let current = nav(&app);
+            assert!(!current.following && current.selection.is_none());
+            assert!(current.fly);
+            assert_eq!(current.page, page);
+            assert_eq!(current.presentation_mode, PresentationMode::Simulation);
+            assert_eq!(current.target, bevy::math::DVec3::ZERO);
+            assert_eq!(current.distance, distance);
+            assert!(current.eye.is_none());
+            assert_eq!(
+                crate::breadcrumb::trail(current, &galaxy)
+                    .last()
+                    .unwrap()
+                    .level,
+                crate::breadcrumb::Level::Star
+            );
+            let has_list = current.list().is_some();
+            send(&mut app, vec![UiCommand::Up]);
+            if has_list {
+                assert_eq!(nav(&app).presentation_mode, PresentationMode::Constellation);
+                assert_eq!(nav(&app).list(), Some(0));
+            } else {
+                assert!(nav(&app).visit.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn up_from_a_selected_but_untracked_planet_only_deselects() {
+        let galaxy = space_simulation::demo_galaxy();
+        let system = &galaxy.systems[0];
+        let planet = system
+            .on_page(system.first_page())
+            .next()
+            .unwrap()
+            .id
+            .clone();
+        let mut app = run(
+            galaxy.clone(),
+            vec![
+                UiCommand::Jump {
+                    list: system.id.clone(),
+                },
+                UiCommand::SetPresentationMode {
+                    presentation_mode: PresentationMode::Simulation,
+                },
+                UiCommand::Inspect { planet },
+            ],
+        );
+        assert!(nav(&app).selected_planet().is_some() && !nav(&app).following);
+        app.world_mut().resource_mut::<Navigation>().fly = false;
+        let distance = nav(&app).distance;
+        send(&mut app, vec![UiCommand::Up]);
+        assert!(nav(&app).selection.is_none() && !nav(&app).fly);
+        assert_eq!(nav(&app).distance, distance);
+        assert_eq!(nav(&app).list(), Some(0));
     }
 }

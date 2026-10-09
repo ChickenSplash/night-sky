@@ -164,7 +164,7 @@ pub const USAGE: [Usage; 15] = [
     Usage {
         name: "up",
         fields: &[],
-        about: "Clear the selection, else go one level up the breadcrumb (Esc)",
+        about: "Reframe a tracked planet's system, else clear selection or go up (Esc)",
     },
     Usage {
         name: "set_paused",

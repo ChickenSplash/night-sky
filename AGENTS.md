@@ -43,8 +43,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   star selected elsewhere is not part of it. Each `Crumb` carries the
   `UiCommand` for its level (galaxy: `galaxy_reference face_on`; list:
   `jump`; star: `show_page`; planet: `follow`). `UiCommand::Up` (Esc, or
-  typed `up`) clears the selection first, else runs the crumb above the
-  current one. Add new levels (moons, surface sites) in `trail` only; its
+  typed `up`) reframes the current system when tracking a planet; otherwise it
+  clears the selection first, else runs the crumb above the current one.
+  Add new levels (moons, surface sites) in `trail` only; its
   colours and sizes are constants in the same file.
 - Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
   movable, resizable window toggled by ` or F3 on both clients (the public
@@ -342,8 +343,10 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   star, by stable ID) or `Selection::Planet` (an index into the visited
   system's planets). Selecting one replaces the other; set it with
   `Navigation::select`, which keeps following only from planet to planet. A
-  second click activates it: a star is visited, a planet followed. Esc clears
-  it, or with nothing selected goes up the breadcrumb. Leaving a system drops a planet selection but keeps a star.
+  second click activates it: a star is visited, a planet followed. Esc while
+  following reframes the system and clears selection; otherwise it clears
+  selection, or with nothing selected goes up the breadcrumb. Leaving a system
+  drops a planet selection but keeps a star.
   `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from
