@@ -25,7 +25,6 @@ mkdir -p web/dist
 # Replace, not overwrite: dev-web.sh links these to the source files.
 rm -rf web/dist/index.html web/dist/ui web/dist/star-worker.js
 cp web/index.html web/dist/index.html
-cp -r web/ui web/dist/ui
 cp web/star-worker.js web/dist/star-worker.js
 # Keep an uncompressed copy for clients without gzip support.
 gzip -9 -k -f web/dist/space_client_bg.wasm web/dist/space_client.js

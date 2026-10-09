@@ -295,7 +295,6 @@ impl CameraRig {
         self.shown.map_or(Quat::IDENTITY, |pose| pose.rotation)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn progress(&self) -> Option<f64> {
         self.flight.as_ref().map(Flight::progress)
     }

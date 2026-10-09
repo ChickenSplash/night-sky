@@ -1,7 +1,11 @@
 mod actions;
 #[cfg(target_arch = "wasm32")]
+mod automation;
+#[cfg(target_arch = "wasm32")]
 mod benchmark;
 mod black_hole;
+mod command_line;
+mod devtools;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
 mod flight;
@@ -15,10 +19,9 @@ mod sky;
 mod smoke;
 mod starfield;
 mod stream;
+mod terminal;
 mod ui;
 mod views;
-#[cfg(target_arch = "wasm32")]
-mod web_bridge;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -213,8 +216,7 @@ fn main() {
     app.add_plugins((
         DefaultPlugins
             .set(bevy::log::LogPlugin {
-                #[cfg(not(target_arch = "wasm32"))]
-                custom_layer: diagnostics::file_layer,
+                custom_layer: devtools::log_layers,
                 ..default()
             })
             .set(WindowPlugin {
@@ -248,6 +250,7 @@ fn main() {
         starfield::StarfieldRenderPlugin,
         glow::GlowPlugin,
         black_hole::BlackHolePlugin,
+        command_line::CommandLinePlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {
@@ -259,7 +262,6 @@ fn main() {
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
     .insert_resource(initial_nav)
-    .init_resource::<actions::PanelInsets>()
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
     .add_systems(
@@ -285,15 +287,23 @@ fn main() {
             .before(bevy_egui::EguiPostUpdateSet::EndPass)
             .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
     )
-    .add_systems(EguiPrimaryContextPass, ui::draw_ui);
+    .add_systems(
+        EguiPrimaryContextPass,
+        (ui::draw_ui, devtools::draw.after(ui::draw_ui)),
+    );
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, smoke::exercise);
     #[cfg(target_arch = "wasm32")]
     if benchmark {
-        app.insert_resource(benchmark::BenchmarkFlight::default());
+        app.insert_resource(benchmark::BenchmarkFlight::default())
+            .add_systems(Last, benchmark::record)
+            .add_systems(
+                EguiPrimaryContextPass,
+                benchmark::results_window.after(ui::draw_ui),
+            );
     }
     #[cfg(target_arch = "wasm32")]
-    web_bridge::install(&mut app);
+    automation::install(&mut app);
     app.run();
 }
 

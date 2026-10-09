@@ -14,22 +14,11 @@
     h1 { font-size: 22px; letter-spacing: .18em; font-weight: 500; }
     #status { color: #77a1ba; max-width: 600px; line-height: 1.6; }
   </style>
-  <link rel="stylesheet" href="ui/panels.css">
 </head>
 <body>
   <div id="loading"><h1>NIGHT SKY</h1><div id="status">Loading the sky…</div></div>
   <div id="app"><canvas id="space-canvas" tabindex="0"></canvas></div>
-  <div id="hud" hidden></div>
   <script type="module">
-    import { createBridge } from './ui/bridge.js';
-    // `?ui=egui` shows the egui panels instead, for debugging.
-    const htmlUi = new URLSearchParams(location.search).get('ui') !== 'egui';
-    // Created before the renderer starts, so no state event is missed.
-    const bridge = createBridge();
-    if (new URLSearchParams(location.search).get('benchmark') === 'star-flight') {
-      (await import('./ui/benchmark.js')).track();
-    }
-    window.spaceBridge = bridge;
     const canvas = document.querySelector('#space-canvas');
     const loading = document.querySelector('#loading');
     const status = document.querySelector('#status');
@@ -48,15 +37,12 @@
       const probe = document.createElement('canvas');
       if (!probe.getContext('webgl2')) throw new Error('WebGL 2 is unavailable. Enable browser hardware acceleration.');
       const wasm = await import('./space_client.js');
-      if (htmlUi) {
-        document.querySelector('#hud').hidden = false;
-        (await import('./ui/panels.js')).mount(bridge, canvas);
-      }
-      try {
-        await wasm.default();
-      } finally {
-        bridge.connect(wasm.send_command);
-      }
+      // A hook for test scripts, not a UI: the egui panels are the interface.
+      window.space = {
+        command: command => wasm.send_command(JSON.stringify(command)),
+        state: () => JSON.parse(wasm.snapshot() || 'null'),
+      };
+      await wasm.default();
       loading.style.display = 'none';
       canvas.focus();
     } catch (error) {

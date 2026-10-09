@@ -44,6 +44,10 @@ pub struct Starfield {
 #[derive(Resource)]
 pub struct StreamMetrics {
     pub caption: String,
+    /// The last one-second report, as the caption shows it.
+    pub sample: Option<StreamSample>,
+    /// Reports so far, so readers can tell a new sample from the last one.
+    pub reports: u64,
     mode: &'static str,
     pub loaded_at: HashMap<Cell, Instant>,
     pub mesh_queue: usize,
@@ -63,6 +67,8 @@ impl Default for StreamMetrics {
     fn default() -> Self {
         Self {
             caption: "STAR STREAM / MEASURING…".into(),
+            sample: None,
+            reports: 0,
             mode: "",
             loaded_at: HashMap::new(),
             mesh_queue: 0,
@@ -80,6 +86,25 @@ impl Default for StreamMetrics {
     }
 }
 
+/// One second of star-stream measurements.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct StreamSample {
+    pub mode: &'static str,
+    pub stars: usize,
+    pub cells: usize,
+    pub pending: usize,
+    pub mesh_chunks: usize,
+    pub generation_ms: f64,
+    pub generated_cells: usize,
+    pub cancelled: usize,
+    pub render_sync_ms: f64,
+    pub built_chunks: usize,
+    pub mesh_wait_avg_ms: f64,
+    pub mesh_wait_oldest_ms: f64,
+    pub frame_p95_ms: f64,
+    pub frame_p99_ms: f64,
+}
+
 impl StreamMetrics {
     fn report(&mut self, field: &Starfield) {
         let elapsed = self.started.elapsed();
@@ -93,23 +118,41 @@ impl StreamMetrics {
                 .copied()
                 .unwrap_or(0.0)
         };
+        let s = StreamSample {
+            mode: self.mode,
+            stars: field.stars,
+            cells: field.cells.len(),
+            pending: field.pending,
+            mesh_chunks: self.mesh_queue,
+            generation_ms: self.generation.as_secs_f64() * 1000.0,
+            generated_cells: self.generated,
+            cancelled: self.cancelled,
+            render_sync_ms: self.rendering.as_secs_f64() * 1000.0,
+            built_chunks: self.built_batches,
+            mesh_wait_avg_ms: self.mesh_wait_ms / self.mesh_wait_samples.max(1) as f64,
+            mesh_wait_oldest_ms: self.oldest_mesh_ms,
+            frame_p95_ms: percentile(95),
+            frame_p99_ms: percentile(99),
+        };
         self.caption = format!(
             "STAR STREAM [{}] {} stars / {} cells  ·  {} pending  ·  {} mesh chunks\nGEN {:.0} ms / {} cells  ·  {} cancelled  ·  RENDER SYNC {:.0} ms / {} chunks\nMESH WAIT {:.0} ms avg / {:.0} ms oldest  ·  FRAME P95 {:.1} / P99 {:.1} ms",
-            self.mode,
-            field.stars,
-            field.cells.len(),
-            field.pending,
-            self.mesh_queue,
-            self.generation.as_secs_f64() * 1000.0,
-            self.generated,
-            self.cancelled,
-            self.rendering.as_secs_f64() * 1000.0,
-            self.built_batches,
-            self.mesh_wait_ms / self.mesh_wait_samples.max(1) as f64,
-            self.oldest_mesh_ms,
-            percentile(95),
-            percentile(99),
+            s.mode,
+            s.stars,
+            s.cells,
+            s.pending,
+            s.mesh_chunks,
+            s.generation_ms,
+            s.generated_cells,
+            s.cancelled,
+            s.render_sync_ms,
+            s.built_chunks,
+            s.mesh_wait_avg_ms,
+            s.mesh_wait_oldest_ms,
+            s.frame_p95_ms,
+            s.frame_p99_ms,
         );
+        self.sample = Some(s);
+        self.reports += 1;
         self.started = Instant::now();
         self.generated = 0;
         self.cancelled = 0;

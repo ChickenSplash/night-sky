@@ -43,22 +43,13 @@ try {
   page.on('pageerror', error => { if (!String(error).includes('Using exceptions for control flow')) errors.push(String(error)); });
   await page.goto(base, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForFunction(() => document.querySelector('#loading').style.display === 'none', null, { timeout: 120000 });
-  await page.evaluate(() => {
-    window.glowState = null;
-    window.spaceBridge.on('state', state => { window.glowState = state; });
-  });
-  await page.waitForFunction(() => window.glowState?.display, null, { timeout: 60000 });
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const glowToggle = page.locator('#settings input[data-option="galaxy_glow"]');
-  // Realistic lighting is the default; the glow control needs it.
-  await page.evaluate(() => window.spaceBridge.command({ type: 'set_display', option: 'realistic', on: false }));
-  await page.waitForFunction(() => !window.glowState.display.realistic);
-  assert(await glowToggle.isDisabled(), 'Glow control should be disabled outside realistic lighting');
-  await page.getByRole('button', { name: 'Galaxy reference: Inside', exact: true }).click();
-  await page.waitForFunction(() => window.glowState.display.realistic);
-  assert(!(await glowToggle.isDisabled()), 'Reference view should enable realistic lighting');
-  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  const command = cmd => page.evaluate(cmd => window.spaceBridge.command(cmd), cmd);
+  await page.waitForFunction(() => window.space?.state()?.display, null, { timeout: 60000 });
+  const command = cmd => page.evaluate(cmd => window.space.command(cmd), cmd);
+  // Realistic lighting is the default; glow needs it, and reference views restore it.
+  await command({ type: 'set_display', option: 'realistic', on: false });
+  await page.waitForFunction(() => !window.space.state().display.realistic);
+  await command({ type: 'galaxy_reference', view: 'inside' });
+  await page.waitForFunction(() => window.space.state().display.realistic);
   const timings = () => page.evaluate(async () => {
     const samples = []; let previous = await new Promise(requestAnimationFrame);
     for (let i = 0; i < 120; i++) {
@@ -75,19 +66,19 @@ try {
     const images = [];
     for (const on of [false, true]) {
       await command({ type: 'set_display', option: 'galaxy_glow', on });
-      await page.waitForFunction(on => window.glowState.display.galaxy_glow === on, on);
+      await page.waitForFunction(on => window.space.state().display.galaxy_glow === on, on);
       await page.waitForTimeout(1500);
       results[view][on ? 'on' : 'off'] = await timings();
       images.push((await page.screenshot({ path: resolve(root, `data/logs/glow-${view}-${on ? 'on' : 'off'}.png`) })).toString('base64'));
     }
     // A successful command or frame-time reading does not prove a shader drew.
-    // Check central canvas pixels, excluding panels and telemetry.
+    // Check central 3D-view pixels, excluding the egui panels and captions.
     const difference = JSON.parse(execFileSync('python', ['-c', `
 import base64, io, json, sys
 from PIL import Image, ImageChops, ImageStat
 a,b=[Image.open(io.BytesIO(base64.b64decode(s))).convert('RGB') for s in json.load(sys.stdin)]
 w,h=a.size
-box=(int(w*.38),int(h*.25),int(w*.9),int(h*.75))
+box=(int(w*.25),int(h*.2),int(w*.78),int(h*.7))
 a,b=a.crop(box),b.crop(box)
 print(json.dumps({'mean_pixel_difference':sum(ImageStat.Stat(ImageChops.difference(a,b)).mean)/3,'off_mean':sum(ImageStat.Stat(a).mean)/3,'on_mean':sum(ImageStat.Stat(b).mean)/3,'viewport':[w,h]}))
 `], { input: JSON.stringify(images), encoding: 'utf8' }));
@@ -99,7 +90,7 @@ print(json.dumps({'mean_pixel_difference':sum(ImageStat.Stat(ImageChops.differen
   console.log(JSON.stringify(results, null, 2));
 } finally {
   writeFileSync(resolve(root, 'data/logs/galaxy-glow-test.json'), JSON.stringify({ environment: headed ? 'Chromium / Wayland / GPU' : 'SwiftShader (not a GPU benchmark)', results, errors, logs }, null, 2));
-  if (headed) await browser.contexts()[0].pages()[0].evaluate(() => window.spaceBridge.command({ type: 'galaxy_reference', view: 'inside' })).catch(() => {});
+  if (headed) await browser.contexts()[0].pages()[0].evaluate(() => window.space.command({ type: 'galaxy_reference', view: 'inside' })).catch(() => {});
   if (headed) {
     const session = await browser.newBrowserCDPSession();
     await session.send('Browser.close').catch(() => {});
