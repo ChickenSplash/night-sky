@@ -4,6 +4,7 @@ mod automation;
 #[cfg(target_arch = "wasm32")]
 mod benchmark;
 mod black_hole;
+mod breadcrumb;
 mod command_line;
 mod devtools;
 #[cfg(not(target_arch = "wasm32"))]

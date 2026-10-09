@@ -655,6 +655,10 @@ fn state(
         "debug-navigation",
         &[
             (
+                "trail",
+                crate::breadcrumb::text(&crate::breadcrumb::trail(nav, galaxy)),
+            ),
+            (
                 "location",
                 star(nav.location(galaxy)).unwrap_or_else(|| "open space".into()),
             ),

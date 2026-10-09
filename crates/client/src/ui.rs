@@ -162,6 +162,12 @@ pub fn draw_ui(
         &velocity,
         &mut out,
     );
+    crate::breadcrumb::show(
+        ctx,
+        rect,
+        &crate::breadcrumb::trail(&nav, &universe.0),
+        &mut out,
+    );
     writer.write_batch(out);
 }
 

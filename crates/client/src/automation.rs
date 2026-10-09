@@ -48,6 +48,10 @@ fn publish(
     let state = serde_json::json!({
         "lists": universe.0.systems.len(),
         "list": nav.list().and_then(|i| Some(universe.0.systems.get(i)?.id.as_str())),
+        "trail": crate::breadcrumb::trail(&nav, &universe.0)
+            .into_iter()
+            .map(|crumb| crumb.label)
+            .collect::<Vec<_>>(),
         "page": nav.page,
         "view": nav.view,
         "paused": clock.0.paused,

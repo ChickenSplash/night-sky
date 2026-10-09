@@ -36,6 +36,8 @@ pub enum UiCommand {
     /// Visits the picked star, or re-frames the visited system.
     FrameSystem,
     Follow,
+    /// Clear the selection, else go one level up the breadcrumb trail.
+    Up,
     SetPaused {
         paused: bool,
     },
@@ -122,8 +124,9 @@ pub fn apply(
 ) {
     let galaxy = &universe.0;
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
-    for command in commands.read() {
-        match command {
+    let mut queue: std::collections::VecDeque<_> = commands.read().cloned().collect();
+    while let Some(command) = queue.pop_front() {
+        match &command {
             UiCommand::PickCentre => {
                 let star = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
                 nav.select(star.map(Selection::Star));
@@ -163,6 +166,13 @@ pub fn apply(
                 }
             }
             UiCommand::Follow => nav.focus_selected(galaxy),
+            UiCommand::Up => {
+                if nav.selection.is_some() {
+                    nav.select(None);
+                } else if let Some(next) = crate::breadcrumb::up(&nav, galaxy) {
+                    queue.push_front(next);
+                }
+            }
             UiCommand::SetPaused { paused } => clock.0.paused = *paused,
             UiCommand::SetRate { rate } => clock.0.rate = *rate,
             UiCommand::SetDisplay { option, on } => match option {
@@ -491,5 +501,23 @@ mod tests {
             assert!(nav.visit.is_none() && nav.selection.is_none());
             assert!(nav.realistic && nav.fly);
         }
+    }
+
+    #[test]
+    fn up_clears_the_selection_first_then_climbs_the_trail() {
+        let galaxy = space_simulation::demo_galaxy();
+        let id = galaxy.systems[0].id.clone();
+        let mut app = run(galaxy, vec![UiCommand::Jump { list: id }]);
+        assert!(nav(&app).selection.is_some());
+        send(&mut app, vec![UiCommand::Up]);
+        assert!(nav(&app).selection.is_none());
+        assert_eq!(nav(&app).list(), Some(0));
+        // From the constellation, up is the galaxy seen from above.
+        send(&mut app, vec![UiCommand::Up]);
+        assert!(nav(&app).visit.is_none());
+        assert!(nav(&app).distance > 10_000.0 * space_simulation::LY_METRES);
+        // The galaxy is the top.
+        send(&mut app, vec![UiCommand::Up]);
+        assert!(nav(&app).visit.is_none());
     }
 }

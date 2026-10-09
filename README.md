@@ -67,6 +67,7 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Move faster | Left Shift |
 | Pause/resume orbital motion | Space |
 | Clear selection and stop tracking | Escape |
+| Go up a level (star, list, then the whole galaxy) | Escape with nothing selected, or click the breadcrumb at the top left |
 | Inspect task | Click planet/marker or task index |
 | Track planet at close range | **Follow this planet** |
 | Return to orbital view | **Orbit** or **Frame orbital system** |

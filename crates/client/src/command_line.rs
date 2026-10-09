@@ -115,7 +115,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 14] = [
+pub const USAGE: [Usage; 15] = [
     Usage {
         name: "pick_centre",
         fields: &[],
@@ -160,6 +160,11 @@ pub const USAGE: [Usage; 14] = [
         name: "follow",
         fields: &[],
         about: "Follow the selected planet",
+    },
+    Usage {
+        name: "up",
+        fields: &[],
+        about: "Clear the selection, else go one level up the breadcrumb (Esc)",
     },
     Usage {
         name: "set_paused",

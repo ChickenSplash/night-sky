@@ -30,7 +30,19 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - The browser is the main target; native is a dev fallback. Both use the same
   egui interface (`ui.rs`), drawn in the same frame as the scene: a left
   sidebar of collapsible sections, time controls, a plain egui Settings window
-  (opened from the sidebar's ⚙ Settings) and canvas captions, labels and clicks.
+  (opened from the sidebar's ⚙ Settings), a breadcrumb and canvas captions,
+  labels and clicks.
+- The breadcrumb (`breadcrumb.rs`) sits at the top left of the 3D view, under
+  any window. `breadcrumb::trail` builds it each frame from `Navigation`:
+  `Milky Way`, the open list, the star the camera is at (`location`; a list's
+  stars are `System n` as the page controls number them, others their
+  catalogue name), then a selected planet of that star (its designation). A
+  star selected elsewhere is not part of it. Each `Crumb` carries the
+  `UiCommand` for its level (galaxy: `galaxy_reference face_on`; list:
+  `jump`; star: `show_page`; planet: `follow`). `UiCommand::Up` (Esc, or
+  typed `up`) clears the selection first, else runs the crumb above the
+  current one. Add new levels (moons, surface sites) in `trail` only; its
+  colours and sizes are constants in the same file.
 - Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
   movable, resizable window toggled by ` or F3 on both clients (the public
   site included), with tabs `log` (an in-memory console of the last 2,000
@@ -321,7 +333,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   system's planets). Selecting one replaces the other; set it with
   `Navigation::select`, which keeps following only from planet to planet. A
   second click activates it: a star is visited, a planet followed. Esc clears
-  it. Leaving a system drops a planet selection but keeps a star.
+  it, or with nothing selected goes up the breadcrumb. Leaving a system drops a planet selection but keeps a star.
   `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from

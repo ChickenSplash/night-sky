@@ -367,6 +367,7 @@ pub fn controls(
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     mut camera_motion: ResMut<CameraMotion>,
+    mut ui: MessageWriter<crate::actions::UiCommand>,
 ) {
     camera_motion.orbiting = false;
     camera_motion.travel_metres = DVec3::ZERO;
@@ -428,7 +429,7 @@ pub fn controls(
             clock.0.paused = !clock.0.paused;
         }
         if keys.just_pressed(KeyCode::Escape) {
-            nav.select(None);
+            ui.write(crate::actions::UiCommand::Up);
         }
         let axis = |positive, negative| {
             f64::from(keys.pressed(positive) as u8) - f64::from(keys.pressed(negative) as u8)
