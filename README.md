@@ -287,11 +287,17 @@ Debugging has its own window, toggled with `` ` `` or F3 on both clients:
 
 | Tab | Contents |
 | --- | --- |
-| `log` | The last 2,000 client log lines, with level filter and grep |
+| `log` | The last 2,000 client log lines, with level filter, grep and a command line. Its tab shows errors and warnings you haven't seen |
 | `perf` | Frame time graph, star-stream metrics |
 | `render` | Exposure readout, galaxy glow, physical exposure, wireframes over bodies, galaxy reference views |
 | `state` | Camera, navigation, visited star and clock values |
 | `tools` | Save bug report (native), star-stream benchmark (browser) |
+
+The command line runs any panel action by name: `help` lists them, for
+example `set_view table`, `set_display orbits false` or
+`galaxy_reference face_on`. Arguments go in order or as `field=value`; quote
+values with spaces. Up and down recall earlier commands, and `clear` empties
+the log.
 
 ## Next milestones
 

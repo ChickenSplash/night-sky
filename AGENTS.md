@@ -34,12 +34,19 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
   movable, resizable window toggled by ` or F3 on both clients (the public
   site included), with tabs `log` (an in-memory console of the last 2,000
-  tracing events from `devtools::log_layers`, with level filter and grep),
+  tracing events from `devtools::log_layers`, with level filter, grep and a
+  command line; the tab shows errors and warnings logged while it was hidden),
   `perf` (frame graph, star-stream metrics), `render` (exposure readout,
   galaxy glow, physical exposure, wireframes over bodies, galaxy reference
   views), `state` (camera, navigation, visited star, clock) and `tools` (bug
   report natively, star-stream benchmark in the browser). New debug readouts
-  and switches go there, not in Settings or the canvas. It uses the terminal
+  and switches go there, not in Settings or the canvas.
+  The command line parses text with `command_line::parse` (`set_view table`,
+  `set_display option=orbits on=false`, or `UiCommand` JSON) into the same
+  `UiCommand`s as the panels; `help` and `clear` are console built-ins.
+  Commands and their errors are logged under the `console` target. Every
+  `UiCommand` needs a `command_line::USAGE` entry (a test's exhaustive match
+  enforces it); any future terminal or script input should reuse `parse`. It uses the terminal
   look (`terminal.rs`): a translucent black, Hyprland-like window with a light
   grey border and text-mode checkboxes and buttons.
   There is no HTML UI; the HTML/CEF prototypes were abandoned (branch

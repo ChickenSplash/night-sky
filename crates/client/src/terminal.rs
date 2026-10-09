@@ -218,7 +218,7 @@ pub fn tab(ui: &mut Ui, label: &str, open: bool) -> bool {
 }
 
 /// `grep text`: a one-line text field, underlined.
-pub fn input(ui: &mut Ui, prompt: &str, text: &mut String, width: f32) {
+pub fn input(ui: &mut Ui, prompt: &str, text: &mut String, width: f32) -> egui::Response {
     ui.label(egui::RichText::new(prompt).font(font()).color(DIM));
     let response = ui.add(
         egui::TextEdit::singleline(text)
@@ -237,6 +237,7 @@ pub fn input(ui: &mut Ui, prompt: &str, text: &mut String, width: f32) {
         response.rect.bottom(),
         (1.0, colour),
     );
+    response
 }
 
 /// Labels and values in two aligned columns.
