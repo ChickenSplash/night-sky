@@ -361,7 +361,7 @@ impl Panels<'_> {
             ),
         );
         let selected_list = nav.list();
-        let selected = nav.selected;
+        let selected = nav.selected_planet();
         // Searching still scans names, but egui only builds widgets for the
         // visible rows. A list can hold over a thousand tasks.
         egui::ScrollArea::vertical()
@@ -572,7 +572,7 @@ impl Panels<'_> {
             muted(ui, "Visit a system to inspect its planets.");
             return;
         };
-        if let Some(planet) = nav.selected.and_then(|i| system.planets.get(i)) {
+        if let Some(planet) = nav.selected_planet().and_then(|i| system.planets.get(i)) {
             heading(
                 ui,
                 if planet.task.is_some() {
@@ -817,7 +817,7 @@ fn facts<const N: usize>(ui: &mut egui::Ui, id: &str, rows: [(&str, String); N])
 
 /// The selected star, from anywhere in the galaxy, and how to visit it.
 fn star_controls(ui: &mut egui::Ui, galaxy: &Galaxy, nav: &Navigation, out: &mut Vec<UiCommand>) {
-    if let Some(star) = &nav.picked {
+    if let Some(star) = nav.selected_star() {
         ui.label(format!(
             "Selected {}",
             crate::galaxy_nav::label(galaxy, &star.id)
@@ -1035,7 +1035,7 @@ fn canvas_overlay(
         .input(|i| i.pointer.interact_pos())
         .filter(|_| !ctx.is_pointer_over_area());
     let mut click = pointer.is_some() && ctx.input(|i| i.pointer.primary_clicked());
-    if let Some(star) = &nav.picked {
+    if let Some(star) = nav.selected_star() {
         let camera =
             rig.rotation().inverse() * (star.position_ly - rig.galactic_ly(pose)).as_vec3();
         if let Some(point) =
@@ -1071,7 +1071,7 @@ fn canvas_overlay(
         let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
         let radius = (marker.radius / scale).max(7.0);
         let hovered = pointer.is_some_and(|p| rect.contains(p) && p.distance(point) < radius + 8.0);
-        let selected = nav.selected == Some(marker.planet);
+        let selected = nav.selected_planet() == Some(marker.planet);
         if selected || hovered {
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }

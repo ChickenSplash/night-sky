@@ -196,7 +196,9 @@ fn rebase(
     nav.eye = Some(new_eye);
     nav.visit = next;
     nav.page = page;
-    nav.selected = None;
+    if nav.selected_planet().is_some() {
+        nav.selection = None;
+    }
     nav.following = false;
 }
 
@@ -419,18 +421,17 @@ pub fn controls(
     let mut wanted = Vec4::ZERO;
     if !keyboard {
         if keys.just_pressed(KeyCode::KeyC) {
-            nav.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
+            let star = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
+            nav.select(star.map(crate::Selection::Star));
         }
         if keys.just_pressed(KeyCode::Enter) {
-            crate::galaxy_nav::visit_picked(&mut nav, &universe.0);
+            crate::galaxy_nav::visit_selected(&mut nav, &universe.0);
         }
         if keys.just_pressed(KeyCode::Space) {
             clock.0.paused = !clock.0.paused;
         }
         if keys.just_pressed(KeyCode::Escape) {
-            nav.picked = None;
-            nav.selected = None;
-            nav.following = false;
+            nav.select(None);
         }
         let axis = |positive, negative| {
             f64::from(keys.pressed(positive) as u8) - f64::from(keys.pressed(negative) as u8)
@@ -541,7 +542,7 @@ pub fn place_camera(
     }
     if nav.following
         && let Some(followed) = nav.system(&universe.0).and_then(|system| {
-            let planet = system.planets.get(nav.selected?)?;
+            let planet = system.planets.get(nav.selected_planet()?)?;
             Some(DVec3::from_array(position(
                 &planet.orbit,
                 system.mass(planet.page()),
@@ -575,10 +576,10 @@ pub fn place_camera(
             flight.shift(offset);
         }
     }
-    let retarget = nav.following && nav.selected != rig.selected;
+    let retarget = nav.following && nav.selected_planet() != rig.selected;
     let star_jump = rig.shown.is_some() && frame != rig.frame_ly;
     rig.frame_ly = frame;
-    rig.selected = nav.selected;
+    rig.selected = nav.selected_planet();
     // Page jumps, list jumps, task focus and preset changes all use this flight.
     if fly || retarget {
         rig.flight = Flight::new(shown, desired);
@@ -1161,7 +1162,7 @@ pub fn draw(
             .star(pose.page)
             .map_or(1.0, |s| photometry.visual_luminosity(s));
         let followed = nav
-            .selected
+            .selected_planet()
             .filter(|_| nav.following)
             .and_then(|i| system.planets.get(i))
             .filter(|p| p.page() == pose.page)

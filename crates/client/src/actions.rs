@@ -1,7 +1,7 @@
 //! Every panel action goes through `UiCommand`, whether it comes from egui or a
 //! browser test script (`automation.rs`). Lists and tasks are named by ID, so a
 //! data refresh that reorders them cannot redirect a click.
-use crate::{Clock, Navigation, Universe, views::View};
+use crate::{Clock, Navigation, Selection, Universe, views::View};
 use bevy::prelude::*;
 use serde::Deserialize;
 
@@ -94,8 +94,7 @@ fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
     };
     nav.visit = None;
     nav.page = 0;
-    nav.selected = None;
-    nav.picked = None;
+    nav.selection = None;
     nav.following = false;
     nav.view = View::Orbit;
     // Keep the normal zoom range even for an external reference eye. Otherwise
@@ -126,13 +125,14 @@ pub fn apply(
     for command in commands.read() {
         match command {
             UiCommand::PickCentre => {
-                nav.picked = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
+                let star = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
+                nav.select(star.map(Selection::Star));
             }
             UiCommand::PickStar { id } => {
-                if nav.picked.as_ref().is_some_and(|star| star.id == *id) {
-                    crate::galaxy_nav::visit_picked(&mut nav, galaxy);
-                } else if let Some(picked) = crate::galaxy_nav::picked_id(&field, id) {
-                    nav.picked = Some(picked);
+                if nav.selected_star().is_some_and(|star| star.id == *id) {
+                    crate::galaxy_nav::visit_selected(&mut nav, galaxy);
+                } else if let Some(star) = crate::galaxy_nav::picked_id(&field, id) {
+                    nav.select(Some(Selection::Star(star)));
                 }
             }
             UiCommand::Jump { list: id } => {
@@ -152,13 +152,13 @@ pub fn apply(
                     .system(galaxy)
                     .and_then(|s| s.planets.iter().position(|p| &p.id == planet))
                 {
-                    nav.selected = Some(index);
+                    nav.select(Some(Selection::Planet(index)));
                 }
             }
             UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
             UiCommand::SetView { view } => nav.preset(*view, galaxy),
             UiCommand::FrameSystem => {
-                if !crate::galaxy_nav::visit_picked(&mut nav, galaxy) {
+                if !crate::galaxy_nav::visit_selected(&mut nav, galaxy) {
                     nav.frame(galaxy);
                 }
             }
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(nav(&app).view, View::Orbit);
         stream(&mut app, &id);
         send(&mut app, vec![UiCommand::PickStar { id: id.clone() }]);
-        assert_eq!(nav(&app).picked.as_ref().unwrap().id, id);
+        assert_eq!(nav(&app).selected_star().unwrap().id, id);
         assert!(nav(&app).visit.is_none());
         send(&mut app, vec![UiCommand::PickStar { id: id.clone() }]);
         let universe = &app.world().resource::<Universe>().0;
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(nav(&app).list(), Some(1));
         assert_eq!(nav(&app).page, 1);
         assert_eq!(nav(&app).view, View::Orbit);
-        assert_eq!(nav(&app).picked, None);
+        assert_eq!(nav(&app).selection, None);
     }
 
     #[test]
@@ -350,7 +350,7 @@ mod tests {
         let universe = app.world().resource::<Universe>();
         assert_eq!(nav.list(), Some(expected));
         let selected = nav
-            .selected
+            .selected_planet()
             .map(|i| &universe.0.systems[expected].planets[i]);
         assert_eq!(
             selected.and_then(|p| Some(&p.task.as_ref()?.id)),
@@ -378,8 +378,7 @@ mod tests {
         );
         let nav = nav(&app);
         assert!(nav.visit.is_none());
-        assert_eq!(nav.selected, None);
-        assert_eq!(nav.picked, None);
+        assert_eq!(nav.selection, None);
     }
 
     #[test]
@@ -402,7 +401,10 @@ mod tests {
             assert_eq!(nav.list(), Some(1));
             assert_eq!(nav.page, first);
             assert_eq!(nav.view, View::Constellation);
-            assert_eq!(nav.picked, page_pick(&galaxy.systems[1], first));
+            assert_eq!(
+                nav.selected_star(),
+                page_pick(&galaxy.systems[1], first).as_ref()
+            );
             assert!(nav.fly);
         }
     }
@@ -425,10 +427,11 @@ mod tests {
             assert_eq!(nav.page, 1);
             assert_eq!(nav.view, start);
             assert_eq!(
-                nav.picked,
+                nav.selection,
                 (start == View::Constellation)
                     .then(|| page_pick(&galaxy.systems[0], 1))
                     .flatten()
+                    .map(Selection::Star)
             );
         }
     }
@@ -478,14 +481,14 @@ mod tests {
         ] {
             let mut nav = Navigation {
                 visit: Some(crate::Visit::List(0)),
-                selected: Some(0),
+                selection: Some(Selection::Planet(0)),
                 ..default()
             };
             galaxy_reference(&mut nav, view);
             let eye = nav.eye.unwrap() / PC_METRES + home;
             let direction = (nav.rotation * Vec3::NEG_Z).as_dvec3();
             assert!(direction.dot(-eye.normalize()) > 0.999999);
-            assert!(nav.visit.is_none() && nav.selected.is_none());
+            assert!(nav.visit.is_none() && nav.selection.is_none());
             assert!(nav.realistic && nav.fly);
         }
     }

@@ -8,7 +8,7 @@ use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
 use crate::stream::{Starfield, StreamMetrics};
 use crate::terminal::{self, DIM, TEXT};
 use crate::views::View;
-use crate::{Clock, Navigation, Universe, Visit};
+use crate::{Clock, Navigation, Selection, Universe, Visit};
 use bevy::log::tracing::{
     Event, Subscriber,
     field::{Field, Visit as Fields},
@@ -661,13 +661,16 @@ fn state(
             ("view", format!("{:?}", nav.view)),
             (
                 "selected",
-                nav.selected
-                    .and_then(|i| system?.planets.get(i))
-                    .map_or("none".into(), |p| p.id.clone()),
-            ),
-            (
-                "picked",
-                nav.picked.as_ref().map_or("none".into(), |s| s.id.clone()),
+                match &nav.selection {
+                    None => "none".into(),
+                    Some(Selection::Star(star)) => format!("star {}", star.id),
+                    Some(Selection::Planet(i)) => format!(
+                        "planet {}",
+                        system
+                            .and_then(|s| s.planets.get(*i))
+                            .map_or("?", |p| p.id.as_str())
+                    ),
+                },
             ),
         ],
     );
@@ -751,13 +754,13 @@ fn save_bug_report(
     let (galaxy, clock) = (&universe.0, &clock.0);
     let system = nav.system(galaxy);
     let state = format!(
-        "System ID: {}\nList: {}\nPage: {}\nView: {:?}\nFollowing: {}\nSelected task index: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
+        "System ID: {}\nList: {}\nPage: {}\nView: {:?}\nFollowing: {}\nSelection: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
         system.map_or("none", |s| s.id.as_str()),
         nav.list().is_some(),
         nav.page,
         nav.view,
         nav.following,
-        nav.selected,
+        nav.selection,
         galaxy.source,
         galaxy.systems.len(),
         galaxy

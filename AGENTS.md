@@ -303,8 +303,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - The render scale tightens near any loaded star within 20 ly even before its
   system activates, independently of the selected camera range. Keep the
   visited body's physical-proximity fallback when its cell has not loaded yet.
-- `Navigation::picked` is one selected star, by stable ID. `galaxy_nav.rs`
-  picks and visits it: a star with a list page (`galaxy_nav::mapped`) opens
+- `Navigation::selection` is the one clicked object: `Selection::Star` (any
+  star, by stable ID) or `Selection::Planet` (an index into the visited
+  system's planets). Selecting one replaces the other; set it with
+  `Navigation::select`, which keeps following only from planet to planet. A
+  second click activates it: a star is visited, a planet followed. Esc clears
+  it. Leaving a system drops a planet selection but keeps a star.
+  `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from
   loaded, visible points only, and only on click, never every frame. Click

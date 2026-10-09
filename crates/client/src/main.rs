@@ -45,6 +45,16 @@ pub enum Visit {
     Generated(Box<StarSystem>),
 }
 
+/// The one clicked object. A second click activates it: a star is visited, a
+/// planet followed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Selection {
+    /// Any star in the galaxy, by stable ID.
+    Star(galaxy_nav::PickedStar),
+    /// Index into the visited system's planets.
+    Planet(usize),
+}
+
 #[derive(Resource)]
 pub struct Navigation {
     pub page: u32,
@@ -52,10 +62,9 @@ pub struct Navigation {
     pub viewport: Option<bevy::camera::Viewport>,
     /// `None` in open space, where the camera is relative to home.
     pub visit: Option<Visit>,
-    pub selected: Option<usize>,
-    /// Selected star, by click, F or page controls. Picking never moves the
-    /// camera; visiting flies there.
-    pub picked: Option<galaxy_nav::PickedStar>,
+    /// Set by clicks, C or page controls. Selecting never moves the camera;
+    /// visiting a star or following a planet does.
+    pub selection: Option<Selection>,
     pub following: bool,
     pub target: DVec3,
     /// Authoritative free-flight eye in the current page's local frame.
@@ -95,8 +104,7 @@ impl Default for Navigation {
             view: views::View::Orbit,
             viewport: None,
             visit: None,
-            selected: None,
-            picked: None,
+            selection: None,
             following: false,
             target: DVec3::ZERO,
             eye: None,
@@ -142,6 +150,28 @@ impl Navigation {
         }
     }
 
+    pub fn selected_star(&self) -> Option<&galaxy_nav::PickedStar> {
+        match &self.selection {
+            Some(Selection::Star(star)) => Some(star),
+            _ => None,
+        }
+    }
+
+    pub fn selected_planet(&self) -> Option<usize> {
+        match self.selection {
+            Some(Selection::Planet(index)) => Some(index),
+            _ => None,
+        }
+    }
+
+    /// Replace the selection. Following carries over from planet to planet only.
+    pub fn select(&mut self, selection: Option<Selection>) {
+        if !matches!(selection, Some(Selection::Planet(_))) {
+            self.following = false;
+        }
+        self.selection = selection;
+    }
+
     /// The visited list, if the camera is at one of its pages.
     pub fn list(&self) -> Option<usize> {
         match self.visit {
@@ -168,8 +198,7 @@ impl Navigation {
         self.fly = true;
         self.view = views::View::Orbit;
         self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);
-        self.selected = None;
-        self.picked = None;
+        self.selection = None;
         self.following = false;
         self.target = DVec3::ZERO;
         self.eye = None;
@@ -183,10 +212,10 @@ impl Navigation {
             return;
         };
         let first_page = system.first_page();
-        let picked = galaxy_nav::page_pick(system, first_page);
+        let star = galaxy_nav::page_pick(system, first_page);
         self.arrive(Visit::List(index), first_page, lists);
         self.preset(views::View::Constellation, lists);
-        self.picked = picked;
+        self.selection = star.map(Selection::Star);
     }
 }
 
@@ -340,8 +369,8 @@ fn follow_visited_star(nav: &mut Navigation, old: &Galaxy, new: &Galaxy) {
     let Some(star) = system.page_star(nav.page).cloned() else {
         return;
     };
-    let selected = nav
-        .selected
+    let planet = nav
+        .selected_planet()
         .and_then(|i| system.planets.get(i))
         .map(|p| p.id.clone());
     if let Some((list, page)) = galaxy_nav::mapped(new, &star.id) {
@@ -352,13 +381,13 @@ fn follow_visited_star(nav: &mut Navigation, old: &Galaxy, new: &Galaxy) {
             .map(|system| Visit::Generated(Box::new(system)));
         nav.page = 0;
     }
-    nav.selected = selected.and_then(|id| {
-        nav.system(new)?
-            .planets
-            .iter()
-            .position(|planet| planet.id == id)
-    });
-    if nav.selected.is_none() {
+    if let Some(id) = planet {
+        nav.selection = nav
+            .system(new)
+            .and_then(|system| system.planets.iter().position(|planet| planet.id == id))
+            .map(Selection::Planet);
+    }
+    if nav.selected_planet().is_none() {
         nav.following = false;
     }
 }

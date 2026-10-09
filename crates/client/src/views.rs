@@ -1,5 +1,5 @@
 //! Presentation layouts never modify orbital elements or simulation time.
-use crate::Navigation;
+use crate::{Navigation, Selection};
 use bevy::math::{DVec3, Quat};
 use space_shared::{Galaxy, Planet, StarSystem};
 use space_simulation::{AU_METRES, LY_METRES, SUN_RADIUS_METRES};
@@ -83,7 +83,7 @@ impl Navigation {
     pub fn focus_selected(&mut self, lists: &Galaxy) {
         let Some((page, radius_km)) = self
             .system(lists)
-            .and_then(|s| s.planets.get(self.selected?))
+            .and_then(|s| s.planets.get(self.selected_planet()?))
             .map(|planet| (planet.page(), planet.radius_km))
         else {
             return;
@@ -107,9 +107,8 @@ impl Navigation {
             return;
         };
         if self.view == View::Constellation {
-            self.picked = crate::galaxy_nav::page_pick(system, page);
+            self.select(crate::galaxy_nav::page_pick(system, page).map(Selection::Star));
             self.page = page;
-            self.selected = None;
             return;
         }
         let view = self.view;
@@ -129,7 +128,7 @@ impl Navigation {
         } else {
             view
         };
-        self.selected = Some(task);
+        self.selection = Some(Selection::Planet(task));
     }
 
     pub fn preset(&mut self, view: View, lists: &Galaxy) {
@@ -142,8 +141,8 @@ impl Navigation {
             self.following = false;
             self.fly = true;
             self.view = view;
-            if view != View::Constellation {
-                self.picked = None;
+            if view != View::Constellation && self.selected_star().is_some() {
+                self.selection = None;
             }
         }
     }
@@ -231,7 +230,10 @@ mod tests {
             nav.show_page(page, &galaxy);
             nav.fit_preset(&galaxy);
             assert_eq!(nav.view, View::Constellation);
-            assert_eq!(nav.picked, crate::galaxy_nav::page_pick(system, page));
+            assert_eq!(
+                nav.selected_star(),
+                crate::galaxy_nav::page_pick(system, page).as_ref()
+            );
             assert_eq!(nav.frame_page(system), frame);
             assert_eq!((nav.target, nav.distance), (target, distance));
             assert_eq!(nav.rotation, rotated);
@@ -372,12 +374,28 @@ mod tests {
         let page = galaxy.systems[0].planets[42].page;
         assert!(page > 0);
         assert_eq!(nav.page, page);
-        assert_eq!(nav.selected, Some(42));
+        assert_eq!(nav.selected_planet(), Some(42));
         assert!(nav.view == View::Table);
         nav.fit_preset(&galaxy);
         assert!(nav.distance.is_finite());
         nav.preset(View::Orbit, &galaxy);
         assert_eq!(nav.page, page);
+        assert!(!nav.following);
+    }
+
+    #[test]
+    fn one_selection_replaces_the_other_and_following_stays_with_planets() {
+        let galaxy = space_simulation::demo_galaxy();
+        let mut nav = Navigation::default();
+        nav.select_list(0, &galaxy);
+        assert!(nav.selected_star().is_some());
+        nav.select(Some(Selection::Planet(0)));
+        assert_eq!(nav.selected_star(), None);
+        nav.following = true;
+        nav.select(Some(Selection::Planet(1)));
+        assert!(nav.following);
+        nav.select(crate::galaxy_nav::page_pick(&galaxy.systems[0], 0).map(Selection::Star));
+        assert_eq!(nav.selected_planet(), None);
         assert!(!nav.following);
     }
 }

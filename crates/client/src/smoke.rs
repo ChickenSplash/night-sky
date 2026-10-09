@@ -79,7 +79,7 @@ pub fn exercise(
             capture(&mut commands, "system");
         }
         1 => {
-            nav.selected = Some(0);
+            nav.selection = Some(crate::Selection::Planet(0));
             nav.focus_selected(&universe.0);
         }
         2 => capture(&mut commands, "planet"),
@@ -146,7 +146,7 @@ pub fn exercise(
             nav.physical = false;
             nav.wireframe = true;
             nav.exaggerate = true;
-            nav.selected = Some(0);
+            nav.selection = Some(crate::Selection::Planet(0));
             nav.focus_selected(&universe.0);
         }
         25 => capture(&mut commands, "realistic-planet"),

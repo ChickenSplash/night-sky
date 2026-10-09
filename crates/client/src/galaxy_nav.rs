@@ -197,10 +197,10 @@ pub fn generated(id: &str, position_ly: DVec3) -> Option<StarSystem> {
     })
 }
 
-/// Fly to the picked star: its list page when it has one, or its generated
+/// Fly to the selected star: its list page when it has one, or its generated
 /// system.
-pub fn visit_picked(nav: &mut Navigation, lists: &Galaxy) -> bool {
-    let Some(picked) = nav.picked.clone() else {
+pub fn visit_selected(nav: &mut Navigation, lists: &Galaxy) -> bool {
+    let Some(picked) = nav.selected_star().cloned() else {
         return false;
     };
     if let Some((list, page)) = mapped(lists, &picked.id) {
@@ -216,6 +216,7 @@ pub fn visit_picked(nav: &mut Navigation, lists: &Galaxy) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Selection;
     use space_simulation::{
         cells::{Cell, Sky},
         galaxy::Component,
@@ -350,10 +351,10 @@ mod tests {
         };
         let lists = lists(vec![]);
         let mut nav = Navigation {
-            picked: Some(picked.clone()),
+            selection: Some(Selection::Star(picked.clone())),
             ..default()
         };
-        assert!(visit_picked(&mut nav, &lists));
+        assert!(visit_selected(&mut nav, &lists));
         let first = nav.system(&lists).cloned().unwrap();
         assert!(!first.planets.is_empty());
         assert!(first.planets.iter().all(|p| p.task.is_none()));
@@ -362,9 +363,9 @@ mod tests {
             first.planets[0].designation,
             planet_designation(&picked.id, 0)
         );
-        assert_eq!(nav.picked, None);
-        nav.picked = Some(picked);
-        assert!(visit_picked(&mut nav, &lists));
+        assert_eq!(nav.selection, None);
+        nav.selection = Some(Selection::Star(picked));
+        assert!(visit_selected(&mut nav, &lists));
         assert_eq!(nav.system(&lists), Some(&first));
     }
 
@@ -386,14 +387,14 @@ mod tests {
         space_simulation::place(&mut list, vec![task]);
         let lists = lists(vec![list.clone()]);
         let mut nav = Navigation {
-            picked: page_pick(&list, 0),
+            selection: page_pick(&list, 0).map(Selection::Star),
             ..default()
         };
         assert_eq!(
             describe(&lists, &star.id),
             (list.name.clone(), Some((0, 1)))
         );
-        assert!(visit_picked(&mut nav, &lists));
+        assert!(visit_selected(&mut nav, &lists));
         assert_eq!(nav.list(), Some(0));
         assert_eq!(nav.page, 0);
         let shown = nav.system(&lists).unwrap();
@@ -427,10 +428,10 @@ mod tests {
         space_simulation::place(&mut list, vec![task]);
         let lists = lists(vec![list.clone()]);
         let mut nav = Navigation {
-            picked: page_pick(&list, 1),
+            selection: page_pick(&list, 1).map(Selection::Star),
             ..default()
         };
-        assert!(visit_picked(&mut nav, &lists));
+        assert!(visit_selected(&mut nav, &lists));
         assert_eq!(nav.page, 1);
         assert_eq!(nav.system(&lists), Some(&list));
     }
