@@ -76,6 +76,7 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Select a star, then visit it | Click it, then click again or press Enter |
 | Select the star at the view centre | C |
 | Jump to a list | Click it in the sidebar |
+| Open or close the debug window | `` ` `` or F3 |
 
 Search covers all systems. The simulation clock starts at an arbitrary epoch;
 task deadlines always use wall-clock time. Changing simulation speed never
@@ -115,7 +116,8 @@ Native backend errors are recorded in `data/server.log`; client events and
 renderer warnings in `data/logs/client.log`, with the previous session in
 `data/logs/client.previous.log`. Panics leave timestamped
 `data/logs/crash-*.log` files with a backtrace, even from detached launches.
-For visual bugs that do not crash, click **Save bug report** in the right panel.
+For visual bugs that do not crash, open the debug window (`` ` `` or F3) and
+click **save bug report** in its `tools` tab.
 It saves the current camera/list/page state and recent flight events to
 `data/logs/bug-*.log`, plus a matching `.png` screenshot. Share both files when
 reporting an issue. Delayed flight frames are noted in the client log.
@@ -277,9 +279,19 @@ The browser is the main client; the native window is a developer fallback that
 adds the smoke test and bug reports. Both use the same egui panels, drawn in the
 same frame as the 3D view. The left sidebar holds collapsible sections: lists,
 the task index (filter, sort and group by status), the visited system and the
-selected planet. Time controls run along the bottom. The round ⚙ button at the
-top right slides in a terminal-style settings window: display, rendering, field
-of view, controls and the star-stream benchmark. Esc or `[ × ]` closes it.
+selected planet. Time controls run along the bottom. **⚙ Settings** at the top
+of the sidebar opens display options, field of view, realistic lighting and the
+controls.
+
+Debugging has its own window, toggled with `` ` `` or F3 on both clients:
+
+| Tab | Contents |
+| --- | --- |
+| `log` | The last 2,000 client log lines, with level filter and grep |
+| `perf` | Frame time graph, star-stream metrics |
+| `render` | Exposure readout, galaxy glow, physical exposure, wireframes over bodies, galaxy reference views |
+| `state` | Camera, navigation, visited star and clock values |
+| `tools` | Save bug report (native), star-stream benchmark (browser) |
 
 ## Next milestones
 

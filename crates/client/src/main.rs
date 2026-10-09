@@ -4,6 +4,7 @@ mod automation;
 #[cfg(target_arch = "wasm32")]
 mod benchmark;
 mod black_hole;
+mod devtools;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
 mod flight;
@@ -214,8 +215,7 @@ fn main() {
     app.add_plugins((
         DefaultPlugins
             .set(bevy::log::LogPlugin {
-                #[cfg(not(target_arch = "wasm32"))]
-                custom_layer: diagnostics::file_layer,
+                custom_layer: devtools::log_layers,
                 ..default()
             })
             .set(WindowPlugin {
@@ -285,7 +285,10 @@ fn main() {
             .before(bevy_egui::EguiPostUpdateSet::EndPass)
             .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
     )
-    .add_systems(EguiPrimaryContextPass, ui::draw_ui);
+    .add_systems(
+        EguiPrimaryContextPass,
+        (ui::draw_ui, devtools::draw.after(ui::draw_ui)),
+    );
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, smoke::exercise);
     #[cfg(target_arch = "wasm32")]

@@ -23,17 +23,25 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
   run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
   documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
-- The native **Save bug report** control captures state, recent client log lines and
-  a screenshot under `data/logs/bug-*` for visual bugs without a panic.
+- The native **Save bug report** control (debug window, `tools` tab) captures
+  state, recent client log lines and a screenshot under `data/logs/bug-*` for
+  visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
 - The browser is the main target; native is a dev fallback. Both use the same
   egui interface (`ui.rs`), drawn in the same frame as the scene: a left
-  sidebar of collapsible sections, time controls, a settings window and canvas
-  captions, labels and clicks. Settings is the new terminal style
-  (`terminal.rs`): a round top-right button that fades out as a translucent
-  black, Hyprland-like window (cyan-to-green border, `GAP` from every edge)
-  slides in from the right, with text-mode checkboxes, slider and buttons.
-  Other panels move to this style over time.
+  sidebar of collapsible sections, time controls, a plain egui Settings window
+  (opened from the sidebar's ⚙ Settings) and canvas captions, labels and clicks.
+- Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
+  movable, resizable window toggled by ` or F3 on both clients (the public
+  site included), with tabs `log` (an in-memory console of the last 2,000
+  tracing events from `devtools::log_layers`, with level filter and grep),
+  `perf` (frame graph, star-stream metrics), `render` (exposure readout,
+  galaxy glow, physical exposure, wireframes over bodies, galaxy reference
+  views), `state` (camera, navigation, visited star, clock) and `tools` (bug
+  report natively, star-stream benchmark in the browser). New debug readouts
+  and switches go there, not in Settings or the canvas. It uses the terminal
+  look (`terminal.rs`): a translucent black, Hyprland-like window with a light
+  grey border and text-mode checkboxes and buttons.
   There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
@@ -177,9 +185,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `space-simulation` builds at opt-level 3 in dev, or loading and tests crawl.
   `StreamMetrics` samples generation time, cancelled jobs, mesh backlog and
   wait, render-sync time and frame-time percentiles once per second; the
-  bottom-left 3D caption shows these below camera range on both clients.
+  debug window's `perf` tab shows them on both clients.
   Instrumentation does not change loading policy.
-  The browser Settings' **Run star-stream benchmark** reloads into a fresh,
+  The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each
   `StreamMetrics::sample`, logs the results to the console and shows them in an
@@ -249,9 +257,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Camera-relative origins are formed in f64 before converting to f32. Patches
   are built lazily and hidden when disabled.
   Glow is shown only with
-  realistic lighting and the **Smooth galaxy glow (prototype)** setting enabled.
-  Settings provide Inside, Face-on and Edge-on reference camera commands on both
-  clients. `node scripts/test-galaxy-glow.mjs` saves comparison
+  realistic lighting and the **Smooth galaxy glow (prototype)** switch enabled
+  (debug window, `render` tab), which also has the Inside, Face-on and Edge-on
+  reference camera commands on both clients. `node scripts/test-galaxy-glow.mjs` saves comparison
   screenshots and on/off frame timings to `data/logs/`, on the secondary monitor.
   Dust, detailed spiral structure and other galaxy types are not implemented yet.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
@@ -296,7 +304,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - On by default (`Navigation::realistic`); the wireframe bodies must stay
   unchanged when it is off (galactic stars appear in both modes). The smoke
   test turns it off for its wireframe captures.
-  `render::exposure_caption` shows the key (and stops from `dark_key`), its
+  `render::exposure_caption` (debug window, `render` tab) shows the key (and stops from `dark_key`), its
   target and which candidate set it (subject, view or star disc), and the
   view's galaxy/star split, from values `sky::expose` already computes.
   Photometry lives in `space_simulation::light`;

@@ -1,15 +1,13 @@
-use crate::actions::{Display, GalaxyReference, UiCommand};
-use crate::terminal;
+use crate::actions::{Display, UiCommand};
 use crate::views::View;
 use crate::{
     Clock, Navigation, Universe,
-    render::{Lights, exposure_caption},
     scene::{CameraPose, CameraRig, CameraVelocity, Markers, speed_label},
 };
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiContexts, egui};
 use space_shared::{Galaxy, StarSystem, Task};
-use space_simulation::{AU_METRES, LY_METRES, SimulationClock, period_seconds};
+use space_simulation::{SimulationClock, period_seconds};
 use std::collections::HashSet;
 
 const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
@@ -29,12 +27,7 @@ fn tint(colour: [u8; 3]) -> egui::Color32 {
     egui::Color32::from_rgb(colour[0], colour[1], colour[2])
 }
 
-type Overlay<'w> = (
-    Res<'w, Markers>,
-    Res<'w, Lights>,
-    Res<'w, CameraVelocity>,
-    Res<'w, crate::sky::Sky>,
-);
+type Overlay<'w> = (Res<'w, Markers>, Res<'w, CameraVelocity>);
 
 /// Panel choices that are not part of the scene.
 pub struct Sidebar {
@@ -99,7 +92,7 @@ impl TaskSort {
 }
 
 pub fn draw_ui(
-    interaction: (Commands, EguiContexts, MessageWriter<UiCommand>),
+    interaction: (EguiContexts, MessageWriter<UiCommand>),
     universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
@@ -108,15 +101,12 @@ pub fn draw_ui(
         Res<CameraRig>,
         Res<CameraPose>,
         Res<crate::stream::Starfield>,
-        Res<crate::stream::StreamMetrics>,
     ),
     mut sidebar: Local<Sidebar>,
 ) {
-    let (mut commands, mut contexts, mut writer) = interaction;
-    #[cfg(target_arch = "wasm32")]
-    let _ = &mut commands;
-    let (markers, lights, velocity, sky) = overlay;
-    let (rig, pose, starfield, metrics) = camera_state;
+    let (mut contexts, mut writer) = interaction;
+    let (markers, velocity) = overlay;
+    let (rig, pose, starfield) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -141,23 +131,8 @@ pub fn draw_ui(
         clock: &clock.0,
         sidebar: &mut sidebar,
         out: &mut out,
-        report: false,
     };
     panels.show(ctx);
-    let report = panels.report;
-    #[cfg(not(target_arch = "wasm32"))]
-    if report {
-        nav.notice = save_bug_report(
-            &mut commands,
-            &universe.0,
-            &nav,
-            &clock.0,
-            (&rig, &pose),
-            &starfield,
-        );
-    }
-    #[cfg(target_arch = "wasm32")]
-    let _ = report;
     let mut rect = ctx.available_rect();
     if rect.width() < 1.0 || rect.height() < 1.0 {
         rect = egui::Rect::from_min_size(rect.min, egui::vec2(1.0, 1.0));
@@ -184,9 +159,7 @@ pub fn draw_ui(
         &rig,
         &pose,
         &starfield,
-        &exposure_caption(&nav, &lights, &sky),
         &velocity,
-        &metrics.caption,
         &mut out,
     );
     writer.write_batch(out);
@@ -199,8 +172,6 @@ struct Panels<'a> {
     clock: &'a SimulationClock,
     sidebar: &'a mut Sidebar,
     out: &'a mut Vec<UiCommand>,
-    /// Save bug report was clicked.
-    report: bool,
 }
 
 /// A row of the task index: a status group's heading, or a task.
@@ -228,29 +199,26 @@ impl Panels<'_> {
         egui::TopBottomPanel::bottom("time-controls")
             .frame(egui::Frame::new().fill(PANEL).inner_margin(14))
             .show(ctx, |ui| self.time_controls(ui));
-        // The button fades out quickly as the window slides in.
-        let open = self.sidebar.settings;
-        let fade = ctx.animate_bool_with_time(egui::Id::new("settings-fade"), open, 0.12);
-        let slide = ctx.animate_bool_with_time_and_easing(
-            egui::Id::new("settings-slide"),
-            open,
-            0.25,
-            egui::emath::easing::cubic_out,
-        );
-        if terminal::corner_button(ctx, "settings-button", "⚙", 1.0 - fade) {
-            self.sidebar.settings = true;
-        }
-        if terminal::side_window(ctx, "settings", "settings", slide, |ui| self.settings(ui))
-            || (open
-                && !ctx.wants_keyboard_input()
-                && ctx.input(|i| i.key_pressed(egui::Key::Escape)))
-        {
-            self.sidebar.settings = false;
-        }
+        let mut open = self.sidebar.settings;
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .default_width(340.0)
+            .default_height(640.0)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
+            });
+        self.sidebar.settings = open;
     }
 
     /// Every section in one column, each collapsible.
     fn sidebar(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .selectable_label(self.sidebar.settings, "⚙ Settings")
+            .clicked()
+        {
+            self.sidebar.settings = !self.sidebar.settings;
+        }
         let section = |title: &str| {
             egui::CollapsingHeader::new(egui::RichText::new(title).size(11.0).color(MUTED).strong())
                 .default_open(true)
@@ -460,8 +428,8 @@ impl Panels<'_> {
 
     fn settings(&mut self, ui: &mut egui::Ui) {
         let nav = &*self.nav;
-        terminal::heading(ui, "display");
-        for (option, on, label) in [
+        heading(ui, "DISPLAY");
+        for (option, mut on, label) in [
             (Display::Exaggerate, nav.exaggerate, "Readable planet sizes"),
             (Display::Orbits, nav.orbits, "Orbital paths"),
             (Display::Labels, nav.labels, "Planet labels"),
@@ -472,63 +440,47 @@ impl Panels<'_> {
                 "Velocity marker",
             ),
         ] {
-            if terminal::check(ui, on, label, true) {
-                self.out.push(UiCommand::SetDisplay { option, on: !on });
+            if ui.checkbox(&mut on, label).changed() {
+                self.out.push(UiCommand::SetDisplay { option, on });
             }
         }
-        let (lo, hi) = (*crate::FOV_DEG.start(), *crate::FOV_DEG.end());
-        if let Some(degrees) = terminal::slider(ui, "fov", nav.fov_deg, lo..=hi, "°") {
+        let mut degrees = nav.fov_deg;
+        if ui
+            .add(
+                egui::Slider::new(&mut degrees, crate::FOV_DEG)
+                    .text("Field of view")
+                    .suffix("°"),
+            )
+            .changed()
+        {
             self.out.push(UiCommand::SetFov { degrees });
         }
-        terminal::heading(ui, "rendering");
-        if terminal::check(ui, nav.realistic, "Realistic lighting", true) {
+        muted(
+            ui,
+            "Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.",
+        );
+        ui.separator();
+        heading(ui, "RENDERING");
+        let mut realistic = nav.realistic;
+        if ui.checkbox(&mut realistic, "Realistic lighting").changed() {
             self.out.push(UiCommand::SetDisplay {
                 option: Display::Realistic,
-                on: !nav.realistic,
+                on: realistic,
             });
         }
-        // These apply only to realistic rendering.
-        for (option, on, label) in [
-            (
-                Display::GalaxyGlow,
-                nav.galaxy_glow,
-                "Galaxy glow (prototype)",
-            ),
-            (Display::Physical, nav.physical, "Physical exposure"),
-            (Display::Wireframe, nav.wireframe, "Wireframes over bodies"),
-        ] {
-            if terminal::check(ui, on, label, nav.realistic) {
-                self.out.push(UiCommand::SetDisplay { option, on: !on });
-            }
-        }
-        terminal::heading(ui, "galaxy reference views");
-        ui.horizontal_wrapped(|ui| {
-            for (view, label) in [
-                (GalaxyReference::Inside, "inside"),
-                (GalaxyReference::FaceOn, "face-on"),
-                (GalaxyReference::EdgeOn, "edge-on"),
-            ] {
-                if terminal::button(ui, label) {
-                    self.out.push(UiCommand::GalaxyReference { view });
-                }
+        muted(
+            ui,
+            "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star.",
+        );
+        ui.separator();
+        heading(ui, "CONTROLS");
+        egui::Grid::new("controls").num_columns(2).show(ui, |ui| {
+            for (key, action) in HELP {
+                ui.label(egui::RichText::new(key).monospace().color(ACCENT));
+                ui.label(action);
+                ui.end_row();
             }
         });
-        terminal::note(ui, "Smooth glow only: no dust or spiral detail yet.");
-        terminal::heading(ui, "controls");
-        for (key, action) in HELP {
-            terminal::key(ui, key, action);
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            terminal::heading(ui, "benchmark");
-            if terminal::button(ui, "run star-stream benchmark") {
-                crate::benchmark::restart();
-            }
-            terminal::note(
-                ui,
-                "Reloads with no stars loaded, then flies 15 seconds from home towards the galactic centre at 1,000 ly/s. Results appear on screen and in the browser console.",
-            );
-        }
     }
 
     fn telemetry(&mut self, ui: &mut egui::Ui) {
@@ -608,27 +560,8 @@ impl Panels<'_> {
                 );
             });
         }
-        let p = crate::scene::page_origin_ly(system, nav.page);
-        let [inclination, node, _] = crate::scene::page_tilt(system, nav.page);
-        ui.label(
-            egui::RichText::new(format!(
-                "Star position (ly)\n{:+.2}  {:+.2}  {:+.2}\nOrbital plane tilt {:.0}°, node {:.0}°",
-                p.x,
-                p.y,
-                p.z,
-                inclination.to_degrees(),
-                node.to_degrees()
-            ))
-            .monospace()
-            .size(11.0)
-            .color(MUTED),
-        );
         if ui.button("Frame orbital system").clicked() {
             self.out.push(UiCommand::FrameSystem);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if ui.button("Save bug report").clicked() {
-            self.report = true;
         }
         star_controls(ui, galaxy, nav, self.out);
     }
@@ -1044,55 +977,6 @@ fn due_text(ms: i64) -> String {
     format!("{day} {month} {year} · {}", due_short(ms).to_lowercase())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn save_bug_report(
-    commands: &mut Commands,
-    galaxy: &Galaxy,
-    nav: &Navigation,
-    clock: &SimulationClock,
-    (rig, pose): (&CameraRig, &CameraPose),
-    starfield: &crate::stream::Starfield,
-) -> String {
-    let system = nav.system(galaxy);
-    let state = format!(
-        "System ID: {}\nList: {}\nPage: {}\nView: {:?}\nFollowing: {}\nSelected task index: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
-        system.map_or("none", |s| s.id.as_str()),
-        nav.list().is_some(),
-        nav.page,
-        nav.view,
-        nav.following,
-        nav.selected,
-        galaxy.source,
-        galaxy.systems.len(),
-        galaxy
-            .systems
-            .iter()
-            .map(|s| s.planets.len())
-            .sum::<usize>(),
-        clock.seconds,
-        clock.rate,
-        clock.paused,
-        nav.target,
-        nav.distance,
-        pose.eye,
-        pose.distance,
-        rig.progress(),
-        starfield.summary(),
-    );
-    match crate::diagnostics::save_bug_report(&state) {
-        Ok(path) => {
-            info!("Bug report saved to {}", path.display());
-            commands
-                .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
-                .observe(bevy::render::view::screenshot::save_to_disk(
-                    path.with_extension("png"),
-                ));
-            format!("Bug report and screenshot: {}", path.display())
-        }
-        Err(err) => format!("Could not save bug report: {err}"),
-    }
-}
-
 /// Captions, labels, hover rings and clicks on the 3D view itself.
 #[allow(clippy::too_many_arguments)]
 fn canvas_overlay(
@@ -1104,9 +988,7 @@ fn canvas_overlay(
     rig: &CameraRig,
     pose: &CameraPose,
     field: &crate::stream::Starfield,
-    exposure: &str,
     velocity: &CameraVelocity,
-    stream_caption: &str,
     out: &mut Vec<UiCommand>,
 ) {
     if galaxy.systems.is_empty() {
@@ -1141,34 +1023,14 @@ fn canvas_overlay(
         egui::FontId::monospace(11.0),
         MUTED,
     );
-    let distance = if pose.distance > LY_METRES * 0.01 {
-        format!("{:.3} ly", pose.distance / LY_METRES)
-    } else {
-        format!("{:.4} AU", pose.distance / AU_METRES)
-    };
-    painter.text(
-        rect.left_bottom() + egui::vec2(24.0, -68.0),
-        egui::Align2::LEFT_BOTTOM,
-        format!(
-            "SET SPEED {}   /   VELOCITY {}\n{}\nCAMERA RANGE {distance}   /   {}",
-            speed_label(nav.move_speed).to_uppercase(),
-            speed_label(velocity.metres_per_second.length()).to_uppercase(),
-            exposure.to_uppercase(),
-            if nav.following {
-                "TRACKING"
-            } else if nav.view != View::Orbit {
-                "AUTO-FRAMED PRESET"
-            } else {
-                "FREE NAVIGATION"
-            }
-        ),
-        egui::FontId::monospace(11.0),
-        MUTED,
-    );
     painter.text(
         rect.left_bottom() + egui::vec2(24.0, -20.0),
         egui::Align2::LEFT_BOTTOM,
-        stream_caption,
+        format!(
+            "SET SPEED {}   /   VELOCITY {}",
+            speed_label(nav.move_speed).to_uppercase(),
+            speed_label(velocity.metres_per_second.length()).to_uppercase(),
+        ),
         egui::FontId::monospace(11.0),
         MUTED,
     );
