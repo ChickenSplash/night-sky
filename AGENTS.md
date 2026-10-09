@@ -352,8 +352,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   with its star (`follow_visited_star`). Clicks not on a planet pick from
   loaded, visible points only, and only on click, never every frame. Click
   again or Enter to visit, C picks the view centre. The only bodies drawn are
-  the visited star and its planets. Scroll zooms from 20,000 km to 40,000 ly;
-  movement uses an independently selected speed (Shift + scroll).
+  the visited star and its planets. Shift + scroll (either Shift key) zooms
+  from 20,000 km to 40,000 ly; plain scroll adjusts movement speed independently.
 - Unassigned cell stars use ID-derived `TS` catalogue names and lettered
   planets, with no name registry or per-star UI entities.
 

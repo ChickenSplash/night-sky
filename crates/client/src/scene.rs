@@ -409,9 +409,9 @@ pub fn controls(
             orbit(&mut nav, motion.delta);
             camera_motion.orbiting = free;
         }
-        if free && keys.pressed(KeyCode::ShiftLeft) {
+        if free && !shift {
             nav.move_speed = scroll_speed(nav.move_speed, scroll);
-        } else if free && scroll != 0.0 {
+        } else if free && shift && scroll != 0.0 {
             let tilt = nav
                 .system(&universe.0)
                 .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));

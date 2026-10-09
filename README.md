@@ -61,7 +61,8 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Look around from the camera | Left mouse drag |
 | Roll around the viewing direction | Q / E |
 | Orbit the camera target | Right mouse drag |
-| Zoom | Mouse wheel |
+| Zoom | Shift + mouse wheel |
+| Adjust movement speed | Mouse wheel |
 | Translate camera and target | W/A/S/D |
 | Move up / down | R / F |
 | Move faster | Left Shift |

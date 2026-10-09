@@ -113,6 +113,9 @@ try {
   await page.mouse.move(850, 440, { steps: 8 });
   await page.mouse.up({ button: 'right' });
   await page.mouse.wheel(0, -120);
+  await page.keyboard.down('Shift');
+  await page.mouse.wheel(0, -120);
+  await page.keyboard.up('Shift');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(2000);
   await page.screenshot({ path: resolve(root, 'data/web-resized.png') });
