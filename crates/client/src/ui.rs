@@ -1009,21 +1009,6 @@ fn canvas_overlay(
         ))
         .with_clip_rect(rect);
     painter.text(
-        rect.left_top() + egui::vec2(24.0, 24.0),
-        egui::Align2::LEFT_TOP,
-        if nav.visit.is_none() {
-            "GALAXY / LIGHT YEARS"
-        } else if nav.view == View::Table {
-            "TASK TABLE / TRUE SIZES · ORBITS CONTINUE"
-        } else if nav.view == View::Constellation {
-            "LIST CONSTELLATION / SELECT A SYSTEM"
-        } else {
-            "SYSTEM VIEW / ASTRONOMICAL UNITS"
-        },
-        egui::FontId::monospace(11.0),
-        MUTED,
-    );
-    painter.text(
         rect.left_bottom() + egui::vec2(24.0, -20.0),
         egui::Align2::LEFT_BOTTOM,
         format!(
