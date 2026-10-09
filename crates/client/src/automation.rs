@@ -53,7 +53,7 @@ fn publish(
             .map(|crumb| crumb.label)
             .collect::<Vec<_>>(),
         "page": nav.page,
-        "view": nav.view,
+        "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,
         "display": {
             "exaggerate": nav.exaggerate,

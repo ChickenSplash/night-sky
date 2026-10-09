@@ -1,6 +1,6 @@
 use crate::flight::{Flight, Pose, STAR_JUMP_SECONDS};
+use crate::presentation::{PresentationMode, TableLayout};
 use crate::render::{self, Lights, Photometry, PlanetLight, StarLight};
-use crate::views::{TableLayout, View};
 use crate::{Clock, Navigation, Universe};
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, MouseWheel},
@@ -206,7 +206,7 @@ fn within(arrived: bool, distance: f64, range: f64) -> bool {
 /// Track where the camera physically is (`Navigation::arrived`). Arriving by
 /// free flight uses the same star body and planetary system as clicking Visit;
 /// only cells already streamed in are eligible, and it never starts a flight or
-/// re-frames the camera. Leaving a system in orbit view, however it was
+/// re-frames the camera. Leaving a system in simulation mode, however it was
 /// reached, returns to open space without moving the eye.
 pub fn locate(
     #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
@@ -220,7 +220,7 @@ pub fn locate(
     let arrived = nav.arrived;
     // The constellation frames a whole list from afar, so it is never at a star.
     nav.arrived = rig.placed()
-        && nav.view != View::Constellation
+        && nav.presentation_mode != PresentationMode::Constellation
         && nav.system(&lists.0).is_some_and(|s| {
             let distance = (page_origin_ly(s, nav.page) - eye_ly).length() * LY_METRES;
             within(arrived, distance, system_range(s, nav.page))
@@ -230,7 +230,12 @@ pub fn locate(
         return;
     }
     // Flights and presets are deliberate: wait until they land.
-    if nav.view != View::Orbit || rig.flying() || nav.fly || !rig.placed() || nav.arrived {
+    if nav.presentation_mode != PresentationMode::Simulation
+        || rig.flying()
+        || nav.fly
+        || !rig.placed()
+        || nav.arrived
+    {
         return;
     }
     if nav.system(&lists.0).is_some() {
@@ -385,8 +390,11 @@ pub fn controls(
         .unwrap_or_default();
     // Flights are short; camera input resumes when they land. Constellations
     // orbit their auto-framed centre, but cannot zoom or translate.
-    let free = nav.view == View::Orbit && !rig.flying();
-    let rotating = matches!(nav.view, View::Orbit | View::Constellation) && !rig.flying();
+    let free = nav.presentation_mode == PresentationMode::Simulation && !rig.flying();
+    let rotating = matches!(
+        nav.presentation_mode,
+        PresentationMode::Simulation | PresentationMode::Constellation
+    ) && !rig.flying();
     if !pointer && rotating {
         let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
         if buttons.pressed(MouseButton::Left) && shift {
@@ -535,7 +543,7 @@ pub fn place_camera(
     >,
 ) {
     nav.fit_preset(&universe.0);
-    if nav.fly || nav.following || nav.view != View::Orbit {
+    if nav.fly || nav.following || nav.presentation_mode != PresentationMode::Simulation {
         nav.eye = None;
     }
     if nav.following
@@ -561,7 +569,7 @@ pub fn place_camera(
         target: frame_tilt * nav.target,
         distance: nav.distance,
         rotation: frame_tilt.as_quat() * nav.rotation,
-        layout: f64::from(u8::from(nav.view == View::Table)),
+        layout: f64::from(u8::from(nav.presentation_mode == PresentationMode::Table)),
     };
     let frame = system.map_or(DVec3::ZERO, |system| page_origin_ly(system, frame_page));
     let mut shown = rig.shown.unwrap_or(desired);
@@ -589,10 +597,10 @@ pub fn place_camera(
         rig.warned_stall = false;
         if let Some(flight) = &rig.flight {
             info!(
-                "Flight started: list={} page={} view={:?} star travel={:.3} ly duration={:.3} s",
+                "Flight started: list={} page={} presentation_mode={:?} star travel={:.3} ly duration={:.3} s",
                 system.map_or("galaxy", |s| s.id.as_str()),
                 nav.page + 1,
-                nav.view,
+                nav.presentation_mode,
                 frame_shift_ly,
                 flight.duration_seconds(),
             );
@@ -620,10 +628,10 @@ pub fn place_camera(
     };
     if rig.flight.as_ref().is_some_and(Flight::finished) {
         info!(
-            "Flight landed: list={} page={} view={:?}",
+            "Flight landed: list={} page={} presentation_mode={:?}",
             system.map_or("galaxy", |s| s.id.as_str()),
             nav.page + 1,
-            nav.view
+            nav.presentation_mode
         );
         rig.flight = None;
     }
@@ -1054,7 +1062,8 @@ impl Canvas<'_> {
         let (nav, pose, system) = (self.nav, self.pose, self.system);
         let layout = TableLayout::new(system, pose.page);
         let place = |local: DVec3| self.frame * local;
-        if nav.orbits && nav.view == View::Orbit && pose.layout <= 0.5 {
+        if nav.orbits && nav.presentation_mode == PresentationMode::Simulation && pose.layout <= 0.5
+        {
             for planet in system.on_page(pose.page) {
                 gizmos.linestrip(
                     (0..=192).map(|step| self.world(place(orbit_point(&planet.orbit, step, 192)))),
@@ -1152,7 +1161,7 @@ pub fn draw(
         subject: planets_shown,
     };
     let markers = &mut markers.0;
-    if nav.view == View::Constellation {
+    if nav.presentation_mode == PresentationMode::Constellation {
         canvas.constellation(&mut gizmos);
     }
     if planets_shown {
@@ -1282,15 +1291,15 @@ mod tests {
         assert!((restored_eye - (frame * LY_METRES + departing_eye)).length() < 100_000.0);
     }
 
-    /// A visited list's star, with the camera placed `eye` from it in `view`.
-    fn visited_list(eye: DVec3, view: View) -> App {
+    /// A visited list's star, with the camera placed `eye` from it in `presentation_mode`.
+    fn visited_list(eye: DVec3, presentation_mode: PresentationMode) -> App {
         let galaxy = space_simulation::demo_galaxy();
         let page = galaxy.systems[0].first_page();
         let frame_ly = page_origin_ly(&galaxy.systems[0], page);
         let nav = Navigation {
             visit: Some(crate::Visit::List(0)),
             page,
-            view,
+            presentation_mode,
             eye: Some(eye),
             ..default()
         };
@@ -1321,7 +1330,7 @@ mod tests {
 
     #[test]
     fn leaving_a_visited_list_star_returns_to_open_space_and_closes_the_list() {
-        let mut app = visited_list(DVec3::X * (5.0 * AU_METRES), View::Orbit);
+        let mut app = visited_list(DVec3::X * (5.0 * AU_METRES), PresentationMode::Simulation);
         app.update();
         let nav = app.world().resource::<Navigation>();
         assert!(nav.arrived && nav.list() == Some(0));
@@ -1340,7 +1349,10 @@ mod tests {
 
     #[test]
     fn a_constellation_keeps_its_list_open_away_from_every_star() {
-        let mut app = visited_list(DVec3::X * (5.0 * LY_METRES), View::Constellation);
+        let mut app = visited_list(
+            DVec3::X * (5.0 * LY_METRES),
+            PresentationMode::Constellation,
+        );
         app.update();
         let nav = app.world().resource::<Navigation>();
         assert!(!nav.arrived && nav.list() == Some(0));
@@ -1352,7 +1364,7 @@ mod tests {
 
     #[test]
     fn a_flight_is_not_at_its_destination_until_it_arrives() {
-        let mut app = visited_list(DVec3::X * (5.0 * LY_METRES), View::Orbit);
+        let mut app = visited_list(DVec3::X * (5.0 * LY_METRES), PresentationMode::Simulation);
         app.world_mut().resource_mut::<Navigation>().fly = true;
         app.update();
         let nav = app.world().resource::<Navigation>();

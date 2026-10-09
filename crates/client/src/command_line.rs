@@ -1,4 +1,4 @@
-//! Typed commands: `set_view table`, `set_display option=orbits on=false`, or
+//! Typed commands: `set_presentation_mode table`, `set_display option=orbits on=false`, or
 //! a `UiCommand` as JSON. Arguments fill a command's fields in order, or by
 //! name; quote values with spaces, or IDs that look like numbers.
 //!
@@ -147,9 +147,9 @@ pub const USAGE: [Usage; 15] = [
         about: "Show a page of the visited list",
     },
     Usage {
-        name: "set_view",
-        fields: &["view"],
-        about: "orbit, table or constellation",
+        name: "set_presentation_mode",
+        fields: &["presentation_mode"],
+        about: "simulation, table or constellation",
     },
     Usage {
         name: "frame_system",
@@ -286,7 +286,7 @@ fn split(line: &str) -> Result<Vec<Word>, String> {
 mod tests {
     use super::*;
     use crate::actions::{Display, GalaxyReference};
-    use crate::views::View;
+    use crate::presentation::PresentationMode;
 
     /// Every `UiCommand` name, as serde lists them when it meets an unknown one.
     fn variants() -> Vec<String> {
@@ -331,7 +331,7 @@ mod tests {
                     "rate" | "degrees" => "60",
                     "paused" | "on" => "true",
                     "option" => "orbits",
-                    "view" if usage.name == "set_view" => "table",
+                    "presentation_mode" => "table",
                     "view" => "inside",
                     _ => "id",
                 })
@@ -363,9 +363,15 @@ mod tests {
             }
         );
         assert_eq!(
-            parse("set_view constellation").unwrap(),
-            UiCommand::SetView {
-                view: View::Constellation
+            parse("set_presentation_mode constellation").unwrap(),
+            UiCommand::SetPresentationMode {
+                presentation_mode: PresentationMode::Constellation
+            }
+        );
+        assert_eq!(
+            parse("set_presentation_mode presentation_mode=simulation").unwrap(),
+            UiCommand::SetPresentationMode {
+                presentation_mode: PresentationMode::Simulation
             }
         );
         assert_eq!(
@@ -407,14 +413,14 @@ mod tests {
         );
         assert!(parse("follow now").unwrap_err().contains("Too many"));
         assert!(
-            parse("set_view colour=red")
+            parse("set_presentation_mode colour=red")
                 .unwrap_err()
                 .contains("no field")
         );
         assert!(
-            parse("set_view sideways")
+            parse("set_presentation_mode sideways")
                 .unwrap_err()
-                .contains("Usage: set_view <view>")
+                .contains("Usage: set_presentation_mode <presentation_mode>")
         );
         assert!(parse("jump \"open").unwrap_err().contains("Unclosed"));
     }

@@ -3,11 +3,11 @@
 //! toggles it on both clients. Drawn in the terminal look (`terminal.rs`).
 use crate::actions::{Display, GalaxyReference, UiCommand};
 use crate::command_line::{self, Source, Typed};
+use crate::presentation::PresentationMode;
 use crate::render::{Lights, exposure_caption};
 use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
 use crate::stream::{Starfield, StreamMetrics};
 use crate::terminal::{self, DIM, TEXT};
-use crate::views::View;
 use crate::{Clock, Navigation, Selection, Universe, Visit};
 use bevy::log::tracing::{
     Event, Subscriber,
@@ -624,7 +624,7 @@ fn state(
                 "mode",
                 if nav.following {
                     "tracking"
-                } else if nav.view != View::Orbit {
+                } else if nav.presentation_mode != PresentationMode::Simulation {
                     "auto-framed preset"
                 } else {
                     "free navigation"
@@ -677,7 +677,7 @@ fn state(
                 },
             ),
             ("page", nav.page.to_string()),
-            ("view", format!("{:?}", nav.view)),
+            ("presentation mode", format!("{:?}", nav.presentation_mode)),
             (
                 "selected",
                 match &nav.selection {
@@ -773,12 +773,12 @@ fn save_bug_report(
     let (galaxy, clock) = (&universe.0, &clock.0);
     let system = nav.system(galaxy);
     let state = format!(
-        "System ID: {}\nArrived: {}\nList: {}\nPage: {}\nView: {:?}\nFollowing: {}\nSelection: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
+        "System ID: {}\nArrived: {}\nList: {}\nPage: {}\nPresentation mode: {:?}\nFollowing: {}\nSelection: {:?}\nSource: {}\nSystems: {}\nTasks: {}\nSimulated seconds: {:.3}\nRate: {:.3}\nPaused: {}\nDesired target (m): {:?}\nDesired range (m): {:.3}\nDisplayed eye relative to page star (m): {:?}\nDisplayed range (m): {:.3}\nFlight progress: {:?}\nGalaxy: {}\n",
         system.map_or("none", |s| s.id.as_str()),
         nav.arrived,
         nav.list().is_some(),
         nav.page,
-        nav.view,
+        nav.presentation_mode,
         nav.following,
         nav.selection,
         galaxy.source,

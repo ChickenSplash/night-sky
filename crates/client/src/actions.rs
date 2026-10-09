@@ -1,7 +1,7 @@
 //! Every panel action goes through `UiCommand`, whether it comes from egui or a
 //! browser test script (`automation.rs`). Lists and tasks are named by ID, so a
 //! data refresh that reorders them cannot redirect a click.
-use crate::{Clock, Navigation, Selection, Universe, views::View};
+use crate::{Clock, Navigation, Selection, Universe, presentation::PresentationMode};
 use bevy::prelude::*;
 use serde::Deserialize;
 
@@ -30,8 +30,8 @@ pub enum UiCommand {
     ShowPage {
         page: u32,
     },
-    SetView {
-        view: View,
+    SetPresentationMode {
+        presentation_mode: PresentationMode,
     },
     /// Visits the picked star, or re-frames the visited system.
     FrameSystem,
@@ -98,7 +98,7 @@ fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
     nav.page = 0;
     nav.selection = None;
     nav.following = false;
-    nav.view = View::Orbit;
+    nav.presentation_mode = PresentationMode::Simulation;
     // Keep the normal zoom range even for an external reference eye. Otherwise
     // the first wheel event clamps 124,000 ly to 40,000 ly and jumps inward.
     nav.distance = (eye.length() * PC_METRES).min(40_000.0 * space_simulation::LY_METRES);
@@ -159,7 +159,9 @@ pub fn apply(
                 }
             }
             UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
-            UiCommand::SetView { view } => nav.preset(*view, galaxy),
+            UiCommand::SetPresentationMode { presentation_mode } => {
+                nav.preset(*presentation_mode, galaxy)
+            }
             UiCommand::FrameSystem => {
                 if !crate::galaxy_nav::visit_selected(&mut nav, galaxy) {
                     nav.frame(galaxy);
@@ -289,9 +291,14 @@ mod tests {
             .map(|ordinal| sky.cell_star_at(cell, ordinal).unwrap().id)
             .find(|id| crate::galaxy_nav::mapped(&galaxy, id).is_none())
             .unwrap();
-        let mut app = run(galaxy, vec![UiCommand::SetView { view: View::Table }]);
+        let mut app = run(
+            galaxy,
+            vec![UiCommand::SetPresentationMode {
+                presentation_mode: PresentationMode::Table,
+            }],
+        );
         // Presets need a system to frame.
-        assert_eq!(nav(&app).view, View::Orbit);
+        assert_eq!(nav(&app).presentation_mode, PresentationMode::Simulation);
         stream(&mut app, &id);
         send(&mut app, vec![UiCommand::PickStar { id: id.clone() }]);
         assert_eq!(nav(&app).selected_star().unwrap().id, id);
@@ -306,11 +313,13 @@ mod tests {
         send(
             &mut app,
             vec![
-                UiCommand::SetView { view: View::Table },
+                UiCommand::SetPresentationMode {
+                    presentation_mode: PresentationMode::Table,
+                },
                 UiCommand::ShowPage { page: 1 },
             ],
         );
-        assert_eq!(nav(&app).view, View::Table);
+        assert_eq!(nav(&app).presentation_mode, PresentationMode::Table);
         assert_eq!(nav(&app).page, 0);
     }
 
@@ -329,7 +338,7 @@ mod tests {
         );
         assert_eq!(nav(&app).list(), Some(1));
         assert_eq!(nav(&app).page, 1);
-        assert_eq!(nav(&app).view, View::Orbit);
+        assert_eq!(nav(&app).presentation_mode, PresentationMode::Simulation);
         assert_eq!(nav(&app).selection, None);
     }
 
@@ -396,21 +405,27 @@ mod tests {
         let galaxy = space_simulation::demo_galaxy();
         let list = galaxy.systems[1].id.clone();
         let first = galaxy.systems[1].first_page();
-        for start in [View::Constellation, View::Table, View::Orbit] {
+        for start in [
+            PresentationMode::Constellation,
+            PresentationMode::Table,
+            PresentationMode::Simulation,
+        ] {
             let app = run(
                 galaxy.clone(),
                 vec![
                     UiCommand::Jump {
                         list: galaxy.systems[0].id.clone(),
                     },
-                    UiCommand::SetView { view: start },
+                    UiCommand::SetPresentationMode {
+                        presentation_mode: start,
+                    },
                     UiCommand::Jump { list: list.clone() },
                 ],
             );
             let nav = nav(&app);
             assert_eq!(nav.list(), Some(1));
             assert_eq!(nav.page, first);
-            assert_eq!(nav.view, View::Constellation);
+            assert_eq!(nav.presentation_mode, PresentationMode::Constellation);
             assert_eq!(
                 nav.selected_star(),
                 page_pick(&galaxy.systems[1], first).as_ref()
@@ -420,25 +435,31 @@ mod tests {
     }
 
     #[test]
-    fn page_navigation_selects_constellation_stars_and_keeps_other_views() {
+    fn page_navigation_selects_constellation_stars_and_keeps_other_presentation_modes() {
         let galaxy = space_simulation::demo_galaxy();
-        for start in [View::Constellation, View::Table, View::Orbit] {
+        for start in [
+            PresentationMode::Constellation,
+            PresentationMode::Table,
+            PresentationMode::Simulation,
+        ] {
             let app = run(
                 galaxy.clone(),
                 vec![
                     UiCommand::Jump {
                         list: galaxy.systems[0].id.clone(),
                     },
-                    UiCommand::SetView { view: start },
+                    UiCommand::SetPresentationMode {
+                        presentation_mode: start,
+                    },
                     UiCommand::ShowPage { page: 1 },
                 ],
             );
             let nav = nav(&app);
             assert_eq!(nav.page, 1);
-            assert_eq!(nav.view, start);
+            assert_eq!(nav.presentation_mode, start);
             assert_eq!(
                 nav.selection,
-                (start == View::Constellation)
+                (start == PresentationMode::Constellation)
                     .then(|| page_pick(&galaxy.systems[0], 1))
                     .flatten()
                     .map(Selection::Star)
@@ -456,9 +477,9 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(r#"{"type":"set_view","view":"constellation"}"#),
-            UiCommand::SetView {
-                view: View::Constellation
+            parse(r#"{"type":"set_presentation_mode","presentation_mode":"constellation"}"#),
+            UiCommand::SetPresentationMode {
+                presentation_mode: PresentationMode::Constellation
             }
         );
         assert_eq!(

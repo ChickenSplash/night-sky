@@ -1,5 +1,5 @@
 use crate::actions::{Display, UiCommand};
-use crate::views::View;
+use crate::presentation::PresentationMode;
 use crate::{
     Clock, Navigation, Universe,
     scene::{CameraPose, CameraRig, CameraVelocity, Markers, speed_label},
@@ -463,7 +463,7 @@ impl Panels<'_> {
         }
         muted(
             ui,
-            "Orbit view uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every view.",
+            "Simulation mode uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every presentation mode.",
         );
         ui.separator();
         heading(ui, "RENDERING");
@@ -503,13 +503,17 @@ impl Panels<'_> {
         };
         ui.heading(&system.name);
         ui.horizontal_wrapped(|ui| {
-            for (label, view) in [
-                ("Orbit", View::Orbit),
-                ("Planet table", View::Table),
-                ("Constellation", View::Constellation),
+            for (label, presentation_mode) in [
+                ("Simulation", PresentationMode::Simulation),
+                ("Table", PresentationMode::Table),
+                ("Constellation", PresentationMode::Constellation),
             ] {
-                if ui.selectable_label(nav.view == view, label).clicked() {
-                    self.out.push(UiCommand::SetView { view });
+                if ui
+                    .selectable_label(nav.presentation_mode == presentation_mode, label)
+                    .clicked()
+                {
+                    self.out
+                        .push(UiCommand::SetPresentationMode { presentation_mode });
                 }
             }
         });
@@ -1086,8 +1090,12 @@ fn canvas_overlay(
             painter.circle_stroke(point, 4.0, egui::Stroke::new(1.0, tint));
         }
         // Task labels would smear across the screen mid-flight.
-        if selected || hovered || ((nav.labels || nav.view != View::Orbit) && !rig.flying()) {
-            let table = nav.view == View::Table && !rig.flying();
+        if selected
+            || hovered
+            || ((nav.labels || nav.presentation_mode != PresentationMode::Simulation)
+                && !rig.flying())
+        {
+            let table = nav.presentation_mode == PresentationMode::Table && !rig.flying();
             let width = if table {
                 (table_column - 12.0).clamp(40.0, 180.0)
             } else {

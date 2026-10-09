@@ -53,6 +53,8 @@ try {
   // Allow the WebGL pipelines to compile and Bevy to produce complete frames.
   await page.waitForTimeout(6000);
   const state = () => page.evaluate(() => window.space.state());
+  assert.equal((await state()).presentation_mode, 'simulation');
+  assert.equal(Object.hasOwn(await state(), 'view'), false);
   await page.keyboard.press('Space');
   await page.waitForFunction(() => window.space.state().paused, null, { timeout: 5000 });
   // The client opens in the galaxy, relative to home.
@@ -61,21 +63,21 @@ try {
   await page.mouse.click(168, 214); // First list.
   await page.waitForTimeout(2500);
   assert.equal((await state()).list, fixture.systems[0].id);
-  assert.equal((await state()).view, 'constellation');
+  assert.equal((await state()).presentation_mode, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-list.png') });
-  await page.mouse.click(90, 75); // Fold the lists section, lifting the view buttons.
+  await page.mouse.click(90, 75); // Fold the lists section, lifting the presentation buttons.
   await page.waitForTimeout(1000);
   await page.mouse.click(148, 687); // Task table preset.
   await page.waitForTimeout(2500);
-  assert.equal((await state()).view, 'table');
+  assert.equal((await state()).presentation_mode, 'table');
   await page.screenshot({ path: resolve(root, 'data/web-table.png') });
-  await page.mouse.click(168, 769); // Next system page.
+  await page.mouse.click(168, 729); // Next system page.
   await page.waitForTimeout(2500);
   assert.equal((await state()).page, 1);
   await page.screenshot({ path: resolve(root, 'data/web-table-next-page.png') });
-  await page.mouse.click(88, 728); // Constellation preset.
+  await page.mouse.click(249, 687); // Constellation preset.
   await page.waitForTimeout(2500);
-  assert.equal((await state()).view, 'constellation');
+  assert.equal((await state()).presentation_mode, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-constellation.png') });
   // Settings opens a window beside the sidebar; its first row is a checkbox.
   const exaggerate = (await state()).display.exaggerate;

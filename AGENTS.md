@@ -54,13 +54,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   command line and its output), `perf` (frame graph, star-stream metrics),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
   bodies, galaxy reference views), `state` (camera; navigation: location,
-  open list, anchor, page, view, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
+  open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
   browser). New debug readouts and switches go there, not in Settings or the
   canvas.
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
-  (`set_view table`, `set_display option=orbits on=false`, or `UiCommand`
+  (`set_presentation_mode table`, `set_display option=orbits on=false`, or `UiCommand`
   JSON) into the same `UiCommand`s as the panels, before `actions::apply`.
   `help` is built in; `clear` empties the terminal tab and is handled by the
   window. Echoes, help and errors are logged under `command_line::TARGET`
@@ -78,7 +78,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `ui::Sidebar`, not `Navigation`.
 - `automation.rs` (browser only) is a test hook, not a UI: `window.space.command`
   sends a `UiCommand` as JSON and `window.space.state()` reads a small snapshot
-  (list, page, view, display options, stream caption, benchmark results).
+  (list, page, presentation_mode, display options, stream caption, benchmark results).
 - `./scripts/dev-web.sh`: web build plus server with `index.html` and
   `star-worker.js` linked live. `node scripts/test-browser.mjs` clicks the egui
   panels at 1600 x 1000 and checks the results through `window.space`; update its
@@ -300,8 +300,15 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `Navigation::page`) or `Visit::Generated` (task-free planets built from the
   star's ID, never added to the lists' `Universe`). `None` is open space,
   relative to home in galactic axes; a visit moves the camera frame to its
-  star in f64, and the same `Flight` shifts the displayed pose. Orbit, table
-  and constellation views work on any visited system.
+  star in f64, and the same `Flight` shifts the displayed pose. Simulation, table
+  and constellation presentation modes work on any visited system.
+- `presentation.rs` owns `PresentationMode`: `Simulation` (simulated orbital
+  positions), `Table` (comparison row), and `Constellation` (connected stars).
+  `Navigation::presentation_mode` describes scene presentation, not tracking or
+  free flight. Switching presets also sets camera framing. The terminal command
+  is `set_presentation_mode simulation|table|constellation`; JSON commands use
+  `type: "set_presentation_mode"` and `presentation_mode`, also the browser state
+  key. Camera views and physical `Orbit` elements keep their existing names.
 - Where the camera is and which list is open are separate:
   `Navigation::location` (the visit while `Navigation::arrived`) is physical,
   and `Navigation::list` is the open list (a `Visit::List`, kept in
@@ -309,8 +316,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `system_range` of the page star (0.02 ly, or 4 times the outermost apoapsis
   if wider) it arrives, and it leaves beyond `LEAVE_FACTOR` (2) times that.
   Constellation view is never at a star, and a flight arrives only on getting
-  there. Clicking Visit and drifting in arrive the same way. Leaving in orbit
-  view, however the visit began, returns to open space and closes the list;
+  there. Clicking Visit and drifting in arrive the same way. Leaving in simulation
+  mode, however the visit began, returns to open space and closes the list;
   there is no restoring a previous visit.
 - Free flight in open space automatically activates a loaded star's list page
   or generated system within 0.02 ly, without flying, reframing or changing

@@ -70,7 +70,7 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Go up a level (star, list, then the whole galaxy) | Escape with nothing selected, or click the breadcrumb at the top left |
 | Inspect task | Click planet/marker or task index |
 | Track planet at close range | **Follow this planet** |
-| Return to orbital view | **Orbit** or **Frame orbital system** |
+| Return to system overview | **Simulation** or **Frame orbital system** |
 | Align ten task-planets in a top-down table | **Task table** |
 | Frame the list's systems | **Constellation** |
 | Browse system pages | **‹ / ›** in the inspector |
@@ -83,7 +83,12 @@ Search covers all systems. The simulation clock starts at an arbitrary epoch;
 task deadlines always use wall-clock time. Changing simulation speed never
 rewinds or jumps the orbit phase.
 
-Table view aligns planets to the right of their star, with task labels below.
+Presentation mode controls the scene layout, not whether the camera is tracking
+or navigating freely: **Simulation** uses simulated orbital positions,
+**Table** arranges planets for comparison, and **Constellation** connects and
+frames the list's stars. The underlying simulation continues in every mode.
+
+Table mode aligns planets to the right of their star, with task labels below.
 Planets and the star keep their physical radii, so a large star shows only its
 right tip at the left edge. Column spacing is schematic, scaled to the page's largest planet.
 Both presets automatically frame the available viewing area. Switch to **Orbit**
@@ -150,11 +155,11 @@ is available it retains its last data, initially the clearly labelled demo.
 - Bevy's reverse-Z perspective depth and distance-adjusted near plane support the
   view's changing scale. This is not a logarithmic-depth-buffer implementation.
 - Bodies use physical radii by default; selectable markers keep them visible.
-  **Readable planet sizes** exaggerates radii in Orbit view, not positions or periods.
+  **Readable planet sizes** exaggerates radii in Simulation mode, not positions or periods.
 - Each page is a separate star system with a stable, independently random orbital
   plane (poles uniform over the sphere). The telemetry panel shows the current
   page's tilt. List pages occupy distinct, visible cell stars near galactic
-  home, with their real generated positions and planetary systems. Constellation view moves nothing: it zooms out from the current
+  home, with their real generated positions and planetary systems. Constellation mode moves nothing: it zooms out from the current
   angle until every page star fits and joins them with lines. Orbit and Task table
   retain physical orbital distances. Camera flights roll between planes; open
   space uses galactic axes.
@@ -215,7 +220,7 @@ is available it retains its last data, initially the clearly labelled demo.
   any visible star to select it, then click it again (or press **Enter**) to
   visit its planetary system. **C** selects the star at the view centre. A star
   that carries a list page opens that page with its tasks; any other shows its
-  generated planets, with the same orbit, table and constellation views.
+  generated planets, with the same simulation, table and constellation presentation modes.
   Generated stars have stable `TS <cell>-<component>-<index>` catalogue names
   and lettered planets. Picking uses only currently loaded, magnitude-visible
   stars; wait for streaming if a target is not selectable.
@@ -296,7 +301,7 @@ Debugging has its own window, toggled with `` ` `` or F3 on both clients:
 | `tools` | Save bug report (native), star-stream benchmark (browser) |
 
 The terminal tab runs any panel action by name: `help` lists them, for
-example `set_view table`, `set_display orbits false` or
+example `set_presentation_mode table`, `set_display orbits false` or
 `galaxy_reference face_on`. Arguments go in order or as `field=value`; quote
 values with spaces. Up and down recall earlier commands, and `clear` empties
 the tab. On the desktop, the terminal that ran `./scripts/run.sh` takes the

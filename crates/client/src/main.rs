@@ -13,6 +13,7 @@ mod flight;
 mod galaxy_nav;
 mod glow;
 mod network;
+mod presentation;
 mod render;
 mod scene;
 mod sky;
@@ -22,7 +23,6 @@ mod starfield;
 mod stream;
 mod terminal;
 mod ui;
-mod views;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -59,7 +59,7 @@ pub enum Selection {
 #[derive(Resource)]
 pub struct Navigation {
     pub page: u32,
-    pub view: views::View,
+    pub presentation_mode: presentation::PresentationMode,
     pub viewport: Option<bevy::camera::Viewport>,
     /// The system the camera is anchored to: the one it is at, is flying to,
     /// or whose list is shown as a constellation. `None` in open space, where
@@ -107,7 +107,7 @@ impl Default for Navigation {
     fn default() -> Self {
         Self {
             page: 0,
-            view: views::View::Orbit,
+            presentation_mode: presentation::PresentationMode::Simulation,
             viewport: None,
             visit: None,
             arrived: false,
@@ -194,23 +194,23 @@ impl Navigation {
         }
     }
 
-    /// Fly to a page's star, framing its planets in orbit view.
+    /// Fly to a page's star, framing its planets in simulation mode.
     pub fn arrive(&mut self, visit: Visit, page: u32, lists: &Galaxy) {
         self.visit = Some(visit);
         self.page = page;
         self.frame(lists);
     }
 
-    /// Frame the current page's planets in orbit view.
+    /// Frame the current page's planets in simulation mode.
     pub fn frame(&mut self, lists: &Galaxy) {
         let Some(distance) = self
             .system(lists)
-            .map(|system| views::fit_distance(system, self.page))
+            .map(|system| presentation::fit_distance(system, self.page))
         else {
             return;
         };
         self.fly = true;
-        self.view = views::View::Orbit;
+        self.presentation_mode = presentation::PresentationMode::Simulation;
         self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);
         self.selection = None;
         self.following = false;
@@ -228,7 +228,7 @@ impl Navigation {
         let first_page = system.first_page();
         let star = galaxy_nav::page_pick(system, first_page);
         self.arrive(Visit::List(index), first_page, lists);
-        self.preset(views::View::Constellation, lists);
+        self.preset(presentation::PresentationMode::Constellation, lists);
         self.selection = star.map(Selection::Star);
     }
 }

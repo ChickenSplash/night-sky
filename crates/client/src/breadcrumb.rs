@@ -173,7 +173,7 @@ fn halo_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Selection, Visit, views::View};
+    use crate::{Selection, Visit, presentation::PresentationMode};
 
     fn labels(nav: &Navigation, galaxy: &Galaxy) -> Vec<String> {
         trail(nav, galaxy).into_iter().map(|c| c.label).collect()
@@ -201,7 +201,7 @@ mod tests {
     fn a_constellation_shows_its_list_but_no_star() {
         let galaxy = space_simulation::demo_galaxy();
         let nav = Navigation {
-            view: View::Constellation,
+            presentation_mode: PresentationMode::Constellation,
             arrived: false,
             ..at_list(&galaxy, 0)
         };
