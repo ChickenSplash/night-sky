@@ -384,7 +384,7 @@ mod native {
     /// Work between checks for a new camera position.
     const SLICE: Duration = Duration::from_millis(20);
     /// Threads making each cell's stars, the stream thread included.
-    const STAR_THREADS: usize = 2;
+    const STAR_THREADS: usize = 8;
 
     type Batch = (Vec<Event>, usize, Duration, usize);
 

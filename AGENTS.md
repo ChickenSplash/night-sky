@@ -271,7 +271,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - `try_point` only reads the `Sky`; it reports a missing integration or
   rejection bound as a `Need`, which `supply`/`complete` work out. So
   `Loader::with_threads(n)` shares each cell's stars among n threads (native
-  `STAR_THREADS`, 2; the browser uses 1): stars needing something become
+  `STAR_THREADS`, 8; the browser uses 1): stars needing something become
   holes, made again once it is worked out, so a cell is identical with any
   thread count (tested). Sorting a loaded cell into its grid
   (`StarCell::new`) is still single-threaded.
