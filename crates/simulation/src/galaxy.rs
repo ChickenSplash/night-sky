@@ -325,7 +325,8 @@ impl GalaxyModel {
             return 0.0;
         }
         let stars = self.stars_in(component);
-        let radius = x.hypot(z);
+        // Only the discs and the halo need the distance in the plane.
+        let radius = || x.hypot(z);
         match component {
             Component::Nucleus => {
                 let a = self.nucleus_pc;
@@ -345,12 +346,13 @@ impl GalaxyModel {
                     Component::Arms => &self.arms,
                     _ => &self.thick,
                 };
-                disc.density(stars, radius, y) * self.spiral.modulation(disc.arm_strength, x, z)
+                disc.density(stars, radius(), y) * self.spiral.modulation(disc.arm_strength, x, z)
             }
             Component::Halo => {
                 // ρ ∝ (r² + c²)⁻², cored and falling as r⁻⁴, truncated at the
                 // galaxy's radius in flattened coordinates.
                 let (c, q, edge) = (self.halo_core_pc, self.halo_flattening, self.radius_pc);
+                let radius = radius();
                 let squared = radius * radius + (y / q).powi(2);
                 if squared > edge * edge {
                     return 0.0;

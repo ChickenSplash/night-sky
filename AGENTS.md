@@ -261,6 +261,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - A cell star's ID is `g{cell hex}.{component}.{index}`. `cell_star(id)` and
   `cell_planetary_system(id)` rebuild it from the ID alone; its position needs
   `Sky::star(id)`.
+- Streaming makes about 100 million stars at the galactic centre, so the
+  per-star path (`Sky::try_point`) builds no strings or `Star`: `StarKey`
+  hashes the ID exactly as `stable_hash` would, `tiered_light` takes only
+  luminosity, temperature and radius from the same `tiered_shape` draws as
+  `tiered_formation`, and each star descends the tree once. It must give the
+  same stars as `Sky::build`, bit for bit (`star_points_match_the_full_stars`).
+  Keep both in step when changing star generation.
 - `space_simulation::stream`: `wanted(camera, magnitude)` lists, per tier, the
   level-t cells within `reach_pc`, most visible first. `Loader` builds them one
   unit at a time (one child box integrated, via `Sky::integrate`, or one star)

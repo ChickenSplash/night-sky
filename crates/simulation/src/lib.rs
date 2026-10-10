@@ -75,9 +75,20 @@ impl SimulationClock {
 
 /// FNV-1a plus an avalanche finalizer, stable across processes and Rust versions.
 pub fn stable_hash(text: &str) -> u64 {
-    let mut hash = text.bytes().fold(0xcbf29ce484222325, |hash, byte| {
+    finish_hash(hash_bytes(HASH_START, text.as_bytes()))
+}
+
+/// `stable_hash` in parts: the state before any bytes, adding bytes, and the
+/// final mix, so a key can be hashed piece by piece without building a string.
+pub(crate) const HASH_START: u64 = 0xcbf29ce484222325;
+
+pub(crate) fn hash_bytes(hash: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(hash, |hash, &byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-    });
+    })
+}
+
+pub(crate) fn finish_hash(mut hash: u64) -> u64 {
     hash = (hash ^ (hash >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     hash = (hash ^ (hash >> 27)).wrapping_mul(0x94d049bb133111eb);
     hash ^ (hash >> 31)

@@ -528,10 +528,10 @@ impl Loader {
         let Some(&component) = Component::ALL.get(job.component) else {
             return true;
         };
-        match self.sky.place_need(cell, component, job.index) {
-            Some((cell, component)) => self.sky.integrate(cell, component),
-            None => {
-                job.stars.push(self.sky.point(cell, component, job.index));
+        match self.sky.try_point(cell, component, job.index) {
+            Err((cell, component)) => self.sky.integrate(cell, component),
+            Ok(star) => {
+                job.stars.push(star);
                 job.index += 1;
             }
         }
