@@ -300,7 +300,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   <label>`; it writes JSON results under `data/logs/`. Headless SwiftShader is
   too slow for meaningful comparisons, so use headed Chromium on Wayland.
 - `starfield.rs` draws one oversized triangle per visible star in mesh batches
-  of at most 4,096 source stars (never an entity per star). Star positions are
+  of up to `PACK` (65,536) uploaded stars, filled from `SLICE`-sized steps of
+  a cell's stars within the upload budget, so a large cell may take several
+  frames. Keep batches few and large: Bevy's per-mesh-entity work
+  (specialization, extraction, queueing) runs every frame, hidden or not, and
+  17k small batches cost about 30 ms of CPU at the galactic centre. A rebuilt
+  cell's new batches wait in `Batches::fresh` and replace the old ones only
+  once complete, so rebuilds never leave holes. Star positions are
   local to the owning cell; per-frame transforms subtract the camera in f64,
   then scale to render units. Filter points beyond 1.25 times their apparent
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild

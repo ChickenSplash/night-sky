@@ -35,7 +35,11 @@ use std::{
 };
 
 const SHADER: Handle<Shader> = uuid_handle!("d12d0ce2-812e-4260-a528-74d3af35d480");
-const BATCH: usize = 4096;
+/// Loaded stars filtered per step, between checks of the upload budget.
+const SLICE: usize = 4096;
+/// Visible stars per uploaded mesh. Bevy's per-entity cost each frame, not
+/// the stars, limits large batch counts, so few large meshes draw fastest.
+const PACK: usize = 65_536;
 const UPLOAD_BUDGET: Duration = Duration::from_millis(3);
 const MARGIN: f64 = 1.25;
 /// A point closer than this many times its offset from its cell's centre gets
@@ -128,9 +132,69 @@ struct Batch {
     stars: usize,
 }
 
+/// Visible stars filtered out of a cell, waiting to fill a mesh.
+#[derive(Default)]
+struct Packing {
+    positions: Vec<[f32; 3]>,
+    corners: Vec<[f32; 2]>,
+    colours: Vec<[f32; 4]>,
+    stars: usize,
+}
+
+impl Packing {
+    /// Adds the stars bright enough to see from `eye`, as offsets from `centre`.
+    fn add(&mut self, points: &[StarPoint], centre: [f64; 3], eye: DVec3) {
+        let reach = MARGIN * MARGIN * reach_sq_per_luminosity(crate::stream::MAGNITUDE);
+        for star in points {
+            let offset = DVec3::from_array(star.position_pc) - eye;
+            let luminosity = f64::from(star.luminosity_solar);
+            let squared = offset.length_squared();
+            if squared > luminosity * reach {
+                continue;
+            }
+            self.stars += 1;
+            let pos: [f32; 3] =
+                std::array::from_fn(|axis| (star.position_pc[axis] - centre[axis]) as f32);
+            let rgb = space_simulation::spectral_colour(f64::from(star.temperature_k));
+            let colour = Color::srgb_u8(rgb[0], rgb[1], rgb[2]).to_linear();
+            let tint = [colour.red, colour.green, colour.blue, star.luminosity_solar];
+            // The shader places each corner by its index, which shares the
+            // attribute with the temperature for realistic colours.
+            for corner in 0..3 {
+                self.positions.push(pos);
+                self.corners.push([corner as f32, star.temperature_k]);
+                self.colours.push(tint);
+            }
+        }
+    }
+
+    fn into_mesh(self) -> Mesh {
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.corners);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colours);
+        mesh
+    }
+}
+
+/// The cell whose batches are being built, possibly across several frames.
+struct Building {
+    owner: Cell,
+    /// Rebuilding a cell already drawn: its new batches wait in `fresh` and
+    /// replace the old ones together, so the cell never shows a hole.
+    replacing: bool,
+    packing: Packing,
+}
+
 #[derive(Resource, Default)]
 struct Batches {
     active: HashMap<Cell, Vec<Batch>>,
+    /// Finished batches of a rebuild still in progress, not yet drawn.
+    fresh: HashMap<Cell, Vec<Batch>>,
+    building: Option<Building>,
     queued: VecDeque<(Cell, usize)>,
     built_at: HashMap<Cell, DVec3>,
     material: Option<Handle<StarMaterial>>,
@@ -199,40 +263,17 @@ fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
 /// The same star at any distance has a stable vertex position within its cell;
 /// camera and zoom move its mesh, not a million individual vertices.
 fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize) {
-    let mut positions = Vec::with_capacity(points.len() * 3);
-    let mut corners = Vec::with_capacity(points.len() * 3);
-    let mut colours = Vec::with_capacity(points.len() * 3);
-    let mut visible = 0;
-    let reach = MARGIN * MARGIN * reach_sq_per_luminosity(crate::stream::MAGNITUDE);
-    for star in points {
-        let offset = DVec3::from_array(star.position_pc) - eye;
-        let luminosity = f64::from(star.luminosity_solar);
-        let squared = offset.length_squared();
-        if squared > luminosity * reach {
-            continue;
-        }
-        visible += 1;
-        let pos: [f32; 3] =
-            std::array::from_fn(|axis| (star.position_pc[axis] - centre[axis]) as f32);
-        let rgb = space_simulation::spectral_colour(f64::from(star.temperature_k));
-        let colour = Color::srgb_u8(rgb[0], rgb[1], rgb[2]).to_linear();
-        let tint = [colour.red, colour.green, colour.blue, star.luminosity_solar];
-        // The shader places each corner by its index, which shares the
-        // attribute with the temperature for realistic colours.
-        for corner in 0..3 {
-            positions.push(pos);
-            corners.push([corner as f32, star.temperature_k]);
-            colours.push(tint);
-        }
+    let mut packing = Packing::default();
+    packing.add(points, centre, eye);
+    let visible = packing.stars;
+    (packing.into_mesh(), visible)
+}
+
+fn despawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, batches: Vec<Batch>) {
+    for batch in batches {
+        commands.entity(batch.entity).despawn();
+        meshes.remove(&batch.mesh);
     }
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, corners);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
-    (mesh, visible)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -338,11 +379,21 @@ fn sync(
     for dropped in field.removed.drain(..) {
         metrics.loaded_at.remove(&dropped);
         batches.built_at.remove(&dropped);
-        if let Some(old) = batches.active.remove(&dropped) {
-            for batch in old {
-                commands.entity(batch.entity).despawn();
-                meshes.remove(&batch.mesh);
-            }
+        for old in [
+            batches.active.remove(&dropped),
+            batches.fresh.remove(&dropped),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            despawn(&mut commands, &mut meshes, old);
+        }
+        if batches
+            .building
+            .as_ref()
+            .is_some_and(|building| building.owner == dropped)
+        {
+            batches.building = None;
         }
         batches.queued.retain(|(cell, _)| *cell != dropped);
     }
@@ -363,7 +414,7 @@ fn sync(
     batches
         .queued
         .extend(moved.into_iter().map(|cell| (cell, 0)));
-    // A few thousand stars per frame: never turn one large cell into a frame stall.
+    // A few thousand stars per step: never turn one large cell into a frame stall.
     let start = bevy::platform::time::Instant::now();
     while let Some((owner, offset)) = batches.queued.pop_front() {
         let Some(stars) = field.cells.get(&owner).map(|c| &c.stars) else {
@@ -372,49 +423,76 @@ fn sync(
         if offset >= stars.len() {
             continue;
         }
-        let end = (offset + BATCH).min(stars.len());
-        let centre = owner.centre_pc();
         if offset == 0 {
-            if let Some(old) = batches.active.remove(&owner) {
-                for batch in old {
-                    commands.entity(batch.entity).despawn();
-                    meshes.remove(&batch.mesh);
-                }
+            if let Some(old) = batches.fresh.remove(&owner) {
+                despawn(&mut commands, &mut meshes, old);
+            }
+            if let Some(at) = metrics.loaded_at.remove(&owner) {
+                metrics.mesh_wait_ms += at.elapsed().as_secs_f64() * 1000.0;
+                metrics.mesh_wait_samples += 1;
             }
             batches.built_at.insert(owner, eye);
         }
-        let (geometry, visible) = mesh(&stars[offset..end], centre, eye);
-        metrics.built_batches += 1;
-        if offset == 0
-            && let Some(at) = metrics.loaded_at.remove(&owner)
+        if batches
+            .building
+            .as_ref()
+            .is_none_or(|building| building.owner != owner || offset == 0)
         {
-            metrics.mesh_wait_ms += at.elapsed().as_secs_f64() * 1000.0;
-            metrics.mesh_wait_samples += 1;
-        }
-        if visible > 0 {
-            let handle = meshes.add(geometry);
-            commands
-                .entity(parent.parent())
-                .insert_if_new(Visibility::default());
-            let entity = commands
-                .spawn((
-                    Mesh3d(handle.clone()),
-                    MeshMaterial3d(material.clone()),
-                    Transform::default(),
-                    GlobalTransform::default(),
-                    *cell,
-                    Visibility::Hidden,
-                    NoFrustumCulling,
-                    ChildOf(parent.parent()),
-                ))
-                .id();
-            batches.active.entry(owner).or_default().push(Batch {
-                entity,
-                mesh: handle,
-                stars: visible,
+            batches.building = Some(Building {
+                owner,
+                replacing: batches.active.contains_key(&owner),
+                packing: Packing::default(),
             });
         }
-        if end < stars.len() {
+        let end = (offset + SLICE).min(stars.len());
+        let centre = owner.centre_pc();
+        let building = batches.building.as_mut().expect("set above");
+        building.packing.add(&stars[offset..end], centre, eye);
+        metrics.built_batches += 1;
+        let done = end == stars.len();
+        if building.packing.stars >= PACK || done {
+            let replacing = building.replacing;
+            let packing = std::mem::take(&mut building.packing);
+            if packing.stars > 0 {
+                let visible = packing.stars;
+                let handle = meshes.add(packing.into_mesh());
+                commands
+                    .entity(parent.parent())
+                    .insert_if_new(Visibility::default());
+                let entity = commands
+                    .spawn((
+                        Mesh3d(handle.clone()),
+                        MeshMaterial3d(material.clone()),
+                        Transform::default(),
+                        GlobalTransform::default(),
+                        *cell,
+                        Visibility::Hidden,
+                        NoFrustumCulling,
+                        ChildOf(parent.parent()),
+                    ))
+                    .id();
+                let batch = Batch {
+                    entity,
+                    mesh: handle,
+                    stars: visible,
+                };
+                if replacing {
+                    batches.fresh.entry(owner).or_default().push(batch);
+                } else {
+                    batches.active.entry(owner).or_default().push(batch);
+                }
+            }
+        }
+        if done {
+            if batches.building.take().is_some_and(|b| b.replacing) {
+                if let Some(old) = batches.active.remove(&owner) {
+                    despawn(&mut commands, &mut meshes, old);
+                }
+                if let Some(new) = batches.fresh.remove(&owner) {
+                    batches.active.insert(owner, new);
+                }
+            }
+        } else {
             batches.queued.push_front((owner, end));
         }
         if start.elapsed() >= UPLOAD_BUDGET {
