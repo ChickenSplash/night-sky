@@ -3,6 +3,7 @@
 //! toggles it on both clients. Drawn in the terminal look (`terminal.rs`).
 use crate::actions::{Display, GalaxyReference, UiCommand};
 use crate::command_line::{self, Source, Typed};
+use crate::core_load::CoreLoad;
 use crate::presentation::PresentationMode;
 use crate::render::{Lights, exposure_caption};
 use crate::render_debug::RenderDebug;
@@ -242,6 +243,7 @@ type Rendering<'w> = (
     Res<'w, crate::sky::Sky>,
     Res<'w, RenderDebug>,
     Option<Res<'w, DiagnosticsStore>>,
+    ResMut<'w, CoreLoad>,
 );
 
 pub fn draw(
@@ -261,7 +263,7 @@ pub fn draw(
     let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (starfield, metrics, lights, sky, debug, diagnostics) = rendering;
+    let (starfield, metrics, lights, sky, debug, diagnostics, mut core_load) = rendering;
     if tools.frames.len() == FRAMES {
         tools.frames.pop_front();
     }
@@ -317,7 +319,7 @@ pub fn draw(
                         ),
                         Tab::Render => render(ui, &nav, &lights, &sky, &debug, &mut out),
                         Tab::State => state(ui, &universe, &nav, &clock, &rig, &pose, &velocity),
-                        _ => report = tools_tab(ui, &tools),
+                        _ => report = tools_tab(ui, &tools, &mut core_load, &starfield),
                     });
             }
         }
@@ -1029,9 +1031,15 @@ fn state(
 }
 
 /// Returns whether Save bug report was clicked.
-fn tools_tab(ui: &mut egui::Ui, tools: &DevTools) -> bool {
+fn tools_tab(
+    ui: &mut egui::Ui,
+    tools: &DevTools,
+    core_load: &mut CoreLoad,
+    field: &Starfield,
+) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        core_load_test(ui, core_load, field);
         terminal::heading(ui, "bug report");
         let report = terminal::button(ui, "save bug report");
         terminal::note(
@@ -1049,7 +1057,7 @@ fn tools_tab(ui: &mut egui::Ui, tools: &DevTools) -> bool {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = tools;
+        let _ = (tools, core_load, field);
         terminal::heading(ui, "benchmark");
         if terminal::button(ui, "run star-stream benchmark") {
             crate::benchmark::restart();
@@ -1060,6 +1068,52 @@ fn tools_tab(ui: &mut egui::Ui, tools: &DevTools) -> bool {
         );
         false
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn core_load_test(ui: &mut egui::Ui, load: &mut CoreLoad, field: &Starfield) {
+    terminal::heading(ui, "core load test");
+    if terminal::button(ui, "load the galactic centre from scratch") {
+        *load = CoreLoad::Requested;
+    }
+    terminal::note(
+        ui,
+        "Jumps 1 pc from the black hole with no stars loaded and times loading every cell; keep still until it finishes.",
+    );
+    let (time, cells, stars) = match *load {
+        CoreLoad::Idle | CoreLoad::Requested => return,
+        CoreLoad::Running(started) => (
+            format!("{:.1} s so far", started.elapsed().as_secs_f64()),
+            format!(
+                "{} loaded, {} pending",
+                grouped(field.cells.len()),
+                grouped(field.pending)
+            ),
+            grouped(field.stars),
+        ),
+        CoreLoad::Done {
+            cells,
+            stars,
+            seconds,
+        } => (format!("{seconds:.2} s"), grouped(cells), grouped(stars)),
+    };
+    terminal::facts_with_details(
+        ui,
+        "debug-core-load",
+        &[
+            (
+                "time",
+                time,
+                Some("From the click until no cells are pending."),
+            ),
+            (
+                "cells",
+                cells,
+                Some("Cells loaded, of every brightness tier, around the camera."),
+            ),
+            ("stars", stars, Some("Stars generated in those cells.")),
+        ],
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

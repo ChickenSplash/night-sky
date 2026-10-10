@@ -161,6 +161,13 @@ pub struct CameraRig {
     warned_stall: bool,
 }
 
+impl CameraRig {
+    /// Ends any flight, so the next placement jumps straight to `Navigation`.
+    pub fn land(&mut self) {
+        self.flight = None;
+    }
+}
+
 fn rebase(
     nav: &mut Navigation,
     rig: &CameraRig,

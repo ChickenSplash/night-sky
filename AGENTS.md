@@ -294,6 +294,12 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   by star per frame or per streaming change: the cells containing the camera
   hold tens of millions of stars at the galactic centre. The perf tab's
   nearest star section times the lookups.
+  The native debug window's **core load test** (`tools` tab, `core_load.rs`)
+  jumps 1 pc from the black hole, restarts streaming from nothing
+  (`StreamRestart`: a new loader thread with an empty `Sky` cache, every
+  cell dropped) and times until no cells are pending. Baseline before any
+  generation speed-ups: 157 cells, 114,992,223 stars in 141.6 s. The star
+  count is deterministic, so a changed count means generation changed.
   The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each

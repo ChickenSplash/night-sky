@@ -40,6 +40,10 @@ pub struct Starfield {
     loaded_once: bool,
 }
 
+/// Set to drop every loaded star and start a new, empty loader, as at startup.
+#[derive(Resource, Default)]
+pub struct StreamRestart(pub bool);
+
 /// One-second measurements of generation and mesh preparation. The render
 /// queue is measured separately from the loader's pending-cell queue.
 #[derive(Resource)]
@@ -256,6 +260,17 @@ impl Starfield {
         }
     }
 
+    /// Drops every loaded star, as before the first load.
+    fn clear(&mut self) {
+        self.removed
+            .extend(self.cells.drain().map(|(cell, _)| cell));
+        self.added.clear();
+        self.stars = 0;
+        self.pending = 0;
+        self.aimed_pc = None;
+        self.started = None;
+    }
+
     pub fn summary(&self) -> String {
         format!(
             "{} stars in {} cells, {} cells pending, aimed at {:?} pc",
@@ -281,6 +296,7 @@ impl Plugin for StreamPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Starfield>()
             .init_resource::<StreamMetrics>()
+            .init_resource::<StreamRestart>()
             .insert_resource(Backend::start())
             .add_systems(Update, stream.after(crate::scene::place_camera));
     }
@@ -291,10 +307,15 @@ fn stream(
     mut backend: ResMut<Backend>,
     mut field: ResMut<Starfield>,
     mut metrics: ResMut<StreamMetrics>,
-    rig: Res<CameraRig>,
-    pose: Res<CameraPose>,
+    (rig, pose): (Res<CameraRig>, Res<CameraPose>),
     debug: Res<crate::render_debug::RenderDebug>,
+    mut restart: ResMut<StreamRestart>,
 ) {
+    if std::mem::take(&mut restart.0) {
+        *backend = Backend::start();
+        field.clear();
+        metrics.loaded_at.clear();
+    }
     let camera = camera_pc(&GalaxyModel::milky_way(), &rig, &pose);
     // Frozen, the loader finishes its current aim and nothing else.
     let moved = !debug.freeze_stream
