@@ -366,6 +366,34 @@ fn near(level: usize, p: [f64; 3], radius: f64) -> Vec<Cell> {
     cells
 }
 
+/// `work` on every part, by this thread and `threads - 1` more, each taking
+/// the next part as it finishes one. Results come in no particular order.
+fn in_parallel<P: Send, T: Send>(
+    threads: usize,
+    parts: impl Iterator<Item = P> + Send,
+    work: impl Fn(P) -> T + Sync,
+) -> Vec<T> {
+    let parts = std::sync::Mutex::new(parts);
+    let take = || {
+        let mut done = Vec::new();
+        loop {
+            let part = parts.lock().expect("a star thread panicked").next();
+            let Some(part) = part else {
+                return done;
+            };
+            done.push(work(part));
+        }
+    };
+    std::thread::scope(|scope| {
+        let others: Vec<_> = (1..threads).map(|_| scope.spawn(take)).collect();
+        let mut done = take();
+        for other in others {
+            done.extend(other.join().expect("a star thread panicked"));
+        }
+        done
+    })
+}
+
 /// Cells holding every star that reaches `magnitude` at `camera`, most visible
 /// first: nearest relative to their tier's reach, then brightest tier.
 pub fn wanted(camera: [f64; 3], magnitude: f64) -> Vec<Cell> {
@@ -387,14 +415,37 @@ struct Job {
     /// Its own stars of each component, once worked out.
     counts: Option<[u64; 6]>,
     component: usize,
+    /// The next star of `component` to try.
     index: u64,
     stars: Vec<StarPoint>,
+    /// With several threads: stars tried that needed something worked out
+    /// first. Their places in `stars` hold `UNMADE` until then.
+    holes: Vec<u64>,
 }
+
+/// Stars each thread makes per step when threads share a cell: a few
+/// milliseconds' work, so the caller's `more()` is still asked often.
+const RUN: u64 = 8_192;
+/// Stars threads take at a time: small, so a slower core (an E-core) just
+/// takes fewer, and the others never wait long for it.
+const PIECE: usize = 512;
+
+/// A place in a cell's stars not made yet.
+const UNMADE: StarPoint = StarPoint {
+    position_pc: [0.0; 3],
+    luminosity_solar: 0.0,
+    temperature_k: 0.0,
+    radius_solar: 0.0,
+    component: Component::Nucleus,
+    index: 0,
+};
 
 /// Loads the cells around a camera and drops those left behind.
 pub struct Loader {
     sky: Sky,
     magnitude: f64,
+    /// Threads making each cell's stars, this one included.
+    threads: usize,
     camera: Option<[f64; 3]>,
     /// Cells delivered and not yet dropped.
     loaded: HashSet<Cell>,
@@ -410,6 +461,7 @@ impl Loader {
         Self {
             sky,
             magnitude,
+            threads: 1,
             camera: None,
             loaded: HashSet::new(),
             queue: Vec::new(),
@@ -417,6 +469,14 @@ impl Loader {
             events: Vec::new(),
             cancelled_jobs: 0,
         }
+    }
+
+    /// Shares each cell's stars among this many threads (native only; the
+    /// browser has none to spare). Stars are seeded alone, so the sky is the
+    /// same with any number.
+    pub fn with_threads(mut self, threads: usize) -> Self {
+        self.threads = threads.max(1);
+        self
     }
 
     fn keeps(&self, cell: Cell, camera: [f64; 3]) -> bool {
@@ -486,6 +546,7 @@ impl Loader {
                     component: 0,
                     index: 0,
                     stars: Vec::new(),
+                    holes: Vec::new(),
                 });
             }
             if self.advance() {
@@ -521,21 +582,85 @@ impl Loader {
             }
             return false;
         };
-        while job.component < 6 && job.index >= counts[job.component] {
+        while job.component < 6 && job.index >= counts[job.component] && job.holes.is_empty() {
             job.component += 1;
             job.index = 0;
         }
         let Some(&component) = Component::ALL.get(job.component) else {
             return true;
         };
+        if self.threads > 1 {
+            let count = counts[job.component];
+            Self::share(&mut self.sky, self.threads, job, component, count);
+            return false;
+        }
         match self.sky.try_point(cell, component, job.index) {
-            Err((cell, component)) => self.sky.integrate(cell, component),
+            Err(need) => self.sky.supply(need),
             Ok(star) => {
                 job.stars.push(star);
                 job.index += 1;
             }
         }
         false
+    }
+
+    /// The next run of stars per thread, in parallel, written into their
+    /// places in `stars`, or else the holes left so far. Stars needing
+    /// something become holes, tried again once it is worked out, so the cell
+    /// is the same as one thread makes.
+    fn share(sky: &mut Sky, threads: usize, job: &mut Job, component: Component, count: u64) {
+        let cell = job.cell;
+        // Where the component's first star goes in `stars`.
+        let base = job.stars.len() - job.index as usize;
+        let shared: &Sky = sky;
+        let make = |index| shared.try_point(cell, component, index);
+        let mut needs = HashSet::new();
+        if job.holes.is_empty() {
+            let start = job.index;
+            let end = count.min(start + RUN * threads as u64);
+            job.stars.resize(base + end as usize, UNMADE);
+            job.index = end;
+            let fresh = &mut job.stars[base + start as usize..];
+            let missed = in_parallel(
+                threads,
+                fresh.chunks_mut(PIECE).enumerate(),
+                |(n, places)| {
+                    let first = start + (n * PIECE) as u64;
+                    let mut missed = Vec::new();
+                    for (index, place) in (first..).zip(places) {
+                        match make(index) {
+                            Ok(star) => *place = star,
+                            Err(need) => missed.push((index, need)),
+                        }
+                    }
+                    missed
+                },
+            );
+            for (index, need) in missed.into_iter().flatten() {
+                job.holes.push(index);
+                needs.insert(need);
+            }
+        } else {
+            let holes = std::mem::take(&mut job.holes);
+            let tried = in_parallel(threads, holes.chunks(PIECE), |holes| {
+                holes
+                    .iter()
+                    .map(|&index| (index, make(index)))
+                    .collect::<Vec<_>>()
+            });
+            for (index, star) in tried.into_iter().flatten() {
+                match star {
+                    Ok(star) => job.stars[base + index as usize] = star,
+                    Err(need) => {
+                        job.holes.push(index);
+                        needs.insert(need);
+                    }
+                }
+            }
+        }
+        for need in needs {
+            sky.complete(need);
+        }
     }
 
     /// Drops cached work no loaded or wanted cell needs to be worked out again.
@@ -740,6 +865,12 @@ mod tests {
         let mut sliced = Loader::new(Sky::default(), MAGNITUDE);
         sliced.aim(home);
         assert_eq!(run(&mut sliced, &mut || false), cells);
+        // So do several threads sharing each cell.
+        for more in [true, false] {
+            let mut shared = Loader::new(Sky::default(), MAGNITUDE).with_threads(3);
+            shared.aim(home);
+            assert_eq!(run(&mut shared, &mut || more), cells);
+        }
         // And they are the sky's own stars, in grid order rather than the sky's.
         let mut sky = Sky::default();
         for (cell, stars) in &cells {

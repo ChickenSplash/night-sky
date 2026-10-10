@@ -404,6 +404,15 @@ fn corner(min: [f64; 3], half: f64, octant: usize) -> [f64; 3] {
     std::array::from_fn(|axis| min[axis] + if octant >> axis & 1 == 1 { half } else { 0.0 })
 }
 
+/// What `Sky::try_point` needs worked out before it can place a star.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Need {
+    /// A cell's child masses, to descend through it.
+    Masses(Cell, Component),
+    /// The rejection bound in the cell a descent ended in.
+    Bound(Cell, Component),
+}
+
 /// Streams the galaxy's stars cell by cell, caching counts and masses.
 pub struct Sky {
     pub model: GalaxyModel,
@@ -611,18 +620,24 @@ impl Sky {
         }
     }
 
-    /// One cell star, as `build` makes it, without its names; or the masses
-    /// placing it still needs.
+    /// One cell star, as `build` makes it, without its names; or what placing
+    /// it still needs, for `supply`. Changes nothing, so threads can share it.
     pub(crate) fn try_point(
-        &mut self,
+        &self,
         cell: Cell,
         component: Component,
         index: u64,
-    ) -> Result<StarPoint, (Cell, Component)> {
+    ) -> Result<StarPoint, Need> {
         let key = StarKey::new(cell, component, index);
         let mut rng = key.rng(":place");
-        let end = self.descend(&mut rng, cell, component)?;
-        let position_pc = self.within_end(end, component, &mut rng);
+        let end = self
+            .descend(&mut rng, cell, component)
+            .map_err(|(cell, component)| Need::Masses(cell, component))?;
+        let bound = *self
+            .bounds
+            .get(&(end, component))
+            .ok_or(Need::Bound(end, component))?;
+        let position_pc = within(&self.model, component, end, bound, &mut rng);
         let (luminosity, kelvin, radius) = tiered_light(key, component, cell.level());
         Ok(StarPoint {
             position_pc,
@@ -632,6 +647,30 @@ impl Sky {
             component,
             index: index as u32,
         })
+    }
+
+    /// Works out part of what `try_point` reported missing: one more child's
+    /// masses, or a rejection bound. Repeating a need is harmless.
+    pub(crate) fn supply(&mut self, need: Need) {
+        match need {
+            Need::Masses(cell, component) => self.integrate(cell, component),
+            Need::Bound(end, component) => {
+                let model = &self.model;
+                self.bounds
+                    .entry((end, component))
+                    .or_insert_with(|| bound(model, component, end));
+            }
+        }
+    }
+
+    /// Works out all of a need at once: every child's masses.
+    pub(crate) fn complete(&mut self, need: Need) {
+        match need {
+            Need::Masses(cell, component) => {
+                self.child_masses(cell, component);
+            }
+            Need::Bound(..) => self.supply(need),
+        }
     }
 
     /// Where a star lies in its cell: down through the children in proportion
@@ -802,7 +841,7 @@ mod tests {
                         let point = loop {
                             match sky.try_point(cell, component, index) {
                                 Ok(point) => break point,
-                                Err((cell, component)) => sky.integrate(cell, component),
+                                Err(need) => sky.supply(need),
                             }
                         };
                         let full = sky.build(cell, component, index);

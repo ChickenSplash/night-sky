@@ -383,6 +383,8 @@ mod native {
 
     /// Work between checks for a new camera position.
     const SLICE: Duration = Duration::from_millis(20);
+    /// Threads making each cell's stars, the stream thread included.
+    const STAR_THREADS: usize = 2;
 
     type Batch = (Vec<Event>, usize, Duration, usize);
 
@@ -401,7 +403,7 @@ mod native {
             let (aim, aims) = mpsc::channel();
             let (sender, batches) = mpsc::channel();
             let work = move || {
-                let mut loader = Loader::new(Sky::default(), MAGNITUDE);
+                let mut loader = Loader::new(Sky::default(), MAGNITUDE).with_threads(STAR_THREADS);
                 loop {
                     // Idle until the camera moves.
                     let mut latest = None;
