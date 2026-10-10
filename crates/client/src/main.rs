@@ -4,6 +4,7 @@ mod automation;
 #[cfg(target_arch = "wasm32")]
 mod benchmark;
 mod black_hole;
+mod breadcrumb;
 mod command_line;
 mod devtools;
 #[cfg(not(target_arch = "wasm32"))]
@@ -11,7 +12,10 @@ mod diagnostics;
 mod flight;
 mod galaxy_nav;
 mod glow;
+mod inspector;
 mod network;
+mod objects;
+mod presentation;
 mod render;
 mod scene;
 mod sky;
@@ -19,9 +23,9 @@ mod sky;
 mod smoke;
 mod starfield;
 mod stream;
+mod tasks;
 mod terminal;
 mod ui;
-mod views;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -45,17 +49,50 @@ pub enum Visit {
     Generated(Box<StarSystem>),
 }
 
+/// The one clicked object. A second click activates it: a star is visited, a
+/// planet followed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Selection {
+    /// Any star in the galaxy, by stable ID.
+    Star(galaxy_nav::PickedStar),
+    /// Stable planet ID, even when its parent system is not visited.
+    Planet(String),
+}
+
+impl Selection {
+    pub fn planet(system: &StarSystem, index: usize) -> Self {
+        Self::Planet(system.planets[index].id.clone())
+    }
+
+    pub fn object(&self) -> objects::ObjectRef {
+        match self {
+            Self::Star(star) => objects::ObjectRef::Star {
+                id: star.id.clone(),
+            },
+            Self::Planet(id) => objects::ObjectRef::Planet { id: id.clone() },
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct Navigation {
     pub page: u32,
-    pub view: views::View,
+    pub presentation_mode: presentation::PresentationMode,
     pub viewport: Option<bevy::camera::Viewport>,
-    /// `None` in open space, where the camera is relative to home.
+    /// The system the camera is anchored to: the one it is at, is flying to,
+    /// or whose list is shown as a constellation. `None` in open space, where
+    /// the camera is relative to home. See `location` for where it actually is.
     pub visit: Option<Visit>,
-    pub selected: Option<usize>,
-    /// Selected star, by click, F or page controls. Picking never moves the
-    /// camera; visiting flies there.
-    pub picked: Option<galaxy_nav::PickedStar>,
+    /// Whether the camera is at the visited star, by physical distance. Set
+    /// each frame by `scene::locate`.
+    pub arrived: bool,
+    /// Set by clicks, C or page controls. Selecting never moves the camera;
+    /// visiting a star or following a planet does.
+    pub selection: Option<Selection>,
+    /// Which trail and object currently drive the floating inspector.
+    pub inspection: Option<breadcrumb::Inspection>,
+    /// Physical planet neighbourhood, unrelated to selection or following.
+    pub location_planet: Option<String>,
     pub following: bool,
     pub target: DVec3,
     /// Authoritative free-flight eye in the current page's local frame.
@@ -92,11 +129,13 @@ impl Default for Navigation {
     fn default() -> Self {
         Self {
             page: 0,
-            view: views::View::Orbit,
+            presentation_mode: presentation::PresentationMode::Simulation,
             viewport: None,
             visit: None,
-            selected: None,
-            picked: None,
+            arrived: false,
+            selection: None,
+            inspection: None,
+            location_planet: None,
             following: false,
             target: DVec3::ZERO,
             eye: None,
@@ -142,7 +181,47 @@ impl Navigation {
         }
     }
 
-    /// The visited list, if the camera is at one of its pages.
+    pub fn selected_star(&self) -> Option<&galaxy_nav::PickedStar> {
+        match &self.selection {
+            Some(Selection::Star(star)) => Some(star),
+            _ => None,
+        }
+    }
+
+    pub fn selected_planet(&self, galaxy: &Galaxy) -> Option<usize> {
+        match &self.selection {
+            Some(Selection::Planet(id)) => self
+                .system(galaxy)?
+                .planets
+                .iter()
+                .position(|planet| planet.id == *id),
+            _ => None,
+        }
+    }
+
+    /// Replace the selection. Following carries over from planet to planet only.
+    pub fn select(&mut self, selection: Option<Selection>) {
+        if !matches!(selection, Some(Selection::Planet(_))) {
+            self.following = false;
+        }
+        self.selection = selection;
+        self.inspection = self
+            .selection
+            .as_ref()
+            .map(|selection| breadcrumb::Inspection {
+                source: breadcrumb::TrailSource::Selection,
+                object: selection.object(),
+            });
+    }
+
+    /// The system the camera is physically at, on `page`. `None` in open space,
+    /// in constellation view and while a flight is still on its way in.
+    pub fn location<'a>(&'a self, lists: &'a Galaxy) -> Option<&'a StarSystem> {
+        self.system(lists).filter(|_| self.arrived)
+    }
+
+    /// The open list: the visited star's list, whether the camera is at it,
+    /// flying to it or showing its constellation. It closes in open space.
     pub fn list(&self) -> Option<usize> {
         match self.visit {
             Some(Visit::List(index)) => Some(index),
@@ -150,26 +229,25 @@ impl Navigation {
         }
     }
 
-    /// Fly to a page's star, framing its planets in orbit view.
+    /// Fly to a page's star, framing its planets in simulation mode.
     pub fn arrive(&mut self, visit: Visit, page: u32, lists: &Galaxy) {
         self.visit = Some(visit);
         self.page = page;
         self.frame(lists);
     }
 
-    /// Frame the current page's planets in orbit view.
+    /// Frame the current page's planets in simulation mode.
     pub fn frame(&mut self, lists: &Galaxy) {
         let Some(distance) = self
             .system(lists)
-            .map(|system| views::fit_distance(system, self.page))
+            .map(|system| presentation::fit_distance(system, self.page))
         else {
             return;
         };
         self.fly = true;
-        self.view = views::View::Orbit;
+        self.presentation_mode = presentation::PresentationMode::Simulation;
         self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);
-        self.selected = None;
-        self.picked = None;
+        self.selection = None;
         self.following = false;
         self.target = DVec3::ZERO;
         self.eye = None;
@@ -183,10 +261,10 @@ impl Navigation {
             return;
         };
         let first_page = system.first_page();
-        let picked = galaxy_nav::page_pick(system, first_page);
+        let star = galaxy_nav::page_pick(system, first_page);
         self.arrive(Visit::List(index), first_page, lists);
-        self.preset(views::View::Constellation, lists);
-        self.picked = picked;
+        self.preset(presentation::PresentationMode::Constellation, lists);
+        self.selection = star.map(Selection::Star);
     }
 }
 
@@ -273,8 +351,9 @@ fn main() {
             scene::controls,
             #[cfg(target_arch = "wasm32")]
             benchmark::advance,
-            scene::nearby_system,
+            scene::locate,
             scene::place_camera,
+            scene::locate_planet,
             scene::measure_velocity,
         )
             .chain(),
@@ -340,8 +419,8 @@ fn follow_visited_star(nav: &mut Navigation, old: &Galaxy, new: &Galaxy) {
     let Some(star) = system.page_star(nav.page).cloned() else {
         return;
     };
-    let selected = nav
-        .selected
+    let planet = nav
+        .selected_planet(old)
         .and_then(|i| system.planets.get(i))
         .map(|p| p.id.clone());
     if let Some((list, page)) = galaxy_nav::mapped(new, &star.id) {
@@ -352,13 +431,10 @@ fn follow_visited_star(nav: &mut Navigation, old: &Galaxy, new: &Galaxy) {
             .map(|system| Visit::Generated(Box::new(system)));
         nav.page = 0;
     }
-    nav.selected = selected.and_then(|id| {
-        nav.system(new)?
-            .planets
-            .iter()
-            .position(|planet| planet.id == id)
-    });
-    if nav.selected.is_none() {
+    if let Some(id) = planet {
+        nav.selection = Some(Selection::Planet(id));
+    }
+    if nav.selected_planet(new).is_none() {
         nav.following = false;
     }
 }

@@ -88,7 +88,7 @@ pub fn advance(
     nav.visit = None;
     nav.following = false;
     nav.fly = false;
-    nav.view = crate::views::View::Orbit;
+    nav.presentation_mode = crate::presentation::PresentationMode::Simulation;
     nav.move_speed = SPEED;
     let eye = -DVec3::X * (SPEED * flight.elapsed);
     nav.eye = Some(eye);

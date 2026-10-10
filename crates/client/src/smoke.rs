@@ -1,5 +1,5 @@
 //! An opt-in graphical integration smoke test, also useful for visual regression review.
-use crate::{Clock, Navigation, Universe, Visit, scene::CameraRig, views::View};
+use crate::{Clock, Navigation, Universe, Visit, presentation::PresentationMode, scene::CameraRig};
 use bevy::{
     app::AppExit,
     prelude::*,
@@ -79,7 +79,12 @@ pub fn exercise(
             capture(&mut commands, "system");
         }
         1 => {
-            nav.selected = Some(0);
+            if let Some(selection) = nav
+                .system(&universe.0)
+                .map(|system| crate::Selection::planet(system, 0))
+            {
+                nav.select(Some(selection));
+            }
             nav.focus_selected(&universe.0);
         }
         2 => capture(&mut commands, "planet"),
@@ -117,7 +122,7 @@ pub fn exercise(
             space_simulation::place(system, tasks);
             jump(&mut nav, &universe.0, 0);
             nav.show_page(0, &universe.0);
-            nav.preset(View::Table, &universe.0);
+            nav.preset(PresentationMode::Table, &universe.0);
         }
         10 => capture(&mut commands, "table"),
         11 => nav.show_page(
@@ -125,9 +130,9 @@ pub fn exercise(
             &universe.0,
         ),
         12 => capture(&mut commands, "table-last-page"),
-        13 => nav.preset(View::Constellation, &universe.0),
+        13 => nav.preset(PresentationMode::Constellation, &universe.0),
         14 => capture(&mut commands, "constellation"),
-        15 => nav.preset(View::Orbit, &universe.0),
+        15 => nav.preset(PresentationMode::Simulation, &universe.0),
         16 => capture(&mut commands, "restored-orbits"),
         17 => nav.show_page(1, &universe.0),
         19 => capture(&mut commands, "orbit-page-2"),
@@ -146,14 +151,19 @@ pub fn exercise(
             nav.physical = false;
             nav.wireframe = true;
             nav.exaggerate = true;
-            nav.selected = Some(0);
+            if let Some(selection) = nav
+                .system(&universe.0)
+                .map(|system| crate::Selection::planet(system, 0))
+            {
+                nav.select(Some(selection));
+            }
             nav.focus_selected(&universe.0);
         }
         25 => capture(&mut commands, "realistic-planet"),
         26 => {
             nav.exaggerate = false;
             nav.wireframe = false;
-            nav.preset(View::Constellation, &universe.0);
+            nav.preset(PresentationMode::Constellation, &universe.0);
         }
         27 => capture(&mut commands, "realistic-constellation"),
         28 => {

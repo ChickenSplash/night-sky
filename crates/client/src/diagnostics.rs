@@ -161,9 +161,9 @@ mod tests {
 
     #[test]
     fn bug_report_captures_context_and_can_be_handed_back() {
-        let path = super::save_bug_report("View: Orbit\nPage: 140").unwrap();
+        let path = super::save_bug_report("Presentation mode: Simulation\nPage: 140").unwrap();
         let report = std::fs::read_to_string(&path).unwrap();
-        assert!(report.contains("View: Orbit\nPage: 140"));
+        assert!(report.contains("Presentation mode: Simulation\nPage: 140"));
         assert!(report.contains("Recent client events:"));
         std::fs::remove_file(path).unwrap();
     }

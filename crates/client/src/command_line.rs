@@ -1,4 +1,4 @@
-//! Typed commands: `set_view table`, `set_display option=orbits on=false`, or
+//! Typed commands: `set_presentation_mode table`, `set_display option=orbits on=false`, or
 //! a `UiCommand` as JSON. Arguments fill a command's fields in order, or by
 //! name; quote values with spaces, or IDs that look like numbers.
 //!
@@ -115,12 +115,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 14] = [
-    Usage {
-        name: "pick_centre",
-        fields: &[],
-        about: "Select the star nearest the view centre",
-    },
+pub const USAGE: [Usage; 17] = [
     Usage {
         name: "pick_star",
         fields: &["id"],
@@ -139,7 +134,12 @@ pub const USAGE: [Usage; 14] = [
     Usage {
         name: "inspect",
         fields: &["planet"],
-        about: "Select a planet in the visited system, by planet ID",
+        about: "Select any planet by stable ID without travelling",
+    },
+    Usage {
+        name: "inspect_object",
+        fields: &["inspection"],
+        about: "Inspect a location or selection crumb (JSON inspection object)",
     },
     Usage {
         name: "show_page",
@@ -147,19 +147,29 @@ pub const USAGE: [Usage; 14] = [
         about: "Show a page of the visited list",
     },
     Usage {
-        name: "set_view",
-        fields: &["view"],
-        about: "orbit, table or constellation",
+        name: "set_presentation_mode",
+        fields: &["presentation_mode"],
+        about: "simulation, table or constellation",
     },
     Usage {
-        name: "frame_system",
-        fields: &[],
-        about: "Visit the selected star, or reframe the visited system",
+        name: "visit_star",
+        fields: &["id", "presentation_mode"],
+        about: "Fly to a star's system by ID: simulation, table or constellation",
+    },
+    Usage {
+        name: "fly_to_planet",
+        fields: &["planet"],
+        about: "Fly to a planet by stable ID and follow it",
     },
     Usage {
         name: "follow",
         fields: &[],
         about: "Follow the selected planet",
+    },
+    Usage {
+        name: "up",
+        fields: &[],
+        about: "Reframe a tracked planet's system, else clear selection or go up (Esc)",
     },
     Usage {
         name: "set_paused",
@@ -170,6 +180,11 @@ pub const USAGE: [Usage; 14] = [
         name: "set_rate",
         fields: &["rate"],
         about: "Simulated seconds per real second",
+    },
+    Usage {
+        name: "set_move_speed",
+        fields: &["speed"],
+        about: "Camera travel speed in metres per second (1 m/s to 10,000 ly/s)",
     },
     Usage {
         name: "set_display",
@@ -281,7 +296,7 @@ fn split(line: &str) -> Result<Vec<Word>, String> {
 mod tests {
     use super::*;
     use crate::actions::{Display, GalaxyReference};
-    use crate::views::View;
+    use crate::presentation::PresentationMode;
 
     /// Every `UiCommand` name, as serde lists them when it meets an unknown one.
     fn variants() -> Vec<String> {
@@ -318,15 +333,19 @@ mod tests {
     #[test]
     fn every_usage_parses() {
         for usage in &USAGE {
+            if usage.name == "inspect_object" {
+                parse(r#"{"type":"inspect_object","inspection":{"source":"location","object":{"kind":"galaxy"}}}"#).expect("nested inspection uses the documented JSON command route");
+                continue;
+            }
             let args: Vec<_> = usage
                 .fields
                 .iter()
                 .map(|field| match *field {
                     "page" => "1",
-                    "rate" | "degrees" => "60",
+                    "rate" | "degrees" | "speed" => "60",
                     "paused" | "on" => "true",
                     "option" => "orbits",
-                    "view" if usage.name == "set_view" => "table",
+                    "presentation_mode" => "table",
                     "view" => "inside",
                     _ => "id",
                 })
@@ -358,9 +377,15 @@ mod tests {
             }
         );
         assert_eq!(
-            parse("set_view constellation").unwrap(),
-            UiCommand::SetView {
-                view: View::Constellation
+            parse("set_presentation_mode constellation").unwrap(),
+            UiCommand::SetPresentationMode {
+                presentation_mode: PresentationMode::Constellation
+            }
+        );
+        assert_eq!(
+            parse("set_presentation_mode presentation_mode=simulation").unwrap(),
+            UiCommand::SetPresentationMode {
+                presentation_mode: PresentationMode::Simulation
             }
         );
         assert_eq!(
@@ -402,14 +427,14 @@ mod tests {
         );
         assert!(parse("follow now").unwrap_err().contains("Too many"));
         assert!(
-            parse("set_view colour=red")
+            parse("set_presentation_mode colour=red")
                 .unwrap_err()
                 .contains("no field")
         );
         assert!(
-            parse("set_view sideways")
+            parse("set_presentation_mode sideways")
                 .unwrap_err()
-                .contains("Usage: set_view <view>")
+                .contains("Usage: set_presentation_mode <presentation_mode>")
         );
         assert!(parse("jump \"open").unwrap_err().contains("Unclosed"));
     }

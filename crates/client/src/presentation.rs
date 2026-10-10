@@ -1,19 +1,20 @@
 //! Presentation layouts never modify orbital elements or simulation time.
-use crate::Navigation;
+use crate::{Navigation, Selection};
 use bevy::math::{DVec3, Quat};
 use space_shared::{Galaxy, Planet, StarSystem};
 use space_simulation::{AU_METRES, LY_METRES, SUN_RADIUS_METRES};
 
+/// Scene layout and preset framing, independent of camera tracking or free flight.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum View {
+pub enum PresentationMode {
     #[default]
-    Orbit,
+    Simulation,
     Table,
     Constellation,
 }
 
-/// Camera range that frames a page's planets in orbit view.
+/// Camera range that frames a page's planets in simulation mode.
 pub fn fit_distance(system: &StarSystem, page: u32) -> f64 {
     system
         .on_page(page)
@@ -73,7 +74,7 @@ impl TableLayout {
 impl Navigation {
     /// Constellation pages are selections within one shared camera frame.
     pub fn frame_page(&self, system: &StarSystem) -> u32 {
-        if self.view == View::Constellation {
+        if self.presentation_mode == PresentationMode::Constellation {
             system.first_page()
         } else {
             self.page
@@ -83,12 +84,12 @@ impl Navigation {
     pub fn focus_selected(&mut self, lists: &Galaxy) {
         let Some((page, radius_km)) = self
             .system(lists)
-            .and_then(|s| s.planets.get(self.selected?))
+            .and_then(|s| s.planets.get(self.selected_planet(lists)?))
             .map(|planet| (planet.page(), planet.radius_km))
         else {
             return;
         };
-        self.view = View::Orbit;
+        self.presentation_mode = PresentationMode::Simulation;
         // A marker clicked mid page swap may belong to the page being wound away.
         self.page = page;
         self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);
@@ -106,49 +107,50 @@ impl Navigation {
         else {
             return;
         };
-        if self.view == View::Constellation {
-            self.picked = crate::galaxy_nav::page_pick(system, page);
+        if self.presentation_mode == PresentationMode::Constellation {
+            self.select(crate::galaxy_nav::page_pick(system, page).map(Selection::Star));
             self.page = page;
-            self.selected = None;
             return;
         }
-        let view = self.view;
+        let presentation_mode = self.presentation_mode;
         self.page = page;
         self.frame(lists);
-        self.view = view;
+        self.presentation_mode = presentation_mode;
     }
 
     pub fn select_task(&mut self, list: usize, task: usize, lists: &Galaxy) {
         let Some(planet) = lists.systems.get(list).and_then(|s| s.planets.get(task)) else {
             return;
         };
-        let view = self.view;
+        let presentation_mode = self.presentation_mode;
         self.arrive(crate::Visit::List(list), planet.page(), lists);
-        self.view = if view == View::Constellation {
-            View::Table
+        self.presentation_mode = if presentation_mode == PresentationMode::Constellation {
+            PresentationMode::Table
         } else {
-            view
+            presentation_mode
         };
-        self.selected = Some(task);
+        self.select(Some(Selection::planet(&lists.systems[list], task)));
     }
 
-    pub fn preset(&mut self, view: View, lists: &Galaxy) {
+    pub fn preset(&mut self, presentation_mode: PresentationMode, lists: &Galaxy) {
         if self.visit.is_none() {
             return;
         }
-        if view == View::Orbit {
+        if presentation_mode == PresentationMode::Simulation {
             self.frame(lists);
         } else {
             self.following = false;
             self.fly = true;
-            self.view = view;
-            if view != View::Constellation {
-                self.picked = None;
+            self.presentation_mode = presentation_mode;
+            if presentation_mode != PresentationMode::Constellation
+                && self.selected_star().is_some()
+            {
+                self.selection = None;
             }
         }
     }
 
-    /// Keep a preset view framed on the visited system as it changes.
+    /// Keep a presentation preset framed on the visited system as it changes.
     pub fn fit_preset(&mut self, lists: &Galaxy) {
         let Some((target, distance, top_down)) =
             self.system(lists).and_then(|system| self.framing(system))
@@ -164,9 +166,9 @@ impl Navigation {
 
     /// A preset's camera target, range and whether it looks straight down.
     fn framing(&self, system: &StarSystem) -> Option<(DVec3, f64, bool)> {
-        match self.view {
-            View::Orbit => None,
-            View::Table => {
+        match self.presentation_mode {
+            PresentationMode::Simulation => None,
+            PresentationMode::Table => {
                 let layout = TableLayout::new(system, self.page);
                 let aspect = self
                     .viewport
@@ -184,7 +186,7 @@ impl Navigation {
                     true,
                 ))
             }
-            View::Constellation => {
+            PresentationMode::Constellation => {
                 // One fixed frame for the entire list. Changing which star is
                 // selected must not re-centre or rotate the constellation.
                 let frame_page = self.frame_page(system);
@@ -215,6 +217,23 @@ mod tests {
     use space_simulation::{planet_count, system_page_of_slot};
 
     #[test]
+    fn presentation_modes_use_the_public_names() {
+        for (mode, name) in [
+            (PresentationMode::Simulation, "simulation"),
+            (PresentationMode::Table, "table"),
+            (PresentationMode::Constellation, "constellation"),
+        ] {
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(json, format!("\"{name}\""));
+            assert_eq!(
+                serde_json::from_str::<PresentationMode>(&json).unwrap(),
+                mode
+            );
+        }
+        assert_eq!(PresentationMode::default(), PresentationMode::Simulation);
+    }
+
+    #[test]
     fn constellation_pages_share_one_frame_without_reframing() {
         let galaxy = space_simulation::demo_galaxy();
         let system = &galaxy.systems[0];
@@ -230,8 +249,11 @@ mod tests {
         for &page in pages.iter().skip(1).take(2) {
             nav.show_page(page, &galaxy);
             nav.fit_preset(&galaxy);
-            assert_eq!(nav.view, View::Constellation);
-            assert_eq!(nav.picked, crate::galaxy_nav::page_pick(system, page));
+            assert_eq!(nav.presentation_mode, PresentationMode::Constellation);
+            assert_eq!(
+                nav.selected_star(),
+                crate::galaxy_nav::page_pick(system, page).as_ref()
+            );
             assert_eq!(nav.frame_page(system), frame);
             assert_eq!((nav.target, nav.distance), (target, distance));
             assert_eq!(nav.rotation, rotated);
@@ -320,7 +342,7 @@ mod tests {
             visit: Some(crate::Visit::List(0)),
             ..Navigation::default()
         };
-        nav.preset(View::Table, &galaxy);
+        nav.preset(PresentationMode::Table, &galaxy);
         nav.fit_preset(&galaxy);
         assert!(
             nav.distance < 3.0 * (layout.right - layout.left) && nav.distance > 3.0 * layout.unit
@@ -343,7 +365,7 @@ mod tests {
             let nav = Navigation {
                 page,
                 visit: Some(crate::Visit::List(0)),
-                view: View::Table,
+                presentation_mode: PresentationMode::Table,
                 ..Navigation::default()
             };
             let (target, distance, top_down) = nav.framing(system).unwrap();
@@ -372,12 +394,28 @@ mod tests {
         let page = galaxy.systems[0].planets[42].page;
         assert!(page > 0);
         assert_eq!(nav.page, page);
-        assert_eq!(nav.selected, Some(42));
-        assert!(nav.view == View::Table);
+        assert_eq!(nav.selected_planet(&galaxy), Some(42));
+        assert!(nav.presentation_mode == PresentationMode::Table);
         nav.fit_preset(&galaxy);
         assert!(nav.distance.is_finite());
-        nav.preset(View::Orbit, &galaxy);
+        nav.preset(PresentationMode::Simulation, &galaxy);
         assert_eq!(nav.page, page);
+        assert!(!nav.following);
+    }
+
+    #[test]
+    fn one_selection_replaces_the_other_and_following_stays_with_planets() {
+        let galaxy = space_simulation::demo_galaxy();
+        let mut nav = Navigation::default();
+        nav.select_list(0, &galaxy);
+        assert!(nav.selected_star().is_some());
+        nav.select(Some(Selection::planet(&galaxy.systems[0], 0)));
+        assert_eq!(nav.selected_star(), None);
+        nav.following = true;
+        nav.select(Some(Selection::planet(&galaxy.systems[0], 1)));
+        assert!(nav.following);
+        nav.select(crate::galaxy_nav::page_pick(&galaxy.systems[0], 0).map(Selection::Star));
+        assert_eq!(nav.selected_planet(&galaxy), None);
         assert!(!nav.following);
     }
 }

@@ -48,8 +48,19 @@ fn publish(
     let state = serde_json::json!({
         "lists": universe.0.systems.len(),
         "list": nav.list().and_then(|i| Some(universe.0.systems.get(i)?.id.as_str())),
+        "trail": crate::breadcrumb::trail(&nav, &universe.0)
+            .into_iter()
+            .map(|crumb| crumb.label)
+            .collect::<Vec<_>>(),
+        "selection_trail": crate::breadcrumb::selection_trail(&nav, &universe.0)
+            .into_iter().map(|crumb| crumb.label).collect::<Vec<_>>(),
+        "selection": nav.selection.as_ref().map(crate::Selection::object),
+        "location_planet": nav.location_planet,
+        "inspection": crate::breadcrumb::active_inspection(&nav, &universe.0,
+            &crate::breadcrumb::trail(&nav, &universe.0),
+            &crate::breadcrumb::selection_trail(&nav, &universe.0)),
         "page": nav.page,
-        "view": nav.view,
+        "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,
         "display": {
             "exaggerate": nav.exaggerate,

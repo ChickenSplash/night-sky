@@ -61,28 +61,39 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Look around from the camera | Left mouse drag |
 | Roll around the viewing direction | Q / E |
 | Orbit the camera target | Right mouse drag |
-| Zoom | Mouse wheel |
+| Zoom | Shift + mouse wheel |
+| Adjust movement speed | Mouse wheel |
 | Translate camera and target | W/A/S/D |
 | Move up / down | R / F |
 | Move faster | Left Shift |
-| Pause/resume orbital motion | Space |
-| Clear selection and stop tracking | Escape |
+| Pause/resume orbital motion | Space, or click the bottom-centre time speed |
+| Adjust simulation speed continuously | Drag the time speed left/right (real time to 100 years/s) |
+| Adjust camera movement speed | Drag the bottom-left set speed left/right, or scroll |
+| Clear selection without moving the camera | Escape when not tracking |
+| Return from tracking a planet to its system overview | Escape while tracking |
+| Go up a level (star, list, then the whole galaxy) | Escape with nothing selected |
+| Inspect galaxy, constellation, star or planet | Click an item in either breadcrumb trail, without moving the camera |
 | Inspect task | Click planet/marker or task index |
-| Track planet at close range | **Follow this planet** |
-| Return to orbital view | **Orbit** or **Frame orbital system** |
-| Align ten task-planets in a top-down table | **Task table** |
-| Frame the list's systems | **Constellation** |
-| Browse system pages | **‹ / ›** in the inspector |
+| Track planet at close range | Click the selected planet again, or terminal command `follow` |
+| Fly to or reframe a star's system | **Fly to system** / **Frame system** under the inspected star |
+| Fly to and follow a planet | **Fly to planet** under the inspected planet |
+| Align a system's planets in a top-down table | **Table view** under the inspected star |
+| Frame the list's systems | **Constellation view** under the inspected list or star |
+| Browse a list's systems | **Previous system** / **Next system** or a **System n** line under the inspected list (select, click again to visit) |
 | Select a star, then visit it | Click it, then click again or press Enter |
-| Select the star at the view centre | C |
-| Jump to a list | Click it in the sidebar |
+| Jump to a list | Click it in the ✔ Tasks window (top right) |
 | Open or close the debug window | `` ` `` or F3 |
 
 Search covers all systems. The simulation clock starts at an arbitrary epoch;
 task deadlines always use wall-clock time. Changing simulation speed never
 rewinds or jumps the orbit phase.
 
-Table view aligns planets to the right of their star, with task labels below.
+Presentation mode controls the scene layout, not whether the camera is tracking
+or navigating freely: **Simulation** uses simulated orbital positions,
+**Table** arranges planets for comparison, and **Constellation** connects and
+frames the list's stars. The underlying simulation continues in every mode.
+
+Table mode aligns planets to the right of their star, with task labels below.
 Planets and the star keep their physical radii, so a large star shows only its
 right tip at the left edge. Column spacing is schematic, scaled to the page's largest planet.
 Both presets automatically frame the available viewing area. Switch to **Orbit**
@@ -149,11 +160,10 @@ is available it retains its last data, initially the clearly labelled demo.
 - Bevy's reverse-Z perspective depth and distance-adjusted near plane support the
   view's changing scale. This is not a logarithmic-depth-buffer implementation.
 - Bodies use physical radii by default; selectable markers keep them visible.
-  **Readable planet sizes** exaggerates radii in Orbit view, not positions or periods.
+  **Readable planet sizes** exaggerates radii in Simulation mode, not positions or periods.
 - Each page is a separate star system with a stable, independently random orbital
-  plane (poles uniform over the sphere). The telemetry panel shows the current
-  page's tilt. List pages occupy distinct, visible cell stars near galactic
-  home, with their real generated positions and planetary systems. Constellation view moves nothing: it zooms out from the current
+  plane (poles uniform over the sphere). The star inspector shows its axial tilt. List pages occupy distinct, visible cell stars near galactic
+  home, with their real generated positions and planetary systems. Constellation mode moves nothing: it zooms out from the current
   angle until every page star fits and joins them with lines. Orbit and Task table
   retain physical orbital distances. Camera flights roll between planes; open
   space uses galactic axes.
@@ -212,9 +222,9 @@ is available it retains its last data, initially the clearly labelled demo.
 - **One galaxy (Phase 6):** lists and generated stars share one view. Scroll
   out for kiloparsec-scale travel; WASD and R/F move, Shift accelerates. Click
   any visible star to select it, then click it again (or press **Enter**) to
-  visit its planetary system. **C** selects the star at the view centre. A star
+  visit its planetary system. A star
   that carries a list page opens that page with its tasks; any other shows its
-  generated planets, with the same orbit, table and constellation views.
+  generated planets, with the same simulation, table and constellation presentation modes.
   Generated stars have stable `TS <cell>-<component>-<index>` catalogue names
   and lettered planets. Picking uses only currently loaded, magnitude-visible
   stars; wait for streaming if a target is not selectable.
@@ -248,6 +258,7 @@ downloads too, set `CARGO_HOME="$PWD/.cargo-home"` before running Cargo.
 ./scripts/build-web.sh
 cargo clippy --locked -p space-client --target wasm32-unknown-unknown -- -D warnings
 node scripts/test-browser.mjs
+SPACE_URL=http://127.0.0.1:4321 node scripts/test-breadcrumbs.mjs
 node scripts/test-star-worker.mjs
 ```
 
@@ -273,15 +284,31 @@ table pagination and constellation presets without changing backend data. It
 clicks the egui panels and checks each result through the `window.space` test
 hook.
 
+The focused breadcrumb test covers remote planet selection, clicking the actual
+galaxy crumb, switching parent inspection tabs without travel, and a narrow
+viewport. It saves `data/logs/breadcrumbs-*.png`. It uses the same browser setup;
+set `SPACE_URL` to a server serving the current web build (default port 4322).
+
 ## User interface
 
 The browser is the main client; the native window is a developer fallback that
 adds the smoke test and bug reports. Both use the same egui panels, drawn in the
-same frame as the 3D view. The left sidebar holds collapsible sections: lists,
-the task index (filter, sort and group by status), the visited system and the
-selected planet. Time controls run along the bottom. **⚙ Settings** at the top
-of the sidebar opens display options, field of view, realistic lighting and the
-controls.
+same frame as the 3D view, which fills the window. Two icons at the top right
+open windows: **⚙** Settings, and **✔** Tasks, with collapsible sections for
+lists and the task index (filter, sort and group by status). Presentation
+modes and system paging are actions under the inspector's facts.
+Two floating trails at the top left distinguish **Location** from **Selected**.
+Location follows physical proximity, including a planet within 20 physical
+radii (retained until 30 radii to prevent flicker). Selection is independent
+of location and uses stable object IDs, ready for remote planet search results.
+Click either trail to inspect that level in the shared floating text readout
+underneath, without changing selection, tracking or camera position. Selecting
+an object automatically activates its selection tab. The information expands
+down the left side as needed, without a scrollbar or a fixed-height container.
+Galaxy figures describe
+the simulation model, and stars/planets are procedurally generated.
+Time controls run along the bottom. **⚙** Settings holds display options,
+field of view, realistic lighting and the controls.
 
 Debugging has its own window, toggled with `` ` `` or F3 on both clients:
 
@@ -291,11 +318,11 @@ Debugging has its own window, toggled with `` ` `` or F3 on both clients:
 | `terminal` | A command line and its output |
 | `perf` | Frame time graph, star-stream metrics |
 | `render` | Exposure readout, galaxy glow, physical exposure, wireframes over bodies, galaxy reference views |
-| `state` | Camera, navigation, visited star and clock values |
+| `state` | Camera, navigation (location, open list, camera anchor), anchor star and clock values |
 | `tools` | Save bug report (native), star-stream benchmark (browser) |
 
 The terminal tab runs any panel action by name: `help` lists them, for
-example `set_view table`, `set_display orbits false` or
+example `set_presentation_mode table`, `set_display orbits false` or
 `galaxy_reference face_on`. Arguments go in order or as `field=value`; quote
 values with spaces. Up and down recall earlier commands, and `clear` empties
 the tab. On the desktop, the terminal that ran `./scripts/run.sh` takes the

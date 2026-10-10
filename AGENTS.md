@@ -28,9 +28,76 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
 - The browser is the main target; native is a dev fallback. Both use the same
-  egui interface (`ui.rs`), drawn in the same frame as the scene: a left
-  sidebar of collapsible sections, time controls, a plain egui Settings window
-  (opened from the sidebar's ⚙ Settings) and canvas captions, labels and clicks.
+  egui interface (`ui.rs`), drawn in the same frame as the scene, which fills
+  the whole window: there is no sidebar. Two free-floating halo icons at the
+  top right (`ui::icons`, ⚙ above ✔, `breadcrumb::halo_glyph`, hover blue,
+  white while open) toggle two plain egui windows that first open just below
+  them, right-aligned: Settings, and Tasks (`tasks.rs`, 01 lists and 02 task
+  index, with the data-source note). Lists and tasks are kept apart there as
+  the future integration point; the rest reaches them through `UiCommand`s.
+  Both start closed. The debug window opens below the icons
+  (`terminal::below_icons`). Body facts, presentation modes and system paging
+  are in the floating breadcrumb inspector and its actions; there is no
+  telemetry section, centre-star pick or C key.
+- The breadcrumb (`breadcrumb.rs`) is free-floating text at the top left of
+  the 3D view, under any window, with no container. A soft dark halo (two
+  rings of translucent black copies, `HALO_EDGE` at 1 px and `HALO_FADE` at
+  2 px) keeps it readable over star discs and the galaxy band; it vanishes
+  on dark space. Reuse `halo_text`/`halo_wrapped_text` for scene text.
+  `breadcrumb::trail` is physical location: `Milky Way`, the current star's
+  list if any, the star, then `Navigation::location_planet`. An open list or
+  destination is not a location until arrival. `selection_trail` independently
+  shows the selected object's hierarchy, even for a remote planet. List stars
+  are `System n`, other stars use their catalogue names. Crumbs carry stable
+  `objects::ObjectRef`s, never camera commands. Clicking either trail sends
+  `InspectObject` and activates a highlighted tab in the shared, borderless
+  `inspector.rs` readout below both trails. Selection automatically activates
+  its leaf. The inspector uses its natural content height, with no scroll area,
+  scrollbar or bottom-HUD height reservation; long information uses the left
+  side of the view. Its top stays anchored at the shared HUD inset.
+  Inspection changes neither selection nor camera/tracking. Missing
+  tabs fall back to the selected leaf, or current location with no selection.
+  Inspector facts are cached until target/snapshot changes; generated remote
+  systems are never rebuilt per frame. Below the facts, `inspector::actions`
+  shows the inspected object's actions as clickable halo text separated by
+  `·` (hover blue, `CURRENT` when already showing it): galaxy `View from
+  above`; list `Constellation view`, `Previous system`/`Next system` and
+  then one `System n · k tasks` line per page. These act exactly like
+  clicking the star (`PickStar`: select, or visit once selected; list stars
+  resolve unstreamed through `page_pick`), relative to the selected star in
+  that list, else the open list's page. They re-send `InspectObject`, and
+  `breadcrumb::holds` keeps a list's tab while that list is open, so the
+  inspector stays on the list while stepping or flying; star `Fly to system`/`Frame system`,
+  `Table view` and, for list stars, `Constellation view`
+  (`UiCommand::VisitStar`); planet `Fly to planet` (`FlyToPlanet`, visiting
+  its star first, then following, like a second click). Stars are reachable
+  by ID if mapped, visited or streamed (`galaxy_nav::reachable`/`visit_star`);
+  unreachable actions are hidden, not disabled. New object kinds should extend
+  `ObjectRef`, hierarchy builders and inspector resolution (moons do not yet
+  exist). `UiCommand::Up` is separate keyboard navigation: reframe tracking,
+  else clear selection, else move up physically; no crumb contains travel code.
+- Time controls (`ui.rs`) are two free-floating, centred lines at the bottom
+  of the 3D viewport, using the breadcrumb font, colours and `halo_text`.
+  Elapsed simulation time sits above the actual rate (two decimal places,
+  seconds/minutes/hours/days/years per real second). Click the rate to toggle
+  pause; drag it horizontally for continuous logarithmic adjustment from real
+  time to 100 years/s (400 logical pixels covers the full range). Dragging
+  preserves pause state, with `· paused` beside the retained rate. There is no
+  bottom panel, preset ladder or separate speed editor.
+  The bottom-left movement readout (`ui::speed_readout`) uses the same halo,
+  font and two-line layout: measured velocity above draggable set speed.
+  Horizontal dragging adjusts speed logarithmically from `scene::MIN_SPEED`
+  to `scene::MAX_SPEED` (1 m/s to 10,000 ly/s), through `SetMoveSpeed`; it
+  captures input like the time rate, and a single click does nothing.
+  All three text HUDs share
+  `breadcrumb::HUD_PADDING` (20 logical pixels from the 3D viewport edges);
+  movement and time share `HUD_LINE_GAP` and their bottom line alignment.
+  `ui::pointer_captured` protects the background-layer breadcrumb/inspector and draggable text and captures
+  its full drag, including outside its bounds; scene camera input and canvas
+  picking both use it so time interactions never also move/select the scene.
+  While a mouse button is held, the HUD hit test uses its press origin, not
+  hover position, so camera drags that begin outside the rate text continue
+  uninterrupted when crossing it.
 - Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
   movable, resizable window toggled by ` or F3 on both clients (the public
   site included), with tabs `log` (an in-memory console of the last 2,000
@@ -38,14 +105,14 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   tab shows errors and warnings logged while it was hidden), `terminal` (a
   command line and its output), `perf` (frame graph, star-stream metrics),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
-  bodies, galaxy reference views), `state` (camera, navigation, visited star,
-  clock) and `tools` (bug report natively, star-stream benchmark in the
+  bodies, galaxy reference views), `state` (camera; navigation: location,
+  open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
   browser). New debug readouts and switches go there, not in Settings or the
   canvas.
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
-  (`set_view table`, `set_display option=orbits on=false`, or `UiCommand`
+  (`set_presentation_mode table`, `set_display option=orbits on=false`, or `UiCommand`
   JSON) into the same `UiCommand`s as the panels, before `actions::apply`.
   `help` is built in; `clear` empties the terminal tab and is handled by the
   window. Echoes, help and errors are logged under `command_line::TARGET`
@@ -60,10 +127,10 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
-  `ui::Sidebar`, not `Navigation`.
+  `tasks::Tasks`, not `Navigation`.
 - `automation.rs` (browser only) is a test hook, not a UI: `window.space.command`
   sends a `UiCommand` as JSON and `window.space.state()` reads a small snapshot
-  (list, page, view, display options, stream caption, benchmark results).
+  (list, page, presentation_mode, display options, stream caption, benchmark results).
 - `./scripts/dev-web.sh`: web build plus server with `index.html` and
   `star-worker.js` linked live. `node scripts/test-browser.mjs` clicks the egui
   panels at 1600 x 1000 and checks the results through `window.space`; update its
@@ -111,7 +178,10 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - Changing task status or deadline must not change orbital elements.
 - Planets and tasks are separate: a `Planet` is a generated body with a stable
   ID (its star's ID and orbit index) and an optional `Task`. Select and follow
-  planets by index into `StarSystem::planets`; find tasks with
+  planets by stable body ID (`Selection::Planet(String)`); resolve a local
+  index only against the visited system with `selected_planet(galaxy)`. Remote
+  `Inspect { planet }` resolves the encoded parent star without visiting or
+  needing streamed meshes, ready for future search results. Find tasks with
   `StarSystem::tasks`/`task_planet`. Task data (status, assignees, URL) never
   lives on the body.
 - Generation is keyed by star ID. A list page's star is `star_id(list_id, page)`;
@@ -222,8 +292,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   placed by an f64 subtraction takes over (built at `PREPARE` times the radius,
   so its hidden frame is spent). The batch remains until a quarter of that
   radius, and is not culled while the precise sprite is still unplaced. The
-  visited star is a body only within `scene::body_range` (where its planets
-  show): batches hide points that close and its sprite waits hidden. Beyond, it
+  visited star is a body only while the camera is at it (`scene::body_range`,
+  where its planets show): batches hide points within that range and its
+  sprite waits hidden. Elsewhere, it
   is a galactic point under the same magnitude limit. Galactic points use
   apparent flux, scaled by `sky::radiance_gain`. Realistic, their colour and
   visual efficiency come from a blackbody palette by temperature (the vertex
@@ -279,18 +350,37 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Dust, detailed spiral structure and other galaxy types are not implemented yet.
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own.
-  `Navigation::visit` is the visited system: `Visit::List` (a list index, at
+  `Navigation::visit` is the system the camera is anchored to (at, flying to,
+  or showing as a constellation): `Visit::List` (a list index, at
   `Navigation::page`) or `Visit::Generated` (task-free planets built from the
   star's ID, never added to the lists' `Universe`). `None` is open space,
   relative to home in galactic axes; a visit moves the camera frame to its
-  star in f64, and the same `Flight` shifts the displayed pose. Orbit, table
-  and constellation views work on any visited system.
-- Free flight automatically activates a nearby loaded star's list page or
-  generated system at 0.02 ly, without flying, reframing or changing movement
-  speed. It restores the previous explicit visit beyond 0.04 ly. Frame changes
-  preserve the camera eye despite f32 quaternion rounding. Body visibility and
-  render scale follow physical proximity, not the zoom/range setting, so the
-  same point-to-body handoff works after clicking Visit or drifting in.
+  star in f64, and the same `Flight` shifts the displayed pose. Simulation, table
+  and constellation presentation modes work on any visited system.
+- `presentation.rs` owns `PresentationMode`: `Simulation` (simulated orbital
+  positions), `Table` (comparison row), and `Constellation` (connected stars).
+  `Navigation::presentation_mode` describes scene presentation, not tracking or
+  free flight. Switching presets also sets camera framing. The terminal command
+  is `set_presentation_mode simulation|table|constellation`; JSON commands use
+  `type: "set_presentation_mode"` and `presentation_mode`, also the browser state
+  key. Camera views and physical `Orbit` elements keep their existing names.
+- Where the camera is and which list is open are separate:
+  `Navigation::location` (the visit while `Navigation::arrived`) is physical,
+  and `Navigation::list` is the open list (a `Visit::List`, kept in
+  constellation view). `scene::locate` sets `arrived` every frame: within
+  `system_range` of the page star (0.02 ly, or 4 times the outermost apoapsis
+  if wider) it arrives, and it leaves beyond `LEAVE_FACTOR` (2) times that.
+  Constellation view is never at a star, and a flight arrives only on getting
+  there. Clicking Visit and drifting in arrive the same way. Leaving in simulation
+  mode, however the visit began, returns to open space and closes the list;
+  there is no restoring a previous visit.
+- Free flight in open space automatically activates a loaded star's list page
+  or generated system within 0.02 ly, without flying, reframing or changing
+  movement speed. Frame changes preserve the camera eye despite f32 quaternion
+  rounding. Bodies are drawn (`scene::body_range`) and render scale tightens
+  only while `arrived`, which follows physical proximity, not the zoom/range
+  setting, so the same point-to-body handoff works after clicking Visit or
+  drifting in.
   Close-up star size exaggeration also follows physical eye distance, never a
   potentially interstellar camera range that would put the eye inside its shell.
 - During free-look and free flight, `Navigation::eye` is the authoritative f64
@@ -303,14 +393,26 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - The render scale tightens near any loaded star within 20 ly even before its
   system activates, independently of the selected camera range. Keep the
   visited body's physical-proximity fallback when its cell has not loaded yet.
-- `Navigation::picked` is one selected star, by stable ID. `galaxy_nav.rs`
-  picks and visits it: a star with a list page (`galaxy_nav::mapped`) opens
+- `Navigation::selection` is the one clicked object: `Selection::Star` (any
+  star, by stable ID) or `Selection::Planet` (a stable planet ID, including
+  remote systems). Selecting one replaces the other; set it with
+  `Navigation::select`, which keeps following only from planet to planet. A
+  second click activates it: a star is visited, a planet followed. Esc while
+  following reframes the system and clears selection; otherwise it clears
+  selection, or with nothing selected goes up physically. Leaving a system
+  keeps either selection and stops tracking. Planet location uses simulated
+  f64 positions: enter within 20 physical planet radii, leave beyond 30.
+  `scene::locate_planet` runs after camera placement, using the same simulation
+  instant as the eye, including when following at high time rates.
+  Render exaggeration, selection and following never affect this threshold;
+  table and constellation layouts have no physical planet location.
+  `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from
   loaded, visible points only, and only on click, never every frame. Click
-  again or Enter to visit, C picks the view centre. The only bodies drawn are
-  the visited star and its planets. Scroll zooms from 20,000 km to 40,000 ly;
-  movement uses an independently selected speed (Shift + scroll).
+  again or Enter to visit. The only bodies drawn are
+  the visited star and its planets. Shift + scroll (either Shift key) zooms
+  from 20,000 km to 40,000 ly; plain scroll adjusts movement speed independently.
 - Unassigned cell stars use ID-derived `TS` catalogue names and lettered
   planets, with no name registry or per-star UI entities.
 

@@ -284,7 +284,7 @@ fn sync(
     // Within its body range the visited star is drawn as a body, so the batches
     // hide its point there, and it has no sprite.
     let body = nav.system(&universe.0).and_then(|system| {
-        let range = crate::scene::body_range(system, &pose)?;
+        let range = crate::scene::body_range(&nav, system, &pose)?;
         Some((system.page_star(pose.page)?.id.as_str(), range / PC_METRES))
     });
     let body_pc = body.map_or(0.0, |(_, range)| range);

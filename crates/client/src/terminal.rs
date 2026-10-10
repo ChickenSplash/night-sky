@@ -19,7 +19,14 @@ pub fn font() -> FontId {
     FontId::monospace(13.0)
 }
 
-/// A floating window, movable and resizable, that opens at the top right.
+/// Clears the HUD icons at the top right, so the window never covers them.
+fn below_icons(ctx: &egui::Context, top: f32) -> f32 {
+    ctx.data(|data| data.get_temp::<(Rect, bool)>(egui::Id::new("icons-pointer-capture")))
+        .map_or(top, |(icons, _)| top.max(icons.bottom() + GAP))
+}
+
+/// A floating window, movable and resizable, that opens at the top right,
+/// below the HUD icons.
 /// Its `[ × ]` button clears `open`.
 pub fn window(ctx: &egui::Context, title: &str, open: &mut bool, add: impl FnOnce(&mut Ui)) {
     if !*open {
@@ -48,7 +55,10 @@ pub fn window(ctx: &egui::Context, title: &str, open: &mut bool, add: impl FnOnc
                 }),
         )
         .default_rect(Rect::from_min_size(
-            pos2(screen.right() - GAP - size.x, screen.top() + GAP),
+            pos2(
+                screen.right() - GAP - size.x,
+                below_icons(ctx, screen.top() + GAP),
+            ),
             size,
         ))
         .min_size(vec2(320.0, 200.0))
