@@ -37,11 +37,13 @@ impl StarPoint {
     }
 }
 
-/// Stars a grid box holds on average, at most: fewer boxes for sparse cells.
+/// Stars a grid box holds on average, at least: fewer boxes for sparse cells.
 const STARS_PER_BOX: f64 = 8.0;
-/// Smallest grid box edge, in parsecs, so a search out to a few parsecs
-/// visits a bounded number of boxes.
-const MIN_BOX_PC: f64 = 0.5;
+/// Smallest grid box edge, in parsecs.
+const MIN_BOX_PC: f64 = 0.1;
+/// Grid blocks holding this few stars are measured star by star rather than
+/// divided further.
+const LEAF_STARS: u32 = 32;
 
 /// A cell's own stars: those of the tier matching its level. Build it with
 /// `StarCell::new`, which sorts the stars into a grid of boxes so the stars
@@ -49,12 +51,16 @@ const MIN_BOX_PC: f64 = 0.5;
 #[derive(Clone, Debug, PartialEq)]
 pub struct StarCell {
     pub cell: Cell,
-    /// Sorted by grid box. Changing them means building a new `StarCell`.
+    /// Sorted by grid box, boxes in Morton order: any run of stars lies in a
+    /// compact region. Changing them means building a new `StarCell`.
     pub stars: Vec<StarPoint>,
     grid: StarGrid,
 }
 
-/// A uniform grid over a cell: box `b` holds `stars[starts[b]..starts[b + 1]]`.
+/// A uniform grid over a cell, a power of two boxes per axis. Boxes are
+/// numbered in Morton order, so every aligned block of boxes, down from the
+/// whole grid, holds one contiguous run of stars: box `b` holds
+/// `stars[starts[b]..starts[b + 1]]`, and an empty block is skipped at once.
 #[derive(Clone, Debug, PartialEq)]
 struct StarGrid {
     min_pc: [f64; 3],
@@ -63,14 +69,25 @@ struct StarGrid {
     starts: Vec<u32>,
 }
 
+/// Spreads the low 10 bits of `v` to every third bit.
+fn spread(v: usize) -> usize {
+    let mut v = v & 0x3ff;
+    v = (v | (v << 16)) & 0x0300_00ff;
+    v = (v | (v << 8)) & 0x0300_f00f;
+    v = (v | (v << 4)) & 0x030c_30c3;
+    (v | (v << 2)) & 0x0924_9249
+}
+
 impl StarGrid {
     fn new(cell: Cell, stars: usize) -> Self {
         let size = cell.size_pc();
-        let per_axis = (stars as f64 / STARS_PER_BOX)
+        let wanted = (stars as f64 / STARS_PER_BOX)
             .cbrt()
             .ceil()
             .min((size / MIN_BOX_PC).floor())
-            .max(1.0) as usize;
+            .clamp(1.0, 1024.0) as usize;
+        // The largest power of two not above it, for Morton order.
+        let per_axis = 1 << wanted.ilog2();
         Self {
             min_pc: cell.min_pc(),
             box_pc: size / per_axis as f64,
@@ -89,21 +106,59 @@ impl StarGrid {
     }
 
     fn index(&self, [x, y, z]: [usize; 3]) -> usize {
-        (x * self.per_axis + y) * self.per_axis + z
+        (spread(x) << 2) | (spread(y) << 1) | spread(z)
     }
 
-    /// Distance from `p` to the nearest point of a box.
-    fn gap_pc(&self, coords: [usize; 3], p: [f64; 3]) -> f64 {
+    /// The stars of the aligned block of `size` boxes per axis at `origin`.
+    fn block(&self, origin: [usize; 3], size: usize) -> std::ops::Range<usize> {
+        let first = self.index(origin);
+        self.starts[first] as usize..self.starts[first + size.pow(3)] as usize
+    }
+
+    /// Distance from `p` to the nearest point of a block.
+    fn gap_pc(&self, origin: [usize; 3], size: usize, p: [f64; 3]) -> f64 {
+        let edge = size as f64 * self.box_pc;
         (0..3)
             .map(|axis| {
-                let min = self.min_pc[axis] + coords[axis] as f64 * self.box_pc;
-                (min - p[axis])
-                    .max(p[axis] - min - self.box_pc)
-                    .max(0.0)
-                    .powi(2)
+                let min = self.min_pc[axis] + origin[axis] as f64 * self.box_pc;
+                (min - p[axis]).max(p[axis] - min - edge).max(0.0).powi(2)
             })
             .sum::<f64>()
             .sqrt()
+    }
+
+    /// The eight blocks within a block, nearest `p` first.
+    fn children(&self, origin: [usize; 3], size: usize, p: [f64; 3]) -> [(f64, [usize; 3]); 8] {
+        let half = size / 2;
+        let mut children = std::array::from_fn(|i| {
+            let child = [
+                origin[0] + half * (i >> 2 & 1),
+                origin[1] + half * (i >> 1 & 1),
+                origin[2] + half * (i & 1),
+            ];
+            (self.gap_pc(child, half, p), child)
+        });
+        children.sort_by(|a, b| a.0.total_cmp(&b.0));
+        children
+    }
+}
+
+/// An aligned cube of grid boxes and the contiguous run of stars inside it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Block {
+    origin: [usize; 3],
+    size: usize,
+    pub start: usize,
+    pub end: usize,
+    pub centre_pc: [f64; 3],
+    /// Half the cube's edge, in parsecs.
+    pub half_pc: f64,
+}
+
+impl Block {
+    /// Distance from the block's centre to its farthest corner, in parsecs.
+    pub fn half_diagonal_pc(&self) -> f64 {
+        self.half_pc * 3.0_f64.sqrt()
     }
 }
 
@@ -133,15 +188,9 @@ impl StarCell {
         }
     }
 
-    fn box_stars(&self, coords: [usize; 3]) -> &[StarPoint] {
-        let b = self.grid.index(coords);
-        let (start, end) = (self.grid.starts[b], self.grid.starts[b + 1]);
-        self.stars.get(start as usize..end as usize).unwrap_or(&[])
-    }
-
     /// The star nearest `p` and closer than `cap_pc`, with its distance in
-    /// parsecs; equal distances resolve by ID. Searches rings of boxes outward
-    /// from `p` and stops once no farther ring could hold a nearer star.
+    /// parsecs; equal distances resolve by ID. Descends the grid's blocks
+    /// nearest first, skipping empty ones and those beyond the best so far.
     /// `checked` counts the stars measured.
     pub fn nearest(
         &self,
@@ -149,72 +198,127 @@ impl StarCell {
         cap_pc: f64,
         checked: &mut usize,
     ) -> Option<(f64, StarPoint)> {
-        let grid = &self.grid;
-        let centre = grid.coords(p).map(|c| c as i64);
-        let last = grid.per_axis as i64 - 1;
-        let mut best: Option<(f64, StarPoint)> = None;
-        for ring in 0..=last {
-            let limit = best.map_or(cap_pc, |(distance, _)| distance);
-            // `p` lies in or beyond the centre box: a ring's boxes are at
-            // least one box fewer than the ring away.
-            if (ring - 1).max(0) as f64 * grid.box_pc > limit {
-                break;
-            }
-            for dx in -ring..=ring {
-                for dy in -ring..=ring {
-                    let edge = dx.abs() == ring || dy.abs() == ring;
-                    let step = if edge { 1 } else { (2 * ring).max(1) };
-                    for dz in (-ring..=ring).step_by(step as usize) {
-                        let coords = [centre[0] + dx, centre[1] + dy, centre[2] + dz];
-                        if coords.iter().any(|&c| c < 0 || c > last) {
-                            continue;
-                        }
-                        let coords = coords.map(|c| c as usize);
-                        let limit = best.map_or(cap_pc, |(distance, _)| distance);
-                        if grid.gap_pc(coords, p) > limit {
-                            continue;
-                        }
-                        for star in self.box_stars(coords) {
-                            *checked += 1;
-                            let distance = (0..3)
-                                .map(|axis| (star.position_pc[axis] - p[axis]).powi(2))
-                                .sum::<f64>()
-                                .sqrt();
-                            if distance >= cap_pc {
-                                continue;
-                            }
-                            if best.is_none_or(|(old, old_star)| {
-                                distance < old
-                                    || (distance == old
-                                        && star.id(self.cell) < old_star.id(self.cell))
-                            }) {
-                                best = Some((distance, *star));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let mut best = None;
+        self.search([0; 3], self.grid.per_axis, p, cap_pc, &mut best, checked);
         best
     }
 
-    /// Calls `f` with every star in the boxes within `radius_pc` of `p`: a
-    /// superset of the stars within that distance, for callers to filter.
-    pub fn near(&self, p: [f64; 3], radius_pc: f64, mut f: impl FnMut(&StarPoint)) {
-        if gap_pc(self.cell, p) > radius_pc {
+    fn search(
+        &self,
+        origin: [usize; 3],
+        size: usize,
+        p: [f64; 3],
+        cap_pc: f64,
+        best: &mut Option<(f64, StarPoint)>,
+        checked: &mut usize,
+    ) {
+        let stars = self.grid.block(origin, size);
+        let limit = best.map_or(cap_pc, |(distance, _)| distance);
+        if stars.is_empty() || self.grid.gap_pc(origin, size, p) > limit {
             return;
         }
-        let grid = &self.grid;
-        let low = grid.coords(std::array::from_fn(|axis| p[axis] - radius_pc));
-        let high = grid.coords(std::array::from_fn(|axis| p[axis] + radius_pc));
-        for x in low[0]..=high[0] {
-            for y in low[1]..=high[1] {
-                for z in low[2]..=high[2] {
-                    if grid.gap_pc([x, y, z], p) <= radius_pc {
-                        self.box_stars([x, y, z]).iter().for_each(&mut f);
-                    }
+        if size == 1 || stars.len() <= LEAF_STARS as usize {
+            for star in &self.stars[stars] {
+                *checked += 1;
+                let distance = (0..3)
+                    .map(|axis| (star.position_pc[axis] - p[axis]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                if distance >= cap_pc {
+                    continue;
+                }
+                if best.is_none_or(|(old, old_star)| {
+                    distance < old
+                        || (distance == old && star.id(self.cell) < old_star.id(self.cell))
+                }) {
+                    *best = Some((distance, *star));
                 }
             }
+            return;
+        }
+        for (_, child) in self.grid.children(origin, size, p) {
+            self.search(child, size / 2, p, cap_pc, best, checked);
+        }
+    }
+
+    /// Calls `f` with the index and star of every star in the grid blocks
+    /// within `radius_pc` of `p`: a superset of the stars within that
+    /// distance, for callers to filter.
+    pub fn near(&self, p: [f64; 3], radius_pc: f64, mut f: impl FnMut(usize, &StarPoint)) {
+        self.within([0; 3], self.grid.per_axis, p, radius_pc, &mut f);
+    }
+
+    /// As `near`, within one of this cell's `blocks`.
+    pub fn near_in(
+        &self,
+        block: &Block,
+        p: [f64; 3],
+        radius_pc: f64,
+        mut f: impl FnMut(usize, &StarPoint),
+    ) {
+        self.within(block.origin, block.size, p, radius_pc, &mut f);
+    }
+
+    /// Non-empty aligned cubes of the grid holding at most `most` stars each,
+    /// unless a single box holds more, in star order: together they cover
+    /// `stars` from start to end. Each is a compact region with its own centre.
+    pub fn blocks(&self, most: usize) -> Vec<Block> {
+        let mut out = Vec::new();
+        self.split([0; 3], self.grid.per_axis, most, &mut out);
+        out
+    }
+
+    fn split(&self, origin: [usize; 3], size: usize, most: usize, out: &mut Vec<Block>) {
+        let stars = self.grid.block(origin, size);
+        if stars.is_empty() {
+            return;
+        }
+        if size == 1 || stars.len() <= most {
+            let half_pc = size as f64 * self.grid.box_pc / 2.0;
+            out.push(Block {
+                origin,
+                size,
+                start: stars.start,
+                end: stars.end,
+                centre_pc: std::array::from_fn(|axis| {
+                    self.grid.min_pc[axis] + origin[axis] as f64 * self.grid.box_pc + half_pc
+                }),
+                half_pc,
+            });
+            return;
+        }
+        // Children in Morton order, so blocks come out in star order.
+        let half = size / 2;
+        for i in 0..8 {
+            let child = [
+                origin[0] + half * (i >> 2 & 1),
+                origin[1] + half * (i >> 1 & 1),
+                origin[2] + half * (i & 1),
+            ];
+            self.split(child, half, most, out);
+        }
+    }
+
+    fn within(
+        &self,
+        origin: [usize; 3],
+        size: usize,
+        p: [f64; 3],
+        radius_pc: f64,
+        f: &mut impl FnMut(usize, &StarPoint),
+    ) {
+        let stars = self.grid.block(origin, size);
+        if stars.is_empty() || self.grid.gap_pc(origin, size, p) > radius_pc {
+            return;
+        }
+        if size == 1 || stars.len() <= LEAF_STARS as usize {
+            for index in stars {
+                f(index, &self.stars[index]);
+            }
+            return;
+        }
+        for (_, child) in self.grid.children(origin, size, p) {
+            self.within(child, size / 2, p, radius_pc, f);
         }
     }
 }
@@ -525,7 +629,8 @@ mod tests {
                     }
                     assert_eq!(found, expected, "{p:?} within {cap}");
                     let mut near = 0;
-                    cell.near(p, cap, |star| {
+                    cell.near(p, cap, |index, star| {
+                        assert_eq!(&cell.stars[index], star);
                         near += usize::from(distance(star.position_pc, p) <= cap);
                     });
                     let within = cell
@@ -539,6 +644,40 @@ mod tests {
         }
         // Outside the cluster, a few dozen stars per query, not 20,000.
         assert!(checked < 300 * 4 * 100, "{checked}");
+    }
+
+    #[test]
+    fn blocks_cover_the_stars_in_order_within_their_cubes() {
+        let cell = scattered_cell();
+        for most in [50, 700, 5_000, 100_000] {
+            let blocks = cell.blocks(most);
+            assert_eq!(blocks.first().map(|b| b.start), Some(0));
+            assert_eq!(blocks.last().map(|b| b.end), Some(cell.stars.len()));
+            for pair in blocks.windows(2) {
+                assert_eq!(pair[0].end, pair[1].start);
+            }
+            for block in &blocks {
+                assert!(block.end > block.start);
+                assert!(block.end - block.start <= most || block.size == 1);
+                for star in &cell.stars[block.start..block.end] {
+                    for axis in 0..3 {
+                        let offset = (star.position_pc[axis] - block.centre_pc[axis]).abs();
+                        assert!(offset <= block.half_pc * (1.0 + 1e-12), "{most}");
+                    }
+                }
+                let mut seen = 0;
+                cell.near_in(
+                    block,
+                    block.centre_pc,
+                    block.half_diagonal_pc(),
+                    |index, _| {
+                        assert!((block.start..block.end).contains(&index));
+                        seen += 1;
+                    },
+                );
+                assert_eq!(seen, block.end - block.start);
+            }
+        }
     }
 
     fn run(loader: &mut Loader, more: &mut dyn FnMut() -> bool) -> HashMap<Cell, StarCell> {

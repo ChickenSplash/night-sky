@@ -27,7 +27,7 @@ use space_simulation::{
     galaxy::PC_METRES,
     light::visual_efficiency,
     population::{reach_pc, reach_sq_per_luminosity},
-    stream::StarPoint,
+    stream::{Block, StarPoint, gap_pc},
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -40,9 +40,14 @@ const SLICE: usize = 4096;
 /// Visible stars per uploaded mesh. Bevy's per-entity cost each frame, not
 /// the stars, limits large batch counts, so few large meshes draw fastest.
 const PACK: usize = 65_536;
+/// Loaded stars per grid block (`StarCell::blocks`). Each batch lies within
+/// one block and is placed from its centre, so its f32 offsets, and with them
+/// the precise-sprite radii, scale with the block rather than the cell: at
+/// the galactic centre a block is a small fraction of its cell.
+const BLOCK: usize = 4 * PACK;
 const UPLOAD_BUDGET: Duration = Duration::from_millis(3);
 const MARGIN: f64 = 1.25;
-/// A point closer than this many times its offset from its cell's centre gets
+/// A point closer than this many times its offset from its block's centre gets
 /// a precise sprite. Batch vertices are f32 offsets from that centre, so their
 /// error grows with the offset; beyond here it stays below a quarter pixel.
 const PRECISE: f64 = 2e-3;
@@ -130,6 +135,8 @@ struct Batch {
     mesh: Handle<Mesh>,
     /// Stars uploaded, three vertices each.
     stars: usize,
+    /// Its block's centre, from which its vertices are offsets.
+    centre_pc: [f64; 3],
 }
 
 /// Visible stars filtered out of a cell, waiting to fill a mesh.
@@ -186,6 +193,9 @@ struct Building {
     /// Rebuilding a cell already drawn: its new batches wait in `fresh` and
     /// replace the old ones together, so the cell never shows a hole.
     replacing: bool,
+    blocks: Vec<Block>,
+    /// The block being packed: no batch spans two.
+    block: usize,
     packing: Packing,
 }
 
@@ -206,7 +216,7 @@ struct Batches {
 struct Candidate {
     id: String,
     star: StarPoint,
-    /// Parsecs from its cell's centre.
+    /// Parsecs from its block's centre.
     offset_pc: f64,
 }
 
@@ -243,19 +253,25 @@ fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
     for (&cell, stars) in &field.cells {
         let half_diagonal = cell.size_pc() * 0.5 * 3.0_f64.sqrt();
         let reach = PREPARE * (PRECISE * half_diagonal).max(body_pc) + RESCAN_PC;
-        let centre = DVec3::from_array(cell.centre_pc());
-        stars.near(eye.to_array(), reach, |star| {
-            let position = DVec3::from_array(star.position_pc);
-            let offset_pc = position.distance(centre);
-            let reach = PREPARE * (PRECISE * offset_pc).max(body_pc) + RESCAN_PC;
-            if position.distance(eye) < reach {
-                out.push(Candidate {
-                    id: star.id(cell),
-                    star: *star,
-                    offset_pc,
-                });
-            }
-        });
+        if gap_pc(cell, eye.to_array()) > reach {
+            continue;
+        }
+        for block in stars.blocks(BLOCK) {
+            let reach = PREPARE * (PRECISE * block.half_diagonal_pc()).max(body_pc) + RESCAN_PC;
+            let centre = DVec3::from_array(block.centre_pc);
+            stars.near_in(&block, eye.to_array(), reach, |_, star| {
+                let position = DVec3::from_array(star.position_pc);
+                let offset_pc = position.distance(centre);
+                let reach = PREPARE * (PRECISE * offset_pc).max(body_pc) + RESCAN_PC;
+                if position.distance(eye) < reach {
+                    out.push(Candidate {
+                        id: star.id(cell),
+                        star: *star,
+                        offset_pc,
+                    });
+                }
+            });
+        }
     }
     out
 }
@@ -417,9 +433,10 @@ fn sync(
     // A few thousand stars per step: never turn one large cell into a frame stall.
     let start = bevy::platform::time::Instant::now();
     while let Some((owner, offset)) = batches.queued.pop_front() {
-        let Some(stars) = field.cells.get(&owner).map(|c| &c.stars) else {
+        let Some(loaded) = field.cells.get(&owner) else {
             continue;
         };
+        let stars = &loaded.stars;
         if offset >= stars.len() {
             continue;
         }
@@ -441,16 +458,23 @@ fn sync(
             batches.building = Some(Building {
                 owner,
                 replacing: batches.active.contains_key(&owner),
+                blocks: loaded.blocks(BLOCK),
+                block: 0,
                 packing: Packing::default(),
             });
         }
-        let end = (offset + SLICE).min(stars.len());
-        let centre = owner.centre_pc();
         let building = batches.building.as_mut().expect("set above");
-        building.packing.add(&stars[offset..end], centre, eye);
+        while building.blocks[building.block].end <= offset {
+            building.block += 1;
+        }
+        let block = building.blocks[building.block];
+        let end = (offset + SLICE).min(block.end);
+        building
+            .packing
+            .add(&stars[offset..end], block.centre_pc, eye);
         metrics.built_batches += 1;
         let done = end == stars.len();
-        if building.packing.stars >= PACK || done {
+        if building.packing.stars >= PACK || end == block.end {
             let replacing = building.replacing;
             let packing = std::mem::take(&mut building.packing);
             if packing.stars > 0 {
@@ -475,6 +499,7 @@ fn sync(
                     entity,
                     mesh: handle,
                     stars: visible,
+                    centre_pc: block.centre_pc,
                 };
                 if replacing {
                     batches.fresh.entry(owner).or_default().push(batch);
@@ -507,10 +532,16 @@ fn sync(
         Visibility::Hidden
     };
     let (mut draws, mut uploaded) = (0, 0);
-    for (&owner, entities) in &batches.active {
-        let delta = (DVec3::from_array(owner.centre_pc()) - eye) * factor;
-        let centre = camera_transform.translation() + delta.as_vec3();
-        for &Batch { entity, stars, .. } in entities {
+    for entities in batches.active.values() {
+        for &Batch {
+            entity,
+            stars,
+            centre_pc,
+            ..
+        } in entities
+        {
+            let delta = (DVec3::from_array(centre_pc) - eye) * factor;
+            let centre = camera_transform.translation() + delta.as_vec3();
             if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
                 placements.get_mut(entity)
             {
@@ -645,7 +676,7 @@ mod tests {
     }
 
     /// Repeats the GPU's f32 placement of a batched point: its f32 offset
-    /// from the cell centre, scaled, plus the centre's camera-relative offset.
+    /// from the block centre, scaled, plus the centre's camera-relative offset.
     #[test]
     fn batched_points_stay_within_a_quarter_pixel_outside_the_precise_radius() {
         let quarter_pixel = 0.25 * 2.0 * 25.0_f64.to_radians().tan() / 1000.0;

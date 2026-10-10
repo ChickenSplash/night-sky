@@ -281,7 +281,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   debug window's `perf` tab shows them on both clients.
   Instrumentation does not change loading policy.
   `StarCell::new` (simulation `stream.rs`) sorts a cell's stars into a uniform
-  grid of boxes (about 8 stars each, never under 0.5 pc), on the loader's
+  grid of boxes (about 8 stars each, never under 0.1 pc, a power of two per
+  axis, numbered in Morton order so aligned cubes are contiguous runs), on the loader's
   thread, so `stars` is in grid order, not generation order. Build cells only
   through `StarCell::new`; changing `stars` afterwards leaves the grid stale.
   Spatial questions use the grid: `StarCell::nearest` (rings of boxes outward)
@@ -307,12 +308,14 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   17k small batches cost about 30 ms of CPU at the galactic centre. A rebuilt
   cell's new batches wait in `Batches::fresh` and replace the old ones only
   once complete, so rebuilds never leave holes. Star positions are
-  local to the owning cell; per-frame transforms subtract the camera in f64,
+  local to their grid block's centre (`StarCell::blocks`, at most `BLOCK`
+  loaded stars, an aligned cube of the cell's grid; no batch spans two
+  blocks); per-frame transforms subtract the camera in f64,
   then scale to render units. Filter points beyond 1.25 times their apparent
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
   retained cells after the camera travels 0.2 of the tier's reach. New entities
   start hidden for one frame, avoiding Bevy's material specialization race.
-  Batch vertices are f32 offsets from their cell's centre, so their error grows
+  Batch vertices are f32 offsets from their block's centre, so their error grows
   with that offset: within `PRECISE` times it of the camera a single-star sprite
   placed by an f64 subtraction takes over (built at `PREPARE` times the radius,
   so its hidden frame is spent). The batch remains until a quarter of that
