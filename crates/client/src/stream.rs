@@ -72,6 +72,9 @@ pub struct StreamMetrics {
     pub generated: usize,
     pub cancelled: usize,
     pub generation: Duration,
+    /// Time the loader's other threads worked, besides `generation`.
+    pub worked: Duration,
+    threads: usize,
     pub rendering: Duration,
     pub frames: Vec<f64>,
     started: Instant,
@@ -99,6 +102,8 @@ impl Default for StreamMetrics {
             generated: 0,
             cancelled: 0,
             generation: Duration::ZERO,
+            worked: Duration::ZERO,
+            threads: 1,
             rendering: Duration::ZERO,
             frames: Vec::with_capacity(120),
             started: Instant::now(),
@@ -117,6 +122,9 @@ pub struct StreamSample {
     pub batch_draws: usize,
     pub uploaded_stars: usize,
     pub generation_ms: f64,
+    /// Threads the loader makes stars on, and how many were busy on average.
+    pub threads: usize,
+    pub busy_threads: f64,
     pub generated_cells: usize,
     pub cancelled: usize,
     pub render_sync_ms: f64,
@@ -154,6 +162,8 @@ impl StreamMetrics {
             batch_draws: self.batch_draws,
             uploaded_stars: self.uploaded_stars,
             generation_ms: self.generation.as_secs_f64() * 1000.0,
+            threads: self.threads,
+            busy_threads: (self.generation + self.worked).as_secs_f64() / elapsed.as_secs_f64(),
             generated_cells: self.generated,
             cancelled: self.cancelled,
             render_sync_ms: self.rendering.as_secs_f64() * 1000.0,
@@ -189,6 +199,7 @@ impl StreamMetrics {
         self.generated = 0;
         self.cancelled = 0;
         self.generation = Duration::ZERO;
+        self.worked = Duration::ZERO;
         self.rendering = Duration::ZERO;
         self.built_batches = 0;
         self.mesh_wait_ms = 0.0;
@@ -331,6 +342,8 @@ fn stream(
     });
     metrics.frames.push(time.delta_secs_f64() * 1000.0);
     metrics.mode = backend.mode();
+    metrics.threads = backend.threads();
+    metrics.worked += backend.take_worked();
     let Some((events, pending, generation, cancelled)) = backend.exchange(aim) else {
         metrics.report(&field);
         return;
@@ -378,13 +391,21 @@ use web::Backend;
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::*;
-    use std::sync::{Mutex, mpsc};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    };
     use std::time::Duration;
 
     /// Work between checks for a new camera position.
     const SLICE: Duration = Duration::from_millis(20);
-    /// Threads making each cell's stars, the stream thread included.
-    const STAR_THREADS: usize = 8;
+    /// Threads making each cell's stars, the stream thread included: three
+    /// quarters of the machine's, leaving the rest for the app.
+    fn star_threads() -> usize {
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+        (available * 3 / 4).max(1)
+    }
 
     type Batch = (Vec<Event>, usize, Duration, usize);
 
@@ -392,6 +413,9 @@ mod native {
     pub struct Backend {
         aim: mpsc::Sender<[f64; 3]>,
         batches: Mutex<mpsc::Receiver<Batch>>,
+        threads: usize,
+        /// Nanoseconds the loader's other threads have worked, not yet taken.
+        worked: Arc<AtomicU64>,
     }
 
     impl Backend {
@@ -399,11 +423,23 @@ mod native {
             "NATIVE THREAD"
         }
 
+        pub fn threads(&self) -> usize {
+            self.threads
+        }
+
+        pub fn take_worked(&self) -> Duration {
+            Duration::from_nanos(self.worked.swap(0, Ordering::Relaxed))
+        }
+
         pub fn start() -> Self {
             let (aim, aims) = mpsc::channel();
             let (sender, batches) = mpsc::channel();
+            let threads = star_threads();
+            bevy::log::info!("Making stars on {threads} threads");
+            let worked = Arc::new(AtomicU64::new(0));
+            let tally = worked.clone();
             let work = move || {
-                let mut loader = Loader::new(Sky::default(), MAGNITUDE).with_threads(STAR_THREADS);
+                let mut loader = Loader::new(Sky::default(), MAGNITUDE).with_threads(threads);
                 loop {
                     // Idle until the camera moves.
                     let mut latest = None;
@@ -419,6 +455,8 @@ mod native {
                     }
                     let start = std::time::Instant::now();
                     let events = loader.step(&mut || start.elapsed() < SLICE);
+                    let other = loader.take_worked().as_nanos() as u64;
+                    tally.fetch_add(other, Ordering::Relaxed);
                     if sender
                         .send((
                             events,
@@ -441,6 +479,8 @@ mod native {
             Self {
                 aim,
                 batches: Mutex::new(batches),
+                threads,
+                worked,
             }
         }
 
@@ -504,6 +544,15 @@ mod web {
                 Self::Worker { .. } => "WEB WORKER",
                 Self::Inline(_) => "FRAME SLICE",
             }
+        }
+
+        /// One: the browser makes stars on one worker, or in frame slices.
+        pub fn threads(&self) -> usize {
+            1
+        }
+
+        pub fn take_worked(&self) -> Duration {
+            Duration::ZERO
         }
 
         pub fn start() -> Self {

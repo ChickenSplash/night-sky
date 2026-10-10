@@ -13,6 +13,7 @@ use crate::galaxy::Component;
 use crate::population::{TIERS, reach_pc};
 use std::collections::{HashSet, VecDeque};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 /// Loaded cells are kept until the camera is this many times their reach away,
 /// so moving back and forth across a boundary does not reload them.
@@ -368,12 +369,13 @@ fn near(level: usize, p: [f64; 3], radius: f64) -> Vec<Cell> {
 }
 
 /// `work` on every part, by this thread and `threads - 1` more, each taking
-/// the next part as it finishes one. Results come in no particular order.
+/// the next part as it finishes one. Results come in no particular order,
+/// with the time the other threads worked.
 fn in_parallel<P: Send, T: Send>(
     threads: usize,
     parts: impl Iterator<Item = P> + Send,
     work: impl Fn(P) -> T + Sync,
-) -> Vec<T> {
+) -> (Vec<T>, Duration) {
     let parts = std::sync::Mutex::new(parts);
     let take = || {
         let mut done = Vec::new();
@@ -385,13 +387,20 @@ fn in_parallel<P: Send, T: Send>(
             done.push(work(part));
         }
     };
+    let timed = || {
+        let start = Instant::now();
+        (take(), start.elapsed())
+    };
     std::thread::scope(|scope| {
-        let others: Vec<_> = (1..threads).map(|_| scope.spawn(take)).collect();
+        let others: Vec<_> = (1..threads).map(|_| scope.spawn(timed)).collect();
         let mut done = take();
+        let mut worked = Duration::ZERO;
         for other in others {
-            done.extend(other.join().expect("a star thread panicked"));
+            let (more, time) = other.join().expect("a star thread panicked");
+            done.extend(more);
+            worked += time;
         }
-        done
+        (done, worked)
     })
 }
 
@@ -455,9 +464,11 @@ pub struct Loader {
     job: Option<Job>,
     /// With several threads: cells made, their grids building on threads of
     /// their own while the next cell's stars are made. Delivered in order.
-    gridding: VecDeque<(Cell, JoinHandle<StarCell>)>,
+    gridding: VecDeque<(Cell, JoinHandle<(StarCell, Duration)>)>,
     events: Vec<Event>,
     cancelled_jobs: usize,
+    /// Time threads other than the caller's worked, for `take_worked`.
+    worked: Duration,
 }
 
 /// Most grids building at once, so made cells cannot pile up in memory.
@@ -476,6 +487,7 @@ impl Loader {
             gridding: VecDeque::new(),
             events: Vec::new(),
             cancelled_jobs: 0,
+            worked: Duration::ZERO,
         }
     }
 
@@ -551,6 +563,18 @@ impl Loader {
         std::mem::take(&mut self.cancelled_jobs)
     }
 
+    /// Threads this loader starts.
+    pub fn threads(&self) -> usize {
+        self.threads
+    }
+
+    /// Time this loader's other threads (star making and grids) have worked
+    /// since last asked, besides the caller's own in `step`. Always zero with
+    /// one thread.
+    pub fn take_worked(&mut self) -> Duration {
+        std::mem::take(&mut self.worked)
+    }
+
     /// Loads until `more` says to stop, checked after every star or child
     /// integrated, or until nothing is left. Returns cells loaded and dropped
     /// since the last step.
@@ -585,7 +609,10 @@ impl Loader {
                         self.deliver(true);
                     }
                     let (cell, stars) = (job.cell, job.stars);
-                    let grid = std::thread::spawn(move || StarCell::new(cell, stars));
+                    let grid = std::thread::spawn(move || {
+                        let start = Instant::now();
+                        (StarCell::new(cell, stars), start.elapsed())
+                    });
                     self.gridding.push_back((cell, grid));
                 } else {
                     self.load(StarCell::new(job.cell, job.stars));
@@ -606,7 +633,9 @@ impl Loader {
             && (wait || grid.is_finished())
         {
             let (_, grid) = self.gridding.pop_front().expect("a grid is building");
-            self.load(grid.join().expect("a grid thread panicked"));
+            let (stars, worked) = grid.join().expect("a grid thread panicked");
+            self.worked += worked;
+            self.load(stars);
             wait = false;
         }
     }
@@ -645,7 +674,7 @@ impl Loader {
         };
         if self.threads > 1 {
             let count = counts[job.component];
-            Self::share(&mut self.sky, self.threads, job, component, count);
+            self.worked += Self::share(&mut self.sky, self.threads, job, component, count);
             return false;
         }
         match self.sky.try_point(cell, component, job.index) {
@@ -661,21 +690,27 @@ impl Loader {
     /// The next run of stars per thread, in parallel, written into their
     /// places in `stars`, or else the holes left so far. Stars needing
     /// something become holes, tried again once it is worked out, so the cell
-    /// is the same as one thread makes.
-    fn share(sky: &mut Sky, threads: usize, job: &mut Job, component: Component, count: u64) {
+    /// is the same as one thread makes. Returns the other threads' time.
+    fn share(
+        sky: &mut Sky,
+        threads: usize,
+        job: &mut Job,
+        component: Component,
+        count: u64,
+    ) -> Duration {
         let cell = job.cell;
         // Where the component's first star goes in `stars`.
         let base = job.stars.len() - job.index as usize;
         let shared: &Sky = sky;
         let make = |index| shared.try_point(cell, component, index);
         let mut needs = HashSet::new();
-        if job.holes.is_empty() {
+        let worked = if job.holes.is_empty() {
             let start = job.index;
             let end = count.min(start + RUN * threads as u64);
             job.stars.resize(base + end as usize, UNMADE);
             job.index = end;
             let fresh = &mut job.stars[base + start as usize..];
-            let missed = in_parallel(
+            let (missed, worked) = in_parallel(
                 threads,
                 fresh.chunks_mut(PIECE).enumerate(),
                 |(n, places)| {
@@ -694,9 +729,10 @@ impl Loader {
                 job.holes.push(index);
                 needs.insert(need);
             }
+            worked
         } else {
             let holes = std::mem::take(&mut job.holes);
-            let tried = in_parallel(threads, holes.chunks(PIECE), |holes| {
+            let (tried, worked) = in_parallel(threads, holes.chunks(PIECE), |holes| {
                 holes
                     .iter()
                     .map(|&index| (index, make(index)))
@@ -711,10 +747,12 @@ impl Loader {
                     }
                 }
             }
-        }
+            worked
+        };
         for need in needs {
             sky.complete(need);
         }
+        worked
     }
 
     /// Drops cached work no loaded or wanted cell needs to be worked out again.

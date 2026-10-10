@@ -570,6 +570,13 @@ fn perf(
                 ),
             ),
             (
+                "threads",
+                format!("{} started, {:.1} busy", s.threads, s.busy_threads),
+                Some(
+                    "Threads making stars (natively three quarters of the CPU's), and how many were working on average over the last second, grids included.",
+                ),
+            ),
+            (
                 "loaded",
                 format!("{} stars in {} cells", grouped(s.stars), grouped(s.cells)),
                 Some("Stars generated and held in memory, in cells around the camera."),
