@@ -209,10 +209,7 @@ fn within(arrived: bool, distance: f64, range: f64) -> bool {
 pub fn locate(
     #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     field: Res<crate::stream::Starfield>,
-    (mut nearby, mut metrics): (
-        ResMut<crate::stream::NearbyStars>,
-        ResMut<crate::stream::StreamMetrics>,
-    ),
+    mut metrics: ResMut<crate::stream::StreamMetrics>,
     lists: Res<Universe>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
@@ -248,7 +245,7 @@ pub fn locate(
     let eye_pc =
         DVec3::from_array(GalaxyModel::milky_way().home_pc) + eye_ly * (LY_METRES / PC_METRES);
     let reach_pc = APPROACH_METRES / PC_METRES;
-    let Some((_, cell, star)) = nearby.nearest(&field, eye_pc, reach_pc, &mut metrics) else {
+    let Some((_, cell, star)) = field.nearest(eye_pc, reach_pc, &mut metrics) else {
         return;
     };
     let (id, position_pc) = (star.id(cell), star.position_pc);
@@ -565,10 +562,7 @@ pub fn place_camera(
     time: Res<Time>,
     universe: Res<Universe>,
     field: Res<crate::stream::Starfield>,
-    (mut nearby, mut metrics): (
-        ResMut<crate::stream::NearbyStars>,
-        ResMut<crate::stream::StreamMetrics>,
-    ),
+    mut metrics: ResMut<crate::stream::StreamMetrics>,
     clock: Res<Clock>,
     mut nav: ResMut<Navigation>,
     mut rig: ResMut<CameraRig>,
@@ -696,8 +690,7 @@ pub fn place_camera(
     let eye_pc = DVec3::from_array(GalaxyModel::milky_way().home_pc)
         + frame * (LY_METRES / PC_METRES)
         + pose.eye / PC_METRES;
-    pose.scale_distance =
-        proximity_scale_distance(&mut nearby, &field, eye_pc, shown.distance, &mut metrics);
+    pose.scale_distance = proximity_scale_distance(&field, eye_pc, shown.distance, &mut metrics);
     if nav.arrived {
         pose.scale_distance = pose.scale_distance.min(pose.eye.length().max(20_000_000.0));
     }
@@ -723,14 +716,13 @@ pub fn place_camera(
 }
 
 fn proximity_scale_distance(
-    nearby: &mut crate::stream::NearbyStars,
     field: &crate::stream::Starfield,
     eye_pc: DVec3,
     selected_range: f64,
     metrics: &mut crate::stream::StreamMetrics,
 ) -> f64 {
-    nearby
-        .nearest(field, eye_pc, PRECISE_SCALE_PC, metrics)
+    field
+        .nearest(eye_pc, PRECISE_SCALE_PC, metrics)
         .map_or(selected_range, |(distance, ..)| {
             selected_range.min(distance * PC_METRES)
         })
@@ -1245,9 +1237,9 @@ mod tests {
         let mut field = crate::stream::Starfield::default();
         field.cells.insert(
             cell,
-            StarCell {
+            StarCell::new(
                 cell,
-                stars: vec![StarPoint {
+                vec![StarPoint {
                     position_pc: star.position_pc,
                     luminosity_solar: star.star.luminosity_solar as f32,
                     temperature_k: star.star.temperature_k as f32,
@@ -1255,7 +1247,7 @@ mod tests {
                     component: parse_cell_star(&id).unwrap().1,
                     index: parse_cell_star(&id).unwrap().2 as u32,
                 }],
-            },
+            ),
         );
         let mut nav = Navigation {
             rotation: Quat::IDENTITY,
@@ -1285,7 +1277,6 @@ mod tests {
             .insert_resource(rig)
             .insert_resource(pose)
             .insert_resource(nav)
-            .init_resource::<crate::stream::NearbyStars>()
             .init_resource::<crate::stream::StreamMetrics>()
             .add_systems(Update, (locate, locate_planet).chain());
         app.update();
@@ -1367,7 +1358,6 @@ mod tests {
                 ..default()
             })
             .insert_resource(nav)
-            .init_resource::<crate::stream::NearbyStars>()
             .init_resource::<crate::stream::StreamMetrics>()
             .add_systems(Update, (locate, locate_planet).chain());
         app
@@ -1547,9 +1537,9 @@ mod tests {
         let mut field = crate::stream::Starfield::default();
         field.cells.insert(
             cell,
-            StarCell {
+            StarCell::new(
                 cell,
-                stars: vec![StarPoint {
+                vec![StarPoint {
                     position_pc: star_pc.to_array(),
                     luminosity_solar: 1.0,
                     temperature_k: 5772.0,
@@ -1557,21 +1547,17 @@ mod tests {
                     component: Component::ThinDisc,
                     index: 0,
                 }],
-            },
+            ),
         );
         let maximum = 40_000.0 * LY_METRES;
         let eye = star_pc + DVec3::X * (6.0 * LY_METRES / PC_METRES);
-        let mut nearby = crate::stream::NearbyStars::default();
         let mut metrics = crate::stream::StreamMetrics::default();
-        let mut scale =
-            |eye| proximity_scale_distance(&mut nearby, &field, eye, maximum, &mut metrics);
+        let mut scale = |eye| proximity_scale_distance(&field, eye, maximum, &mut metrics);
         assert!((scale(eye) / LY_METRES - 6.0).abs() < 1e-9);
         assert_eq!(
             scale(eye + DVec3::X * 30.0 * LY_METRES / PC_METRES),
             maximum
         );
-        // Back again: the moved-away gather must not hide the star.
-        assert!((scale(eye) / LY_METRES - 6.0).abs() < 1e-9);
     }
 
     #[test]

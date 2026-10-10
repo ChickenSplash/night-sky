@@ -269,13 +269,7 @@ mod tests {
             component: Component::ThinDisc,
             index: 8,
         };
-        field.cells.insert(
-            cell,
-            StarCell {
-                cell,
-                stars: vec![star],
-            },
-        );
+        field.cells.insert(cell, StarCell::new(cell, vec![star]));
         let rig = CameraRig::default();
         let pose = CameraPose::default();
         let tan_half = (50.0_f64.to_radians() / 2.0).tan();

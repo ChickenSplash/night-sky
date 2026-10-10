@@ -610,13 +610,13 @@ fn perf(
         ui,
         "Uploaded stars pass the CPU magnitude filter; the shader culls the rest of the faint ones and those behind the camera.",
     );
-    terminal::heading(ui, "nearby-star scans");
+    terminal::heading(ui, "nearest star");
     terminal::facts(
         ui,
         "debug-nearby",
         &[
             (
-                "query time",
+                "lookup time",
                 format!("{:.2} ms per frame", s.nearby_ms_per_frame),
             ),
             (
@@ -624,19 +624,14 @@ fn perf(
                 format!("{:.0} stars per frame", s.nearby_checked_per_frame),
             ),
             (
-                "gathers",
-                format!(
-                    "{} scanning {} stars",
-                    s.nearby_gathers,
-                    grouped(s.nearby_gathered)
-                ),
+                "cells",
+                format!("{:.0} searched per frame", s.nearby_cells_per_frame),
             ),
-            ("list", format!("{} stars", grouped(s.nearby_list))),
         ],
     );
     terminal::note(
         ui,
-        "The nearest loaded star, for automatic system arrival and the close-up render scale. Gathers rebuild the sorted list when the camera drifts or stars load; query time includes them.",
+        "For automatic system arrival and the close-up render scale. Each loaded cell sorts its stars into a grid of boxes, so a lookup checks only the boxes around the camera.",
     );
     gpu_passes(ui, diagnostics, mean);
 }

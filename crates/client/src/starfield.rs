@@ -27,7 +27,7 @@ use space_simulation::{
     galaxy::PC_METRES,
     light::visual_efficiency,
     population::{reach_pc, reach_sq_per_luminosity},
-    stream::{StarPoint, gap_pc},
+    stream::StarPoint,
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -179,11 +179,8 @@ fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
     for (&cell, stars) in &field.cells {
         let half_diagonal = cell.size_pc() * 0.5 * 3.0_f64.sqrt();
         let reach = PREPARE * (PRECISE * half_diagonal).max(body_pc) + RESCAN_PC;
-        if gap_pc(cell, eye.to_array()) > reach {
-            continue;
-        }
         let centre = DVec3::from_array(cell.centre_pc());
-        for star in &stars.stars {
+        stars.near(eye.to_array(), reach, |star| {
             let position = DVec3::from_array(star.position_pc);
             let offset_pc = position.distance(centre);
             let reach = PREPARE * (PRECISE * offset_pc).max(body_pc) + RESCAN_PC;
@@ -194,7 +191,7 @@ fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
                     offset_pc,
                 });
             }
-        }
+        });
     }
     out
 }
@@ -611,10 +608,7 @@ mod tests {
         let mut field = Starfield::default();
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell {
-                cell,
-                stars: vec![point(star, 0), point(centre, 1)],
-            },
+            space_simulation::stream::StarCell::new(cell, vec![point(star, 0), point(centre, 1)]),
         );
         let near = candidates(&field, star + DVec3::new(0.0, 0.05, 0.0), 0.0);
         assert_eq!(near.len(), 1);
@@ -645,10 +639,7 @@ mod tests {
         let mut field = Starfield::default();
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell {
-                cell,
-                stars: vec![point],
-            },
+            space_simulation::stream::StarCell::new(cell, vec![point]),
         );
         let eye = position + DVec3::Z * (6.0 * space_simulation::LY_METRES / PC_METRES);
         let candidate = candidates(&field, eye, 0.0);

@@ -37,11 +37,186 @@ impl StarPoint {
     }
 }
 
-/// A cell's own stars: those of the tier matching its level.
+/// Stars a grid box holds on average, at most: fewer boxes for sparse cells.
+const STARS_PER_BOX: f64 = 8.0;
+/// Smallest grid box edge, in parsecs, so a search out to a few parsecs
+/// visits a bounded number of boxes.
+const MIN_BOX_PC: f64 = 0.5;
+
+/// A cell's own stars: those of the tier matching its level. Build it with
+/// `StarCell::new`, which sorts the stars into a grid of boxes so the stars
+/// near a point are found without scanning the whole cell.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StarCell {
     pub cell: Cell,
+    /// Sorted by grid box. Changing them means building a new `StarCell`.
     pub stars: Vec<StarPoint>,
+    grid: StarGrid,
+}
+
+/// A uniform grid over a cell: box `b` holds `stars[starts[b]..starts[b + 1]]`.
+#[derive(Clone, Debug, PartialEq)]
+struct StarGrid {
+    min_pc: [f64; 3],
+    box_pc: f64,
+    per_axis: usize,
+    starts: Vec<u32>,
+}
+
+impl StarGrid {
+    fn new(cell: Cell, stars: usize) -> Self {
+        let size = cell.size_pc();
+        let per_axis = (stars as f64 / STARS_PER_BOX)
+            .cbrt()
+            .ceil()
+            .min((size / MIN_BOX_PC).floor())
+            .max(1.0) as usize;
+        Self {
+            min_pc: cell.min_pc(),
+            box_pc: size / per_axis as f64,
+            per_axis,
+            starts: vec![0; per_axis.pow(3) + 1],
+        }
+    }
+
+    /// The box containing `p` on each axis, clamped to the grid.
+    fn coords(&self, p: [f64; 3]) -> [usize; 3] {
+        std::array::from_fn(|axis| {
+            ((p[axis] - self.min_pc[axis]) / self.box_pc)
+                .floor()
+                .clamp(0.0, (self.per_axis - 1) as f64) as usize
+        })
+    }
+
+    fn index(&self, [x, y, z]: [usize; 3]) -> usize {
+        (x * self.per_axis + y) * self.per_axis + z
+    }
+
+    /// Distance from `p` to the nearest point of a box.
+    fn gap_pc(&self, coords: [usize; 3], p: [f64; 3]) -> f64 {
+        (0..3)
+            .map(|axis| {
+                let min = self.min_pc[axis] + coords[axis] as f64 * self.box_pc;
+                (min - p[axis])
+                    .max(p[axis] - min - self.box_pc)
+                    .max(0.0)
+                    .powi(2)
+            })
+            .sum::<f64>()
+            .sqrt()
+    }
+}
+
+impl StarCell {
+    pub fn new(cell: Cell, stars: Vec<StarPoint>) -> Self {
+        let mut grid = StarGrid::new(cell, stars.len());
+        let boxes: Vec<usize> = stars
+            .iter()
+            .map(|star| grid.index(grid.coords(star.position_pc)))
+            .collect();
+        for &b in &boxes {
+            grid.starts[b + 1] += 1;
+        }
+        for b in 1..grid.starts.len() {
+            grid.starts[b] += grid.starts[b - 1];
+        }
+        let mut next = grid.starts.clone();
+        let mut sorted = stars.clone();
+        for (star, b) in stars.into_iter().zip(boxes) {
+            sorted[next[b] as usize] = star;
+            next[b] += 1;
+        }
+        Self {
+            cell,
+            stars: sorted,
+            grid,
+        }
+    }
+
+    fn box_stars(&self, coords: [usize; 3]) -> &[StarPoint] {
+        let b = self.grid.index(coords);
+        let (start, end) = (self.grid.starts[b], self.grid.starts[b + 1]);
+        self.stars.get(start as usize..end as usize).unwrap_or(&[])
+    }
+
+    /// The star nearest `p` and closer than `cap_pc`, with its distance in
+    /// parsecs; equal distances resolve by ID. Searches rings of boxes outward
+    /// from `p` and stops once no farther ring could hold a nearer star.
+    /// `checked` counts the stars measured.
+    pub fn nearest(
+        &self,
+        p: [f64; 3],
+        cap_pc: f64,
+        checked: &mut usize,
+    ) -> Option<(f64, StarPoint)> {
+        let grid = &self.grid;
+        let centre = grid.coords(p).map(|c| c as i64);
+        let last = grid.per_axis as i64 - 1;
+        let mut best: Option<(f64, StarPoint)> = None;
+        for ring in 0..=last {
+            let limit = best.map_or(cap_pc, |(distance, _)| distance);
+            // `p` lies in or beyond the centre box: a ring's boxes are at
+            // least one box fewer than the ring away.
+            if (ring - 1).max(0) as f64 * grid.box_pc > limit {
+                break;
+            }
+            for dx in -ring..=ring {
+                for dy in -ring..=ring {
+                    let edge = dx.abs() == ring || dy.abs() == ring;
+                    let step = if edge { 1 } else { (2 * ring).max(1) };
+                    for dz in (-ring..=ring).step_by(step as usize) {
+                        let coords = [centre[0] + dx, centre[1] + dy, centre[2] + dz];
+                        if coords.iter().any(|&c| c < 0 || c > last) {
+                            continue;
+                        }
+                        let coords = coords.map(|c| c as usize);
+                        let limit = best.map_or(cap_pc, |(distance, _)| distance);
+                        if grid.gap_pc(coords, p) > limit {
+                            continue;
+                        }
+                        for star in self.box_stars(coords) {
+                            *checked += 1;
+                            let distance = (0..3)
+                                .map(|axis| (star.position_pc[axis] - p[axis]).powi(2))
+                                .sum::<f64>()
+                                .sqrt();
+                            if distance >= cap_pc {
+                                continue;
+                            }
+                            if best.is_none_or(|(old, old_star)| {
+                                distance < old
+                                    || (distance == old
+                                        && star.id(self.cell) < old_star.id(self.cell))
+                            }) {
+                                best = Some((distance, *star));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    /// Calls `f` with every star in the boxes within `radius_pc` of `p`: a
+    /// superset of the stars within that distance, for callers to filter.
+    pub fn near(&self, p: [f64; 3], radius_pc: f64, mut f: impl FnMut(&StarPoint)) {
+        if gap_pc(self.cell, p) > radius_pc {
+            return;
+        }
+        let grid = &self.grid;
+        let low = grid.coords(std::array::from_fn(|axis| p[axis] - radius_pc));
+        let high = grid.coords(std::array::from_fn(|axis| p[axis] + radius_pc));
+        for x in low[0]..=high[0] {
+            for y in low[1]..=high[1] {
+                for z in low[2]..=high[2] {
+                    if grid.gap_pc([x, y, z], p) <= radius_pc {
+                        self.box_stars([x, y, z]).iter().for_each(&mut f);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -212,10 +387,8 @@ impl Loader {
             if self.advance() {
                 let job = self.job.take().expect("a job is being built");
                 self.loaded.insert(job.cell);
-                self.events.push(Event::Loaded(StarCell {
-                    cell: job.cell,
-                    stars: job.stars,
-                }));
+                self.events
+                    .push(Event::Loaded(StarCell::new(job.cell, job.stars)));
                 self.trim();
             }
             if !more() {
@@ -290,6 +463,84 @@ mod tests {
     /// A few bright tiers only, so the tests stay quick.
     const MAGNITUDE: f64 = -1.0;
 
+    /// A cell with stars scattered through it and a dense cluster inside.
+    fn scattered_cell() -> StarCell {
+        let cell = Cell::containing(8, GalaxyModel::milky_way().home_pc).unwrap();
+        let (min, size) = (cell.min_pc(), cell.size_pc());
+        let mut seed = 12345_u64;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let stars = (0..20_000_u32)
+            .map(|index| {
+                let position_pc = if index % 2 == 0 {
+                    std::array::from_fn(|axis| min[axis] + next() * size)
+                } else {
+                    std::array::from_fn(|axis| min[axis] + size * 0.3 + next())
+                };
+                StarPoint {
+                    position_pc,
+                    luminosity_solar: 1.0,
+                    temperature_k: 5772.0,
+                    radius_solar: 1.0,
+                    component: Component::ThinDisc,
+                    index,
+                }
+            })
+            .collect();
+        StarCell::new(cell, stars)
+    }
+
+    fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+        (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+    }
+
+    #[test]
+    fn grid_finds_the_same_stars_as_a_full_scan() {
+        let cell = scattered_cell();
+        let (min, size) = (cell.cell.min_pc(), cell.cell.size_pc());
+        let mut checked = 0;
+        // Probes inside, in the cluster, and a little outside the cell.
+        for step in 0..300 {
+            let t = step as f64 / 300.0;
+            let p: [f64; 3] = std::array::from_fn(|axis| {
+                min[axis] - 3.0 + (size + 6.0) * t * [1.0, 0.7, 0.4][axis]
+            });
+            let cluster: [f64; 3] = std::array::from_fn(|axis| min[axis] + size * 0.3 + t);
+            for (p, in_cluster) in [(p, false), (cluster, true)] {
+                for cap in [0.006, 0.3, 6.1, 40.0] {
+                    let expected = cell
+                        .stars
+                        .iter()
+                        .map(|star| distance(star.position_pc, p))
+                        .filter(|&d| d < cap)
+                        .min_by(f64::total_cmp);
+                    let mut counted = 0;
+                    let found = cell.nearest(p, cap, &mut counted).map(|(d, _)| d);
+                    if !in_cluster {
+                        checked += counted;
+                    }
+                    assert_eq!(found, expected, "{p:?} within {cap}");
+                    let mut near = 0;
+                    cell.near(p, cap, |star| {
+                        near += usize::from(distance(star.position_pc, p) <= cap);
+                    });
+                    let within = cell
+                        .stars
+                        .iter()
+                        .filter(|star| distance(star.position_pc, p) <= cap)
+                        .count();
+                    assert_eq!(near, within, "{p:?} within {cap}");
+                }
+            }
+        }
+        // Outside the cluster, a few dozen stars per query, not 20,000.
+        assert!(checked < 300 * 4 * 100, "{checked}");
+    }
+
     fn run(loader: &mut Loader, more: &mut dyn FnMut() -> bool) -> HashMap<Cell, StarCell> {
         let mut cells = HashMap::new();
         while loader.pending() > 0 {
@@ -350,12 +601,16 @@ mod tests {
         let mut sliced = Loader::new(Sky::default(), MAGNITUDE);
         sliced.aim(home);
         assert_eq!(run(&mut sliced, &mut || false), cells);
-        // And they are the sky's own stars.
+        // And they are the sky's own stars, in grid order rather than the sky's.
         let mut sky = Sky::default();
         for (cell, stars) in &cells {
             let own = sky.cell_stars(*cell);
             assert_eq!(own.len(), stars.stars.len());
-            for (star, point) in own.iter().zip(&stars.stars) {
+            let mut points = stars.stars.clone();
+            let mut own = own.to_vec();
+            own.sort_by(|a, b| a.id.cmp(&b.id));
+            points.sort_by_key(|point| point.id(*cell));
+            for (star, point) in own.iter().zip(&points) {
                 assert_eq!(point.id(*cell), star.id);
                 assert_eq!(point.position_pc, star.position_pc);
                 assert_eq!(point.temperature_k, star.star.temperature_k as f32);

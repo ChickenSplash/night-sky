@@ -415,11 +415,11 @@ mod tests {
         let (cell, component, index) = parse_cell_star(id).unwrap();
         let star = Sky::default().star(id).unwrap();
         let mut field = app.world_mut().resource_mut::<crate::stream::Starfield>();
-        field.cells.entry(cell).or_insert(StarCell {
-            cell,
-            stars: vec![],
-        });
-        field.cells.get_mut(&cell).unwrap().stars.push(StarPoint {
+        let mut stars = field
+            .cells
+            .remove(&cell)
+            .map_or_else(Vec::new, |loaded| loaded.stars);
+        stars.push(StarPoint {
             position_pc: star.position_pc,
             luminosity_solar: star.star.luminosity_solar as f32,
             temperature_k: star.star.temperature_k as f32,
@@ -427,6 +427,7 @@ mod tests {
             component,
             index: index as u32,
         });
+        field.cells.insert(cell, StarCell::new(cell, stars));
     }
 
     fn nav(app: &App) -> &Navigation {

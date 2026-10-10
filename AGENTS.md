@@ -280,13 +280,17 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   wait, render-sync time and frame-time percentiles once per second; the
   debug window's `perf` tab shows them on both clients.
   Instrumentation does not change loading policy.
-  Per-frame "nearest loaded star" questions (automatic arrival in
-  `scene::locate`, the close-up render scale in `place_camera`) go through
-  `stream::NearbyStars`: a list of stars near the eye sorted by distance from
-  where it was gathered, regathered only when the eye drifts `NEARBY_MARGIN_PC`
-  or `Starfield::version` changes. Never scan `Starfield::cells` star by star
-  every frame: the cells containing the camera hold tens of millions of stars
-  at the galactic centre. The perf tab's nearby-star scans section times it.
+  `StarCell::new` (simulation `stream.rs`) sorts a cell's stars into a uniform
+  grid of boxes (about 8 stars each, never under 0.5 pc), on the loader's
+  thread, so `stars` is in grid order, not generation order. Build cells only
+  through `StarCell::new`; changing `stars` afterwards leaves the grid stale.
+  Spatial questions use the grid: `StarCell::nearest` (rings of boxes outward)
+  behind `Starfield::nearest` for automatic arrival in `scene::locate` and the
+  close-up render scale in `place_camera`, and `StarCell::near` (boxes within a
+  radius) for precise-sprite `candidates`. Never scan `Starfield::cells` star
+  by star per frame or per streaming change: the cells containing the camera
+  hold tens of millions of stars at the galactic centre. The perf tab's
+  nearest star section times the lookups.
   The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each

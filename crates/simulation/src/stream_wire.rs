@@ -99,7 +99,7 @@ pub fn decode(bytes: &[u8]) -> Option<(Vec<Event>, usize, Duration, usize)> {
                         index,
                     });
                 }
-                events.push(Event::Loaded(StarCell { cell, stars }));
+                events.push(Event::Loaded(StarCell::new(cell, stars)));
             }
             _ => return None,
         }
@@ -119,9 +119,9 @@ mod tests {
     #[test]
     fn round_trip_keeps_precise_positions_and_ids() {
         let events = vec![
-            Event::Loaded(StarCell {
-                cell: Cell(123),
-                stars: vec![StarPoint {
+            Event::Loaded(StarCell::new(
+                Cell(123),
+                vec![StarPoint {
                     position_pc: [12345.000000001, -4.0, 99.0],
                     luminosity_solar: 1.5,
                     temperature_k: 5772.0,
@@ -129,7 +129,7 @@ mod tests {
                     component: Component::ThinDisc,
                     index: 987_654,
                 }],
-            }),
+            )),
             Event::Dropped(Cell(42)),
         ];
         let encoded = encode(&events, 52, Duration::from_millis(21), 2);
