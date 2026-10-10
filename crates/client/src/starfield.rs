@@ -433,6 +433,11 @@ fn sync(
         let delta = (DVec3::from_array(owner.centre_pc()) - eye) * factor;
         let centre = camera_transform.translation() + delta.as_vec3();
         for &Batch { entity, stars, .. } in entities {
+            if !debug.place_batches {
+                draws += 1;
+                uploaded += stars;
+                continue;
+            }
             if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
                 placements.get_mut(entity)
             {
