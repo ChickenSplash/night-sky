@@ -23,9 +23,13 @@ pub enum UiCommand {
         list: String,
         task: String,
     },
-    /// Select a planet in the visited system without moving the camera.
+    /// Select any planet by stable ID without moving the camera or visiting.
     Inspect {
         planet: String,
+    },
+    /// Activate an inspector tab without changing selection or camera state.
+    InspectObject {
+        inspection: crate::breadcrumb::Inspection,
     },
     ShowPage {
         page: u32,
@@ -43,6 +47,10 @@ pub enum UiCommand {
     },
     SetRate {
         rate: f64,
+    },
+    /// Camera travel speed in metres per second.
+    SetMoveSpeed {
+        speed: f64,
     },
     SetDisplay {
         option: Display,
@@ -151,11 +159,30 @@ pub fn apply(
                 }
             }
             UiCommand::Inspect { planet } => {
-                if let Some(index) = nav
-                    .system(galaxy)
-                    .and_then(|s| s.planets.iter().position(|p| &p.id == planet))
-                {
-                    nav.select(Some(Selection::Planet(index)));
+                if crate::objects::planet(galaxy, planet).is_some() {
+                    let local = nav.system(galaxy).is_some_and(|system| {
+                        system
+                            .planets
+                            .iter()
+                            .any(|body| body.id == *planet && body.page() == nav.page)
+                    });
+                    nav.select(Some(Selection::Planet(planet.clone())));
+                    if !local {
+                        nav.following = false;
+                    }
+                }
+            }
+            UiCommand::InspectObject { inspection } => {
+                let trail = match inspection.source {
+                    crate::breadcrumb::TrailSource::Location => {
+                        crate::breadcrumb::trail(&nav, galaxy)
+                    }
+                    crate::breadcrumb::TrailSource::Selection => {
+                        crate::breadcrumb::selection_trail(&nav, galaxy)
+                    }
+                };
+                if trail.iter().any(|crumb| crumb.object == inspection.object) {
+                    nav.inspection = Some(inspection.clone());
                 }
             }
             UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),
@@ -169,7 +196,7 @@ pub fn apply(
             }
             UiCommand::Follow => nav.focus_selected(galaxy),
             UiCommand::Up => {
-                if nav.following && nav.selected_planet().is_some() {
+                if nav.following && nav.selected_planet(galaxy).is_some() {
                     nav.frame(galaxy);
                 } else if nav.selection.is_some() {
                     nav.select(None);
@@ -179,6 +206,11 @@ pub fn apply(
             }
             UiCommand::SetPaused { paused } => clock.0.paused = *paused,
             UiCommand::SetRate { rate } => clock.0.rate = *rate,
+            UiCommand::SetMoveSpeed { speed } => {
+                if speed.is_finite() {
+                    nav.move_speed = speed.clamp(crate::scene::MIN_SPEED, crate::scene::MAX_SPEED);
+                }
+            }
             UiCommand::SetDisplay { option, on } => match option {
                 Display::Exaggerate => nav.exaggerate = *on,
                 Display::Orbits => nav.orbits = *on,
@@ -204,6 +236,131 @@ mod tests {
         cells::{Sky, parse_cell_star},
         stream::{StarCell, StarPoint},
     };
+
+    #[test]
+    fn remote_planet_selection_and_inspection_never_move_the_camera() {
+        use crate::{
+            breadcrumb::{Inspection, TrailSource},
+            objects::ObjectRef,
+        };
+        let galaxy = space_simulation::demo_galaxy();
+        let id = galaxy.systems[1].planets[0].id.clone();
+        let mut app = run(galaxy, vec![]);
+        let before = (
+            nav(&app).target,
+            nav(&app).eye,
+            nav(&app).distance,
+            nav(&app).page,
+        );
+        send(&mut app, vec![UiCommand::Inspect { planet: id.clone() }]);
+        assert_eq!(nav(&app).selection, Some(Selection::Planet(id.clone())));
+        assert!(nav(&app).visit.is_none() && !nav(&app).fly && !nav(&app).following);
+        assert_eq!(
+            nav(&app).selected_planet(&app.world().resource::<Universe>().0),
+            None
+        );
+        assert_eq!(
+            nav(&app).inspection.as_ref().unwrap().object,
+            ObjectRef::Planet { id: id.clone() }
+        );
+        let star = crate::objects::parent_star(&id).unwrap().to_owned();
+        for inspection in [
+            Inspection {
+                source: TrailSource::Location,
+                object: ObjectRef::Galaxy,
+            },
+            Inspection {
+                source: TrailSource::Selection,
+                object: ObjectRef::Star { id: star },
+            },
+            Inspection {
+                source: TrailSource::Selection,
+                object: ObjectRef::Planet { id: id.clone() },
+            },
+        ] {
+            send(
+                &mut app,
+                vec![UiCommand::InspectObject {
+                    inspection: inspection.clone(),
+                }],
+            );
+            assert_eq!(nav(&app).inspection, Some(inspection));
+            assert_eq!(nav(&app).selection, Some(Selection::Planet(id.clone())));
+            assert_eq!(
+                (
+                    nav(&app).target,
+                    nav(&app).eye,
+                    nav(&app).distance,
+                    nav(&app).page
+                ),
+                before
+            );
+            assert!(!nav(&app).fly);
+        }
+    }
+
+    #[test]
+    fn an_unstreamed_generated_planet_can_be_selected_by_id() {
+        use space_simulation::{cells::Cell, galaxy::GalaxyModel};
+        let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
+        let star = Sky::default().cell_star_at(cell, 0).unwrap().id;
+        let system = crate::galaxy_nav::generated(&star, bevy::math::DVec3::ZERO).unwrap();
+        let id = system.planets[0].id.clone();
+        let app = run(
+            space_simulation::demo_galaxy(),
+            vec![UiCommand::Inspect { planet: id.clone() }],
+        );
+        assert_eq!(nav(&app).selection, Some(Selection::Planet(id.clone())));
+        assert!(nav(&app).visit.is_none());
+        let galaxy = &app.world().resource::<Universe>().0;
+        let trail = crate::breadcrumb::selection_trail(nav(&app), galaxy);
+        assert_eq!(trail.last().unwrap().label, system.planets[0].designation);
+        let info = crate::inspector::describe(&crate::objects::ObjectRef::Planet { id }, galaxy);
+        assert_eq!(info.title, system.planets[0].designation);
+        assert!(info.rows.iter().any(|(label, _)| label == "Mass"));
+    }
+
+    #[test]
+    fn inspector_tabs_preserve_tracking_and_reject_absent_crumbs() {
+        use crate::{
+            breadcrumb::{Inspection, TrailSource},
+            objects::ObjectRef,
+        };
+        let galaxy = space_simulation::demo_galaxy();
+        let id = galaxy.systems[0].planets[0].id.clone();
+        let mut app = run(galaxy, vec![]);
+        {
+            let mut nav = app.world_mut().resource_mut::<Navigation>();
+            nav.visit = Some(crate::Visit::List(0));
+            nav.arrived = true;
+            nav.select(Some(Selection::Planet(id)));
+            nav.following = true;
+        }
+        let inspection = Inspection {
+            source: TrailSource::Location,
+            object: ObjectRef::Galaxy,
+        };
+        send(
+            &mut app,
+            vec![UiCommand::InspectObject {
+                inspection: inspection.clone(),
+            }],
+        );
+        assert!(nav(&app).following);
+        send(
+            &mut app,
+            vec![UiCommand::InspectObject {
+                inspection: Inspection {
+                    source: TrailSource::Location,
+                    object: ObjectRef::Star {
+                        id: "absent".into(),
+                    },
+                },
+            }],
+        );
+        assert_eq!(nav(&app).inspection, Some(inspection));
+        assert!(nav(&app).following);
+    }
 
     fn run(galaxy: space_shared::Galaxy, commands: Vec<UiCommand>) -> App {
         let mut app = App::new();
@@ -279,6 +436,20 @@ mod tests {
         assert_eq!(nav(&app).fov_deg, 30.0);
         send(&mut app, vec![set(500.0), set(f32::NAN)]);
         assert_eq!(nav(&app).fov_deg, 130.0);
+    }
+
+    #[test]
+    fn movement_speed_is_clamped_and_rejects_non_finite_values() {
+        let set = |speed| UiCommand::SetMoveSpeed { speed };
+        let mut app = run(space_simulation::demo_galaxy(), vec![set(1234.5)]);
+        assert_eq!(nav(&app).move_speed, 1234.5);
+        send(&mut app, vec![set(-10.0)]);
+        assert_eq!(nav(&app).move_speed, crate::scene::MIN_SPEED);
+        send(
+            &mut app,
+            vec![set(f64::MAX), set(f64::NAN), set(f64::INFINITY)],
+        );
+        assert_eq!(nav(&app).move_speed, crate::scene::MAX_SPEED);
     }
 
     #[test]
@@ -371,7 +542,7 @@ mod tests {
         let universe = app.world().resource::<Universe>();
         assert_eq!(nav.list(), Some(expected));
         let selected = nav
-            .selected_planet()
+            .selected_planet(&universe.0)
             .map(|i| &universe.0.systems[expected].planets[i]);
         assert_eq!(
             selected.and_then(|p| Some(&p.task.as_ref()?.id)),
@@ -514,7 +685,7 @@ mod tests {
         ] {
             let mut nav = Navigation {
                 visit: Some(crate::Visit::List(0)),
-                selection: Some(Selection::Planet(0)),
+                selection: Some(Selection::Planet("fixture/0".into())),
                 ..default()
             };
             galaxy_reference(&mut nav, view);
@@ -627,7 +798,12 @@ mod tests {
                 UiCommand::Inspect { planet },
             ],
         );
-        assert!(nav(&app).selected_planet().is_some() && !nav(&app).following);
+        assert!(
+            nav(&app)
+                .selected_planet(&app.world().resource::<Universe>().0)
+                .is_some()
+                && !nav(&app).following
+        );
         app.world_mut().resource_mut::<Navigation>().fly = false;
         let distance = nav(&app).distance;
         send(&mut app, vec![UiCommand::Up]);

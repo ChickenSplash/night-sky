@@ -191,9 +191,7 @@ fn rebase(
     nav.eye = Some(new_eye);
     nav.visit = next;
     nav.page = page;
-    if nav.selected_planet().is_some() {
-        nav.selection = None;
-    }
+    nav.location_planet = None;
     nav.following = false;
 }
 
@@ -279,6 +277,65 @@ pub fn locate(
     };
     rebase(&mut nav, &rig, pose.eye, &lists.0, Some(visit), page);
     nav.arrived = true;
+}
+
+/// Measure planets after camera placement, so a followed planet and the eye
+/// use the same simulation instant even at very high time rates.
+pub fn locate_planet(
+    lists: Res<Universe>,
+    rig: Res<CameraRig>,
+    pose: Res<CameraPose>,
+    clock: Res<Clock>,
+    mut nav: ResMut<Navigation>,
+) {
+    nav.location_planet = nav.location(&lists.0).and_then(|system| {
+        // Never cancel huge galactic coordinates for metre-scale measurements.
+        if rig.frame_ly != page_origin_ly(system, nav.page) {
+            return None;
+        }
+        let eye = page_frame(system, nav.page).inverse() * pose.eye;
+        nearby_planet(
+            system,
+            nav.page,
+            eye,
+            clock.0.seconds,
+            nav.location_planet.as_deref(),
+            nav.presentation_mode,
+        )
+    });
+}
+
+/// Enter within 20 physical radii; remain until 30. No visual exaggeration,
+/// selection or following is involved. Table/constellation are not physical.
+fn nearby_planet(
+    system: &space_shared::StarSystem,
+    page: u32,
+    eye: DVec3,
+    seconds: f64,
+    previous: Option<&str>,
+    mode: PresentationMode,
+) -> Option<String> {
+    if mode != PresentationMode::Simulation {
+        return None;
+    }
+    let distance = |planet: &space_shared::Planet| {
+        (eye - DVec3::from_array(position(&planet.orbit, system.mass(page), seconds))).length()
+    };
+    if let Some(planet) = system
+        .on_page(page)
+        .find(|planet| Some(planet.id.as_str()) == previous)
+        && distance(planet) < planet.radius_km * 1000.0 * 30.0
+    {
+        return Some(planet.id.clone());
+    }
+    system
+        .on_page(page)
+        .filter_map(|planet| {
+            let d = distance(planet);
+            (d < planet.radius_km * 1000.0 * 20.0).then_some((d, &planet.id))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(b.1)))
+        .map(|(_, id)| id.clone())
 }
 
 impl CameraRig {
@@ -386,7 +443,7 @@ pub fn controls(
         .sum::<f32>();
     let (pointer, keyboard) = contexts
         .ctx_mut()
-        .map(|ctx| (ctx.is_pointer_over_area(), ctx.wants_keyboard_input()))
+        .map(|ctx| (crate::ui::pointer_captured(ctx), ctx.wants_keyboard_input()))
         .unwrap_or_default();
     // Flights are short; camera input resumes when they land. Constellations
     // orbit their auto-framed centre, but cannot zoom or translate.
@@ -548,7 +605,7 @@ pub fn place_camera(
     }
     if nav.following
         && let Some(followed) = nav.system(&universe.0).and_then(|system| {
-            let planet = system.planets.get(nav.selected_planet()?)?;
+            let planet = system.planets.get(nav.selected_planet(&universe.0)?)?;
             Some(DVec3::from_array(position(
                 &planet.orbit,
                 system.mass(planet.page()),
@@ -582,10 +639,10 @@ pub fn place_camera(
             flight.shift(offset);
         }
     }
-    let retarget = nav.following && nav.selected_planet() != rig.selected;
+    let retarget = nav.following && nav.selected_planet(&universe.0) != rig.selected;
     let star_jump = rig.shown.is_some() && frame != rig.frame_ly;
     rig.frame_ly = frame;
-    rig.selected = nav.selected_planet();
+    rig.selected = nav.selected_planet(&universe.0);
     // Page jumps, list jumps, task focus and preset changes all use this flight.
     if fly || retarget {
         rig.flight = Flight::new(shown, desired);
@@ -1171,7 +1228,7 @@ pub fn draw(
             .star(pose.page)
             .map_or(1.0, |s| photometry.visual_luminosity(s));
         let followed = nav
-            .selected_planet()
+            .selected_planet(&universe.0)
             .filter(|_| nav.following)
             .and_then(|i| system.planets.get(i))
             .filter(|p| p.page() == pose.page)
@@ -1241,11 +1298,12 @@ mod tests {
         };
         let mut app = App::new();
         app.insert_resource(field)
+            .init_resource::<Clock>()
             .insert_resource(Universe(space_simulation::demo_galaxy()))
             .insert_resource(rig)
             .insert_resource(pose)
             .insert_resource(nav)
-            .add_systems(Update, locate);
+            .add_systems(Update, (locate, locate_planet).chain());
         app.update();
         let nav = app.world().resource::<Navigation>();
         assert!(nav.arrived);
@@ -1315,6 +1373,7 @@ mod tests {
         };
         let mut app = App::new();
         app.insert_resource(crate::stream::Starfield::default())
+            .init_resource::<Clock>()
             .insert_resource(Universe(galaxy))
             .insert_resource(rig)
             .insert_resource(CameraPose {
@@ -1324,8 +1383,68 @@ mod tests {
                 ..default()
             })
             .insert_resource(nav)
-            .add_systems(Update, locate);
+            .add_systems(Update, (locate, locate_planet).chain());
         app
+    }
+
+    #[test]
+    fn planet_neighbourhood_has_hysteresis_and_uses_physical_orbits() {
+        let galaxy = space_simulation::demo_galaxy();
+        let system = &galaxy.systems[0];
+        let planet = system.on_page(system.first_page()).next().unwrap();
+        let page = planet.page();
+        for seconds in [0.0, 1e7] {
+            let centre = DVec3::from_array(position(&planet.orbit, system.mass(page), seconds));
+            let radius = planet.radius_km * 1000.0;
+            let check = |radii, previous| {
+                nearby_planet(
+                    system,
+                    page,
+                    centre + DVec3::Y * (radius * radii),
+                    seconds,
+                    previous,
+                    PresentationMode::Simulation,
+                )
+            };
+            assert_eq!(check(19.0, None), Some(planet.id.clone()));
+            assert_eq!(check(25.0, None), None);
+            assert_eq!(check(25.0, Some(&planet.id)), Some(planet.id.clone()));
+            assert_eq!(check(31.0, Some(&planet.id)), None);
+            assert_eq!(
+                nearby_planet(system, page, centre, seconds, None, PresentationMode::Table),
+                None
+            );
+            assert_eq!(
+                nearby_planet(
+                    system,
+                    page,
+                    centre,
+                    seconds,
+                    None,
+                    PresentationMode::Constellation
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn drifting_near_a_planet_sets_location_without_selection_or_following() {
+        let galaxy = space_simulation::demo_galaxy();
+        let system = &galaxy.systems[0];
+        let page = system.first_page();
+        let planet = system.on_page(page).next().unwrap();
+        let id = planet.id.clone();
+        let local = DVec3::from_array(position(&planet.orbit, system.mass(page), 0.0))
+            + DVec3::Y * (planet.radius_km * 1000.0 * 12.0);
+        let mut app = visited_list(
+            page_frame(system, page) * local,
+            PresentationMode::Simulation,
+        );
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert_eq!(nav.location_planet, Some(id));
+        assert!(nav.selection.is_none() && !nav.following && !nav.fly);
     }
 
     #[test]
@@ -1340,11 +1459,17 @@ mod tests {
         );
 
         let far = DVec3::X * (LEAVE_FACTOR * WIDE_METRES * 50.0);
+        let selection =
+            crate::Selection::planet(&app.world().resource::<Universe>().0.systems[0], 0);
+        app.world_mut()
+            .resource_mut::<Navigation>()
+            .select(Some(selection.clone()));
         app.world_mut().resource_mut::<CameraPose>().eye = far;
         app.world_mut().resource_mut::<Navigation>().eye = Some(far);
         app.update();
         let nav = app.world().resource::<Navigation>();
         assert!(!nav.arrived && nav.visit.is_none() && nav.list().is_none());
+        assert_eq!(nav.selection, Some(selection));
     }
 
     #[test]

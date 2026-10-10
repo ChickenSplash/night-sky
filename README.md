@@ -66,16 +66,19 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Translate camera and target | W/A/S/D |
 | Move up / down | R / F |
 | Move faster | Left Shift |
-| Pause/resume orbital motion | Space |
+| Pause/resume orbital motion | Space, or click the bottom-centre time speed |
+| Adjust simulation speed continuously | Drag the time speed left/right (real time to 100 years/s) |
+| Adjust camera movement speed | Drag the bottom-left set speed left/right, or scroll |
 | Clear selection without moving the camera | Escape when not tracking |
 | Return from tracking a planet to its system overview | Escape while tracking |
-| Go up a level (star, list, then the whole galaxy) | Escape with nothing selected, or click the breadcrumb at the top left |
+| Go up a level (star, list, then the whole galaxy) | Escape with nothing selected |
+| Inspect galaxy, constellation, star or planet | Click an item in either breadcrumb trail, without moving the camera |
 | Inspect task | Click planet/marker or task index |
-| Track planet at close range | **Follow this planet** |
+| Track planet at close range | Click the selected planet again, or terminal command `follow` |
 | Return to system overview | **Simulation** or **Frame orbital system** |
 | Align ten task-planets in a top-down table | **Task table** |
 | Frame the list's systems | **Constellation** |
-| Browse system pages | **‹ / ›** in the inspector |
+| Browse system pages | **‹ / ›** in the sidebar's scene controls |
 | Select a star, then visit it | Click it, then click again or press Enter |
 | Select the star at the view centre | C |
 | Jump to a list | Click it in the sidebar |
@@ -256,6 +259,7 @@ downloads too, set `CARGO_HOME="$PWD/.cargo-home"` before running Cargo.
 ./scripts/build-web.sh
 cargo clippy --locked -p space-client --target wasm32-unknown-unknown -- -D warnings
 node scripts/test-browser.mjs
+SPACE_URL=http://127.0.0.1:4321 node scripts/test-breadcrumbs.mjs
 node scripts/test-star-worker.mjs
 ```
 
@@ -281,13 +285,28 @@ table pagination and constellation presets without changing backend data. It
 clicks the egui panels and checks each result through the `window.space` test
 hook.
 
+The focused breadcrumb test covers remote planet selection, clicking the actual
+galaxy crumb, switching parent inspection tabs without travel, and a narrow
+viewport. It saves `data/logs/breadcrumbs-*.png`. It uses the same browser setup;
+set `SPACE_URL` to a server serving the current web build (default port 4322).
+
 ## User interface
 
 The browser is the main client; the native window is a developer fallback that
 adds the smoke test and bug reports. Both use the same egui panels, drawn in the
 same frame as the 3D view. The left sidebar holds collapsible sections: lists,
-the task index (filter, sort and group by status), the visited system and the
-selected planet. Time controls run along the bottom. **⚙ Settings** at the top
+the task index (filter, sort and group by status), and visited-system controls.
+Two floating trails at the top left distinguish **Location** from **Selected**.
+Location follows physical proximity, including a planet within 20 physical
+radii (retained until 30 radii to prevent flicker). Selection is independent
+of location and uses stable object IDs, ready for remote planet search results.
+Click either trail to inspect that level in the shared floating text readout
+underneath, without changing selection, tracking or camera position. Selecting
+an object automatically activates its selection tab. The information expands
+down the left side as needed, without a scrollbar or a fixed-height container.
+Galaxy figures describe
+the simulation model, and stars/planets are procedurally generated.
+Time controls run along the bottom. **⚙ Settings** at the top
 of the sidebar opens display options, field of view, realistic lighting and the
 controls.
 

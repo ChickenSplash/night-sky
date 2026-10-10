@@ -31,22 +31,53 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   egui interface (`ui.rs`), drawn in the same frame as the scene: a left
   sidebar of collapsible sections, time controls, a plain egui Settings window
   (opened from the sidebar's ⚙ Settings), a breadcrumb and canvas captions,
-  labels and clicks.
+  labels and clicks. Body facts are in the floating breadcrumb inspector,
+  not the sidebar; the sidebar retains lists, task index and scene controls.
 - The breadcrumb (`breadcrumb.rs`) is free-floating text at the top left of
   the 3D view, under any window, with no container. A soft dark halo (two
   rings of translucent black copies, `HALO_EDGE` at 1 px and `HALO_FADE` at
   2 px) keeps it readable over star discs and the galaxy band; it vanishes
-  on dark space. Reuse `halo_text` for other text drawn over the scene. `breadcrumb::trail` builds it each frame from `Navigation`:
-  `Milky Way`, the open list, the star the camera is at (`location`; a list's
-  stars are `System n` as the page controls number them, others their
-  catalogue name), then a selected planet of that star (its designation). A
-  star selected elsewhere is not part of it. Each `Crumb` carries the
-  `UiCommand` for its level (galaxy: `galaxy_reference face_on`; list:
-  `jump`; star: `show_page`; planet: `follow`). `UiCommand::Up` (Esc, or
-  typed `up`) reframes the current system when tracking a planet; otherwise it
-  clears the selection first, else runs the crumb above the current one.
-  Add new levels (moons, surface sites) in `trail` only; its
-  colours and sizes are constants in the same file.
+  on dark space. Reuse `halo_text`/`halo_wrapped_text` for scene text.
+  `breadcrumb::trail` is physical location: `Milky Way`, the current star's
+  list if any, the star, then `Navigation::location_planet`. An open list or
+  destination is not a location until arrival. `selection_trail` independently
+  shows the selected object's hierarchy, even for a remote planet. List stars
+  are `System n`, other stars use their catalogue names. Crumbs carry stable
+  `objects::ObjectRef`s, never camera commands. Clicking either trail sends
+  `InspectObject` and activates a highlighted tab in the shared, borderless
+  `inspector.rs` readout below both trails. Selection automatically activates
+  its leaf. The inspector uses its natural content height, with no scroll area,
+  scrollbar or bottom-HUD height reservation; long information uses the left
+  side of the view. Its top stays anchored at the shared HUD inset.
+  Inspection changes neither selection nor camera/tracking. Missing
+  tabs fall back to the selected leaf, or current location with no selection.
+  Inspector facts are cached until target/snapshot changes; generated remote
+  systems are never rebuilt per frame. New object kinds should extend
+  `ObjectRef`, hierarchy builders and inspector resolution (moons do not yet
+  exist). `UiCommand::Up` is separate keyboard navigation: reframe tracking,
+  else clear selection, else move up physically; no crumb contains travel code.
+- Time controls (`ui.rs`) are two free-floating, centred lines at the bottom
+  of the 3D viewport, using the breadcrumb font, colours and `halo_text`.
+  Elapsed simulation time sits above the actual rate (two decimal places,
+  seconds/minutes/hours/days/years per real second). Click the rate to toggle
+  pause; drag it horizontally for continuous logarithmic adjustment from real
+  time to 100 years/s (400 logical pixels covers the full range). Dragging
+  preserves pause state, with `· paused` beside the retained rate. There is no
+  bottom panel, preset ladder or separate speed editor.
+  The bottom-left movement readout (`ui::speed_readout`) uses the same halo,
+  font and two-line layout: measured velocity above draggable set speed.
+  Horizontal dragging adjusts speed logarithmically from `scene::MIN_SPEED`
+  to `scene::MAX_SPEED` (1 m/s to 10,000 ly/s), through `SetMoveSpeed`; it
+  captures input like the time rate, and a single click does nothing.
+  All three text HUDs share
+  `breadcrumb::HUD_PADDING` (20 logical pixels from the 3D viewport edges);
+  movement and time share `HUD_LINE_GAP` and their bottom line alignment.
+  `ui::pointer_captured` protects the background-layer breadcrumb/inspector and draggable text and captures
+  its full drag, including outside its bounds; scene camera input and canvas
+  picking both use it so time interactions never also move/select the scene.
+  While a mouse button is held, the HUD hit test uses its press origin, not
+  hover position, so camera drags that begin outside the rate text continue
+  uninterrupted when crossing it.
 - Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
   movable, resizable window toggled by ` or F3 on both clients (the public
   site included), with tabs `log` (an in-memory console of the last 2,000
@@ -127,7 +158,10 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - Changing task status or deadline must not change orbital elements.
 - Planets and tasks are separate: a `Planet` is a generated body with a stable
   ID (its star's ID and orbit index) and an optional `Task`. Select and follow
-  planets by index into `StarSystem::planets`; find tasks with
+  planets by stable body ID (`Selection::Planet(String)`); resolve a local
+  index only against the visited system with `selected_planet(galaxy)`. Remote
+  `Inspect { planet }` resolves the encoded parent star without visiting or
+  needing streamed meshes, ready for future search results. Find tasks with
   `StarSystem::tasks`/`task_planet`. Task data (status, assignees, URL) never
   lives on the body.
 - Generation is keyed by star ID. A list page's star is `star_id(list_id, page)`;
@@ -340,13 +374,18 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   system activates, independently of the selected camera range. Keep the
   visited body's physical-proximity fallback when its cell has not loaded yet.
 - `Navigation::selection` is the one clicked object: `Selection::Star` (any
-  star, by stable ID) or `Selection::Planet` (an index into the visited
-  system's planets). Selecting one replaces the other; set it with
+  star, by stable ID) or `Selection::Planet` (a stable planet ID, including
+  remote systems). Selecting one replaces the other; set it with
   `Navigation::select`, which keeps following only from planet to planet. A
   second click activates it: a star is visited, a planet followed. Esc while
   following reframes the system and clears selection; otherwise it clears
-  selection, or with nothing selected goes up the breadcrumb. Leaving a system
-  drops a planet selection but keeps a star.
+  selection, or with nothing selected goes up physically. Leaving a system
+  keeps either selection and stops tracking. Planet location uses simulated
+  f64 positions: enter within 20 physical planet radii, leave beyond 30.
+  `scene::locate_planet` runs after camera placement, using the same simulation
+  instant as the eye, including when following at high time rates.
+  Render exaggeration, selection and following never affect this threshold;
+  table and constellation layouts have no physical planet location.
   `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from

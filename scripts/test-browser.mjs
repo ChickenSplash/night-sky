@@ -67,15 +67,19 @@ try {
   await page.screenshot({ path: resolve(root, 'data/web-list.png') });
   await page.mouse.click(90, 75); // Fold the lists section, lifting the presentation buttons.
   await page.waitForTimeout(1000);
-  await page.mouse.click(148, 687); // Task table preset.
+  await page.screenshot({ path: resolve(root, 'data/web-folded-sidebar.png') });
+  await page.mouse.click(160, 687); // Task table preset, centred on its label.
+  await page.waitForFunction(() => window.space.state().presentation_mode === 'table', null, { timeout: 30_000 });
   await page.waitForTimeout(2500);
   assert.equal((await state()).presentation_mode, 'table');
   await page.screenshot({ path: resolve(root, 'data/web-table.png') });
   await page.mouse.click(168, 729); // Next system page.
+  await page.waitForFunction(() => window.space.state().page === 1, null, { timeout: 30_000 });
   await page.waitForTimeout(2500);
   assert.equal((await state()).page, 1);
   await page.screenshot({ path: resolve(root, 'data/web-table-next-page.png') });
   await page.mouse.click(249, 687); // Constellation preset.
+  await page.waitForFunction(() => window.space.state().presentation_mode === 'constellation', null, { timeout: 30_000 });
   await page.waitForTimeout(2500);
   assert.equal((await state()).presentation_mode, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-constellation.png') });

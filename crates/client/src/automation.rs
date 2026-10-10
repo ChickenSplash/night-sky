@@ -52,6 +52,13 @@ fn publish(
             .into_iter()
             .map(|crumb| crumb.label)
             .collect::<Vec<_>>(),
+        "selection_trail": crate::breadcrumb::selection_trail(&nav, &universe.0)
+            .into_iter().map(|crumb| crumb.label).collect::<Vec<_>>(),
+        "selection": nav.selection.as_ref().map(crate::Selection::object),
+        "location_planet": nav.location_planet,
+        "inspection": crate::breadcrumb::active_inspection(&nav,
+            &crate::breadcrumb::trail(&nav, &universe.0),
+            &crate::breadcrumb::selection_trail(&nav, &universe.0)),
         "page": nav.page,
         "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,

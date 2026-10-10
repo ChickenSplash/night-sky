@@ -683,12 +683,7 @@ fn state(
                 match &nav.selection {
                     None => "none".into(),
                     Some(Selection::Star(star)) => format!("star {}", star.id),
-                    Some(Selection::Planet(i)) => format!(
-                        "planet {}",
-                        system
-                            .and_then(|s| s.planets.get(*i))
-                            .map_or("?", |p| p.id.as_str())
-                    ),
+                    Some(Selection::Planet(id)) => format!("planet {id}"),
                 },
             ),
         ],

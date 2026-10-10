@@ -12,7 +12,9 @@ mod diagnostics;
 mod flight;
 mod galaxy_nav;
 mod glow;
+mod inspector;
 mod network;
+mod objects;
 mod presentation;
 mod render;
 mod scene;
@@ -52,8 +54,23 @@ pub enum Visit {
 pub enum Selection {
     /// Any star in the galaxy, by stable ID.
     Star(galaxy_nav::PickedStar),
-    /// Index into the visited system's planets.
-    Planet(usize),
+    /// Stable planet ID, even when its parent system is not visited.
+    Planet(String),
+}
+
+impl Selection {
+    pub fn planet(system: &StarSystem, index: usize) -> Self {
+        Self::Planet(system.planets[index].id.clone())
+    }
+
+    pub fn object(&self) -> objects::ObjectRef {
+        match self {
+            Self::Star(star) => objects::ObjectRef::Star {
+                id: star.id.clone(),
+            },
+            Self::Planet(id) => objects::ObjectRef::Planet { id: id.clone() },
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -71,6 +88,10 @@ pub struct Navigation {
     /// Set by clicks, C or page controls. Selecting never moves the camera;
     /// visiting a star or following a planet does.
     pub selection: Option<Selection>,
+    /// Which trail and object currently drive the floating inspector.
+    pub inspection: Option<breadcrumb::Inspection>,
+    /// Physical planet neighbourhood, unrelated to selection or following.
+    pub location_planet: Option<String>,
     pub following: bool,
     pub target: DVec3,
     /// Authoritative free-flight eye in the current page's local frame.
@@ -112,6 +133,8 @@ impl Default for Navigation {
             visit: None,
             arrived: false,
             selection: None,
+            inspection: None,
+            location_planet: None,
             following: false,
             target: DVec3::ZERO,
             eye: None,
@@ -164,9 +187,13 @@ impl Navigation {
         }
     }
 
-    pub fn selected_planet(&self) -> Option<usize> {
-        match self.selection {
-            Some(Selection::Planet(index)) => Some(index),
+    pub fn selected_planet(&self, galaxy: &Galaxy) -> Option<usize> {
+        match &self.selection {
+            Some(Selection::Planet(id)) => self
+                .system(galaxy)?
+                .planets
+                .iter()
+                .position(|planet| planet.id == *id),
             _ => None,
         }
     }
@@ -177,6 +204,13 @@ impl Navigation {
             self.following = false;
         }
         self.selection = selection;
+        self.inspection = self
+            .selection
+            .as_ref()
+            .map(|selection| breadcrumb::Inspection {
+                source: breadcrumb::TrailSource::Selection,
+                object: selection.object(),
+            });
     }
 
     /// The system the camera is physically at, on `page`. `None` in open space,
@@ -318,6 +352,7 @@ fn main() {
             benchmark::advance,
             scene::locate,
             scene::place_camera,
+            scene::locate_planet,
             scene::measure_velocity,
         )
             .chain(),
@@ -384,7 +419,7 @@ fn follow_visited_star(nav: &mut Navigation, old: &Galaxy, new: &Galaxy) {
         return;
     };
     let planet = nav
-        .selected_planet()
+        .selected_planet(old)
         .and_then(|i| system.planets.get(i))
         .map(|p| p.id.clone());
     if let Some((list, page)) = galaxy_nav::mapped(new, &star.id) {
@@ -396,12 +431,9 @@ fn follow_visited_star(nav: &mut Navigation, old: &Galaxy, new: &Galaxy) {
         nav.page = 0;
     }
     if let Some(id) = planet {
-        nav.selection = nav
-            .system(new)
-            .and_then(|system| system.planets.iter().position(|planet| planet.id == id))
-            .map(Selection::Planet);
+        nav.selection = Some(Selection::Planet(id));
     }
-    if nav.selected_planet().is_none() {
+    if nav.selected_planet(new).is_none() {
         nav.following = false;
     }
 }

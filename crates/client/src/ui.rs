@@ -7,7 +7,7 @@ use crate::{
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiContexts, egui};
 use space_shared::{Galaxy, StarSystem, Task};
-use space_simulation::{SimulationClock, period_seconds};
+use space_simulation::SimulationClock;
 use std::collections::HashSet;
 
 const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
@@ -39,6 +39,9 @@ pub struct Sidebar {
     group: bool,
     /// Folded status groups, by lower-case status.
     collapsed: HashSet<String>,
+    time_drag_start: Option<f64>,
+    speed_drag_start: Option<f64>,
+    inspector: crate::inspector::Cache,
 }
 
 impl Default for Sidebar {
@@ -51,6 +54,9 @@ impl Default for Sidebar {
             task_sort: TaskSort::Default,
             group: true,
             collapsed: HashSet::new(),
+            time_drag_start: None,
+            speed_drag_start: None,
+            inspector: crate::inspector::Cache::default(),
         }
     }
 }
@@ -128,7 +134,6 @@ pub fn draw_ui(
     let mut panels = Panels {
         galaxy: &universe.0,
         nav: &mut nav,
-        clock: &clock.0,
         sidebar: &mut sidebar,
         out: &mut out,
     };
@@ -150,6 +155,15 @@ pub fn draw_ui(
         ),
         ..default()
     });
+    time_controls(ctx, rect, &clock.0, &mut sidebar.time_drag_start, &mut out);
+    speed_readout(
+        ctx,
+        rect,
+        nav.move_speed,
+        velocity.metres_per_second.length(),
+        &mut sidebar.speed_drag_start,
+        &mut out,
+    );
     canvas_overlay(
         ctx,
         rect,
@@ -162,10 +176,15 @@ pub fn draw_ui(
         &velocity,
         &mut out,
     );
+    if universe.is_changed() {
+        sidebar.inspector.invalidate();
+    }
     crate::breadcrumb::show(
         ctx,
         rect,
-        &crate::breadcrumb::trail(&nav, &universe.0),
+        &nav,
+        &universe.0,
+        &mut sidebar.inspector,
         &mut out,
     );
     writer.write_batch(out);
@@ -175,7 +194,6 @@ pub fn draw_ui(
 struct Panels<'a> {
     galaxy: &'a Galaxy,
     nav: &'a mut Navigation,
-    clock: &'a SimulationClock,
     sidebar: &'a mut Sidebar,
     out: &'a mut Vec<UiCommand>,
 }
@@ -202,9 +220,6 @@ impl Panels<'_> {
                     .id_salt("sidebar")
                     .show(ui, |ui| self.sidebar(ui));
             });
-        egui::TopBottomPanel::bottom("time-controls")
-            .frame(egui::Frame::new().fill(PANEL).inner_margin(14))
-            .show(ctx, |ui| self.time_controls(ui));
         let mut open = self.sidebar.settings;
         egui::Window::new("Settings")
             .open(&mut open)
@@ -232,7 +247,6 @@ impl Panels<'_> {
         section("01 / LIST CONSTELLATIONS").show(ui, |ui| self.lists(ui));
         section("02 / TASK INDEX").show(ui, |ui| self.tasks(ui));
         section("03 / TELEMETRY").show(ui, |ui| self.telemetry(ui));
-        section("04 / SELECTED PLANET").show(ui, |ui| self.selection(ui));
     }
 
     fn lists(&mut self, ui: &mut egui::Ui) {
@@ -367,7 +381,7 @@ impl Panels<'_> {
             ),
         );
         let selected_list = nav.list();
-        let selected = nav.selected_planet();
+        let selected = nav.selected_planet(galaxy);
         // Searching still scans names, but egui only builds widgets for the
         // visible rows. A list can hold over a thousand tasks.
         egui::ScrollArea::vertical()
@@ -550,196 +564,10 @@ impl Panels<'_> {
             ))
             .color(MUTED),
         );
-        if let Some(star) = system.star(nav.page) {
-            ui.collapsing("Star", |ui| {
-                facts(
-                    ui,
-                    "star",
-                    [
-                        ("Type", format!("{} · {}", star.kind, star.spectral)),
-                        ("Mass", format!("{:.2} solar masses", star.mass_solar)),
-                        ("Radius", star_radius_text(star.radius_solar)),
-                        ("Temperature", format!("{:.0} K", star.temperature_k)),
-                        (
-                            "Luminosity",
-                            format!("{} solar", luminosity_text(star.luminosity_solar)),
-                        ),
-                        ("Rotation", rotation_text(star.spin.period_hours)),
-                        ("Axial tilt", tilt_text(star.spin.tilt_rad)),
-                    ],
-                );
-            });
-        }
         if ui.button("Frame orbital system").clicked() {
             self.out.push(UiCommand::FrameSystem);
         }
         star_controls(ui, galaxy, nav, self.out);
-    }
-
-    fn selection(&mut self, ui: &mut egui::Ui) {
-        let (galaxy, nav) = (self.galaxy, &*self.nav);
-        let Some(system) = nav.system(galaxy) else {
-            muted(ui, "Visit a system to inspect its planets.");
-            return;
-        };
-        if let Some(planet) = nav.selected_planet().and_then(|i| system.planets.get(i)) {
-            heading(
-                ui,
-                if planet.task.is_some() {
-                    "SELECTED TASK"
-                } else {
-                    "SELECTED PLANET"
-                },
-            );
-            ui.add_space(4.0);
-            ui.heading(planet.label());
-            if let Some(task) = &planet.task {
-                ui.colored_label(tint(task.colour), task.status.to_uppercase());
-                if task.description.is_empty() {
-                    ui.label(egui::RichText::new("No description.").color(MUTED));
-                } else {
-                    ui.label(&task.description);
-                }
-                facts(
-                    ui,
-                    "task",
-                    [
-                        (
-                            "Assigned",
-                            if task.assignees.is_empty() {
-                                "Nobody".into()
-                            } else {
-                                task.assignees.join(", ")
-                            },
-                        ),
-                        (
-                            "Due",
-                            task.due_date_ms.map_or("No due date".into(), due_text),
-                        ),
-                        ("List", system.name.clone()),
-                        ("Designation", planet.designation.clone()),
-                    ],
-                );
-            } else {
-                ui.label(egui::RichText::new(&planet.designation).color(MUTED));
-                ui.label(egui::RichText::new("No task on this planet.").color(MUTED));
-            }
-            ui.add_space(6.0);
-            heading(ui, "ORBITAL ELEMENTS");
-            let period_days = period_seconds(&planet.orbit, system.mass(planet.page())) / 86400.0;
-            facts(
-                ui,
-                "elements",
-                [
-                    ("Type", planet.class.clone()),
-                    ("Mass", mass_text(planet.mass_earth)),
-                    ("Physical radius", format!("{:.0} km", planet.radius_km)),
-                    (
-                        "Semi-major axis",
-                        format!("{:.3} AU", planet.orbit.semi_major_au),
-                    ),
-                    ("Eccentricity", format!("{:.3}", planet.orbit.eccentricity)),
-                    ("Orbital period", period_text(period_days)),
-                    (
-                        "Rotation",
-                        if planet.spin.locked {
-                            format!("Tidally locked · {}", period_text(period_days))
-                        } else {
-                            rotation_text(planet.spin.period_hours)
-                        },
-                    ),
-                    ("Axial tilt", tilt_text(planet.spin.tilt_rad)),
-                    (
-                        "Resonance",
-                        planet.resonance.map_or("None".into(), |[p, q]| {
-                            format!("{p}:{q} with inner neighbour")
-                        }),
-                    ),
-                ],
-            );
-            ui.add_space(10.0);
-            if ui.button("◎  Follow this planet").clicked() {
-                self.out.push(UiCommand::Follow);
-            }
-            if let Some(url) = planet.task.as_ref().and_then(|t| t.url.as_ref()) {
-                ui.hyperlink_to("Open task link ↗", url);
-            }
-        } else {
-            ui.add_space(16.0);
-            ui.label(egui::RichText::new("Select a planet").size(19.0));
-            ui.label(
-                egui::RichText::new(
-                    "Click a wireframe, its marker, or a task in the index to inspect it.",
-                )
-                .color(MUTED),
-            );
-            ui.add_space(16.0);
-            heading(ui, "STATUS SIGNALS");
-            for (text, colour) in [
-                ("In progress", [92, 213, 242]),
-                ("To do", [169, 154, 238]),
-                ("Complete", [100, 220, 169]),
-            ] {
-                ui.colored_label(tint(colour), text);
-            }
-        }
-    }
-
-    fn time_controls(&mut self, ui: &mut egui::Ui) {
-        let clock = self.clock;
-        let step = rate_step(clock.rate);
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(step > 0, egui::Button::new("«"))
-                .on_hover_text("Slow time down")
-                .clicked()
-            {
-                self.out.push(UiCommand::SetRate {
-                    rate: RATES[step - 1].1,
-                });
-            }
-            if ui
-                .button(if clock.paused {
-                    "▶  Resume"
-                } else {
-                    "⏸  Pause"
-                })
-                .clicked()
-            {
-                self.out.push(UiCommand::SetPaused {
-                    paused: !clock.paused,
-                });
-            }
-            if ui
-                .add_enabled(step + 1 < RATES.len(), egui::Button::new("»"))
-                .on_hover_text("Speed time up")
-                .clicked()
-            {
-                self.out.push(UiCommand::SetRate {
-                    rate: RATES[step + 1].1,
-                });
-            }
-            if ui
-                .selectable_label(clock.rate == 1.0, "Real time")
-                .clicked()
-            {
-                self.out.push(UiCommand::SetRate { rate: 1.0 });
-            }
-            ui.separator();
-            ui.label(
-                egui::RichText::new(if clock.paused {
-                    "Paused"
-                } else {
-                    RATES[step].0
-                })
-                .color(MUTED),
-            );
-            ui.label(
-                egui::RichText::new(elapsed_text(clock.seconds / 86400.0))
-                    .monospace()
-                    .color(ACCENT),
-            );
-        });
     }
 }
 
@@ -815,16 +643,6 @@ fn status_rank(task: &Task) -> u32 {
     }
 }
 
-fn facts<const N: usize>(ui: &mut egui::Ui, id: &str, rows: [(&str, String); N]) {
-    egui::Grid::new(id).num_columns(2).show(ui, |ui| {
-        for (label, value) in rows {
-            ui.label(egui::RichText::new(label).color(MUTED));
-            ui.label(value);
-            ui.end_row();
-        }
-    });
-}
-
 /// The selected star, from anywhere in the galaxy, and how to visit it.
 fn star_controls(ui: &mut egui::Ui, galaxy: &Galaxy, nav: &Navigation, out: &mut Vec<UiCommand>) {
     if let Some(star) = nav.selected_star() {
@@ -858,32 +676,139 @@ const HELP: [(&str, &str); 13] = [
 ];
 
 const YEAR: f64 = 31_557_600.0;
-/// Simulated seconds per real second, from real time up to a century a second.
-const RATES: [(&str, f64); 16] = [
-    ("Real time", 1.0),
-    ("10 s/s", 10.0),
-    ("1 min/s", 60.0),
-    ("10 min/s", 600.0),
-    ("1 hr/s", 3600.0),
-    ("6 hr/s", 21_600.0),
-    ("1 day/s", 86_400.0),
-    ("3 days/s", 259_200.0),
-    ("1 week/s", 604_800.0),
-    ("30 days/s", 2_592_000.0),
-    ("90 days/s", 7_776_000.0),
-    ("1 yr/s", YEAR),
-    ("3 yr/s", 3.0 * YEAR),
-    ("10 yr/s", 10.0 * YEAR),
-    ("30 yr/s", 30.0 * YEAR),
-    ("100 yr/s", 100.0 * YEAR),
-];
+const MAX_RATE: f64 = 100.0 * YEAR;
+/// A 400-point horizontal drag covers either HUD control's logarithmic range.
+const HUD_DRAG_SPAN: f64 = 400.0;
 
-/// The step on the rate ladder nearest to a rate, on a log scale.
-fn rate_step(rate: f64) -> usize {
-    let distance = |r: f64| (r / rate).ln().abs();
-    (0..RATES.len())
-        .min_by(|&a, &b| distance(RATES[a].1).total_cmp(&distance(RATES[b].1)))
-        .unwrap_or(0)
+/// Background-layer HUD text is deliberately not an egui window. egui's
+/// `is_pointer_over_area` excludes it, so explicitly protect its hit region
+/// and retain capture when a drag leaves that region.
+pub(crate) fn pointer_captured(ctx: &egui::Context) -> bool {
+    ctx.is_pointer_over_area()
+        || ctx.wants_pointer_input()
+        || [
+            "time-pointer-capture",
+            "speed-pointer-capture",
+            "breadcrumb-pointer-capture",
+        ]
+        .into_iter()
+        .any(|id| {
+            let hud = ctx.data(|data| data.get_temp::<(egui::Rect, bool)>(egui::Id::new(id)));
+            hud.is_some_and(|(rect, dragging)| {
+                dragging
+                    || ctx.input(|input| {
+                        // Hover only claims an idle pointer. While a button is held,
+                        // ownership comes from the press origin, not the current
+                        // position: a camera drag can pass straight over the HUD.
+                        let pos = if input.pointer.any_down() {
+                            input.pointer.press_origin()
+                        } else {
+                            input.pointer.hover_pos()
+                        };
+                        pos.is_some_and(|p| rect.contains(p))
+                    })
+            })
+        })
+}
+
+fn dragged_rate(start: f64, delta: f32) -> f64 {
+    dragged_value(start, delta, 1.0, MAX_RATE)
+}
+
+fn dragged_value(start: f64, delta: f32, min: f64, max: f64) -> f64 {
+    (start.clamp(min, max).ln() + f64::from(delta) / HUD_DRAG_SPAN * (max / min).ln())
+        .clamp(min.ln(), max.ln())
+        .exp()
+        .clamp(min, max)
+}
+
+fn rate_text(rate: f64) -> String {
+    let (unit, scale) = [
+        ("years/s", YEAR),
+        ("days/s", 86_400.0),
+        ("hours/s", 3_600.0),
+        ("minutes/s", 60.0),
+        ("seconds/s", 1.0),
+    ]
+    .into_iter()
+    .find(|(_, scale)| rate >= *scale)
+    .unwrap_or(("seconds/s", 1.0));
+    format!("{:.2} {unit}", rate / scale)
+}
+
+fn time_controls(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    clock: &SimulationClock,
+    drag_start: &mut Option<f64>,
+    out: &mut Vec<UiCommand>,
+) {
+    use crate::breadcrumb::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_text};
+
+    egui::Area::new(egui::Id::new("time-controls"))
+        .order(egui::Order::Background)
+        .movable(false)
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(rect.center_bottom() - egui::vec2(0.0, HUD_PADDING))
+        .show(ctx, |ui| {
+            ui.set_width(260.0);
+            ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
+            ui.vertical_centered(|ui| {
+                halo_text(
+                    ui,
+                    &elapsed_text(clock.seconds / 86_400.0),
+                    egui::Sense::hover(),
+                    |_| CURRENT,
+                );
+                let mut label = rate_text(clock.rate);
+                if clock.paused {
+                    label.push_str(" · paused");
+                }
+                let response = halo_text(ui, &label, egui::Sense::click_and_drag(), |response| {
+                    if response.hovered() || response.dragged() || response.has_focus() {
+                        HOVER
+                    } else {
+                        LINK
+                    }
+                })
+                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+                .on_hover_text(if clock.paused {
+                    "Click to resume · Drag left/right to adjust speed"
+                } else {
+                    "Click to pause · Drag left/right to adjust speed"
+                });
+                ctx.data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new("time-pointer-capture"),
+                        (
+                            response.rect,
+                            response.dragged() || response.is_pointer_button_down_on(),
+                        ),
+                    );
+                });
+                if response.drag_started() {
+                    *drag_start = Some(clock.rate);
+                }
+                if response.dragged()
+                    && let Some(start) = *drag_start
+                {
+                    out.push(UiCommand::SetRate {
+                        rate: dragged_rate(
+                            start,
+                            response.total_drag_delta().unwrap_or_default().x,
+                        ),
+                    });
+                }
+                if response.drag_stopped() {
+                    *drag_start = None;
+                }
+                if response.clicked() {
+                    out.push(UiCommand::SetPaused {
+                        paused: !clock.paused,
+                    });
+                }
+            });
+        });
 }
 
 fn elapsed_text(days: f64) -> String {
@@ -896,7 +821,7 @@ fn elapsed_text(days: f64) -> String {
 
 const JUPITER_MASSES: f64 = 317.83;
 
-fn mass_text(earths: f64) -> String {
+pub(crate) fn mass_text(earths: f64) -> String {
     if earths >= 0.1 * JUPITER_MASSES {
         format!("{:.2} Jupiter masses", earths / JUPITER_MASSES)
     } else if earths < 0.1 {
@@ -906,7 +831,7 @@ fn mass_text(earths: f64) -> String {
     }
 }
 
-fn period_text(days: f64) -> String {
+pub(crate) fn period_text(days: f64) -> String {
     if days >= 730.0 {
         format!("{:.1} years", days / 365.25)
     } else {
@@ -914,7 +839,7 @@ fn period_text(days: f64) -> String {
     }
 }
 
-fn rotation_text(hours: f64) -> String {
+pub(crate) fn rotation_text(hours: f64) -> String {
     if hours >= 48.0 {
         period_text(hours / 24.0)
     } else if hours >= 2.0 {
@@ -924,7 +849,7 @@ fn rotation_text(hours: f64) -> String {
     }
 }
 
-fn tilt_text(radians: f64) -> String {
+pub(crate) fn tilt_text(radians: f64) -> String {
     let degrees = radians.to_degrees();
     format!(
         "{degrees:.1}°{}",
@@ -932,7 +857,7 @@ fn tilt_text(radians: f64) -> String {
     )
 }
 
-fn star_radius_text(solar: f64) -> String {
+pub(crate) fn star_radius_text(solar: f64) -> String {
     if solar < 0.05 {
         format!("{:.0} km", solar * 695_700.0)
     } else {
@@ -940,7 +865,7 @@ fn star_radius_text(solar: f64) -> String {
     }
 }
 
-fn luminosity_text(solar: f64) -> String {
+pub(crate) fn luminosity_text(solar: f64) -> String {
     if solar < 0.01 {
         format!("{solar:.1e}")
     } else if solar < 10.0 {
@@ -982,9 +907,77 @@ fn due_short(ms: i64) -> String {
     }
 }
 
-fn due_text(ms: i64) -> String {
+pub(crate) fn due_text(ms: i64) -> String {
     let (day, month, year) = civil_date(ms);
     format!("{day} {month} {year} · {}", due_short(ms).to_lowercase())
+}
+
+/// Measured velocity above a draggable set speed, like the time controls.
+fn speed_readout(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    set_speed: f64,
+    velocity: f64,
+    drag_start: &mut Option<f64>,
+    out: &mut Vec<UiCommand>,
+) {
+    use crate::breadcrumb::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_text};
+
+    egui::Area::new(egui::Id::new("speed-readout"))
+        .order(egui::Order::Background)
+        .movable(false)
+        .pivot(egui::Align2::LEFT_BOTTOM)
+        .fixed_pos(rect.left_bottom() + egui::vec2(HUD_PADDING, -HUD_PADDING))
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
+            halo_text(
+                ui,
+                &format!("Velocity {}", speed_label(velocity)),
+                egui::Sense::hover(),
+                |_| CURRENT,
+            );
+            let response = halo_text(
+                ui,
+                &format!("Set speed {}", speed_label(set_speed)),
+                egui::Sense::click_and_drag(),
+                |response| {
+                    if response.hovered() || response.dragged() || response.has_focus() {
+                        HOVER
+                    } else {
+                        LINK
+                    }
+                },
+            )
+            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+            .on_hover_text("Drag left/right to adjust movement speed");
+            ctx.data_mut(|data| {
+                data.insert_temp(
+                    egui::Id::new("speed-pointer-capture"),
+                    (
+                        response.rect,
+                        response.dragged() || response.is_pointer_button_down_on(),
+                    ),
+                );
+            });
+            if response.drag_started() {
+                *drag_start = Some(set_speed);
+            }
+            if response.dragged()
+                && let Some(start) = *drag_start
+            {
+                out.push(UiCommand::SetMoveSpeed {
+                    speed: dragged_value(
+                        start,
+                        response.total_drag_delta().unwrap_or_default().x,
+                        crate::scene::MIN_SPEED,
+                        crate::scene::MAX_SPEED,
+                    ),
+                });
+            }
+            if response.drag_stopped() {
+                *drag_start = None;
+            }
+        });
 }
 
 /// Captions, labels, hover rings and clicks on the 3D view itself.
@@ -1018,17 +1011,6 @@ fn canvas_overlay(
             egui::Id::new("annotations"),
         ))
         .with_clip_rect(rect);
-    painter.text(
-        rect.left_bottom() + egui::vec2(24.0, -20.0),
-        egui::Align2::LEFT_BOTTOM,
-        format!(
-            "SET SPEED {}   /   VELOCITY {}",
-            speed_label(nav.move_speed).to_uppercase(),
-            speed_label(velocity.metres_per_second.length()).to_uppercase(),
-        ),
-        egui::FontId::monospace(11.0),
-        MUTED,
-    );
 
     if nav.velocity_marker {
         draw_velocity_marker(
@@ -1043,7 +1025,7 @@ fn canvas_overlay(
     // Windows such as Settings float over the view; clicks there are theirs.
     let pointer = ctx
         .input(|i| i.pointer.interact_pos())
-        .filter(|_| !ctx.is_pointer_over_area());
+        .filter(|_| !pointer_captured(ctx));
     let mut click = pointer.is_some() && ctx.input(|i| i.pointer.primary_clicked());
     if let Some(star) = nav.selected_star() {
         let camera =
@@ -1081,7 +1063,7 @@ fn canvas_overlay(
         let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
         let radius = (marker.radius / scale).max(7.0);
         let hovered = pointer.is_some_and(|p| rect.contains(p) && p.distance(point) < radius + 8.0);
-        let selected = nav.selected_planet() == Some(marker.planet);
+        let selected = nav.selected_planet(galaxy) == Some(marker.planet);
         if selected || hovered {
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }
@@ -1237,8 +1219,434 @@ mod tests {
         // 2026-10-08T00:00:00Z
         assert_eq!(civil_date(1_791_417_600_000), (8, "Oct", 2026));
         assert_eq!(civil_date(0), (1, "Jan", 1970));
-        assert_eq!(rate_step(1.0), 0);
-        assert_eq!(rate_step(86_400.0), 6);
-        assert_eq!(rate_step(1e12), RATES.len() - 1);
+        assert_eq!(rate_text(1.0), "1.00 seconds/s");
+        assert_eq!(rate_text(60.0), "1.00 minutes/s");
+        assert_eq!(rate_text(3600.0), "1.00 hours/s");
+        assert_eq!(rate_text(89.9 * 86_400.0), "89.90 days/s");
+        assert_eq!(rate_text(MAX_RATE), "100.00 years/s");
+    }
+
+    #[test]
+    fn time_drag_is_continuous_logarithmic_and_clamped() {
+        assert!((dragged_rate(1.0, 200.0) - MAX_RATE.sqrt()).abs() < 1e-6);
+        assert!((dragged_rate(86_400.0, 0.0) - 86_400.0).abs() < 1e-6);
+        assert!(dragged_rate(86_400.0, 0.1) > 86_400.0);
+        assert!(dragged_rate(86_400.0, -0.1) < 86_400.0);
+        assert_eq!(dragged_rate(1.0, -1000.0), 1.0);
+        assert!((dragged_rate(MAX_RATE, 1000.0) - MAX_RATE).abs() < 1e-5);
+    }
+
+    #[test]
+    fn time_control_click_pauses_but_a_multi_frame_drag_does_not() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut clock = SimulationClock {
+            paused: true,
+            ..Default::default()
+        };
+        let mut drag = None;
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut commands = Vec::new();
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| time_controls(ctx, rect, &clock, &mut drag, &mut commands),
+            );
+            if !commands.is_empty() {
+                assert!(
+                    pointer_captured(&ctx),
+                    "time interactions must not reach the scene"
+                );
+            }
+            for command in &commands {
+                match command {
+                    UiCommand::SetRate { rate } => clock.rate = *rate,
+                    UiCommand::SetPaused { paused } => clock.paused = *paused,
+                    _ => panic!("unexpected time command"),
+                }
+            }
+            (output, commands)
+        };
+        // Areas settle their position after their first sizing frame.
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text.contains("days/s") => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .expect("speed text is painted");
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(pos), button(pos, true)]);
+        let (_, commands) = frame(vec![button(pos, false)]);
+        assert!(matches!(
+            commands.as_slice(),
+            [UiCommand::SetPaused { paused: false }]
+        ));
+
+        frame(vec![button(pos, true)]);
+        let first = pos + egui::vec2(40.0, 0.0);
+        let (_, commands) = frame(vec![egui::Event::PointerMoved(first)]);
+        let [UiCommand::SetRate { rate: first_rate }] = commands.as_slice() else {
+            panic!("drag must only change the rate");
+        };
+        let first_rate = *first_rate;
+        let end = pos + egui::vec2(80.0, 0.0);
+        let (_, commands) = frame(vec![egui::Event::PointerMoved(end)]);
+        let [UiCommand::SetRate { rate: end_rate }] = commands.as_slice() else {
+            panic!("continued drag must only change the rate");
+        };
+        assert!(*end_rate > first_rate);
+        assert!((*end_rate - dragged_rate(86_400.0, 80.0)).abs() < 1e-5);
+        let (_, commands) = frame(vec![button(end, false)]);
+        assert!(
+            commands.is_empty(),
+            "releasing a drag must not toggle pause"
+        );
+    }
+
+    #[test]
+    fn hud_capture_survives_leaving_text_but_does_not_cover_empty_sky() {
+        let ctx = egui::Context::default();
+        let hit = egui::Rect::from_min_size(egui::pos2(350.0, 550.0), egui::vec2(100.0, 20.0));
+        let frame = |pos, dragging| {
+            ctx.data_mut(|data| {
+                data.insert_temp(egui::Id::new("time-pointer-capture"), (hit, dragging));
+            });
+            let mut captured = false;
+            let _ = ctx.run(
+                egui::RawInput {
+                    events: vec![egui::Event::PointerMoved(pos)],
+                    ..Default::default()
+                },
+                |ctx| captured = pointer_captured(ctx),
+            );
+            captured
+        };
+        assert!(frame(hit.center(), false));
+        assert!(frame(egui::pos2(700.0, 300.0), true));
+        assert!(!frame(egui::pos2(700.0, 300.0), false));
+    }
+
+    #[test]
+    fn set_speed_drag_is_continuous_and_captures_input_without_click_actions() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut speed = 1000.0;
+        let mut drag = None;
+        let mut frame = |events| {
+            let mut commands = Vec::new();
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| speed_readout(ctx, rect, speed, 0.0, &mut drag, &mut commands),
+            );
+            for command in &commands {
+                let UiCommand::SetMoveSpeed { speed: value } = command else {
+                    panic!("movement speed must not affect the clock or selection");
+                };
+                assert!(pointer_captured(&ctx));
+                speed = *value;
+            }
+            let (hit, _) = ctx
+                .data(|data| {
+                    data.get_temp::<(egui::Rect, bool)>(egui::Id::new("speed-pointer-capture"))
+                })
+                .unwrap();
+            (commands, hit)
+        };
+        frame(vec![]);
+        let (_, hit) = frame(vec![]);
+        let start = hit.center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
+        assert!(frame(vec![button(start, false)]).0.is_empty());
+        frame(vec![button(start, true)]);
+        let (commands, _) = frame(vec![egui::Event::PointerMoved(
+            start + egui::vec2(40.0, 0.0),
+        )]);
+        let [UiCommand::SetMoveSpeed { speed: first }] = commands.as_slice() else {
+            panic!("expected speed adjustment");
+        };
+        let first = *first;
+        let end = start + egui::vec2(80.0, 0.0);
+        let (commands, _) = frame(vec![egui::Event::PointerMoved(end)]);
+        let [UiCommand::SetMoveSpeed { speed: last }] = commands.as_slice() else {
+            panic!("expected continued adjustment");
+        };
+        assert!(*last > first);
+        assert!(
+            (*last
+                - dragged_value(
+                    1000.0,
+                    80.0,
+                    crate::scene::MIN_SPEED,
+                    crate::scene::MAX_SPEED
+                ))
+            .abs()
+                < 1e-5
+        );
+        assert!(frame(vec![button(end, false)]).0.is_empty());
+    }
+
+    #[test]
+    fn text_huds_share_edge_padding_and_bottom_baseline() {
+        use crate::breadcrumb::{CURRENT, HUD_LINE_GAP, HUD_PADDING, LINK};
+        for size in [egui::vec2(1000.0, 700.0), egui::vec2(1600.0, 1000.0)] {
+            let ctx = egui::Context::default();
+            let rect = egui::Rect::from_min_max(egui::pos2(320.0, 0.0), size.to_pos2());
+            let clock = SimulationClock::default();
+            let mut drag = None;
+            let mut speed_drag = None;
+            let mut commands = Vec::new();
+            let nav = Navigation::default();
+            let galaxy = space_simulation::demo_galaxy();
+            let mut inspector = crate::inspector::Cache::default();
+            let mut output = egui::FullOutput::default();
+            for frame in 0..3 {
+                output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        time: Some(f64::from(frame)),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        crate::breadcrumb::show(
+                            ctx,
+                            rect,
+                            &nav,
+                            &galaxy,
+                            &mut inspector,
+                            &mut commands,
+                        );
+                        time_controls(ctx, rect, &clock, &mut drag, &mut commands);
+                        speed_readout(ctx, rect, 1000.0, 0.0, &mut speed_drag, &mut commands);
+                    },
+                );
+            }
+            let bounds = |prefix: &str, colour| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text)
+                            if text.galley.job.text.starts_with(prefix)
+                                && text.fallback_color == colour =>
+                        {
+                            Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("HUD text {prefix} painted with shared colour"))
+            };
+            let crumb = bounds("Location", LINK);
+            let speed = bounds("Set speed", LINK);
+            let velocity = bounds("Velocity", CURRENT);
+            let time_rate = bounds("1.00 days/s", LINK);
+            assert!((crumb.left() - rect.left() - HUD_PADDING).abs() < 1.0);
+            assert!(
+                (crumb.top() - rect.top() - HUD_PADDING).abs() < 1.0,
+                "crumb: {crumb:?}"
+            );
+            assert!((speed.left() - crumb.left()).abs() < 1.0);
+            assert!((velocity.left() - crumb.left()).abs() < 1.0);
+            assert!((rect.bottom() - speed.bottom() - HUD_PADDING).abs() < 1.0);
+            assert!((speed.bottom() - time_rate.bottom()).abs() < 1.0);
+            assert!((speed.top() - velocity.bottom() - HUD_LINE_GAP).abs() < 1.0);
+            assert!((time_rate.center().x - rect.center().x).abs() < 1.0);
+        }
+    }
+
+    #[test]
+    fn floating_inspector_grows_after_tab_changes_and_wraps_in_a_narrow_viewport() {
+        let ctx = egui::Context::default();
+        let galaxy = space_simulation::demo_galaxy();
+        let mut nav = Navigation::default();
+        let mut inspector = crate::inspector::Cache::default();
+        let mut commands = Vec::new();
+        let mut output = egui::FullOutput::default();
+        for (stage, size) in [
+            egui::vec2(1600.0, 1000.0),
+            egui::vec2(1600.0, 1000.0),
+            egui::vec2(760.0, 600.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if stage == 1 {
+                nav.select(Some(crate::Selection::planet(&galaxy.systems[1], 0)));
+            }
+            let rect = egui::Rect::from_min_max(egui::pos2(320.0, 0.0), size.to_pos2());
+            for _ in 0..4 {
+                output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        crate::breadcrumb::show(
+                            ctx,
+                            rect,
+                            &nav,
+                            &galaxy,
+                            &mut inspector,
+                            &mut commands,
+                        );
+                    },
+                );
+            }
+            if stage == 1 {
+                for prefix in ["Orbital period", "Procedurally generated planet"] {
+                    let shape = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::epaint::Shape::Text(text)
+                                if text.galley.job.text.starts_with(prefix)
+                                    && text.fallback_color
+                                        != egui::Color32::from_black_alpha(130)
+                                    && text.fallback_color
+                                        != egui::Color32::from_black_alpha(45) =>
+                            {
+                                Some((
+                                    shape.clip_rect,
+                                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                                ))
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| panic!("inspector must paint {prefix}"));
+                    assert!(
+                        shape.0.contains_rect(shape.1),
+                        "{prefix} is clipped: {shape:?}"
+                    );
+                }
+            }
+            if stage == 2 {
+                let area = ctx
+                    .memory(|memory| memory.area_rect(egui::Id::new("breadcrumb")))
+                    .unwrap();
+                assert!(
+                    area.right() <= rect.right() - crate::breadcrumb::HUD_PADDING + 1.0,
+                    "inspector exceeds viewport: {area:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn floating_inspector_expands_instead_of_scrolling() {
+        let ctx = egui::Context::default();
+        let galaxy = space_simulation::demo_galaxy();
+        let mut nav = Navigation::default();
+        nav.select(Some(crate::Selection::planet(&galaxy.systems[1], 0)));
+        let mut inspector = crate::inspector::Cache::default();
+        let mut commands = Vec::new();
+        let viewport = egui::Rect::from_min_max(egui::pos2(320.0, 0.0), egui::pos2(1000.0, 200.0));
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 1000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    crate::breadcrumb::show(
+                        ctx,
+                        viewport,
+                        &nav,
+                        &galaxy,
+                        &mut inspector,
+                        &mut commands,
+                    )
+                },
+            );
+        }
+        let area = ctx
+            .memory(|memory| memory.area_rect(egui::Id::new("breadcrumb")))
+            .unwrap();
+        assert!(
+            area.height() > viewport.height(),
+            "information must use its natural height: {area:?}"
+        );
+        assert!((area.top() - crate::breadcrumb::HUD_PADDING).abs() < 1.0);
+        assert!(
+            output.shapes.iter().any(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) =>
+                    text.galley.job.text == "Procedurally generated planet"
+                        && shape
+                            .clip_rect
+                            .contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())),
+                _ => false,
+            }),
+            "final information row must remain visible, not inside a short scroll viewport"
+        );
+    }
+
+    #[test]
+    fn camera_drag_crossing_time_text_stays_with_the_scene() {
+        let ctx = egui::Context::default();
+        let hit = egui::Rect::from_min_size(egui::pos2(350.0, 550.0), egui::vec2(100.0, 20.0));
+        ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::new("time-pointer-capture"), (hit, false));
+        });
+        let frame = |events| {
+            let mut captured = false;
+            let _ = ctx.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| captured = pointer_captured(ctx),
+            );
+            captured
+        };
+        let start = egui::pos2(475.0, 560.0);
+        assert!(!frame(vec![
+            egui::Event::PointerMoved(start),
+            egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]));
+        assert!(!frame(vec![egui::Event::PointerMoved(hit.center())]));
+        assert!(!frame(vec![egui::Event::PointerMoved(egui::pos2(
+            325.0, 560.0
+        ))]));
+        // Once released, hovering the text captures normally again.
+        assert!(frame(vec![
+            egui::Event::PointerMoved(hit.center()),
+            egui::Event::PointerButton {
+                pos: hit.center(),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]));
     }
 }

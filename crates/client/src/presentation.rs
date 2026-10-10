@@ -84,7 +84,7 @@ impl Navigation {
     pub fn focus_selected(&mut self, lists: &Galaxy) {
         let Some((page, radius_km)) = self
             .system(lists)
-            .and_then(|s| s.planets.get(self.selected_planet()?))
+            .and_then(|s| s.planets.get(self.selected_planet(lists)?))
             .map(|planet| (planet.page(), planet.radius_km))
         else {
             return;
@@ -129,7 +129,7 @@ impl Navigation {
         } else {
             presentation_mode
         };
-        self.selection = Some(Selection::Planet(task));
+        self.select(Some(Selection::planet(&lists.systems[list], task)));
     }
 
     pub fn preset(&mut self, presentation_mode: PresentationMode, lists: &Galaxy) {
@@ -394,7 +394,7 @@ mod tests {
         let page = galaxy.systems[0].planets[42].page;
         assert!(page > 0);
         assert_eq!(nav.page, page);
-        assert_eq!(nav.selected_planet(), Some(42));
+        assert_eq!(nav.selected_planet(&galaxy), Some(42));
         assert!(nav.presentation_mode == PresentationMode::Table);
         nav.fit_preset(&galaxy);
         assert!(nav.distance.is_finite());
@@ -409,13 +409,13 @@ mod tests {
         let mut nav = Navigation::default();
         nav.select_list(0, &galaxy);
         assert!(nav.selected_star().is_some());
-        nav.select(Some(Selection::Planet(0)));
+        nav.select(Some(Selection::planet(&galaxy.systems[0], 0)));
         assert_eq!(nav.selected_star(), None);
         nav.following = true;
-        nav.select(Some(Selection::Planet(1)));
+        nav.select(Some(Selection::planet(&galaxy.systems[0], 1)));
         assert!(nav.following);
         nav.select(crate::galaxy_nav::page_pick(&galaxy.systems[0], 0).map(Selection::Star));
-        assert_eq!(nav.selected_planet(), None);
+        assert_eq!(nav.selected_planet(&galaxy), None);
         assert!(!nav.following);
     }
 }

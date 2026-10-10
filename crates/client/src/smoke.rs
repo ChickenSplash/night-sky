@@ -79,7 +79,12 @@ pub fn exercise(
             capture(&mut commands, "system");
         }
         1 => {
-            nav.selection = Some(crate::Selection::Planet(0));
+            if let Some(selection) = nav
+                .system(&universe.0)
+                .map(|system| crate::Selection::planet(system, 0))
+            {
+                nav.select(Some(selection));
+            }
             nav.focus_selected(&universe.0);
         }
         2 => capture(&mut commands, "planet"),
@@ -146,7 +151,12 @@ pub fn exercise(
             nav.physical = false;
             nav.wireframe = true;
             nav.exaggerate = true;
-            nav.selection = Some(crate::Selection::Planet(0));
+            if let Some(selection) = nav
+                .system(&universe.0)
+                .map(|system| crate::Selection::planet(system, 0))
+            {
+                nav.select(Some(selection));
+            }
             nav.focus_selected(&universe.0);
         }
         25 => capture(&mut commands, "realistic-planet"),

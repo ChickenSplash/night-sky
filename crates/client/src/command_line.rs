@@ -115,7 +115,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 15] = [
+pub const USAGE: [Usage; 17] = [
     Usage {
         name: "pick_centre",
         fields: &[],
@@ -139,7 +139,12 @@ pub const USAGE: [Usage; 15] = [
     Usage {
         name: "inspect",
         fields: &["planet"],
-        about: "Select a planet in the visited system, by planet ID",
+        about: "Select any planet by stable ID without travelling",
+    },
+    Usage {
+        name: "inspect_object",
+        fields: &["inspection"],
+        about: "Inspect a location or selection crumb (JSON inspection object)",
     },
     Usage {
         name: "show_page",
@@ -175,6 +180,11 @@ pub const USAGE: [Usage; 15] = [
         name: "set_rate",
         fields: &["rate"],
         about: "Simulated seconds per real second",
+    },
+    Usage {
+        name: "set_move_speed",
+        fields: &["speed"],
+        about: "Camera travel speed in metres per second (1 m/s to 10,000 ly/s)",
     },
     Usage {
         name: "set_display",
@@ -323,12 +333,16 @@ mod tests {
     #[test]
     fn every_usage_parses() {
         for usage in &USAGE {
+            if usage.name == "inspect_object" {
+                parse(r#"{"type":"inspect_object","inspection":{"source":"location","object":{"kind":"galaxy"}}}"#).expect("nested inspection uses the documented JSON command route");
+                continue;
+            }
             let args: Vec<_> = usage
                 .fields
                 .iter()
                 .map(|field| match *field {
                     "page" => "1",
-                    "rate" | "degrees" => "60",
+                    "rate" | "degrees" | "speed" => "60",
                     "paused" | "on" => "true",
                     "option" => "orbits",
                     "presentation_mode" => "table",
