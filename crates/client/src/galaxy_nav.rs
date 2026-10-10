@@ -27,17 +27,6 @@ fn relative_ly(position: [f64; 3]) -> DVec3 {
         * (PC_METRES / LY_METRES)
 }
 
-/// Select the closest star to the middle of the camera view. Only loaded
-/// points are eligible, and selection never depends on their upload order.
-pub fn pick_centre(
-    field: &Starfield,
-    rig: &CameraRig,
-    pose: &CameraPose,
-    rotation: Quat,
-) -> Option<PickedStar> {
-    pick_ray(field, rig, pose, (rotation * -Vec3::Z).as_dvec3(), 0.99985)
-}
-
 /// Pick a visible streamed star along the pointer ray. The threshold is the
 /// angular size of a ten-pixel hit target at the current viewport height.
 /// `tan_half` is the tangent of half the vertical field of view.
@@ -213,6 +202,43 @@ pub fn visit_selected(nav: &mut Navigation, lists: &Galaxy) -> bool {
     true
 }
 
+/// How a star by ID can be visited from here.
+enum Route {
+    List(usize, u32),
+    Visited,
+    Streamed(PickedStar),
+}
+
+/// Resolves a route without generating a system, so the UI can ask every frame.
+fn route(nav: &Navigation, lists: &Galaxy, field: &Starfield, id: &str) -> Option<Route> {
+    if let Some((system, page)) = crate::objects::known_system(lists, id) {
+        let list = lists.systems.iter().position(|list| list.id == system.id)?;
+        return Some(Route::List(list, page));
+    }
+    if matches!(&nav.visit, Some(Visit::Generated(system)) if system.id == id) {
+        return Some(Route::Visited);
+    }
+    picked_id(field, id).map(Route::Streamed)
+}
+
+pub fn reachable(nav: &Navigation, lists: &Galaxy, field: &Starfield, id: &str) -> bool {
+    route(nav, lists, field, id).is_some()
+}
+
+/// Fly to any star's system and frame it, as a second click on the star does.
+pub fn visit_star(nav: &mut Navigation, lists: &Galaxy, field: &Starfield, id: &str) -> bool {
+    match route(nav, lists, field, id) {
+        Some(Route::List(list, page)) => nav.arrive(Visit::List(list), page, lists),
+        Some(Route::Visited) => nav.frame(lists),
+        Some(Route::Streamed(star)) => match generated(id, star.position_ly) {
+            Some(system) => nav.arrive(Visit::Generated(Box::new(system)), 0, lists),
+            None => return false,
+        },
+        None => return false,
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,34 +254,6 @@ mod tests {
             source: String::new(),
             systems,
         }
-    }
-
-    #[test]
-    fn centre_pick_ignores_stars_below_the_visible_limit() {
-        let home = GalaxyModel::milky_way().home_pc;
-        let point = |distance: f64, index| StarPoint {
-            position_pc: [home[0], home[1], home[2] - distance],
-            luminosity_solar: 1.0,
-            temperature_k: 5772.0,
-            radius_solar: 1.0,
-            component: Component::ThinDisc,
-            index,
-        };
-        let cell = Cell::from_coords(0, [0, 0, 0]).unwrap();
-        let mut field = Starfield::default();
-        field.cells.insert(
-            cell,
-            StarCell {
-                cell,
-                stars: vec![point(100.0, 0), point(0.01, 1)],
-            },
-        );
-        let rig = CameraRig::default();
-        let pose = CameraPose::default();
-        let picked = pick_centre(&field, &rig, &pose, Quat::IDENTITY).unwrap();
-        assert_eq!(picked.id, point(0.01, 1).id(cell));
-        field.cells.get_mut(&cell).unwrap().stars.pop();
-        assert!(pick_centre(&field, &rig, &pose, Quat::IDENTITY).is_none());
     }
 
     #[test]

@@ -210,6 +210,7 @@ pub fn show(
     rect: egui::Rect,
     nav: &Navigation,
     galaxy: &Galaxy,
+    field: &crate::stream::Starfield,
     inspector: &mut crate::inspector::Cache,
     out: &mut Vec<crate::actions::UiCommand>,
 ) {
@@ -225,7 +226,7 @@ pub fn show(
             ui.set_max_width((rect.width() - HUD_PADDING * 2.0).max(1.0));
             let location = trail(nav, galaxy);
             let selected = selection_trail(nav, galaxy);
-            let active = active_inspection(nav, &location, &selected);
+            let active = active_inspection(nav, galaxy, &location, &selected);
             for (source, title, trail) in [
                 (TrailSource::Location, "Location", &location),
                 (TrailSource::Selection, "Selected", &selected),
@@ -266,7 +267,7 @@ pub fn show(
             ui.add_space(HUD_LINE_GAP);
             // Natural content height: no scrolling, scrollbar or reserved
             // bottom strip. Long information can use the whole left side.
-            crate::inspector::show(ui, &active.object, galaxy, inspector);
+            crate::inspector::show(ui, &active, nav, galaxy, field, inspector, out);
         });
     // Background areas are excluded by egui's normal pointer-area test.
     if let Some(area) = ctx.memory(|memory| memory.area_rect(egui::Id::new("breadcrumb"))) {
@@ -276,16 +277,36 @@ pub fn show(
     }
 }
 
-pub fn active_inspection(nav: &Navigation, location: &[Crumb], selected: &[Crumb]) -> Inspection {
-    if let Some(active) = &nav.inspection {
-        let trail = if active.source == TrailSource::Location {
-            location
-        } else {
-            selected
-        };
-        if trail.iter().any(|crumb| crumb.object == active.object) {
-            return active.clone();
-        }
+/// An inspection stays valid while its crumb is in its trail. A list's tab
+/// also stays while that list is open, so stepping through its systems (mid
+/// flight, or selecting their stars) does not move the inspector away.
+pub fn holds(
+    nav: &Navigation,
+    galaxy: &Galaxy,
+    inspection: &Inspection,
+    location: &[Crumb],
+    selected: &[Crumb],
+) -> bool {
+    let trail = if inspection.source == TrailSource::Location {
+        location
+    } else {
+        selected
+    };
+    trail.iter().any(|crumb| crumb.object == inspection.object)
+        || matches!(&inspection.object, ObjectRef::List { id }
+            if nav.list().is_some_and(|index| galaxy.systems[index].id == *id))
+}
+
+pub fn active_inspection(
+    nav: &Navigation,
+    galaxy: &Galaxy,
+    location: &[Crumb],
+    selected: &[Crumb],
+) -> Inspection {
+    if let Some(active) = &nav.inspection
+        && holds(nav, galaxy, active, location, selected)
+    {
+        return active.clone();
     }
     let (source, trail) = if selected.is_empty() {
         (TrailSource::Location, location)
@@ -307,9 +328,20 @@ pub(crate) fn halo_text(
     sense: egui::Sense,
     colour: impl FnOnce(&egui::Response) -> egui::Color32,
 ) -> egui::Response {
+    halo_glyph(ui, text, SIZE, sense, colour)
+}
+
+/// `halo_text` at another size, such as the HUD icons.
+pub(crate) fn halo_glyph(
+    ui: &mut egui::Ui,
+    text: &str,
+    size: f32,
+    sense: egui::Sense,
+    colour: impl FnOnce(&egui::Response) -> egui::Color32,
+) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(
         text.to_owned(),
-        egui::FontId::proportional(SIZE),
+        egui::FontId::proportional(size),
         egui::Color32::PLACEHOLDER,
     );
     paint_halo(ui, galley, sense, colour)
@@ -369,7 +401,7 @@ mod tests {
         assert_eq!(location.last().unwrap().level, Level::Star);
         assert_eq!(selected.last().unwrap().object, planet_ref(planet));
         assert_eq!(
-            active_inspection(&nav, &location, &selected).object,
+            active_inspection(&nav, &galaxy, &location, &selected).object,
             planet_ref(planet)
         );
         nav.inspection = Some(Inspection {
@@ -378,7 +410,7 @@ mod tests {
         });
         nav.arrived = false;
         assert_eq!(
-            active_inspection(&nav, &trail(&nav, &galaxy), &selected).object,
+            active_inspection(&nav, &galaxy, &trail(&nav, &galaxy), &selected).object,
             planet_ref(planet)
         );
     }

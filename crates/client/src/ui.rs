@@ -6,95 +6,35 @@ use crate::{
 };
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::{EguiContexts, egui};
-use space_shared::{Galaxy, StarSystem, Task};
+use space_shared::Galaxy;
 use space_simulation::SimulationClock;
-use std::collections::HashSet;
 
-const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
+pub(crate) const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(99, 214, 240);
 const PANEL: egui::Color32 = egui::Color32::from_rgb(7, 15, 31);
-const ROW: f32 = 30.0;
+/// The HUD icons' glyph size, larger than the HUD text so they read as icons.
+const ICON_SIZE: f32 = 20.0;
 
 fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(MUTED).strong());
 }
 
-fn muted(ui: &mut egui::Ui, text: impl Into<String>) {
+pub(crate) fn muted(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(egui::RichText::new(text).size(11.0).color(MUTED));
-}
-
-fn tint(colour: [u8; 3]) -> egui::Color32 {
-    egui::Color32::from_rgb(colour[0], colour[1], colour[2])
 }
 
 type Overlay<'w> = (Res<'w, Markers>, Res<'w, CameraVelocity>);
 
-/// Panel choices that are not part of the scene.
-pub struct Sidebar {
+/// Interface state that is not part of the scene.
+#[derive(Default)]
+pub struct Hud {
     styled: bool,
     settings: bool,
-    list_filter: String,
-    list_sort: ListSort,
-    task_sort: TaskSort,
-    group: bool,
-    /// Folded status groups, by lower-case status.
-    collapsed: HashSet<String>,
+    tasks_open: bool,
+    tasks: crate::tasks::Tasks,
     time_drag_start: Option<f64>,
     speed_drag_start: Option<f64>,
     inspector: crate::inspector::Cache,
-}
-
-impl Default for Sidebar {
-    fn default() -> Self {
-        Self {
-            styled: false,
-            settings: false,
-            list_filter: String::new(),
-            list_sort: ListSort::Default,
-            task_sort: TaskSort::Default,
-            group: true,
-            collapsed: HashSet::new(),
-            time_drag_start: None,
-            speed_drag_start: None,
-            inspector: crate::inspector::Cache::default(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum ListSort {
-    Default,
-    Name,
-    Tasks,
-}
-
-impl ListSort {
-    const ALL: [Self; 3] = [Self::Default, Self::Name, Self::Tasks];
-    fn label(self) -> &'static str {
-        match self {
-            Self::Default => "List order",
-            Self::Name => "Name A–Z",
-            Self::Tasks => "Most tasks",
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum TaskSort {
-    Default,
-    Name,
-    Due,
-}
-
-impl TaskSort {
-    const ALL: [Self; 3] = [Self::Default, Self::Name, Self::Due];
-    fn label(self) -> &'static str {
-        match self {
-            Self::Default => "List order",
-            Self::Name => "Name A–Z",
-            Self::Due => "Due date",
-        }
-    }
 }
 
 pub fn draw_ui(
@@ -108,7 +48,7 @@ pub fn draw_ui(
         Res<CameraPose>,
         Res<crate::stream::Starfield>,
     ),
-    mut sidebar: Local<Sidebar>,
+    mut hud: Local<Hud>,
 ) {
     let (mut contexts, mut writer) = interaction;
     let (markers, velocity) = overlay;
@@ -116,7 +56,7 @@ pub fn draw_ui(
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    if !sidebar.styled {
+    if !hud.styled {
         let mut style = (*ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.panel_fill = PANEL;
@@ -127,21 +67,37 @@ pub fn draw_ui(
         style.spacing.item_spacing = egui::vec2(10.0, 10.0);
         style.spacing.button_padding = egui::vec2(12.0, 8.0);
         ctx.set_style(style);
-        sidebar.styled = true;
+        hud.styled = true;
     }
 
     let mut out = Vec::new();
-    let mut panels = Panels {
-        galaxy: &universe.0,
-        nav: &mut nav,
-        sidebar: &mut sidebar,
-        out: &mut out,
-    };
-    panels.show(ctx);
     let mut rect = ctx.available_rect();
     if rect.width() < 1.0 || rect.height() < 1.0 {
         rect = egui::Rect::from_min_size(rect.min, egui::vec2(1.0, 1.0));
     }
+    let hud = &mut *hud;
+    let anchor = icons(ctx, rect, &mut hud.settings, &mut hud.tasks_open);
+    let mut open = hud.settings;
+    egui::Window::new("Settings")
+        .open(&mut open)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .default_pos(anchor)
+        .default_width(340.0)
+        .default_height(640.0)
+        .collapsible(false)
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| settings(ui, &nav, &mut out));
+        });
+    hud.settings = open;
+    crate::tasks::window(
+        ctx,
+        anchor,
+        &mut hud.tasks_open,
+        &universe.0,
+        &mut nav,
+        &mut hud.tasks,
+        &mut out,
+    );
 
     let pixels = ctx.pixels_per_point();
     nav.viewport = Some(bevy::camera::Viewport {
@@ -155,13 +111,13 @@ pub fn draw_ui(
         ),
         ..default()
     });
-    time_controls(ctx, rect, &clock.0, &mut sidebar.time_drag_start, &mut out);
+    time_controls(ctx, rect, &clock.0, &mut hud.time_drag_start, &mut out);
     speed_readout(
         ctx,
         rect,
         nav.move_speed,
         velocity.metres_per_second.length(),
-        &mut sidebar.speed_drag_start,
+        &mut hud.speed_drag_start,
         &mut out,
     );
     canvas_overlay(
@@ -177,491 +133,122 @@ pub fn draw_ui(
         &mut out,
     );
     if universe.is_changed() {
-        sidebar.inspector.invalidate();
+        hud.inspector.invalidate();
     }
     crate::breadcrumb::show(
         ctx,
         rect,
         &nav,
         &universe.0,
-        &mut sidebar.inspector,
+        &starfield,
+        &mut hud.inspector,
         &mut out,
     );
     writer.write_batch(out);
 }
 
-/// The egui panels. They only read state; every change is a `UiCommand`.
-struct Panels<'a> {
-    galaxy: &'a Galaxy,
-    nav: &'a mut Navigation,
-    sidebar: &'a mut Sidebar,
-    out: &'a mut Vec<UiCommand>,
-}
-
-/// A row of the task index: a status group's heading, or a task.
-enum Row<'a> {
-    Group {
-        key: String,
-        name: &'a str,
-        colour: [u8; 3],
-        count: usize,
-    },
-    Task(&'a StarSystem, usize, &'a Task),
-}
-
-impl Panels<'_> {
-    fn show(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("navigation")
-            .exact_width(320.0)
-            .resizable(false)
-            .frame(egui::Frame::new().fill(PANEL).inner_margin(20))
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("sidebar")
-                    .show(ui, |ui| self.sidebar(ui));
-            });
-        let mut open = self.sidebar.settings;
-        egui::Window::new("Settings")
-            .open(&mut open)
-            .default_width(340.0)
-            .default_height(640.0)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
-            });
-        self.sidebar.settings = open;
-    }
-
-    /// Every section in one column, each collapsible.
-    fn sidebar(&mut self, ui: &mut egui::Ui) {
-        if ui
-            .selectable_label(self.sidebar.settings, "⚙ Settings")
-            .clicked()
-        {
-            self.sidebar.settings = !self.sidebar.settings;
-        }
-        let section = |title: &str| {
-            egui::CollapsingHeader::new(egui::RichText::new(title).size(11.0).color(MUTED).strong())
-                .default_open(true)
-        };
-        section("01 / LIST CONSTELLATIONS").show(ui, |ui| self.lists(ui));
-        section("02 / TASK INDEX").show(ui, |ui| self.tasks(ui));
-        section("03 / TELEMETRY").show(ui, |ui| self.telemetry(ui));
-    }
-
-    fn lists(&mut self, ui: &mut egui::Ui) {
-        let (galaxy, nav, sidebar) = (self.galaxy, &mut *self.nav, &mut *self.sidebar);
-        muted(
-            ui,
-            format!(
-                "{} lists in your local universe\n{}\n{}",
-                galaxy.systems.len(),
-                galaxy.source,
-                nav.notice
-            ),
-        );
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut sidebar.list_filter)
-                    .hint_text("Filter lists…")
-                    .desired_width(130.0),
-            );
-            egui::ComboBox::from_id_salt("list-sort")
-                .selected_text(sidebar.list_sort.label())
-                .show_ui(ui, |ui| {
-                    for sort in ListSort::ALL {
-                        ui.selectable_value(&mut sidebar.list_sort, sort, sort.label());
-                    }
-                });
-        });
-        let filter = sidebar.list_filter.trim().to_lowercase();
-        let mut lists: Vec<_> = galaxy
-            .systems
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| filter.is_empty() || s.name.to_lowercase().contains(&filter))
-            .collect();
-        match sidebar.list_sort {
-            ListSort::Default => {}
-            ListSort::Name => lists.sort_by_key(|(_, s)| s.name.to_lowercase()),
-            ListSort::Tasks => lists.sort_by_key(|(_, s)| std::cmp::Reverse(s.tasks().count())),
-        }
-        egui::ScrollArea::vertical()
-            .id_salt("systems")
-            .max_height(170.0)
-            .show(ui, |ui| {
-                for (i, system) in lists {
-                    let active = nav.list() == Some(i);
-                    let text = format!("{}\n{} task planets", system.name, system.tasks().count());
-                    if ui
-                        .add_sized(
-                            [ui.available_width(), 48.0],
-                            egui::Button::new(text).selected(active),
-                        )
-                        .clicked()
-                    {
-                        self.out.push(UiCommand::Jump {
-                            list: system.id.clone(),
-                        });
-                    }
-                }
-            });
-    }
-
-    fn tasks(&mut self, ui: &mut egui::Ui) {
-        let (galaxy, nav, sidebar) = (self.galaxy, &mut *self.nav, &mut *self.sidebar);
-        let search = ui.add(
-            egui::TextEdit::singleline(&mut nav.search)
-                .hint_text("Search all task planets…")
-                .desired_width(f32::INFINITY),
-        );
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("task-sort")
-                .selected_text(sidebar.task_sort.label())
-                .show_ui(ui, |ui| {
-                    for sort in TaskSort::ALL {
-                        ui.selectable_value(&mut sidebar.task_sort, sort, sort.label());
-                    }
-                });
-            ui.checkbox(&mut sidebar.group, "Group by status");
-        });
-        let query = nav.search.trim().to_lowercase();
-        // The current list's tasks, or every list's while searching.
-        let mut matches: Vec<_> = galaxy
-            .systems
-            .iter()
-            .enumerate()
-            .filter(|(si, _)| !query.is_empty() || nav.list() == Some(*si))
-            .flat_map(|(_, system)| {
-                system
-                    .tasks()
-                    .filter(|(_, task)| {
-                        query.is_empty() || task.name.to_lowercase().contains(&query)
-                    })
-                    .map(move |(pi, task)| (system, pi, task))
-            })
-            .collect();
-        match sidebar.task_sort {
-            TaskSort::Default => {}
-            TaskSort::Name => matches.sort_by_key(|(_, _, t)| t.name.to_lowercase()),
-            TaskSort::Due => matches.sort_by_key(|(_, _, t)| t.due_date_ms.unwrap_or(i64::MAX)),
-        }
-        let total = matches.len();
-        let rows = if sidebar.group {
-            group_rows(matches, &sidebar.collapsed)
-        } else {
-            matches
-                .into_iter()
-                .map(|(s, pi, t)| Row::Task(s, pi, t))
-                .collect()
-        };
-        let shown = rows.iter().filter(|r| matches!(r, Row::Task(..))).count();
-        // Enter finds the first task in view.
-        if search.lost_focus()
-            && ui.input(|i| i.key_pressed(egui::Key::Enter))
-            && let Some(Row::Task(system, _, task)) =
-                rows.iter().find(|r| matches!(r, Row::Task(..)))
-        {
-            self.out.push(UiCommand::FindTask {
-                list: system.id.clone(),
-                task: task.id.clone(),
-            });
-        }
-        muted(
-            ui,
-            format!(
-                "{total} task{}{}{}",
-                if total == 1 { "" } else { "s" },
-                if query.is_empty() { "" } else { " matching" },
-                if total > shown {
-                    format!(" · {} folded", total - shown)
-                } else {
-                    String::new()
-                }
-            ),
-        );
-        let selected_list = nav.list();
-        let selected = nav.selected_planet(galaxy);
-        // Searching still scans names, but egui only builds widgets for the
-        // visible rows. A list can hold over a thousand tasks.
-        egui::ScrollArea::vertical()
-            .id_salt("task-index")
-            .auto_shrink([false, true])
-            .max_height(360.0)
-            .show_rows(ui, ROW, rows.len(), |ui, range| {
-                for row in &rows[range] {
-                    match row {
-                        Row::Group {
-                            key,
-                            name,
-                            colour,
-                            count,
-                        } => {
-                            let folded = sidebar.collapsed.contains(key);
-                            let text = egui::RichText::new(format!(
-                                "{} {}  ({count})",
-                                if folded { "⏵" } else { "⏷" },
-                                name.to_uppercase()
-                            ))
-                            .size(11.0)
-                            .strong()
-                            .color(tint(*colour));
-                            if ui
-                                .add_sized(
-                                    [ui.available_width(), ROW],
-                                    egui::Button::selectable(false, text),
-                                )
-                                .clicked()
-                                && !sidebar.collapsed.remove(key)
-                            {
-                                sidebar.collapsed.insert(key.clone());
-                            }
-                        }
-                        Row::Task(system, pi, task) => {
-                            let active = selected_list
-                                .is_some_and(|i| galaxy.systems[i].id == system.id)
-                                && selected == Some(*pi);
-                            let due = task
-                                .due_date_ms
-                                .map(|ms| format!("   {}", due_short(ms)))
-                                .unwrap_or_default();
-                            let text = egui::RichText::new(format!("· {}{due}", task.name))
-                                .color(tint(task.colour));
-                            if ui
-                                .add_sized(
-                                    [ui.available_width(), ROW],
-                                    egui::Button::selectable(active, text).truncate(),
-                                )
-                                .on_hover_text(&task.name)
-                                .clicked()
-                            {
-                                self.out.push(UiCommand::FindTask {
-                                    list: system.id.clone(),
-                                    task: task.id.clone(),
-                                });
-                            }
-                        }
-                    }
-                }
-            });
-    }
-
-    fn settings(&mut self, ui: &mut egui::Ui) {
-        let nav = &*self.nav;
-        heading(ui, "DISPLAY");
-        for (option, mut on, label) in [
-            (Display::Exaggerate, nav.exaggerate, "Readable planet sizes"),
-            (Display::Orbits, nav.orbits, "Orbital paths"),
-            (Display::Labels, nav.labels, "Planet labels"),
-            (Display::Markers, nav.markers, "Body markers"),
-            (
-                Display::VelocityMarker,
-                nav.velocity_marker,
-                "Velocity marker",
-            ),
-        ] {
-            if ui.checkbox(&mut on, label).changed() {
-                self.out.push(UiCommand::SetDisplay { option, on });
-            }
-        }
-        let mut degrees = nav.fov_deg;
-        if ui
-            .add(
-                egui::Slider::new(&mut degrees, crate::FOV_DEG)
-                    .text("Field of view")
-                    .suffix("°"),
-            )
-            .changed()
-        {
-            self.out.push(UiCommand::SetFov { degrees });
-        }
-        muted(
-            ui,
-            "Simulation mode uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every presentation mode.",
-        );
-        ui.separator();
-        heading(ui, "RENDERING");
-        let mut realistic = nav.realistic;
-        if ui.checkbox(&mut realistic, "Realistic lighting").changed() {
-            self.out.push(UiCommand::SetDisplay {
-                option: Display::Realistic,
-                on: realistic,
-            });
-        }
-        muted(
-            ui,
-            "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star.",
-        );
-        ui.separator();
-        heading(ui, "CONTROLS");
-        egui::Grid::new("controls").num_columns(2).show(ui, |ui| {
-            for (key, action) in HELP {
-                ui.label(egui::RichText::new(key).monospace().color(ACCENT));
-                ui.label(action);
-                ui.end_row();
-            }
-        });
-    }
-
-    fn telemetry(&mut self, ui: &mut egui::Ui) {
-        let (galaxy, nav) = (self.galaxy, &*self.nav);
-        let Some(system) = nav.system(galaxy) else {
-            star_controls(ui, galaxy, nav, self.out);
-            ui.label(
-                egui::RichText::new(
-                    "Click a star to select it, and again to visit it. Lists open at their first system.",
-                )
-                .color(MUTED),
-            );
-            return;
-        };
-        ui.heading(&system.name);
-        ui.horizontal_wrapped(|ui| {
-            for (label, presentation_mode) in [
-                ("Simulation", PresentationMode::Simulation),
-                ("Table", PresentationMode::Table),
-                ("Constellation", PresentationMode::Constellation),
-            ] {
-                if ui
-                    .selectable_label(nav.presentation_mode == presentation_mode, label)
-                    .clicked()
+/// ⚙ Settings above ✔ Tasks, free-floating at the top right of the view.
+/// Each toggles its window. Returns where those windows first open: just
+/// below the icons, aligned to their right edge.
+fn icons(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    settings: &mut bool,
+    tasks: &mut bool,
+) -> egui::Pos2 {
+    use crate::breadcrumb::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_glyph};
+    let id = egui::Id::new("hud-icons");
+    let area = egui::Area::new(id)
+        .order(egui::Order::Background)
+        .constrain(false)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .fixed_pos(rect.right_top() + egui::vec2(-HUD_PADDING, HUD_PADDING))
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
+            ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                for (glyph, hint, open) in [("⚙", "Settings", settings), ("✔", "Tasks", tasks)]
                 {
-                    self.out
-                        .push(UiCommand::SetPresentationMode { presentation_mode });
+                    let response =
+                        halo_glyph(ui, glyph, ICON_SIZE, egui::Sense::click(), |response| {
+                            if response.hovered() {
+                                HOVER
+                            } else if *open {
+                                CURRENT
+                            } else {
+                                LINK
+                            }
+                        })
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(hint);
+                    if response.clicked() {
+                        *open = !*open;
+                    }
                 }
-            }
+            });
         });
-        let pages = system.pages();
-        let current = pages.iter().position(|p| *p == nav.page).unwrap_or(0);
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(current > 0, egui::Button::new("‹"))
-                .clicked()
-            {
-                self.out.push(UiCommand::ShowPage {
-                    page: pages[current - 1],
-                });
-            }
-            ui.label(format!("System {} / {}", current + 1, pages.len().max(1)));
-            if ui
-                .add_enabled(current + 1 < pages.len(), egui::Button::new("›"))
-                .clicked()
-            {
-                self.out.push(UiCommand::ShowPage {
-                    page: pages[current + 1],
-                });
-            }
-        });
-        ui.label(
-            egui::RichText::new(format!(
-                "System {} · {} of {} tasks",
-                nav.page + 1,
-                system
-                    .tasks()
-                    .filter(|&(i, _)| system.planets[i].page() == nav.page)
-                    .count(),
-                system.tasks().count()
-            ))
-            .color(MUTED),
-        );
-        if ui.button("Frame orbital system").clicked() {
-            self.out.push(UiCommand::FrameSystem);
-        }
-        star_controls(ui, galaxy, nav, self.out);
-    }
+    let bounds = area.response.rect;
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("icons-pointer-capture"), (bounds, false)));
+    egui::pos2(bounds.right(), bounds.bottom() + HUD_LINE_GAP)
 }
 
-/// Status groups follow the board: open, then custom, then done and closed.
-fn group_rows<'a>(
-    tasks: Vec<(&'a StarSystem, usize, &'a Task)>,
-    collapsed: &HashSet<String>,
-) -> Vec<Row<'a>> {
-    struct Group<'a> {
-        key: String,
-        task: &'a Task,
-        rank: u32,
-        tasks: Vec<(&'a StarSystem, usize, &'a Task)>,
-    }
-    let mut groups: Vec<Group> = Vec::new();
-    for entry in tasks {
-        let key = entry.2.status.to_lowercase();
-        match groups.iter_mut().find(|g| g.key == key) {
-            Some(group) => group.tasks.push(entry),
-            None => groups.push(Group {
-                key,
-                task: entry.2,
-                rank: status_rank(entry.2),
-                tasks: vec![entry],
-            }),
+fn settings(ui: &mut egui::Ui, nav: &Navigation, out: &mut Vec<UiCommand>) {
+    heading(ui, "DISPLAY");
+    for (option, mut on, label) in [
+        (Display::Exaggerate, nav.exaggerate, "Readable planet sizes"),
+        (Display::Orbits, nav.orbits, "Orbital paths"),
+        (Display::Labels, nav.labels, "Planet labels"),
+        (Display::Markers, nav.markers, "Body markers"),
+        (
+            Display::VelocityMarker,
+            nav.velocity_marker,
+            "Velocity marker",
+        ),
+    ] {
+        if ui.checkbox(&mut on, label).changed() {
+            out.push(UiCommand::SetDisplay { option, on });
         }
     }
-    groups.sort_by(|a, b| {
-        (a.rank, a.task.status_order, &a.task.status).cmp(&(
-            b.rank,
-            b.task.status_order,
-            &b.task.status,
-        ))
+    let mut degrees = nav.fov_deg;
+    if ui
+        .add(
+            egui::Slider::new(&mut degrees, crate::FOV_DEG)
+                .text("Field of view")
+                .suffix("°"),
+        )
+        .changed()
+    {
+        out.push(UiCommand::SetFov { degrees });
+    }
+    muted(
+        ui,
+        "Simulation mode uses physical distances. The task table keeps true body sizes with schematic spacing. Orbits keep running in every presentation mode.",
+    );
+    ui.separator();
+    heading(ui, "RENDERING");
+    let mut realistic = nav.realistic;
+    if ui.checkbox(&mut realistic, "Realistic lighting").changed() {
+        out.push(UiCommand::SetDisplay {
+            option: Display::Realistic,
+            on: realistic,
+        });
+    }
+    muted(
+        ui,
+        "Realistic lighting draws stars by temperature and true brightness, and lights planets by their star.",
+    );
+    ui.separator();
+    heading(ui, "CONTROLS");
+    egui::Grid::new("controls").num_columns(2).show(ui, |ui| {
+        for (key, action) in HELP {
+            ui.label(egui::RichText::new(key).monospace().color(ACCENT));
+            ui.label(action);
+            ui.end_row();
+        }
     });
-    let mut rows = Vec::new();
-    for group in groups {
-        let folded = collapsed.contains(&group.key);
-        rows.push(Row::Group {
-            name: &group.task.status,
-            colour: group.task.colour,
-            count: group.tasks.len(),
-            key: group.key,
-        });
-        if !folded {
-            rows.extend(
-                group
-                    .tasks
-                    .into_iter()
-                    .map(|(s, pi, t)| Row::Task(s, pi, t)),
-            );
-        }
-    }
-    rows
 }
 
-fn status_rank(task: &Task) -> u32 {
-    match task.status_type.as_str() {
-        "open" => 0,
-        "custom" => 1,
-        "done" => 2,
-        "closed" => 3,
-        _ => {
-            let status = task.status.to_lowercase();
-            if ["complete", "done", "closed"]
-                .iter()
-                .any(|word| status.contains(word))
-            {
-                2
-            } else {
-                1
-            }
-        }
-    }
-}
-
-/// The selected star, from anywhere in the galaxy, and how to visit it.
-fn star_controls(ui: &mut egui::Ui, galaxy: &Galaxy, nav: &Navigation, out: &mut Vec<UiCommand>) {
-    if let Some(star) = nav.selected_star() {
-        ui.label(format!(
-            "Selected {}",
-            crate::galaxy_nav::label(galaxy, &star.id)
-        ));
-        if ui.button("Visit star (Enter)").clicked() {
-            out.push(UiCommand::FrameSystem);
-        }
-    }
-    if ui.button("Select centre star (C)").clicked() {
-        out.push(UiCommand::PickCentre);
-    }
-}
-
-const HELP: [(&str, &str); 13] = [
+const HELP: [(&str, &str); 12] = [
     ("Click", "Select a star, again to visit"),
-    ("C", "Select the centre star"),
     ("Enter", "Visit the selected star"),
     ("Left drag", "Look around"),
     ("Right drag", "Orbit"),
@@ -690,6 +277,7 @@ pub(crate) fn pointer_captured(ctx: &egui::Context) -> bool {
             "time-pointer-capture",
             "speed-pointer-capture",
             "breadcrumb-pointer-capture",
+            "icons-pointer-capture",
         ]
         .into_iter()
         .any(|id| {
@@ -893,7 +481,7 @@ fn civil_date(ms: i64) -> (i64, &'static str, i64) {
     (day, MONTHS[month as usize - 1], year)
 }
 
-fn due_short(ms: i64) -> String {
+pub(crate) fn due_short(ms: i64) -> String {
     let days = (ms - crate::network::now_ms()) as f64 / 86_400_000.0;
     if days.abs() < 1.0 {
         "Today".into()
@@ -1436,6 +1024,7 @@ mod tests {
                             rect,
                             &nav,
                             &galaxy,
+                            &crate::stream::Starfield::default(),
                             &mut inspector,
                             &mut commands,
                         );
@@ -1509,6 +1098,7 @@ mod tests {
                             rect,
                             &nav,
                             &galaxy,
+                            &crate::stream::Starfield::default(),
                             &mut inspector,
                             &mut commands,
                         );
@@ -1516,7 +1106,7 @@ mod tests {
                 );
             }
             if stage == 1 {
-                for prefix in ["Orbital period", "Procedurally generated planet"] {
+                for prefix in ["Orbital period", "Fly to planet"] {
                     let shape = output
                         .shapes
                         .iter()
@@ -1579,6 +1169,7 @@ mod tests {
                         viewport,
                         &nav,
                         &galaxy,
+                        &crate::stream::Starfield::default(),
                         &mut inspector,
                         &mut commands,
                     )
@@ -1596,7 +1187,7 @@ mod tests {
         assert!(
             output.shapes.iter().any(|shape| match &shape.shape {
                 egui::epaint::Shape::Text(text) =>
-                    text.galley.job.text == "Procedurally generated planet"
+                    text.galley.job.text == "Fly to planet"
                         && shape
                             .clip_rect
                             .contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())),

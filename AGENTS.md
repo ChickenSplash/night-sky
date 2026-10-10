@@ -28,11 +28,17 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
 - The browser is the main target; native is a dev fallback. Both use the same
-  egui interface (`ui.rs`), drawn in the same frame as the scene: a left
-  sidebar of collapsible sections, time controls, a plain egui Settings window
-  (opened from the sidebar's ⚙ Settings), a breadcrumb and canvas captions,
-  labels and clicks. Body facts are in the floating breadcrumb inspector,
-  not the sidebar; the sidebar retains lists, task index and scene controls.
+  egui interface (`ui.rs`), drawn in the same frame as the scene, which fills
+  the whole window: there is no sidebar. Two free-floating halo icons at the
+  top right (`ui::icons`, ⚙ above ✔, `breadcrumb::halo_glyph`, hover blue,
+  white while open) toggle two plain egui windows that first open just below
+  them, right-aligned: Settings, and Tasks (`tasks.rs`, 01 lists and 02 task
+  index, with the data-source note). Lists and tasks are kept apart there as
+  the future integration point; the rest reaches them through `UiCommand`s.
+  Both start closed. The debug window opens below the icons
+  (`terminal::below_icons`). Body facts, presentation modes and system paging
+  are in the floating breadcrumb inspector and its actions; there is no
+  telemetry section, centre-star pick or C key.
 - The breadcrumb (`breadcrumb.rs`) is free-floating text at the top left of
   the 3D view, under any window, with no container. A soft dark halo (two
   rings of translucent black copies, `HALO_EDGE` at 1 px and `HALO_FADE` at
@@ -52,7 +58,21 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Inspection changes neither selection nor camera/tracking. Missing
   tabs fall back to the selected leaf, or current location with no selection.
   Inspector facts are cached until target/snapshot changes; generated remote
-  systems are never rebuilt per frame. New object kinds should extend
+  systems are never rebuilt per frame. Below the facts, `inspector::actions`
+  shows the inspected object's actions as clickable halo text separated by
+  `·` (hover blue, `CURRENT` when already showing it): galaxy `View from
+  above`; list `Constellation view`, `Previous system`/`Next system` and
+  then one `System n · k tasks` line per page. These act exactly like
+  clicking the star (`PickStar`: select, or visit once selected; list stars
+  resolve unstreamed through `page_pick`), relative to the selected star in
+  that list, else the open list's page. They re-send `InspectObject`, and
+  `breadcrumb::holds` keeps a list's tab while that list is open, so the
+  inspector stays on the list while stepping or flying; star `Fly to system`/`Frame system`,
+  `Table view` and, for list stars, `Constellation view`
+  (`UiCommand::VisitStar`); planet `Fly to planet` (`FlyToPlanet`, visiting
+  its star first, then following, like a second click). Stars are reachable
+  by ID if mapped, visited or streamed (`galaxy_nav::reachable`/`visit_star`);
+  unreachable actions are hidden, not disabled. New object kinds should extend
   `ObjectRef`, hierarchy builders and inspector resolution (moons do not yet
   exist). `UiCommand::Up` is separate keyboard navigation: reframe tracking,
   else clear selection, else move up physically; no crumb contains travel code.
@@ -107,7 +127,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
-  `ui::Sidebar`, not `Navigation`.
+  `tasks::Tasks`, not `Navigation`.
 - `automation.rs` (browser only) is a test hook, not a UI: `window.space.command`
   sends a `UiCommand` as JSON and `window.space.state()` reads a small snapshot
   (list, page, presentation_mode, display options, stream caption, benchmark results).
@@ -390,7 +410,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from
   loaded, visible points only, and only on click, never every frame. Click
-  again or Enter to visit, C picks the view centre. The only bodies drawn are
+  again or Enter to visit. The only bodies drawn are
   the visited star and its planets. Shift + scroll (either Shift key) zooms
   from 20,000 km to 40,000 ly; plain scroll adjusts movement speed independently.
 - Unassigned cell stars use ID-derived `TS` catalogue names and lettered

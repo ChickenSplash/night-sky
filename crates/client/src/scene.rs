@@ -425,7 +425,6 @@ pub fn controls(
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
     universe: Res<Universe>,
-    field: Res<crate::stream::Starfield>,
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     mut camera_motion: ResMut<CameraMotion>,
@@ -483,10 +482,6 @@ pub fn controls(
     }
     let mut wanted = Vec4::ZERO;
     if !keyboard {
-        if keys.just_pressed(KeyCode::KeyC) {
-            let star = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
-            nav.select(star.map(crate::Selection::Star));
-        }
         if keys.just_pressed(KeyCode::Enter) {
             crate::galaxy_nav::visit_selected(&mut nav, &universe.0);
         }

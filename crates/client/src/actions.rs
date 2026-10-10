@@ -8,8 +8,6 @@ use serde::Deserialize;
 #[derive(Message, Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiCommand {
-    /// Select the visible star nearest the centre of the view.
-    PickCentre,
     /// Select a streamed star by stable ID, or visit it on a second click.
     PickStar {
         id: String,
@@ -37,8 +35,15 @@ pub enum UiCommand {
     SetPresentationMode {
         presentation_mode: PresentationMode,
     },
-    /// Visits the picked star, or re-frames the visited system.
-    FrameSystem,
+    /// Fly to any star's system by stable ID and present it.
+    VisitStar {
+        id: String,
+        presentation_mode: PresentationMode,
+    },
+    /// Fly to any planet by stable ID and follow it, visiting its star first.
+    FlyToPlanet {
+        planet: String,
+    },
     Follow,
     /// Reframe a tracked planet's system, else clear selection or climb the trail.
     Up,
@@ -127,22 +132,21 @@ pub fn apply(
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     field: Res<crate::stream::Starfield>,
-    rig: Res<crate::scene::CameraRig>,
-    pose: Res<crate::scene::CameraPose>,
 ) {
     let galaxy = &universe.0;
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
     let mut queue: std::collections::VecDeque<_> = commands.read().cloned().collect();
     while let Some(command) = queue.pop_front() {
         match &command {
-            UiCommand::PickCentre => {
-                let star = crate::galaxy_nav::pick_centre(&field, &rig, &pose, rig.rotation());
-                nav.select(star.map(Selection::Star));
-            }
             UiCommand::PickStar { id } => {
                 if nav.selected_star().is_some_and(|star| star.id == *id) {
                     crate::galaxy_nav::visit_selected(&mut nav, galaxy);
-                } else if let Some(star) = crate::galaxy_nav::picked_id(&field, id) {
+                } else if let Some(star) = crate::galaxy_nav::picked_id(&field, id).or_else(|| {
+                    // A list's stars are known without streaming them.
+                    crate::galaxy_nav::mapped(galaxy, id).and_then(|(list, page)| {
+                        crate::galaxy_nav::page_pick(&galaxy.systems[list], page)
+                    })
+                }) {
                     nav.select(Some(Selection::Star(star)));
                 }
             }
@@ -173,15 +177,9 @@ pub fn apply(
                 }
             }
             UiCommand::InspectObject { inspection } => {
-                let trail = match inspection.source {
-                    crate::breadcrumb::TrailSource::Location => {
-                        crate::breadcrumb::trail(&nav, galaxy)
-                    }
-                    crate::breadcrumb::TrailSource::Selection => {
-                        crate::breadcrumb::selection_trail(&nav, galaxy)
-                    }
-                };
-                if trail.iter().any(|crumb| crumb.object == inspection.object) {
+                let location = crate::breadcrumb::trail(&nav, galaxy);
+                let selected = crate::breadcrumb::selection_trail(&nav, galaxy);
+                if crate::breadcrumb::holds(&nav, galaxy, inspection, &location, &selected) {
                     nav.inspection = Some(inspection.clone());
                 }
             }
@@ -189,9 +187,32 @@ pub fn apply(
             UiCommand::SetPresentationMode { presentation_mode } => {
                 nav.preset(*presentation_mode, galaxy)
             }
-            UiCommand::FrameSystem => {
-                if !crate::galaxy_nav::visit_selected(&mut nav, galaxy) {
-                    nav.frame(galaxy);
+            UiCommand::VisitStar {
+                id,
+                presentation_mode,
+            } => {
+                if crate::galaxy_nav::visit_star(&mut nav, galaxy, &field, id)
+                    && *presentation_mode != PresentationMode::Simulation
+                {
+                    nav.preset(*presentation_mode, galaxy);
+                    if *presentation_mode == PresentationMode::Constellation {
+                        let star = nav
+                            .system(galaxy)
+                            .and_then(|system| crate::galaxy_nav::page_pick(system, nav.page));
+                        nav.select(star.map(Selection::Star));
+                    }
+                }
+            }
+            UiCommand::FlyToPlanet { planet } => {
+                let local = nav
+                    .system(galaxy)
+                    .is_some_and(|system| system.planets.iter().any(|body| body.id == *planet));
+                if crate::objects::planet(galaxy, planet).is_some()
+                    && let Some(star) = crate::objects::parent_star(planet)
+                    && (local || crate::galaxy_nav::visit_star(&mut nav, galaxy, &field, star))
+                {
+                    nav.select(Some(Selection::Planet(planet.clone())));
+                    nav.focus_selected(galaxy);
                 }
             }
             UiCommand::Follow => nav.focus_selected(galaxy),
@@ -369,8 +390,6 @@ mod tests {
             .init_resource::<Navigation>()
             .init_resource::<Clock>()
             .init_resource::<crate::stream::Starfield>()
-            .init_resource::<crate::scene::CameraRig>()
-            .init_resource::<crate::scene::CameraPose>()
             .add_systems(Update, apply);
         send(&mut app, commands);
         app
@@ -513,6 +532,123 @@ mod tests {
         assert_eq!(nav(&app).page, 1);
         assert_eq!(nav(&app).presentation_mode, PresentationMode::Simulation);
         assert_eq!(nav(&app).selection, None);
+    }
+
+    #[test]
+    fn inspector_actions_reach_remote_stars_and_planets_like_a_second_click() {
+        let galaxy = space_simulation::demo_galaxy();
+        let star = galaxy.systems[1].page_star(1).unwrap().id.clone();
+        let planet = galaxy.systems[1]
+            .planets
+            .iter()
+            .find(|planet| planet.page() == 1)
+            .unwrap()
+            .id
+            .clone();
+        let mut app = run(galaxy, vec![]);
+        for (presentation_mode, selected) in [
+            (PresentationMode::Table, false),
+            (PresentationMode::Constellation, true),
+            (PresentationMode::Simulation, false),
+        ] {
+            send(
+                &mut app,
+                vec![UiCommand::VisitStar {
+                    id: star.clone(),
+                    presentation_mode,
+                }],
+            );
+            assert_eq!((nav(&app).list(), nav(&app).page), (Some(1), 1));
+            assert_eq!(nav(&app).presentation_mode, presentation_mode);
+            assert_eq!(
+                nav(&app).selected_star().map(|picked| picked.id.as_str()),
+                selected.then_some(star.as_str())
+            );
+        }
+        send(
+            &mut app,
+            vec![UiCommand::GalaxyReference {
+                view: GalaxyReference::FaceOn,
+            }],
+        );
+        send(
+            &mut app,
+            vec![UiCommand::FlyToPlanet {
+                planet: planet.clone(),
+            }],
+        );
+        assert_eq!((nav(&app).list(), nav(&app).page), (Some(1), 1));
+        assert_eq!(nav(&app).selection, Some(Selection::Planet(planet)));
+        assert!(nav(&app).following);
+    }
+
+    #[test]
+    fn list_systems_select_like_a_star_click_and_keep_the_list_tab() {
+        use crate::{
+            breadcrumb::{Inspection, TrailSource},
+            objects::ObjectRef,
+        };
+        let galaxy = space_simulation::demo_galaxy();
+        let list = galaxy.systems[1].id.clone();
+        let second = galaxy.systems[1].page_star(1).unwrap().id.clone();
+        let tab = Inspection {
+            source: TrailSource::Selection,
+            object: ObjectRef::List { id: list.clone() },
+        };
+        let mut app = run(galaxy, vec![UiCommand::Jump { list: list.clone() }]);
+        send(
+            &mut app,
+            vec![UiCommand::InspectObject {
+                inspection: tab.clone(),
+            }],
+        );
+        // Unstreamed, as the stars of a distant list usually are.
+        let pick = || {
+            vec![
+                UiCommand::PickStar { id: second.clone() },
+                UiCommand::InspectObject {
+                    inspection: tab.clone(),
+                },
+            ]
+        };
+        send(&mut app, pick());
+        assert_eq!(nav(&app).selected_star().unwrap().id, second);
+        assert_eq!(nav(&app).presentation_mode, PresentationMode::Constellation);
+        assert_eq!(nav(&app).inspection, Some(tab.clone()));
+        send(&mut app, pick());
+        assert_eq!((nav(&app).list(), nav(&app).page), (Some(1), 1));
+        assert_eq!(nav(&app).presentation_mode, PresentationMode::Simulation);
+        assert_eq!(nav(&app).inspection, Some(tab));
+    }
+
+    #[test]
+    fn unstreamed_generated_stars_are_not_visited_by_id() {
+        let galaxy = space_simulation::demo_galaxy();
+        use space_simulation::cells::Cell;
+        let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
+        let cell = Cell::containing(10, home).unwrap();
+        let id = (0..)
+            .map(|ordinal| Sky::default().cell_star_at(cell, ordinal).unwrap().id)
+            .find(|id| crate::galaxy_nav::mapped(&galaxy, id).is_none())
+            .unwrap();
+        let mut app = run(
+            galaxy,
+            vec![UiCommand::FlyToPlanet {
+                planet: format!("{id}/0"),
+            }],
+        );
+        assert!(nav(&app).visit.is_none());
+        stream(&mut app, &id);
+        send(
+            &mut app,
+            vec![UiCommand::VisitStar {
+                id: id.clone(),
+                presentation_mode: PresentationMode::Table,
+            }],
+        );
+        let universe = &app.world().resource::<Universe>().0;
+        assert_eq!(nav(&app).system(universe).unwrap().id, id);
+        assert_eq!(nav(&app).presentation_mode, PresentationMode::Table);
     }
 
     #[test]

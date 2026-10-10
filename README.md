@@ -75,13 +75,13 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Inspect galaxy, constellation, star or planet | Click an item in either breadcrumb trail, without moving the camera |
 | Inspect task | Click planet/marker or task index |
 | Track planet at close range | Click the selected planet again, or terminal command `follow` |
-| Return to system overview | **Simulation** or **Frame orbital system** |
-| Align ten task-planets in a top-down table | **Task table** |
-| Frame the list's systems | **Constellation** |
-| Browse system pages | **‹ / ›** in the sidebar's scene controls |
+| Fly to or reframe a star's system | **Fly to system** / **Frame system** under the inspected star |
+| Fly to and follow a planet | **Fly to planet** under the inspected planet |
+| Align a system's planets in a top-down table | **Table view** under the inspected star |
+| Frame the list's systems | **Constellation view** under the inspected list or star |
+| Browse a list's systems | **Previous system** / **Next system** or a **System n** line under the inspected list (select, click again to visit) |
 | Select a star, then visit it | Click it, then click again or press Enter |
-| Select the star at the view centre | C |
-| Jump to a list | Click it in the sidebar |
+| Jump to a list | Click it in the ✔ Tasks window (top right) |
 | Open or close the debug window | `` ` `` or F3 |
 
 Search covers all systems. The simulation clock starts at an arbitrary epoch;
@@ -162,8 +162,7 @@ is available it retains its last data, initially the clearly labelled demo.
 - Bodies use physical radii by default; selectable markers keep them visible.
   **Readable planet sizes** exaggerates radii in Simulation mode, not positions or periods.
 - Each page is a separate star system with a stable, independently random orbital
-  plane (poles uniform over the sphere). The telemetry panel shows the current
-  page's tilt. List pages occupy distinct, visible cell stars near galactic
+  plane (poles uniform over the sphere). The star inspector shows its axial tilt. List pages occupy distinct, visible cell stars near galactic
   home, with their real generated positions and planetary systems. Constellation mode moves nothing: it zooms out from the current
   angle until every page star fits and joins them with lines. Orbit and Task table
   retain physical orbital distances. Camera flights roll between planes; open
@@ -223,7 +222,7 @@ is available it retains its last data, initially the clearly labelled demo.
 - **One galaxy (Phase 6):** lists and generated stars share one view. Scroll
   out for kiloparsec-scale travel; WASD and R/F move, Shift accelerates. Click
   any visible star to select it, then click it again (or press **Enter**) to
-  visit its planetary system. **C** selects the star at the view centre. A star
+  visit its planetary system. A star
   that carries a list page opens that page with its tasks; any other shows its
   generated planets, with the same simulation, table and constellation presentation modes.
   Generated stars have stable `TS <cell>-<component>-<index>` catalogue names
@@ -294,8 +293,10 @@ set `SPACE_URL` to a server serving the current web build (default port 4322).
 
 The browser is the main client; the native window is a developer fallback that
 adds the smoke test and bug reports. Both use the same egui panels, drawn in the
-same frame as the 3D view. The left sidebar holds collapsible sections: lists,
-the task index (filter, sort and group by status), and visited-system controls.
+same frame as the 3D view, which fills the window. Two icons at the top right
+open windows: **⚙** Settings, and **✔** Tasks, with collapsible sections for
+lists and the task index (filter, sort and group by status). Presentation
+modes and system paging are actions under the inspector's facts.
 Two floating trails at the top left distinguish **Location** from **Selected**.
 Location follows physical proximity, including a planet within 20 physical
 radii (retained until 30 radii to prevent flicker). Selection is independent
@@ -306,9 +307,8 @@ an object automatically activates its selection tab. The information expands
 down the left side as needed, without a scrollbar or a fixed-height container.
 Galaxy figures describe
 the simulation model, and stars/planets are procedurally generated.
-Time controls run along the bottom. **⚙ Settings** at the top
-of the sidebar opens display options, field of view, realistic lighting and the
-controls.
+Time controls run along the bottom. **⚙** Settings holds display options,
+field of view, realistic lighting and the controls.
 
 Debugging has its own window, toggled with `` ` `` or F3 on both clients:
 

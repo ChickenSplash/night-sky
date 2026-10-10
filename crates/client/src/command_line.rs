@@ -117,11 +117,6 @@ pub struct Usage {
 /// when a variant has no entry here or an entry's fields do not match.
 pub const USAGE: [Usage; 17] = [
     Usage {
-        name: "pick_centre",
-        fields: &[],
-        about: "Select the star nearest the view centre",
-    },
-    Usage {
         name: "pick_star",
         fields: &["id"],
         about: "Select a star by ID, or visit it if already selected",
@@ -157,9 +152,14 @@ pub const USAGE: [Usage; 17] = [
         about: "simulation, table or constellation",
     },
     Usage {
-        name: "frame_system",
-        fields: &[],
-        about: "Visit the selected star, or reframe the visited system",
+        name: "visit_star",
+        fields: &["id", "presentation_mode"],
+        about: "Fly to a star's system by ID: simulation, table or constellation",
+    },
+    Usage {
+        name: "fly_to_planet",
+        fields: &["planet"],
+        about: "Fly to a planet by stable ID and follow it",
     },
     Usage {
         name: "follow",

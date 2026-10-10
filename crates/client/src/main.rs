@@ -23,6 +23,7 @@ mod sky;
 mod smoke;
 mod starfield;
 mod stream;
+mod tasks;
 mod terminal;
 mod ui;
 

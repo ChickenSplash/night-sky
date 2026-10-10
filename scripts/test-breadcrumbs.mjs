@@ -39,7 +39,7 @@ try {
   await page.waitForTimeout(2000);
   await page.screenshot({ path: resolve(output, 'breadcrumbs-remote-planet.png') });
   // Actual floating text hit, not a command: Location › Milky Way.
-  await page.mouse.click(430, 27);
+  await page.mouse.click(110, 27);
   await page.waitForFunction(() => window.space.state().inspection.source === 'location', null, { timeout: 30_000 });
   assert.equal((await state()).inspection.object.kind, 'galaxy');
   assert.equal((await state()).selection.id, planet.id);
