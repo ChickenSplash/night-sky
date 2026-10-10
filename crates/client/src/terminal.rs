@@ -252,15 +252,75 @@ pub fn input(ui: &mut Ui, prompt: &str, text: &mut String, width: f32) -> egui::
 
 /// Labels and values in two aligned columns.
 pub fn facts(ui: &mut Ui, id: &str, rows: &[(&str, String)]) {
-    egui::Grid::new(id)
-        .num_columns(2)
-        .min_col_width(130.0)
-        .spacing(vec2(16.0, 2.0))
-        .show(ui, |ui| {
-            for (label, value) in rows {
-                ui.label(egui::RichText::new(*label).font(font()).color(DIM));
-                ui.label(egui::RichText::new(value).font(font()).color(TEXT));
-                ui.end_row();
-            }
-        });
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|(label, value)| (*label, value.clone(), None))
+        .collect();
+    facts_with_details(ui, id, &rows);
+}
+
+/// As `facts`, but a row with a detail has a clickable label, `label +`,
+/// that shows the detail below it until clicked again.
+pub fn facts_with_details(ui: &mut Ui, id: &str, rows: &[(&str, String, Option<&str>)]) {
+    let mut rows = rows.iter().peekable();
+    let mut part = 0;
+    while rows.peek().is_some() {
+        let mut opened = None;
+        // Each open detail ends a grid; the columns line up across them
+        // because every label is narrower than the minimum column width.
+        egui::Grid::new((id, part))
+            .num_columns(2)
+            .min_col_width(130.0)
+            .spacing(vec2(16.0, 2.0))
+            .show(ui, |ui| {
+                for (label, value, detail) in rows.by_ref() {
+                    let open = match detail {
+                        Some(detail) => {
+                            expander(ui, egui::Id::new((id, *label)), label).then_some(*detail)
+                        }
+                        None => {
+                            ui.label(egui::RichText::new(*label).font(font()).color(DIM));
+                            None
+                        }
+                    };
+                    ui.label(egui::RichText::new(value).font(font()).color(TEXT));
+                    ui.end_row();
+                    if open.is_some() {
+                        opened = open;
+                        break;
+                    }
+                }
+            });
+        if let Some(detail) = opened {
+            note(ui, detail);
+        }
+        part += 1;
+    }
+}
+
+/// `label +` that lights up on hover and toggles on click, `label -` while
+/// open. Returns whether it is open.
+fn expander(ui: &mut Ui, id: egui::Id, label: &str) -> bool {
+    let mut open = ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
+    let text = format!("{label} {}", if open { "-" } else { "+" });
+    let galley = ui.painter().layout_no_wrap(text, font(), DIM);
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::click());
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id, response.hovered(), 0.1);
+    ui.painter().rect_filled(
+        rect.expand2(vec2(4.0, 1.0)),
+        4,
+        CYAN.gamma_multiply(0.15 * hover),
+    );
+    ui.painter()
+        .galley_with_override_text_color(rect.min, galley, DIM.lerp_to_gamma(CYAN, hover));
+    if response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        open = !open;
+        ui.data_mut(|data| data.insert_temp(id, open));
+    }
+    open
 }

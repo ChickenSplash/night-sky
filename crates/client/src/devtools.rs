@@ -585,11 +585,11 @@ fn perf(
     terminal::note(ui, "Timings and counts are totals over the last second.");
     terminal::heading(ui, "star draw");
     let uploaded = metrics.uploaded_stars;
-    terminal::facts(
+    terminal::facts_with_details(
         ui,
         "debug-star-draw",
         &[
-            ("draw calls", grouped(metrics.batch_draws)),
+            ("draw calls", grouped(metrics.batch_draws), None),
             (
                 "uploaded",
                 format!(
@@ -597,18 +597,18 @@ fn perf(
                     grouped(uploaded),
                     grouped(field.stars)
                 ),
+                Some(
+                    "Uploaded stars pass the CPU magnitude filter; the shader culls the rest of the faint ones and those behind the camera.",
+                ),
             ),
-            ("vertices", grouped(uploaded * 3)),
+            ("vertices", grouped(uploaded * 3), None),
             (
                 "vertex memory",
                 format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
+                None,
             ),
-            ("precise sprites", grouped(metrics.precise_sprites)),
+            ("precise sprites", grouped(metrics.precise_sprites), None),
         ],
-    );
-    terminal::note(
-        ui,
-        "Uploaded stars pass the CPU magnitude filter; the shader culls the rest of the faint ones and those behind the camera.",
     );
     terminal::heading(ui, "nearest star");
     terminal::facts(

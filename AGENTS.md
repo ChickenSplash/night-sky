@@ -131,7 +131,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   mismatch).
 - The debug window uses the terminal look (`terminal.rs`): a translucent
   black, Hyprland-like window with a light grey border and text-mode
-  checkboxes and buttons.
+  checkboxes and buttons. A fact's explanation goes behind its label with
+  `terminal::facts_with_details` (`label +`, click to show it below, `label -`
+  to hide), not as an always-visible note.
 - There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
