@@ -11,7 +11,8 @@
 use crate::cells::{Cell, ROOT_PC, Sky, cell_star_id};
 use crate::galaxy::Component;
 use crate::population::{TIERS, reach_pc};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
+use std::thread::JoinHandle;
 
 /// Loaded cells are kept until the camera is this many times their reach away,
 /// so moving back and forth across a boundary does not reload them.
@@ -452,9 +453,15 @@ pub struct Loader {
     /// Wanted cells not yet loaded, most visible last.
     queue: Vec<Cell>,
     job: Option<Job>,
+    /// With several threads: cells made, their grids building on threads of
+    /// their own while the next cell's stars are made. Delivered in order.
+    gridding: VecDeque<(Cell, JoinHandle<StarCell>)>,
     events: Vec<Event>,
     cancelled_jobs: usize,
 }
+
+/// Most grids building at once, so made cells cannot pile up in memory.
+const GRIDDING: usize = 2;
 
 impl Loader {
     pub fn new(sky: Sky, magnitude: f64) -> Self {
@@ -466,6 +473,7 @@ impl Loader {
             loaded: HashSet::new(),
             queue: Vec::new(),
             job: None,
+            gridding: VecDeque::new(),
             events: Vec::new(),
             cancelled_jobs: 0,
         }
@@ -509,17 +517,29 @@ impl Loader {
             self.job = None;
             self.cancelled_jobs += 1;
         }
+        // A grid still building is never delivered, so it needs no drop.
+        let before = self.gridding.len();
+        let gridding = std::mem::take(&mut self.gridding);
+        self.gridding = gridding
+            .into_iter()
+            .filter(|(cell, _)| self.keeps(*cell, camera))
+            .collect();
+        self.cancelled_jobs += before - self.gridding.len();
         let building = self.job.as_ref().map(|job| job.cell);
+        let gridding: HashSet<Cell> = self.gridding.iter().map(|(cell, _)| *cell).collect();
         self.queue = wanted(camera, self.magnitude)
             .into_iter()
-            .filter(|cell| !self.loaded.contains(cell) && Some(*cell) != building)
+            .filter(|cell| {
+                !self.loaded.contains(cell) && Some(*cell) != building && !gridding.contains(cell)
+            })
             .rev()
             .collect();
     }
 
-    /// Cells wanted but not loaded yet, including the one being built.
+    /// Cells wanted but not loaded yet, including the one being built and
+    /// those whose grids are.
     pub fn pending(&self) -> usize {
-        self.queue.len() + usize::from(self.job.is_some())
+        self.queue.len() + usize::from(self.job.is_some()) + self.gridding.len()
     }
 
     pub fn loaded(&self) -> usize {
@@ -536,9 +556,18 @@ impl Loader {
     /// since the last step.
     pub fn step(&mut self, more: &mut dyn FnMut() -> bool) -> Vec<Event> {
         loop {
+            self.deliver(false);
             if self.job.is_none() {
                 let Some(cell) = self.queue.pop() else {
-                    break;
+                    // Nothing left to make: wait for the grids.
+                    if self.gridding.is_empty() {
+                        break;
+                    }
+                    self.deliver(true);
+                    if !more() {
+                        break;
+                    }
+                    continue;
                 };
                 self.job = Some(Job {
                     cell,
@@ -551,16 +580,41 @@ impl Loader {
             }
             if self.advance() {
                 let job = self.job.take().expect("a job is being built");
-                self.loaded.insert(job.cell);
-                self.events
-                    .push(Event::Loaded(StarCell::new(job.cell, job.stars)));
-                self.trim();
+                if self.threads > 1 {
+                    if self.gridding.len() >= GRIDDING {
+                        self.deliver(true);
+                    }
+                    let (cell, stars) = (job.cell, job.stars);
+                    let grid = std::thread::spawn(move || StarCell::new(cell, stars));
+                    self.gridding.push_back((cell, grid));
+                } else {
+                    self.load(StarCell::new(job.cell, job.stars));
+                }
             }
             if !more() {
                 break;
             }
         }
         std::mem::take(&mut self.events)
+    }
+
+    /// Delivers grids built so far, in order, first waiting for the oldest if
+    /// asked to.
+    fn deliver(&mut self, wait: bool) {
+        let mut wait = wait;
+        while let Some((_, grid)) = self.gridding.front()
+            && (wait || grid.is_finished())
+        {
+            let (_, grid) = self.gridding.pop_front().expect("a grid is building");
+            self.load(grid.join().expect("a grid thread panicked"));
+            wait = false;
+        }
+    }
+
+    fn load(&mut self, stars: StarCell) {
+        self.loaded.insert(stars.cell);
+        self.events.push(Event::Loaded(stars));
+        self.trim();
     }
 
     /// One unit of work on the cell being built: an integration, or a star.
@@ -930,6 +984,31 @@ mod tests {
         assert!(wanted.iter().all(|cell| cells.contains_key(cell)));
         assert!(cells.keys().all(|&cell| loader.keeps(cell, away)));
         assert_eq!(loader.loaded(), cells.len());
+    }
+
+    #[test]
+    fn moving_away_from_building_grids_drops_only_delivered_cells() {
+        let home = GalaxyModel::milky_way().home_pc;
+        let mut loader = Loader::new(Sky::default(), MAGNITUDE).with_threads(3);
+        loader.aim(home);
+        let mut cells = HashMap::new();
+        while loader.gridding.is_empty() {
+            for event in loader.step(&mut || false) {
+                if let Event::Loaded(stars) = event {
+                    cells.insert(stars.cell, stars);
+                }
+            }
+        }
+        loader.aim([1_000_000.0, home[1], home[2]]);
+        assert!(loader.take_cancelled_jobs() > 0);
+        assert!(loader.gridding.is_empty());
+        for event in loader.step(&mut || true) {
+            match event {
+                Event::Loaded(stars) => assert!(cells.insert(stars.cell, stars).is_none()),
+                Event::Dropped(cell) => assert!(cells.remove(&cell).is_some()),
+            }
+        }
+        assert!(cells.is_empty());
     }
 
     #[test]

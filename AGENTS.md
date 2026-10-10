@@ -273,8 +273,11 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `Loader::with_threads(n)` shares each cell's stars among n threads (native
   `STAR_THREADS`, 8; the browser uses 1): stars needing something become
   holes, made again once it is worked out, so a cell is identical with any
-  thread count (tested). Sorting a loaded cell into its grid
-  (`StarCell::new`) is still single-threaded.
+  thread count (tested). With several threads, a made cell's grid
+  (`StarCell::new`) builds on a thread of its own while the next cell's stars
+  are made (`Loader::gridding`, at most `GRIDDING` at once, delivered in
+  order). Moving away from a cell whose grid is building discards it without
+  a `Dropped` event, as it was never delivered.
 - `space_simulation::stream`: `wanted(camera, magnitude)` lists, per tier, the
   level-t cells within `reach_pc`, most visible first. `Loader` builds them one
   unit at a time (one child box integrated, via `Sky::integrate`, or one star)
