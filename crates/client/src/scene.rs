@@ -209,6 +209,10 @@ fn within(arrived: bool, distance: f64, range: f64) -> bool {
 pub fn locate(
     #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     field: Res<crate::stream::Starfield>,
+    (mut nearby, mut metrics): (
+        ResMut<crate::stream::NearbyStars>,
+        ResMut<crate::stream::StreamMetrics>,
+    ),
     lists: Res<Universe>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
@@ -244,27 +248,10 @@ pub fn locate(
     let eye_pc =
         DVec3::from_array(GalaxyModel::milky_way().home_pc) + eye_ly * (LY_METRES / PC_METRES);
     let reach_pc = APPROACH_METRES / PC_METRES;
-    let mut closest = None;
-    for (&cell, stars) in &field.cells {
-        if space_simulation::stream::gap_pc(cell, eye_pc.to_array()) > reach_pc {
-            continue;
-        }
-        for star in &stars.stars {
-            let distance = (DVec3::from_array(star.position_pc) - eye_pc).length();
-            if distance >= reach_pc {
-                continue;
-            }
-            let id = star.id(cell);
-            if closest.as_ref().is_none_or(|(best, old_id, _)| {
-                distance < *best || (distance == *best && id < *old_id)
-            }) {
-                closest = Some((distance, id, star.position_pc));
-            }
-        }
-    }
-    let Some((_, id, position_pc)) = closest else {
+    let Some((_, cell, star)) = nearby.nearest(&field, eye_pc, reach_pc, &mut metrics) else {
         return;
     };
+    let (id, position_pc) = (star.id(cell), star.position_pc);
     let position_ly = (DVec3::from_array(position_pc)
         - DVec3::from_array(GalaxyModel::milky_way().home_pc))
         * (PC_METRES / LY_METRES);
@@ -578,6 +565,10 @@ pub fn place_camera(
     time: Res<Time>,
     universe: Res<Universe>,
     field: Res<crate::stream::Starfield>,
+    (mut nearby, mut metrics): (
+        ResMut<crate::stream::NearbyStars>,
+        ResMut<crate::stream::StreamMetrics>,
+    ),
     clock: Res<Clock>,
     mut nav: ResMut<Navigation>,
     mut rig: ResMut<CameraRig>,
@@ -705,7 +696,8 @@ pub fn place_camera(
     let eye_pc = DVec3::from_array(GalaxyModel::milky_way().home_pc)
         + frame * (LY_METRES / PC_METRES)
         + pose.eye / PC_METRES;
-    pose.scale_distance = proximity_scale_distance(&field, eye_pc, shown.distance);
+    pose.scale_distance =
+        proximity_scale_distance(&mut nearby, &field, eye_pc, shown.distance, &mut metrics);
     if nav.arrived {
         pose.scale_distance = pose.scale_distance.min(pose.eye.length().max(20_000_000.0));
     }
@@ -731,23 +723,18 @@ pub fn place_camera(
 }
 
 fn proximity_scale_distance(
+    nearby: &mut crate::stream::NearbyStars,
     field: &crate::stream::Starfield,
     eye_pc: DVec3,
     selected_range: f64,
+    metrics: &mut crate::stream::StreamMetrics,
 ) -> f64 {
-    let mut scale = selected_range;
-    for (&cell, stars) in &field.cells {
-        if space_simulation::stream::gap_pc(cell, eye_pc.to_array()) > PRECISE_SCALE_PC {
-            continue;
-        }
-        for star in &stars.stars {
-            let distance = DVec3::from_array(star.position_pc).distance(eye_pc);
-            if distance < PRECISE_SCALE_PC {
-                scale = scale.min(distance * PC_METRES);
-            }
-        }
-    }
-    scale.max(20_000_000.0)
+    nearby
+        .nearest(field, eye_pc, PRECISE_SCALE_PC, metrics)
+        .map_or(selected_range, |(distance, ..)| {
+            selected_range.min(distance * PC_METRES)
+        })
+        .max(20_000_000.0)
 }
 
 fn rotation([inclination, node, twist]: [f64; 3]) -> DQuat {
@@ -1298,6 +1285,8 @@ mod tests {
             .insert_resource(rig)
             .insert_resource(pose)
             .insert_resource(nav)
+            .init_resource::<crate::stream::NearbyStars>()
+            .init_resource::<crate::stream::StreamMetrics>()
             .add_systems(Update, (locate, locate_planet).chain());
         app.update();
         let nav = app.world().resource::<Navigation>();
@@ -1378,6 +1367,8 @@ mod tests {
                 ..default()
             })
             .insert_resource(nav)
+            .init_resource::<crate::stream::NearbyStars>()
+            .init_resource::<crate::stream::StreamMetrics>()
             .add_systems(Update, (locate, locate_planet).chain());
         app
     }
@@ -1570,16 +1561,17 @@ mod tests {
         );
         let maximum = 40_000.0 * LY_METRES;
         let eye = star_pc + DVec3::X * (6.0 * LY_METRES / PC_METRES);
-        let scale = proximity_scale_distance(&field, eye, maximum);
-        assert!((scale / LY_METRES - 6.0).abs() < 1e-9);
+        let mut nearby = crate::stream::NearbyStars::default();
+        let mut metrics = crate::stream::StreamMetrics::default();
+        let mut scale =
+            |eye| proximity_scale_distance(&mut nearby, &field, eye, maximum, &mut metrics);
+        assert!((scale(eye) / LY_METRES - 6.0).abs() < 1e-9);
         assert_eq!(
-            proximity_scale_distance(
-                &field,
-                eye + DVec3::X * 30.0 * LY_METRES / PC_METRES,
-                maximum
-            ),
+            scale(eye + DVec3::X * 30.0 * LY_METRES / PC_METRES),
             maximum
         );
+        // Back again: the moved-away gather must not hide the star.
+        assert!((scale(eye) / LY_METRES - 6.0).abs() < 1e-9);
     }
 
     #[test]

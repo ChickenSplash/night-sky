@@ -4,6 +4,7 @@
 use crate::scene::{CameraPose, CameraRig};
 use bevy::{
     log::{debug, info, warn},
+    math::DVec3,
     platform::time::Instant,
     prelude::*,
 };
@@ -11,7 +12,7 @@ use space_simulation::{
     LY_METRES,
     cells::{Cell, Sky},
     galaxy::{GalaxyModel, PC_METRES},
-    stream::{Event, Loader, StarCell},
+    stream::{Event, Loader, StarCell, StarPoint, gap_pc},
 };
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
@@ -21,6 +22,9 @@ pub const MAGNITUDE: f64 = space_simulation::population::VISIBLE_MAGNITUDE;
 /// Camera moves shorter than this, in parsecs, do not re-aim the loader: about
 /// 2,000 AU, so moving within a planetary system never does.
 const AIM_PC: f64 = 0.01;
+/// Parsecs the eye may drift from where `NearbyStars` gathered before it
+/// gathers again.
+const NEARBY_MARGIN_PC: f64 = 5.0;
 
 /// Stars loaded around the camera, by cell.
 #[derive(Resource, Default)]
@@ -35,6 +39,8 @@ pub struct Starfield {
     pub pending: usize,
     /// Where the loader was last aimed, in parsecs from the galactic centre.
     pub aimed_pc: Option<[f64; 3]>,
+    /// Counts changes to `cells`, so caches of them know when to rebuild.
+    pub version: u64,
     started: Option<Instant>,
     loaded_once: bool,
 }
@@ -60,6 +66,13 @@ pub struct StreamMetrics {
     pub built_batches: usize,
     pub mesh_wait_ms: f64,
     pub mesh_wait_samples: usize,
+    /// `NearbyStars` queries: time, stars checked, gathers and the stars
+    /// they scanned, plus the current list's size.
+    pub nearby: Duration,
+    pub nearby_checked: usize,
+    pub nearby_gathers: usize,
+    pub nearby_gathered: usize,
+    pub nearby_list: usize,
     pub generated: usize,
     pub cancelled: usize,
     pub generation: Duration,
@@ -84,6 +97,11 @@ impl Default for StreamMetrics {
             built_batches: 0,
             mesh_wait_ms: 0.0,
             mesh_wait_samples: 0,
+            nearby: Duration::ZERO,
+            nearby_checked: 0,
+            nearby_gathers: 0,
+            nearby_gathered: 0,
+            nearby_list: 0,
             generated: 0,
             cancelled: 0,
             generation: Duration::ZERO,
@@ -111,6 +129,12 @@ pub struct StreamSample {
     pub built_chunks: usize,
     pub mesh_wait_avg_ms: f64,
     pub mesh_wait_oldest_ms: f64,
+    /// Nearest-star queries per frame, on average, gathers included.
+    pub nearby_ms_per_frame: f64,
+    pub nearby_checked_per_frame: f64,
+    pub nearby_gathers: usize,
+    pub nearby_gathered: usize,
+    pub nearby_list: usize,
     pub frame_p95_ms: f64,
     pub frame_p99_ms: f64,
 }
@@ -121,6 +145,7 @@ impl StreamMetrics {
         if elapsed < Duration::from_secs(1) {
             return;
         }
+        let frames = self.frames.len().max(1) as f64;
         self.frames.sort_by(f64::total_cmp);
         let percentile = |p: usize| {
             self.frames
@@ -143,6 +168,11 @@ impl StreamMetrics {
             built_chunks: self.built_batches,
             mesh_wait_avg_ms: self.mesh_wait_ms / self.mesh_wait_samples.max(1) as f64,
             mesh_wait_oldest_ms: self.oldest_mesh_ms,
+            nearby_ms_per_frame: self.nearby.as_secs_f64() * 1000.0 / frames,
+            nearby_checked_per_frame: self.nearby_checked as f64 / frames,
+            nearby_gathers: self.nearby_gathers,
+            nearby_gathered: self.nearby_gathered,
+            nearby_list: self.nearby_list,
             frame_p95_ms: percentile(95),
             frame_p99_ms: percentile(99),
         };
@@ -173,12 +203,19 @@ impl StreamMetrics {
         self.built_batches = 0;
         self.mesh_wait_ms = 0.0;
         self.mesh_wait_samples = 0;
+        self.nearby = Duration::ZERO;
+        self.nearby_checked = 0;
+        self.nearby_gathers = 0;
+        self.nearby_gathered = 0;
         self.frames.clear();
     }
 }
 
 impl Starfield {
     fn apply(&mut self, events: Vec<Event>) {
+        if !events.is_empty() {
+            self.version += 1;
+        }
         for event in events {
             match event {
                 Event::Loaded(cell) => {
@@ -218,12 +255,93 @@ fn camera_pc(model: &GalaxyModel, rig: &CameraRig, pose: &CameraPose) -> [f64; 3
     std::array::from_fn(|axis| home[axis] + ly[axis] * LY_METRES / PC_METRES)
 }
 
+/// Loaded stars near the camera, nearest first from where they were gathered.
+/// Finding the star nearest the eye then stops after a few checks, instead of
+/// scanning every star in the cells around the camera each frame: at the
+/// galactic centre those cells hold tens of millions.
+#[derive(Resource, Default)]
+pub struct NearbyStars {
+    centre_pc: DVec3,
+    radius_pc: f64,
+    /// The largest cap asked for, so alternating callers share one gather.
+    cap_pc: f64,
+    version: Option<u64>,
+    /// Distance from `centre_pc`, then the owning cell and star.
+    stars: Vec<(f64, Cell, StarPoint)>,
+}
+
+impl NearbyStars {
+    /// The loaded star nearest `eye_pc` and closer than `cap_pc`: its
+    /// distance in parsecs, cell and point. Equal distances resolve by ID.
+    pub fn nearest(
+        &mut self,
+        field: &Starfield,
+        eye_pc: DVec3,
+        cap_pc: f64,
+        metrics: &mut StreamMetrics,
+    ) -> Option<(f64, Cell, StarPoint)> {
+        let start = Instant::now();
+        self.cap_pc = self.cap_pc.max(cap_pc);
+        // Every star within the cap of the eye must lie within the list.
+        if self.version != Some(field.version)
+            || eye_pc.distance(self.centre_pc) + self.cap_pc > self.radius_pc
+        {
+            self.gather(field, eye_pc, metrics);
+        }
+        let drift = eye_pc.distance(self.centre_pc);
+        let mut best: Option<(f64, Cell, StarPoint)> = None;
+        let mut checked = 0;
+        for &(from_centre, cell, star) in &self.stars {
+            // No later star can be nearer the eye than this.
+            if from_centre - drift > best.map_or(cap_pc, |(distance, ..)| distance) {
+                break;
+            }
+            checked += 1;
+            let distance = DVec3::from_array(star.position_pc).distance(eye_pc);
+            if distance >= cap_pc {
+                continue;
+            }
+            if best.is_none_or(|(old, old_cell, old_star)| {
+                distance < old || (distance == old && star.id(cell) < old_star.id(old_cell))
+            }) {
+                best = Some((distance, cell, star));
+            }
+        }
+        metrics.nearby_checked += checked;
+        metrics.nearby += start.elapsed();
+        best
+    }
+
+    fn gather(&mut self, field: &Starfield, eye_pc: DVec3, metrics: &mut StreamMetrics) {
+        self.centre_pc = eye_pc;
+        self.radius_pc = self.cap_pc + NEARBY_MARGIN_PC;
+        self.version = Some(field.version);
+        self.stars.clear();
+        for (&cell, stars) in &field.cells {
+            if gap_pc(cell, eye_pc.to_array()) > self.radius_pc {
+                continue;
+            }
+            metrics.nearby_gathered += stars.stars.len();
+            for star in &stars.stars {
+                let distance = DVec3::from_array(star.position_pc).distance(eye_pc);
+                if distance <= self.radius_pc {
+                    self.stars.push((distance, cell, *star));
+                }
+            }
+        }
+        self.stars.sort_by(|a, b| a.0.total_cmp(&b.0));
+        metrics.nearby_gathers += 1;
+        metrics.nearby_list = self.stars.len();
+    }
+}
+
 pub struct StreamPlugin;
 
 impl Plugin for StreamPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Starfield>()
             .init_resource::<StreamMetrics>()
+            .init_resource::<NearbyStars>()
             .insert_resource(Backend::start())
             .add_systems(Update, stream.after(crate::scene::place_camera));
     }
@@ -549,5 +667,100 @@ mod web {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use space_simulation::galaxy::Component;
+
+    /// A scattered field of stars in two cells, by a fixed linear congruence.
+    fn field() -> Starfield {
+        let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        let mut seed = 12345_u64;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+        let mut field = Starfield::default();
+        for index in 0..2000_u32 {
+            let position = home + DVec3::new(next(), next(), next()) * 30.0;
+            let cell = Cell::containing(8 + (index % 2) as usize, position.to_array()).unwrap();
+            field
+                .cells
+                .entry(cell)
+                .or_insert(StarCell {
+                    cell,
+                    stars: Vec::new(),
+                })
+                .stars
+                .push(StarPoint {
+                    position_pc: position.to_array(),
+                    luminosity_solar: 1.0,
+                    temperature_k: 5772.0,
+                    radius_solar: 1.0,
+                    component: Component::ThinDisc,
+                    index,
+                });
+        }
+        field
+    }
+
+    fn brute_force(field: &Starfield, eye: DVec3, cap: f64) -> Option<f64> {
+        field
+            .cells
+            .values()
+            .flat_map(|cell| &cell.stars)
+            .map(|star| DVec3::from_array(star.position_pc).distance(eye))
+            .filter(|&distance| distance < cap)
+            .min_by(f64::total_cmp)
+    }
+
+    #[test]
+    fn nearest_star_matches_a_full_scan_as_the_eye_moves() {
+        let mut field = field();
+        let mut nearby = NearbyStars::default();
+        let mut metrics = StreamMetrics::default();
+        let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        for step in 0..200 {
+            let eye = home + DVec3::new(0.37, -0.11, 0.23) * step as f64 * 0.4;
+            // Alternate a wide and a narrow cap, as place_camera and locate do.
+            for cap in [6.0, 0.8] {
+                let found = nearby
+                    .nearest(&field, eye, cap, &mut metrics)
+                    .map(|(distance, ..)| distance);
+                assert_eq!(
+                    found,
+                    brute_force(&field, eye, cap),
+                    "step {step}, cap {cap}"
+                );
+            }
+            if step == 100 {
+                // A newly loaded star right at the eye must be found at once.
+                let cell = Cell::containing(10, eye.to_array()).unwrap();
+                field.cells.insert(
+                    cell,
+                    StarCell {
+                        cell,
+                        stars: vec![StarPoint {
+                            position_pc: (eye + DVec3::X * 0.01).to_array(),
+                            luminosity_solar: 1.0,
+                            temperature_k: 5772.0,
+                            radius_solar: 1.0,
+                            component: Component::ThinDisc,
+                            index: 0,
+                        }],
+                    },
+                );
+                field.version += 1;
+                let found = nearby.nearest(&field, eye, 6.0, &mut metrics);
+                assert!(found.is_some_and(|(distance, ..)| (distance - 0.01).abs() < 1e-9));
+            }
+        }
+        // Gathers follow movement, not every query.
+        assert!(metrics.nearby_gathers < 40, "{}", metrics.nearby_gathers);
     }
 }

@@ -280,6 +280,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   wait, render-sync time and frame-time percentiles once per second; the
   debug window's `perf` tab shows them on both clients.
   Instrumentation does not change loading policy.
+  Per-frame "nearest loaded star" questions (automatic arrival in
+  `scene::locate`, the close-up render scale in `place_camera`) go through
+  `stream::NearbyStars`: a list of stars near the eye sorted by distance from
+  where it was gathered, regathered only when the eye drifts `NEARBY_MARGIN_PC`
+  or `Starfield::version` changes. Never scan `Starfield::cells` star by star
+  every frame: the cells containing the camera hold tens of millions of stars
+  at the galactic centre. The perf tab's nearby-star scans section times it.
   The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each
