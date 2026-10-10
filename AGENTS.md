@@ -116,8 +116,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
   but are never rasterised), compact 1.25 px points, 4x MSAA (both window
-  cameras), bloom, and place star batches each frame (off, `starfield::sync`
-  leaves batch entities untouched, so they go stale if the camera moves).
+  cameras) and bloom.
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`

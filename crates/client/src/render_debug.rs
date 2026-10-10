@@ -21,10 +21,6 @@ pub enum DebugSwitch {
     /// 4x MSAA on the 3D and egui cameras.
     Msaa,
     Bloom,
-    /// Rewrite every star batch's placement each frame. Off, batches stay
-    /// where they were, so Bevy sees no change to them: for measuring that
-    /// per-entity cost with the camera still.
-    PlaceBatches,
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -35,7 +31,6 @@ pub struct RenderDebug {
     pub compact_points: bool,
     pub msaa: bool,
     pub bloom: bool,
-    pub place_batches: bool,
 }
 
 impl Default for RenderDebug {
@@ -47,20 +42,18 @@ impl Default for RenderDebug {
             compact_points: false,
             msaa: true,
             bloom: true,
-            place_batches: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 7] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 6] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
         (DebugSwitch::CompactPoints, "Compact 1.25 px points"),
         (DebugSwitch::Msaa, "4x MSAA"),
         (DebugSwitch::Bloom, "Bloom"),
-        (DebugSwitch::PlaceBatches, "Place star batches each frame"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -71,7 +64,6 @@ impl RenderDebug {
             DebugSwitch::CompactPoints => self.compact_points,
             DebugSwitch::Msaa => self.msaa,
             DebugSwitch::Bloom => self.bloom,
-            DebugSwitch::PlaceBatches => self.place_batches,
         }
     }
 
@@ -83,7 +75,6 @@ impl RenderDebug {
             DebugSwitch::CompactPoints => &mut self.compact_points,
             DebugSwitch::Msaa => &mut self.msaa,
             DebugSwitch::Bloom => &mut self.bloom,
-            DebugSwitch::PlaceBatches => &mut self.place_batches,
         } = on;
     }
 
