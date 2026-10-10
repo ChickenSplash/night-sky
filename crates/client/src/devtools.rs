@@ -528,16 +528,25 @@ fn perf(
     let mean = recent.iter().sum::<f32>() / recent.len().max(1) as f32;
     let worst = recent.iter().copied().fold(0.0, f32::max);
     let mut rows = vec![
-        ("fps", format!("{:.0}", 1000.0 / mean.max(0.001))),
-        ("frame", format!("{mean:.1} ms mean, {worst:.1} ms worst")),
+        (
+            "fps",
+            format!("{:.0}", 1000.0 / mean.max(0.001)),
+            Some("Frames per second, from the mean of the last 60 frames."),
+        ),
+        (
+            "frame",
+            format!("{mean:.1} ms mean, {worst:.1} ms worst"),
+            Some("Mean and slowest frame time over the last 60 frames."),
+        ),
     ];
     if let Some(s) = &metrics.sample {
         rows.push((
             "last second",
             format!("P95 {:.1} ms, P99 {:.1} ms", s.frame_p95_ms, s.frame_p99_ms),
+            Some("95% and 99% of last second's frames were faster than these, so stutters show here."),
         ));
     }
-    terminal::facts(ui, "debug-frames", &rows);
+    terminal::facts_with_details(ui, "debug-frames", &rows);
     frame_graph(ui, frames);
     terminal::heading(ui, "star stream");
     let Some(s) = &metrics.sample else {
@@ -547,22 +556,40 @@ fn perf(
     let aimed = field.aimed_pc.map_or("nowhere yet".into(), |[x, y, z]| {
         format!("{x:+.0}  {y:+.0}  {z:+.0} pc")
     });
-    terminal::facts(
+    terminal::facts_with_details(
         ui,
         "debug-stream",
         &[
-            ("mode", s.mode.to_lowercase()),
+            (
+                "mode",
+                s.mode.to_lowercase(),
+                Some(
+                    "Where stars are generated: a background thread or worker, or slices of each frame as a fallback.",
+                ),
+            ),
             (
                 "loaded",
                 format!("{} stars in {} cells", grouped(s.stars), grouped(s.cells)),
+                Some("Stars generated and held in memory, in cells around the camera."),
             ),
-            ("pending", format!("{} cells", grouped(s.pending))),
-            ("aimed at", aimed),
+            (
+                "pending",
+                format!("{} cells", grouped(s.pending)),
+                Some("Cells wanted around the camera but not generated yet."),
+            ),
+            (
+                "aimed at",
+                aimed,
+                Some("Where loading is centred, in parsecs from the central black hole."),
+            ),
             (
                 "generation",
                 format!(
                     "{:.0} ms for {} cells, {} cancelled",
                     s.generation_ms, s.generated_cells, s.cancelled
+                ),
+                Some(
+                    "Generating time over the last second, and jobs dropped because the camera moved on.",
                 ),
             ),
             (
@@ -571,25 +598,40 @@ fn perf(
                     "{} cells, oldest {:.0} ms",
                     s.mesh_chunks, s.mesh_wait_oldest_ms
                 ),
+                Some(
+                    "Loaded cells waiting to become GPU batches, and how long the oldest has waited.",
+                ),
             ),
-            ("mesh wait", format!("{:.0} ms average", s.mesh_wait_avg_ms)),
+            (
+                "mesh wait",
+                format!("{:.0} ms average", s.mesh_wait_avg_ms),
+                Some("Average time from a cell loading to its stars showing on screen."),
+            ),
             (
                 "render sync",
                 format!(
                     "{:.0} ms for {} chunks built",
                     s.render_sync_ms, s.built_chunks
                 ),
+                Some(
+                    "Frame time spent over the last second turning loaded stars into GPU batches.",
+                ),
             ),
         ],
     );
-    terminal::note(ui, "Timings and counts are totals over the last second.");
     terminal::heading(ui, "star draw");
     let uploaded = metrics.uploaded_stars;
     terminal::facts_with_details(
         ui,
         "debug-star-draw",
         &[
-            ("draw calls", grouped(metrics.batch_draws), None),
+            (
+                "draw calls",
+                grouped(metrics.batch_draws),
+                Some(
+                    "Star batches drawn each frame, up to 65,536 stars each; each costs CPU time, on screen or not.",
+                ),
+            ),
             (
                 "uploaded",
                 format!(
@@ -598,40 +640,51 @@ fn perf(
                     grouped(field.stars)
                 ),
                 Some(
-                    "Uploaded stars pass the CPU magnitude filter; the shader culls the rest of the faint ones and those behind the camera.",
+                    "Stars bright enough to pass the CPU filter; the shader drops the rest of the faint ones and those behind the camera.",
                 ),
             ),
-            ("vertices", grouped(uploaded * 3), None),
+            (
+                "vertices",
+                grouped(uploaded * 3),
+                Some("Three per uploaded star: one triangle the shader shapes into a point."),
+            ),
             (
                 "vertex memory",
                 format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
-                None,
+                Some("GPU memory holding the uploaded stars, 108 bytes each."),
             ),
-            ("precise sprites", grouped(metrics.precise_sprites), None),
+            (
+                "precise sprites",
+                grouped(metrics.precise_sprites),
+                Some(
+                    "Stars too close to the camera for batch precision, drawn one by one; should stay small.",
+                ),
+            ),
         ],
     );
     terminal::heading(ui, "nearest star");
-    terminal::facts(
+    terminal::facts_with_details(
         ui,
         "debug-nearby",
         &[
             (
                 "lookup time",
                 format!("{:.2} ms per frame", s.nearby_ms_per_frame),
+                Some(
+                    "Time finding the nearest star, for automatic arrival and the close-up render scale.",
+                ),
             ),
             (
                 "checked",
                 format!("{:.0} stars per frame", s.nearby_checked_per_frame),
+                Some("Stars measured by the lookups; each cell's grid keeps this low."),
             ),
             (
                 "cells",
                 format!("{:.0} searched per frame", s.nearby_cells_per_frame),
+                Some("Loaded cells close enough to hold the nearest star."),
             ),
         ],
-    );
-    terminal::note(
-        ui,
-        "For automatic system arrival and the close-up render scale. Each loaded cell sorts its stars into a grid of boxes, so a lookup checks only the boxes around the camera.",
     );
     gpu_passes(ui, diagnostics, mean);
 }
@@ -695,13 +748,23 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
         .filter(|(pass, _)| !pass.contains('/'))
         .filter_map(|(_, p)| p.gpu)
         .sum();
-    terminal::facts(
+    terminal::facts_with_details(
         ui,
         "debug-gpu-total",
-        &[(
-            "gpu total",
-            format!("{total:.1} ms of a {frame_ms:.1} ms frame"),
-        )],
+        &[
+            (
+                "gpu total",
+                format!("{total:.1} ms of a {frame_ms:.1} ms frame"),
+                Some("Near the frame time the GPU is the limit; well below it, the CPU is."),
+            ),
+            (
+                "passes",
+                format!("{}, slowest first", passes.len()),
+                Some(
+                    "Vertices and fragments are shader runs per frame; galactic stars draw in the transparent 3D pass.",
+                ),
+            ),
+        ],
     );
     let mut passes: Vec<_> = passes.into_iter().collect();
     passes.sort_by(|a, b| b.1.gpu.unwrap_or(0.0).total_cmp(&a.1.gpu.unwrap_or(0.0)));
@@ -731,10 +794,6 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
                 ui.end_row();
             }
         });
-    terminal::note(
-        ui,
-        "Shader invocations per frame. Galactic stars draw in the transparent 3D pass. A gpu total near the frame time means the GPU is the limit; well below it, the CPU is.",
-    );
 }
 
 /// `17,012,345`.
