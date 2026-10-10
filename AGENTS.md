@@ -103,12 +103,20 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   site included), with tabs `log` (an in-memory console of the last 2,000
   tracing events from `devtools::log_layers`, with level filter and grep; the
   tab shows errors and warnings logged while it was hidden), `terminal` (a
-  command line and its output), `perf` (frame graph, star-stream metrics),
+  command line and its output), `perf` (frame graph; star stream and star
+  draw facts: draw calls, uploaded stars, vertices and vertex memory; natively,
+  a GPU passes table of GPU/CPU time and vertex/fragment shader invocations
+  per render pass from Bevy's `RenderDiagnosticsPlugin`),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
-  bodies, galaxy reference views), `state` (camera; navigation: location,
+  bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
   open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
   browser). New debug readouts and switches go there, not in Settings or the
-  canvas.
+  canvas. The performance switches (`render_debug::RenderDebug`, not
+  `Navigation`; `set_debug <switch> <on>`) are for A/B tests and reset on
+  restart: freeze star streaming (the loader keeps its last aim), galactic
+  star points, shade point pixels (off, points still run the vertex shader
+  but are never rasterised), compact 1.25 px points, 4x MSAA (both window
+  cameras) and bloom.
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
@@ -300,7 +308,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   visual efficiency come from a blackbody palette by temperature (the vertex
   corner attribute carries the corner index and temperature); which stars
   load still follows bolometric luminosity. Every point is a
-  0.55 px sigma Gaussian (2 px footprint), as in a perfect camera: brightness
+  0.55 px sigma Gaussian (2 px footprint, a uniform so the compact debug
+  switch can shrink it), as in a perfect camera: brightness
   shows only in its peak, linear up to a knee and logarithmic above it, never
   in its size. Crowds are never widened or blurred.
 - `sky.rs` meters the view on the CPU (about 0.3 ms): the smooth galaxy model

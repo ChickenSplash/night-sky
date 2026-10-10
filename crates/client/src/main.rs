@@ -17,6 +17,7 @@ mod network;
 mod objects;
 mod presentation;
 mod render;
+mod render_debug;
 mod scene;
 mod sky;
 #[cfg(not(target_arch = "wasm32"))]
@@ -324,6 +325,7 @@ fn main() {
         BigSpaceDefaultPlugins,
         EguiPlugin::default(),
         render::RenderPlugin,
+        render_debug::RenderDebugPlugin,
         stream::StreamPlugin,
         starfield::StarfieldRenderPlugin,
         glow::GlowPlugin,

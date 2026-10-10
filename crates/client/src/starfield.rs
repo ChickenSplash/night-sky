@@ -4,6 +4,7 @@
 use crate::{
     Navigation, Universe,
     render::Photometry,
+    render_debug::RenderDebug,
     scene::{CameraPose, CameraRig, SpaceCamera},
     sky::{Sky, radiance_gain},
     stream::{Starfield, StreamMetrics},
@@ -84,6 +85,8 @@ struct StarMaterial {
     settings: Vec4,
     /// For batches, `PRECISE` and the visited star's body range in parsecs:
     /// points that close are drawn alone, or as the body. Zero for precise sprites.
+    /// Then debug switches (`RenderDebug`): one to skip rasterising points,
+    /// and the footprint radius in physical pixels.
     #[uniform(1)]
     near: Vec4,
     #[uniform(2)]
@@ -121,6 +124,8 @@ impl Material for StarMaterial {
 struct Batch {
     entity: Entity,
     mesh: Handle<Mesh>,
+    /// Stars uploaded, three vertices each.
+    stars: usize,
 }
 
 #[derive(Resource, Default)]
@@ -247,6 +252,7 @@ fn sync(
     nav: Res<Navigation>,
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
+    debug: Res<RenderDebug>,
     camera: Query<(&CellCoord, &ChildOf, &GlobalTransform, &Camera), With<SpaceCamera>>,
     mut placements: Query<
         (
@@ -288,6 +294,8 @@ fn sync(
         Some((system.page_star(pose.page)?.id.as_str(), range / PC_METRES))
     });
     let body_pc = body.map_or(0.0, |(_, range)| range);
+    let skip_pixels = if debug.point_pixels { 0.0 } else { 1.0 };
+    let radius_px = debug.point_radius_px();
     let mut star_material = |precise: f32| {
         materials.add(StarMaterial {
             settings: Vec4::new(
@@ -296,7 +304,7 @@ fn sync(
                 gain,
                 realistic,
             ),
-            near: Vec4::new(precise, 0.0, 0.0, 0.0),
+            near: Vec4::new(precise, 0.0, skip_pixels, radius_px),
             palette: Palette::new(nav.physical),
         })
     };
@@ -314,12 +322,16 @@ fn sync(
                 || m.settings.z != gain
                 || m.settings.w != realistic
                 || m.near.y != hide
+                || m.near.z != skip_pixels
+                || m.near.w != radius_px
         }) && let Some(m) = materials.get_mut(handle)
         {
             m.settings.x = scale;
             m.settings.z = gain;
             m.settings.w = realistic;
             m.near.y = hide;
+            m.near.z = skip_pixels;
+            m.near.w = radius_px;
         }
     }
     let origin = rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
@@ -402,6 +414,7 @@ fn sync(
             batches.active.entry(owner).or_default().push(Batch {
                 entity,
                 mesh: handle,
+                stars: visible,
             });
         }
         if end < stars.len() {
@@ -413,10 +426,16 @@ fn sync(
     }
     // Camera-relative subtraction in f64 *before* conversion to GPU floats.
     let factor = PC_METRES / pose.render_scale();
+    let shown = if debug.galactic_points {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    let (mut draws, mut uploaded) = (0, 0);
     for (&owner, entities) in &batches.active {
         let delta = (DVec3::from_array(owner.centre_pc()) - eye) * factor;
         let centre = camera_transform.translation() + delta.as_vec3();
-        for &Batch { entity, .. } in entities {
+        for &Batch { entity, stars, .. } in entities {
             if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
                 placements.get_mut(entity)
             {
@@ -424,10 +443,14 @@ fn sync(
                 *transform =
                     Transform::from_translation(centre).with_scale(Vec3::splat(factor as f32));
                 *global = GlobalTransform::from(*transform);
-                *visibility = Visibility::Inherited;
+                *visibility = shown;
+                draws += 1;
+                uploaded += stars;
             }
         }
     }
+    metrics.batch_draws = if debug.galactic_points { draws } else { 0 };
+    metrics.uploaded_stars = uploaded;
     // Close up, each star is placed alone by an f64 subtraction. The visited
     // star's sprite waits, hidden, while its body is drawn at the exact position.
     if changed
@@ -486,7 +509,7 @@ fn sync(
             *transform = Transform::from_translation(centre).with_scale(Vec3::splat(factor as f32));
             *global = GlobalTransform::from(*transform);
             let drawn = body.is_some_and(|(id, _)| id == candidate.id);
-            *visibility = if distance < radius && !drawn {
+            *visibility = if distance < radius && !drawn && debug.galactic_points {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden
@@ -512,6 +535,7 @@ fn sync(
         }
         keep
     });
+    metrics.precise_sprites = sprites.len();
     metrics.mesh_queue = batches.queued.len();
     metrics.oldest_mesh_ms = batches
         .queued

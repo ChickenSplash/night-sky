@@ -5,10 +5,12 @@ use crate::actions::{Display, GalaxyReference, UiCommand};
 use crate::command_line::{self, Source, Typed};
 use crate::presentation::PresentationMode;
 use crate::render::{Lights, exposure_caption};
+use crate::render_debug::RenderDebug;
 use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
 use crate::stream::{Starfield, StreamMetrics};
 use crate::terminal::{self, DIM, TEXT};
 use crate::{Clock, Navigation, Selection, Universe, Visit};
+use bevy::diagnostic::DiagnosticsStore;
 use bevy::log::tracing::{
     Event, Subscriber,
     field::{Field, Visit as Fields},
@@ -238,6 +240,8 @@ type Rendering<'w> = (
     Res<'w, StreamMetrics>,
     Res<'w, Lights>,
     Res<'w, crate::sky::Sky>,
+    Res<'w, RenderDebug>,
+    Option<Res<'w, DiagnosticsStore>>,
 );
 
 pub fn draw(
@@ -257,7 +261,7 @@ pub fn draw(
     let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (starfield, metrics, lights, sky) = rendering;
+    let (starfield, metrics, lights, sky, debug, diagnostics) = rendering;
     if tools.frames.len() == FRAMES {
         tools.frames.pop_front();
     }
@@ -304,8 +308,14 @@ pub fn draw(
                     .id_salt("debug-tab")
                     .auto_shrink(false)
                     .show(ui, |ui| match tab {
-                        Tab::Perf => perf(ui, &tools.frames, &metrics, &starfield),
-                        Tab::Render => render(ui, &nav, &lights, &sky, &mut out),
+                        Tab::Perf => perf(
+                            ui,
+                            &tools.frames,
+                            &metrics,
+                            &starfield,
+                            diagnostics.as_deref(),
+                        ),
+                        Tab::Render => render(ui, &nav, &lights, &sky, &debug, &mut out),
                         Tab::State => state(ui, &universe, &nav, &clock, &rig, &pose, &velocity),
                         _ => report = tools_tab(ui, &tools),
                     });
@@ -506,23 +516,225 @@ fn level_colour(level: usize) -> egui::Color32 {
     }
 }
 
-fn perf(ui: &mut egui::Ui, frames: &VecDeque<f32>, metrics: &StreamMetrics, field: &Starfield) {
+fn perf(
+    ui: &mut egui::Ui,
+    frames: &VecDeque<f32>,
+    metrics: &StreamMetrics,
+    field: &Starfield,
+    diagnostics: Option<&DiagnosticsStore>,
+) {
     terminal::heading(ui, "frames");
     let recent: Vec<f32> = frames.iter().rev().take(60).copied().collect();
     let mean = recent.iter().sum::<f32>() / recent.len().max(1) as f32;
     let worst = recent.iter().copied().fold(0.0, f32::max);
-    terminal::facts(
-        ui,
-        "debug-frames",
-        &[
-            ("fps", format!("{:.0}", 1000.0 / mean.max(0.001))),
-            ("frame", format!("{mean:.1} ms mean, {worst:.1} ms worst")),
-        ],
-    );
+    let mut rows = vec![
+        ("fps", format!("{:.0}", 1000.0 / mean.max(0.001))),
+        ("frame", format!("{mean:.1} ms mean, {worst:.1} ms worst")),
+    ];
+    if let Some(s) = &metrics.sample {
+        rows.push((
+            "last second",
+            format!("P95 {:.1} ms, P99 {:.1} ms", s.frame_p95_ms, s.frame_p99_ms),
+        ));
+    }
+    terminal::facts(ui, "debug-frames", &rows);
     frame_graph(ui, frames);
     terminal::heading(ui, "star stream");
-    terminal::note(ui, &metrics.caption);
-    terminal::note(ui, &field.summary());
+    let Some(s) = &metrics.sample else {
+        terminal::note(ui, "Measuring…");
+        return;
+    };
+    let aimed = field.aimed_pc.map_or("nowhere yet".into(), |[x, y, z]| {
+        format!("{x:+.0}  {y:+.0}  {z:+.0} pc")
+    });
+    terminal::facts(
+        ui,
+        "debug-stream",
+        &[
+            ("mode", s.mode.to_lowercase()),
+            (
+                "loaded",
+                format!("{} stars in {} cells", grouped(s.stars), grouped(s.cells)),
+            ),
+            ("pending", format!("{} cells", grouped(s.pending))),
+            ("aimed at", aimed),
+            (
+                "generation",
+                format!(
+                    "{:.0} ms for {} cells, {} cancelled",
+                    s.generation_ms, s.generated_cells, s.cancelled
+                ),
+            ),
+            (
+                "mesh queue",
+                format!(
+                    "{} cells, oldest {:.0} ms",
+                    s.mesh_chunks, s.mesh_wait_oldest_ms
+                ),
+            ),
+            ("mesh wait", format!("{:.0} ms average", s.mesh_wait_avg_ms)),
+            (
+                "render sync",
+                format!(
+                    "{:.0} ms for {} chunks built",
+                    s.render_sync_ms, s.built_chunks
+                ),
+            ),
+        ],
+    );
+    terminal::note(ui, "Timings and counts are totals over the last second.");
+    terminal::heading(ui, "star draw");
+    let uploaded = metrics.uploaded_stars;
+    terminal::facts(
+        ui,
+        "debug-star-draw",
+        &[
+            ("draw calls", grouped(metrics.batch_draws)),
+            (
+                "uploaded",
+                format!(
+                    "{} of {} loaded stars",
+                    grouped(uploaded),
+                    grouped(field.stars)
+                ),
+            ),
+            ("vertices", grouped(uploaded * 3)),
+            (
+                "vertex memory",
+                format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
+            ),
+            ("precise sprites", grouped(metrics.precise_sprites)),
+        ],
+    );
+    terminal::note(
+        ui,
+        "Uploaded stars pass the CPU magnitude filter; the shader culls the rest of the faint ones and those behind the camera.",
+    );
+    gpu_passes(ui, diagnostics, mean);
+}
+
+/// Vertex bytes per uploaded star: three corners of position, corner and
+/// temperature, and colour with luminosity (`starfield::mesh`).
+const STAR_BYTES: usize = 3 * (12 + 8 + 16);
+
+/// GPU and render-thread time, and shader invocations, per render pass, from
+/// Bevy's render diagnostics (native only: WebGL 2 has no timestamp queries).
+fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_ms: f32) {
+    #[derive(Default)]
+    struct Pass {
+        gpu: Option<f64>,
+        cpu: Option<f64>,
+        vertices: Option<f64>,
+        fragments: Option<f64>,
+    }
+    terminal::heading(ui, "gpu passes");
+    let mut passes = std::collections::BTreeMap::<&str, Pass>::new();
+    for diagnostic in diagnostics.iter().flat_map(|store| store.iter()) {
+        let Some((pass, field)) = diagnostic
+            .path()
+            .as_str()
+            .strip_prefix("render/")
+            .and_then(|rest| rest.rsplit_once('/'))
+        else {
+            continue;
+        };
+        // Passes that stopped running, such as bloom once it is off, keep
+        // their last values; leave them out.
+        let Some(latest) = diagnostic
+            .measurement()
+            .filter(|m| m.time.elapsed().as_secs_f32() < 1.0)
+        else {
+            continue;
+        };
+        let value = Some(diagnostic.smoothed().unwrap_or(latest.value));
+        let entry = passes.entry(pass).or_default();
+        match field {
+            "elapsed_gpu" => entry.gpu = value,
+            "elapsed_cpu" => entry.cpu = value,
+            "vertex_shader_invocations" => entry.vertices = value,
+            "fragment_shader_invocations" => entry.fragments = value,
+            _ => {}
+        }
+    }
+    if passes.is_empty() {
+        terminal::note(
+            ui,
+            if cfg!(target_arch = "wasm32") {
+                "Per-pass GPU timings are native only."
+            } else {
+                "Waiting for render diagnostics…"
+            },
+        );
+        return;
+    }
+    let total: f64 = passes
+        .iter()
+        .filter(|(pass, _)| !pass.contains('/'))
+        .filter_map(|(_, p)| p.gpu)
+        .sum();
+    terminal::facts(
+        ui,
+        "debug-gpu-total",
+        &[(
+            "gpu total",
+            format!("{total:.1} ms of a {frame_ms:.1} ms frame"),
+        )],
+    );
+    let mut passes: Vec<_> = passes.into_iter().collect();
+    passes.sort_by(|a, b| b.1.gpu.unwrap_or(0.0).total_cmp(&a.1.gpu.unwrap_or(0.0)));
+    let cell = |ui: &mut egui::Ui, text: String, colour| {
+        ui.label(
+            egui::RichText::new(text)
+                .font(terminal::font())
+                .color(colour),
+        );
+    };
+    let ms = |v: Option<f64>| v.map_or("·".into(), |v| format!("{v:.2} ms"));
+    let count = |v: Option<f64>| v.map_or("·".into(), si);
+    egui::Grid::new("debug-gpu-passes")
+        .num_columns(5)
+        .spacing(egui::vec2(16.0, 2.0))
+        .show(ui, |ui| {
+            for heading in ["pass", "gpu", "cpu", "vertices", "fragments"] {
+                cell(ui, heading.into(), DIM);
+            }
+            ui.end_row();
+            for (name, pass) in passes {
+                cell(ui, name.into(), DIM);
+                cell(ui, ms(pass.gpu), TEXT);
+                cell(ui, ms(pass.cpu), TEXT);
+                cell(ui, count(pass.vertices), TEXT);
+                cell(ui, count(pass.fragments), TEXT);
+                ui.end_row();
+            }
+        });
+    terminal::note(
+        ui,
+        "Shader invocations per frame. Galactic stars draw in the transparent 3D pass. A gpu total near the frame time means the GPU is the limit; well below it, the CPU is.",
+    );
+}
+
+/// `17,012,345`.
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `51.2M`, `830k`.
+fn si(n: f64) -> String {
+    match n {
+        n if n >= 1e9 => format!("{:.1}G", n / 1e9),
+        n if n >= 1e6 => format!("{:.1}M", n / 1e6),
+        n if n >= 1e3 => format!("{:.0}k", n / 1e3),
+        n => format!("{n:.0}"),
+    }
 }
 
 /// Frame times, newest on the right, against 60 and 30 fps guides.
@@ -558,6 +770,7 @@ fn render(
     nav: &Navigation,
     lights: &Lights,
     sky: &crate::sky::Sky,
+    debug: &RenderDebug,
     out: &mut Vec<UiCommand>,
 ) {
     terminal::heading(ui, "exposure");
@@ -597,6 +810,17 @@ fn render(
         }
     });
     terminal::note(ui, "Smooth glow only: no dust or spiral detail yet.");
+    terminal::heading(ui, "performance switches");
+    for (switch, label) in RenderDebug::SWITCHES {
+        let on = debug.get(switch);
+        if terminal::check(ui, on, label, true) {
+            out.push(UiCommand::SetDebug { switch, on: !on });
+        }
+    }
+    terminal::note(
+        ui,
+        "For A/B tests against the perf tab; they reset on restart. Freeze first so the star count holds still. Without pixel shading, points still run the vertex shader, which separates vertex cost from fill. Compact points clip a little of each star's light.",
+    );
 }
 
 fn state(

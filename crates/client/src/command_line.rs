@@ -115,7 +115,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 17] = [
+pub const USAGE: [Usage; 18] = [
     Usage {
         name: "pick_star",
         fields: &["id"],
@@ -200,6 +200,11 @@ pub const USAGE: [Usage; 17] = [
         name: "galaxy_reference",
         fields: &["view"],
         about: "inside, face_on or edge_on",
+    },
+    Usage {
+        name: "set_debug",
+        fields: &["switch", "on"],
+        about: "freeze_stream, galactic_points, point_pixels, compact_points, msaa or bloom; true or false",
     },
 ];
 
@@ -345,6 +350,7 @@ mod tests {
                     "rate" | "degrees" | "speed" => "60",
                     "paused" | "on" => "true",
                     "option" => "orbits",
+                    "switch" => "bloom",
                     "presentation_mode" => "table",
                     "view" => "inside",
                     _ => "id",

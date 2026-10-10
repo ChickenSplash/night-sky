@@ -69,6 +69,11 @@ pub enum UiCommand {
     GalaxyReference {
         view: GalaxyReference,
     },
+    /// Debug-only performance switches (`render_debug.rs`).
+    SetDebug {
+        switch: crate::render_debug::DebugSwitch,
+        on: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -132,6 +137,7 @@ pub fn apply(
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     field: Res<crate::stream::Starfield>,
+    mut debug: ResMut<crate::render_debug::RenderDebug>,
 ) {
     let galaxy = &universe.0;
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
@@ -245,6 +251,7 @@ pub fn apply(
             },
             UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
             UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
+            UiCommand::SetDebug { switch, on } => debug.set(*switch, *on),
         }
     }
 }
@@ -390,6 +397,7 @@ mod tests {
             .init_resource::<Navigation>()
             .init_resource::<Clock>()
             .init_resource::<crate::stream::Starfield>()
+            .init_resource::<crate::render_debug::RenderDebug>()
             .add_systems(Update, apply);
         send(&mut app, commands);
         app

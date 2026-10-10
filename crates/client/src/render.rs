@@ -680,12 +680,21 @@ fn switch_camera(
     mut commands: Commands,
     nav: Res<Navigation>,
     mut clear: ResMut<ClearColor>,
-    space: Query<(Entity, Has<Hdr>), With<SpaceCamera>>,
+    debug: Res<crate::render_debug::RenderDebug>,
+    space: Query<(Entity, Has<Hdr>, Has<Bloom>), With<SpaceCamera>>,
     overlay: Query<Entity, With<bevy_egui::PrimaryEguiContext>>,
 ) {
-    let Ok((entity, hdr)) = space.single() else {
+    let Ok((entity, hdr, bloom)) = space.single() else {
         return;
     };
+    let wants_bloom = nav.realistic && debug.bloom;
+    if bloom != wants_bloom {
+        if wants_bloom {
+            commands.entity(entity).insert(Bloom::NATURAL);
+        } else {
+            commands.entity(entity).remove::<Bloom>();
+        }
+    }
     if nav.realistic == hdr {
         return;
     }
@@ -702,9 +711,9 @@ fn switch_camera(
         }
     }
     if nav.realistic {
-        commands.entity(entity).insert((Hdr, Bloom::NATURAL));
+        commands.entity(entity).insert(Hdr);
     } else {
-        commands.entity(entity).remove::<(Bloom, Hdr)>();
+        commands.entity(entity).remove::<Hdr>();
     }
 }
 

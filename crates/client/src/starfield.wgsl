@@ -16,15 +16,15 @@ struct Settings { values: vec4<f32> }
 // x: batch points closer than this times their offset from the mesh origin are
 // hidden. This is smaller than the precise sprite's visibility radius, so both
 // overlap during the handoff (`starfield.rs`). y: body range in parsecs.
-// Both zero for sprites.
+// Both zero for sprites. z: one to skip rasterising every point, w: footprint
+// radius in physical pixels (debug switches, `render_debug.rs`).
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> near: vec4<f32>;
 // Unit-luminance colour, then visual efficiency, log-spaced in temperature
 // from 1,000 to 50,000 K (`starfield.rs`).
 struct Palette { colours: array<vec4<f32>, 32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> palette: Palette;
 const PI: f32 = 3.14159265;
-// A point's footprint radius and Gaussian sigma, in physical pixels.
-const RADIUS_PX: f32 = 2.0;
+// A point's Gaussian sigma in physical pixels. Its footprint radius is near.w.
 const SIGMA_PX: f32 = 0.55;
 // Point peaks up to this are linear; beyond, they grow logarithmically.
 const KNEE: f32 = 1.0;
@@ -64,7 +64,7 @@ fn vertex(v: Vertex) -> Output {
     let ratio = v.colour.a / max(distance_pc * distance_pc, 1e-16);
     // The far plane is 1e22 render units; reject bodies behind the camera.
     if clip.w <= 0.0 || distance_pc < max(near.x * length(v.position), near.y)
-        || ratio < settings.values.y {
+        || ratio < settings.values.y || near.z > 0.5 {
         clip = vec4(2.0, 2.0, 0.0, 1.0);
     }
     // Linear in apparent flux, up to the knee. Exposure and bloom operate on
@@ -84,7 +84,7 @@ fn vertex(v: Vertex) -> Output {
     // Clip space spans two units per viewport width.
     var corner = vec2(-1.0, -1.0);
     if v.corner.x > 1.5 { corner = vec2(-1.0, 3.0); } else if v.corner.x > 0.5 { corner = vec2(3.0, -1.0); }
-    clip = vec4(clip.xy + corner * clip.w * 2.0 * RADIUS_PX / width, clip.zw);
+    clip = vec4(clip.xy + corner * clip.w * 2.0 * near.w / width, clip.zw);
     out.position = clip;
     out.corner = corner;
     out.colour = colour;
@@ -95,6 +95,6 @@ fn vertex(v: Vertex) -> Output {
 fn fragment(in: Output) -> @location(0) vec4<f32> {
     let r2 = dot(in.corner, in.corner);
     if r2 > 1.0 { discard; }
-    let px2 = r2 * RADIUS_PX * RADIUS_PX;
+    let px2 = r2 * near.w * near.w;
     return vec4(in.colour * in.peak * exp(-px2 / (2.0 * SIGMA_PX * SIGMA_PX)), 0.0);
 }

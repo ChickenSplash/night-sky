@@ -52,6 +52,11 @@ pub struct StreamMetrics {
     pub loaded_at: HashMap<Cell, Instant>,
     pub mesh_queue: usize,
     pub oldest_mesh_ms: f64,
+    /// Star batches drawn this frame, one draw call each.
+    pub batch_draws: usize,
+    /// Stars in uploaded batches, after the CPU magnitude filter.
+    pub uploaded_stars: usize,
+    pub precise_sprites: usize,
     pub built_batches: usize,
     pub mesh_wait_ms: f64,
     pub mesh_wait_samples: usize,
@@ -73,6 +78,9 @@ impl Default for StreamMetrics {
             loaded_at: HashMap::new(),
             mesh_queue: 0,
             oldest_mesh_ms: 0.0,
+            batch_draws: 0,
+            uploaded_stars: 0,
+            precise_sprites: 0,
             built_batches: 0,
             mesh_wait_ms: 0.0,
             mesh_wait_samples: 0,
@@ -94,6 +102,8 @@ pub struct StreamSample {
     pub cells: usize,
     pub pending: usize,
     pub mesh_chunks: usize,
+    pub batch_draws: usize,
+    pub uploaded_stars: usize,
     pub generation_ms: f64,
     pub generated_cells: usize,
     pub cancelled: usize,
@@ -124,6 +134,8 @@ impl StreamMetrics {
             cells: field.cells.len(),
             pending: field.pending,
             mesh_chunks: self.mesh_queue,
+            batch_draws: self.batch_draws,
+            uploaded_stars: self.uploaded_stars,
             generation_ms: self.generation.as_secs_f64() * 1000.0,
             generated_cells: self.generated,
             cancelled: self.cancelled,
@@ -224,14 +236,17 @@ fn stream(
     mut metrics: ResMut<StreamMetrics>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
+    debug: Res<crate::render_debug::RenderDebug>,
 ) {
     let camera = camera_pc(&GalaxyModel::milky_way(), &rig, &pose);
-    let moved = field.aimed_pc.is_none_or(|aimed| {
-        (0..3)
-            .map(|axis| (camera[axis] - aimed[axis]).powi(2))
-            .sum::<f64>()
-            > AIM_PC * AIM_PC
-    });
+    // Frozen, the loader finishes its current aim and nothing else.
+    let moved = !debug.freeze_stream
+        && field.aimed_pc.is_none_or(|aimed| {
+            (0..3)
+                .map(|axis| (camera[axis] - aimed[axis]).powi(2))
+                .sum::<f64>()
+                > AIM_PC * AIM_PC
+        });
     let aim = moved.then(|| {
         field.aimed_pc = Some(camera);
         camera
