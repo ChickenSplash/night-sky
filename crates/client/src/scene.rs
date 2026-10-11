@@ -392,7 +392,14 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
         root.spawn_spatial((
             SpaceCamera,
             FloatingOrigin,
-            Camera3d::default(),
+            Camera3d {
+                // Read by the star splat's depth test (`starfield_splat.rs`).
+                depth_texture_usages:
+                    (bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
+                        | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
+                        .into(),
+                ..default()
+            },
             Projection::Perspective(PerspectiveProjection {
                 near: 1000.0,
                 far: 1e22,

@@ -134,7 +134,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
   but are never rasterised), compact 1.25 px points, 4x MSAA (both window
-  cameras), bloom and cull blocks outside the view (on by default).
+  cameras), bloom, cull blocks outside the view (on by default) and splat
+  stars (compute, native only, on by default natively).
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
@@ -382,6 +383,24 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   then scales to render units. Filter points beyond 1.25 times their apparent
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
   retained cells after the camera travels 0.2 of the tier's reach.
+  Natively, while the `splat_stars` switch is on (default),
+  `starfield_splat.rs` draws the same batches by compute instead: the
+  `StarSplat` node (between `MainOpaquePass` and `MainTransmissivePass`, GPU
+  span `star_splat`) clears a fixed-point RGB light buffer per pixel
+  (1/65,536 steps, rounding dithered), then `starfield_splat.wgsl` runs one
+  thread per star per draw, applying the same cutoff, near hiding, colour and
+  knee as `starfield.wgsl` (keep them in step), depth-tests the star's centre
+  against the opaque bodies (the space camera's depth texture has
+  `TEXTURE_BINDING` for this), and adds its 0.55 px Gaussian sampled at the
+  3x3 pixels around it with atomics. One full-screen draw in `Transparent3d`
+  (`starfield_composite.wgsl`) adds the buffer to the frame, so bloom and
+  MSAA resolve as before. Batch buffers carry `STORAGE` natively; each
+  `StarDraw::near.z` is its star count. At the galactic centre most stars are
+  far below a pixel apart and the instanced path's cost was per-triangle
+  setup, not shading. Under splatting the compact-points switch does nothing
+  and shade point pixels off skips the splat. The GPU test's star pass sums
+  `main_transparent_pass_3d` and `star_splat`, and records which path ran.
+  The browser (WebGL 2, no compute) always uses the instanced path.
   `starfield::Sight` skips batches outside the view each frame (the
   `cull_blocks` switch): a sphere around each batch's block, in f64 against
   the view's four side planes, widened by the point footprint.

@@ -164,6 +164,8 @@ impl Plugin for StarfieldRenderPlugin {
             .init_resource::<Batches>()
             .init_resource::<Precise>()
             .add_systems(PostUpdate, sync.after(crate::sky::expose));
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(crate::starfield_splat::StarSplatPlugin);
     }
 }
 
@@ -289,6 +291,7 @@ fn sync(
     });
     frame.draws.clear();
     frame.precise.clear();
+    frame.splat = debug.splat_stars && cfg!(not(target_arch = "wasm32"));
     // Within its body range the visited star is drawn as a body, so the batches
     // hide its point there, and it has no sprite.
     let body = nav.system(&universe.0).and_then(|system| {
@@ -465,7 +468,7 @@ fn sync(
                     origin: (camera_at + offset * factor)
                         .as_vec3()
                         .extend(factor as f32),
-                    near: batch_near,
+                    near: batch_near.with_z(stars as f32),
                 });
             }
         }
@@ -504,10 +507,11 @@ fn sync(
     }
     metrics.precise_sprites = frame.precise.len();
     if !frame.precise.is_empty() {
+        let precise = frame.precise.len() as f32;
         frame.draws.push(StarDraw {
             batch: None,
             origin: camera_at.as_vec3().extend(factor as f32),
-            near: Vec4::ZERO,
+            near: Vec4::new(0.0, 0.0, precise, 0.0),
         });
     }
     metrics.mesh_queue = batches.queued.len();

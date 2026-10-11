@@ -23,6 +23,9 @@ pub enum DebugSwitch {
     Bloom,
     /// Hide star batches whose grid block lies outside the view.
     CullBlocks,
+    /// Natively, draw galactic stars by compute splatting rather than as
+    /// instanced triangles (`starfield_splat.rs`). No effect in the browser.
+    SplatStars,
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -34,6 +37,7 @@ pub struct RenderDebug {
     pub msaa: bool,
     pub bloom: bool,
     pub cull_blocks: bool,
+    pub splat_stars: bool,
 }
 
 impl Default for RenderDebug {
@@ -46,12 +50,13 @@ impl Default for RenderDebug {
             msaa: true,
             bloom: true,
             cull_blocks: true,
+            splat_stars: cfg!(not(target_arch = "wasm32")),
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 7] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 8] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -59,6 +64,7 @@ impl RenderDebug {
         (DebugSwitch::Msaa, "4x MSAA"),
         (DebugSwitch::Bloom, "Bloom"),
         (DebugSwitch::CullBlocks, "Cull blocks outside the view"),
+        (DebugSwitch::SplatStars, "Splat stars (compute)"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -70,6 +76,7 @@ impl RenderDebug {
             DebugSwitch::Msaa => self.msaa,
             DebugSwitch::Bloom => self.bloom,
             DebugSwitch::CullBlocks => self.cull_blocks,
+            DebugSwitch::SplatStars => self.splat_stars,
         }
     }
 
@@ -82,6 +89,7 @@ impl RenderDebug {
             DebugSwitch::Msaa => &mut self.msaa,
             DebugSwitch::Bloom => &mut self.bloom,
             DebugSwitch::CullBlocks => &mut self.cull_blocks,
+            DebugSwitch::SplatStars => &mut self.splat_stars,
         } = on;
     }
 
