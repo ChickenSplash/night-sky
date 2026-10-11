@@ -1,5 +1,15 @@
 use super::*;
+use crate::flight::Pose;
+use crate::presentation::PresentationMode;
+use crate::{Clock, Navigation, Universe};
+use bevy::math::{DQuat, DVec3};
+use space_shared::{Orbit, Spin};
 use space_simulation::AU_METRES;
+use space_simulation::{
+    LY_METRES, SUN_RADIUS_METRES,
+    galaxy::{GalaxyModel, PC_METRES},
+    position,
+};
 
 #[test]
 fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
