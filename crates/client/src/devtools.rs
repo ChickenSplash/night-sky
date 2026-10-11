@@ -700,12 +700,14 @@ fn perf(
                     grouped(metrics.drawn_stars * 3),
                     grouped(uploaded * 3)
                 ),
-                Some("Three per star: one triangle the shader shapes into a point."),
+                Some(
+                    "Vertex shader runs, three per star: one instanced triangle the shader shapes into a point.",
+                ),
             ),
             (
                 "vertex memory",
                 format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
-                Some("GPU memory holding the uploaded stars, 108 bytes each."),
+                Some("GPU memory holding the uploaded stars, 20 bytes each."),
             ),
             (
                 "precise sprites",
@@ -743,9 +745,8 @@ fn perf(
     gpu_passes(ui, diagnostics, mean);
 }
 
-/// Vertex bytes per uploaded star: three corners of position, corner and
-/// temperature, and colour with luminosity (`starfield::mesh`).
-const STAR_BYTES: usize = 3 * (12 + 8 + 16);
+/// GPU bytes per uploaded star (`starfield_render::StarInstance`).
+const STAR_BYTES: usize = size_of::<crate::starfield_render::StarInstance>();
 
 /// GPU and render-thread time, and shader invocations, per render pass, from
 /// Bevy's render diagnostics (native only: WebGL 2 has no timestamp queries).
