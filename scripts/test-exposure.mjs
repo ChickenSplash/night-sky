@@ -54,14 +54,21 @@ try {
   // Compares a reference capture with another: mean brightness, mean change
   // where the reference is faint (the galaxy, which only Exposure sets), white
   // pixels (bright stars' size) and the spread of a lit patch.
-  const compare = (reference, other, lit) => JSON.parse(execFileSync('python', ['-c', `
+  // `around` ([x, y, r]) leaves a body and its streaks out of the faint check.
+  const compare = (reference, other, lit, around) => JSON.parse(execFileSync('python', ['-c', `
 import json, sys
 from PIL import Image, ImageStat
-a_path, b_path, lit = json.load(sys.stdin)
+a_path, b_path, lit, around = json.load(sys.stdin)
 box = (480, 200, 1200, 700)
 a, b = [Image.open(p).convert('L').crop(box) for p in (a_path, b_path)]
 pa, pb = list(a.get_flattened_data()), list(b.get_flattened_data())
-faint = [abs(x - y) for x, y in zip(pa, pb) if x < 150]
+width = box[2] - box[0]
+def outside(i):
+    if not around:
+        return True
+    x, y = box[0] + i % width, box[1] + i // width
+    return (x - around[0]) ** 2 + (y - around[1]) ** 2 > around[2] ** 2
+faint = [abs(x - y) for i, (x, y) in enumerate(zip(pa, pb)) if x < 150 and outside(i)]
 def stats(path):
     im = Image.open(path).convert('L')
     return ImageStat.Stat(im.crop(tuple(lit))).stddev[0] if lit else 0
@@ -70,7 +77,7 @@ print(json.dumps(dict(
     faintChange=sum(faint) / max(len(faint), 1),
     white=[sum(x >= 245 for x in pa), sum(x >= 245 for x in pb)],
     litSpread=[stats(a_path), stats(b_path)])))
-`], { input: JSON.stringify([reference, other, lit]), encoding: 'utf8' }));
+`], { input: JSON.stringify([reference, other, lit, around]), encoding: 'utf8' }));
   const linear = await capture('linear', 0, 0);
   assert.deepEqual(errors, [], 'Browser or shader errors');
   const dim = compare(linear, await capture('dim', -6, 0));
@@ -92,7 +99,8 @@ print(json.dumps(dict(
   await page.waitForTimeout(5000);
   const lit = [805, 455, 865, 545];
   const planetLinear = await capture('planet-linear', 0, 0);
-  results.planet = compare(planetLinear, await capture('planet-compressed', 0, 1), lit);
+  // The overexposed planet streaks over the galaxy at 0% and not at 100%.
+  results.planet = compare(planetLinear, await capture('planet-compressed', 0, 1), lit, [800, 498, 320]);
   assert(results.planet.faintChange < 0.5, 'Planet compression changed the faint galaxy');
   assert(results.planet.litSpread[1] > results.planet.litSpread[0] + 5, 'Exposing the planet for itself did not show its shading');
 

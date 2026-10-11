@@ -1,8 +1,10 @@
 // Galactic stars, one instance each (`starfield_render.rs`). Each is an
 // oversized triangle expanded around its projected centre; the fragment
 // shader cuts out a small Gaussian. Every star has the same one- to two-pixel
-// profile, as in a perfect camera: brightness shows in its peak, never its size.
+// profile, as in a perfect camera: brightness shows in its peak and, above
+// white, in its glare (`hdr.wgsl`).
 #import bevy_render::view::View
+#import night_sky::hdr::encode
 
 @group(0) @binding(0) var<uniform> view: View;
 
@@ -34,8 +36,13 @@ struct Draw {
 @group(2) @binding(1) var<uniform> draw: Draw;
 
 const PI: f32 = 3.14159265;
-// A point's Gaussian sigma in physical pixels. Its footprint radius is debug.y.
+// A point's Gaussian sigma in physical pixels, the camera's point spread
+// (`render::PSF_SIGMA_PX`). Its footprint radius is debug.y, wider for a
+// star bright enough to show beyond it.
 const SIGMA_PX: f32 = 0.55;
+// Footprints reach until the Gaussian is this faint, at most `REACH_PX`.
+const FLOOR: f32 = 1.0 / 1024.0;
+const REACH_PX: f32 = 12.0;
 
 struct Star {
     // Parsecs from the draw's origin.
@@ -50,6 +57,8 @@ struct Output {
     @location(0) corner: vec2<f32>,
     @location(1) colour: vec3<f32>,
     @location(2) peak: f32,
+    // Footprint radius in physical pixels.
+    @location(3) radius: f32,
 }
 
 @vertex
@@ -66,9 +75,9 @@ fn vertex(star: Star) -> Output {
         || ratio < globals.settings.y || globals.debug.x > 0.5 {
         clip = vec4(2.0, 2.0, 0.0, 1.0);
     }
-    // Linear in apparent flux, up to the HDR safety cap. Exposure and bloom operate on
-    // this HDR colour; in the wireframe view it is tone-mapped by the normal
-    // SDR target.
+    // Linear in apparent flux; above white it is stored as glare
+    // (`hdr.wgsl`). In the wireframe view it is tone-mapped by the normal SDR
+    // target.
     let x = clamp(log(star.temperature / 1000.0) / log(50.0) * 31.0, 0.0, 31.0);
     let i = min(u32(x), 30u);
     var light = globals.settings.z * ratio;
@@ -81,8 +90,12 @@ fn vertex(star: Star) -> Output {
         colour = mix(globals.wireframe[i], globals.wireframe[i + 1u], x - f32(i)).rgb;
     }
     let peak = light / (2.0 * PI * SIGMA_PX * SIGMA_PX);
+    var radius = globals.debug.y;
     if globals.settings.w > 0.5 {
-        out.peak = min(peak, 20000.0 / max(max(colour.r, colour.g), max(colour.b, 1.0)));
+        out.peak = peak;
+        let brightest = peak * max(max(colour.r, colour.g), colour.b);
+        let faint = SIGMA_PX * sqrt(2.0 * log(max(brightest / FLOOR, 1.0)));
+        radius = max(radius, min(faint, REACH_PX));
     } else {
         // Preserve the old wireframe point rendering only.
         out.peak = select(1.0 + log(max(peak, 1.0)), peak, peak <= 1.0);
@@ -91,8 +104,9 @@ fn vertex(star: Star) -> Output {
     // Clip space spans two units per viewport width.
     var corner = vec2(-1.0, -1.0);
     if star.corner == 1u { corner = vec2(3.0, -1.0); } else if star.corner == 2u { corner = vec2(-1.0, 3.0); }
-    clip = vec4(clip.xy + corner * clip.w * 2.0 * globals.debug.y / width, clip.zw);
+    clip = vec4(clip.xy + corner * clip.w * 2.0 * radius / width, clip.zw);
     out.position = clip;
+    out.radius = radius;
     out.corner = corner;
     out.colour = colour;
     return out;
@@ -102,6 +116,10 @@ fn vertex(star: Star) -> Output {
 fn fragment(in: Output) -> @location(0) vec4<f32> {
     let r2 = dot(in.corner, in.corner);
     if r2 > 1.0 { discard; }
-    let px2 = r2 * globals.debug.y * globals.debug.y;
-    return vec4(in.colour * in.peak * exp(-px2 / (2.0 * SIGMA_PX * SIGMA_PX)), 0.0);
+    let px2 = r2 * in.radius * in.radius;
+    let light = in.colour * in.peak * exp(-px2 / (2.0 * SIGMA_PX * SIGMA_PX));
+    if globals.settings.w > 0.5 {
+        return vec4(encode(light), 0.0);
+    }
+    return vec4(light, 0.0);
 }

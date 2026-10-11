@@ -1,7 +1,10 @@
 // Adds the star points (`starfield_points.wgsl`) to the frame. Each output
 // pixel sums the point light of the 6x6 supersampled pixels covering it and
 // its neighbours, weighted by the raster path's 0.55 px Gaussian at their
-// centres, so a point lands within a quarter pixel of its star.
+// centres, so a point lands within a quarter pixel of its star. Light above
+// white is stored as glare (`hdr.wgsl`); in the SDR wireframe view it clips
+// at white either way.
+#import night_sky::hdr::encode
 
 @group(0) @binding(0) var points: texture_2d<f32>;
 // xy: viewport origin in the target, zw: its size, in physical pixels.
@@ -41,5 +44,5 @@ fn fragment(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
     }
     // Light over the Gaussian's area gives its peak. Additive, as the raster
     // path: zero alpha under premultiplied blending.
-    return vec4(total / (2.0 * PI * SIGMA_PX * SIGMA_PX), 0.0);
+    return vec4(encode(total / (2.0 * PI * SIGMA_PX * SIGMA_PX)), 0.0);
 }
