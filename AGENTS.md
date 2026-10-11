@@ -76,7 +76,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `ObjectRef`, hierarchy builders and inspector resolution (moons do not yet
   exist). `UiCommand::Up` is separate keyboard navigation: reframe tracking,
   else clear selection, else move up physically; no crumb contains travel code.
-- Time controls (`ui/mod.rs`) are two free-floating, centred lines at the bottom
+- Time controls (`ui/hud.rs`) are two free-floating, centred lines at the bottom
   of the 3D viewport, using the breadcrumb font, colours and `halo_text`.
   Elapsed simulation time sits above the actual rate (two decimal places,
   seconds/minutes/hours/days/years per real second). Click the rate to toggle
@@ -84,12 +84,12 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   time to 100 years/s (400 logical pixels covers the full range). Dragging
   preserves pause state, with `· paused` beside the retained rate. There is no
   bottom panel, preset ladder or separate speed editor.
-  The bottom-left movement readout (`ui::speed_readout`) uses the same halo,
+  The bottom-left movement readout (`ui::hud::speed_readout`) uses the same halo,
   font and two-line layout: measured velocity above draggable set speed.
   Horizontal dragging adjusts speed logarithmically from `scene::MIN_SPEED`
   to `scene::MAX_SPEED` (1 m/s to 10,000 ly/s), through `SetMoveSpeed`; it
   captures input like the time rate, and a single click does nothing.
-  The bottom-right **Magnitude limit** (`ui::magnitude_control`, one line)
+  The bottom-right **Magnitude limit** (`ui::hud::magnitude_control`, one line)
   is `Navigation::magnitude`, the faintest apparent magnitude drawn as a
   star point (default `VISIBLE_MAGNITUDE`, 6.5; `MAGNITUDE` range 3 to 8.5, in
   tenths). Dragging shows the new value; it applies on release
@@ -102,7 +102,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Each magnitude fainter draws about four times the stars. Page-star
   assignment (`system.rs`) stays at `VISIBLE_MAGNITUDE`. Not persisted.
   Above it, two matching halo-text controls adjust manual Exposure and Dynamic
-  Range Compression (`ui::exposure_controls`), right-aligned with the same font
+  Range Compression (`ui::hud::exposure_controls`), right-aligned with the same font
   and line gap. Drag exposure at 20 pixels per stop (-64 to +16); +1 doubles
   all light, -1 halves it. Drag compression across 400 pixels for 0 to 100%.
   Both apply continuously through `SetExposure`/`SetCompression`, capture the
@@ -314,7 +314,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `counts_need`/`place_need` report the masses a step still needs; they share
   `Sky::descend` with `place`, so sliced loading gives the same stars. Loaded
   cells drop beyond `KEEP` × reach. Stars stream as compact `StarPoint`s.
-- `crates/client/src/stars/stream.rs` aims the loader at the camera
+- `crates/client/src/stars/stream/` aims the loader at the camera
   (`CameraRig::galactic_ly`, lists anchored at home) to
   `Navigation::magnitude` (6.5 by default): a
   worker thread natively, a dedicated module Web Worker in the browser, into
@@ -556,10 +556,10 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   in stops and compression as a percentage, with expandable explanations.
   No physical/assisted checkbox, metering, target key or adaptation remains.
   Photometry lives in `space_simulation::light`;
-  exposure, the pools and the HDR camera in `crates/client/src/render/mod.rs`,
-  with the shaders in `body.wgsl` and `point.wgsl`.
+  per-body exposure in `crates/client/src/render/resolve.rs`, the pools and
+  the HDR camera in `render/bodies.rs`, with the shaders in `body.wgsl` and `point.wgsl`.
 - Bodies are plain spheres under the wireframes. `scene::draw` gathers `Lights`
-  while drawing gizmos; `render::sync_bodies`/`sync_points` place pooled mesh
+  while drawing gizmos; `render::bodies::sync_bodies`/`sync_points` place pooled mesh
   entities in the camera's cell and write `GlobalTransform` directly, because
   they run after propagation.
 - Body colours reach the GPU pre-exposed on the CPU, in f32 uniforms (only an
@@ -580,7 +580,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   replacing it are white over the same radius (tested). This fixed overexposed
   stars shrinking suddenly where points became discs, 100 to 200 AU from a
   giant.
-- Eye-like streaks (`point.wgsl` `streaks`, `render::streaks`) mark light too
+- Eye-like streaks (`point.wgsl` `streaks`, `render::resolve::streaks`) mark light too
   bright for the camera: many fine rays of uneven length and strength, fixed
   to the screen, from points and lit limbs more than `STREAK_START` (3) stops
   over white, longer per stop up to `STREAK_MAX_PX`, whiter than the source.
@@ -602,7 +602,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - One manual linear exposure applies to bodies, galactic points and glow.
   No subject metering, brightness floors, artificial night-side ambient,
   adaptation or display curve. Dynamic Range Compression is per-body
-  balance (`render::balance`, in `resolve`): each star (with its corona) and
+  balance (`render::resolve::balance`, in `resolve`): each star (with its corona) and
   planet is moved from the shared exposure towards its own, by that share of
   the stops between them. A body's key is how strongly it is lit, never phase
   or screen coverage: a planet's sub-stellar radiance (shown at `PLANET_KEY`,
