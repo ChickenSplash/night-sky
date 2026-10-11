@@ -134,7 +134,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
   but are never rasterised), compact 1.25 px points, 4x MSAA (both window
-  cameras), bloom and cull blocks outside the view (on by default).
+  cameras), bloom, cull blocks outside the view (on by default) and stars
+  as points (native only, on by default natively).
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
@@ -382,6 +383,22 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   then scales to render units. Filter points beyond 1.25 times their apparent
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
   retained cells after the camera travels 0.2 of the tier's reach.
+  Natively, while the `point_stars` switch is on (default),
+  `starfield_points.rs` draws the same batches as single-pixel points, one
+  vertex per star instead of three: the `StarPoints` node (between
+  `MainOpaquePass` and `MainTransmissivePass`, GPU span `star_points`) draws
+  them additively into an `Rgba16Float` image at `SUPERSAMPLE` (2) times the
+  view's resolution per axis, without MSAA. `starfield_points.wgsl` applies
+  the same cutoff, near hiding, colour and knee as `starfield.wgsl` (keep them
+  in step) and depth-tests each star's centre against the opaque bodies (the
+  space camera's depth texture has `TEXTURE_BINDING` for this). One
+  full-screen draw in `Transparent3d` (`starfield_points_composite.wgsl`)
+  gives each point the 0.55 px Gaussian from the 6x6 supersampled pixels
+  around each view pixel, so points land within a quarter pixel. Under
+  points the compact-points switch does nothing. The GPU test's star pass
+  sums `main_transparent_pass_3d` and `star_points`, and records which path
+  ran. The browser always uses triangles. A compute splat with atomics
+  (`b6a078f`, reverted) was slower than triangles: 17.3 vs 14.3 ms.
   `starfield::Sight` skips batches outside the view each frame (the
   `cull_blocks` switch): a sphere around each batch's block, in f64 against
   the view's four side planes, widened by the point footprint.

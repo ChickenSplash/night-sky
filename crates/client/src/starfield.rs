@@ -164,6 +164,8 @@ impl Plugin for StarfieldRenderPlugin {
             .init_resource::<Batches>()
             .init_resource::<Precise>()
             .add_systems(PostUpdate, sync.after(crate::sky::expose));
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(crate::starfield_points::StarPointsPlugin);
     }
 }
 
@@ -289,6 +291,7 @@ fn sync(
     });
     frame.draws.clear();
     frame.precise.clear();
+    frame.points = debug.point_stars && cfg!(not(target_arch = "wasm32"));
     // Within its body range the visited star is drawn as a body, so the batches
     // hide its point there, and it has no sprite.
     let body = nav.system(&universe.0).and_then(|system| {

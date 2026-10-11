@@ -25,6 +25,8 @@ mod sky;
 #[cfg(not(target_arch = "wasm32"))]
 mod smoke;
 mod starfield;
+#[cfg(not(target_arch = "wasm32"))]
+mod starfield_points;
 mod starfield_render;
 mod stream;
 mod tasks;

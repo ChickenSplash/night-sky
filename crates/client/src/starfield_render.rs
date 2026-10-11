@@ -82,7 +82,7 @@ pub struct StarDraw {
 }
 
 #[derive(Clone, Copy, ShaderType)]
-struct DrawUniform {
+pub(crate) struct DrawUniform {
     origin: Vec4,
     near: Vec4,
 }
@@ -94,6 +94,8 @@ pub struct StarFrame {
     pub draws: Vec<StarDraw>,
     /// Precise sprites, placed relative to the eye each frame.
     pub precise: Vec<StarInstance>,
+    /// Draw as single-pixel points (`starfield_points.rs`), not triangles.
+    pub points: bool,
 }
 
 /// Batches to upload or free, taken once by the render world.
@@ -246,14 +248,14 @@ impl SpecializedRenderPipeline for StarPipeline {
 }
 
 #[derive(Resource)]
-struct StarBuffers {
-    batches: HashMap<u64, (Buffer, u32)>,
-    frame: StarFrame,
-    precise: RawBufferVec<StarInstance>,
-    globals: UniformBuffer<Globals>,
-    draws: DynamicUniformBuffer<DrawUniform>,
+pub(crate) struct StarBuffers {
+    pub(crate) batches: HashMap<u64, (Buffer, u32)>,
+    pub(crate) frame: StarFrame,
+    pub(crate) precise: RawBufferVec<StarInstance>,
+    pub(crate) globals: UniformBuffer<Globals>,
+    pub(crate) draws: DynamicUniformBuffer<DrawUniform>,
     /// Each draw's dynamic offset into `draws`.
-    offsets: Vec<u32>,
+    pub(crate) offsets: Vec<u32>,
     bind_group: Option<BindGroup>,
 }
 
@@ -303,6 +305,9 @@ fn queue(
     views: Query<(&ExtractedView, &Msaa), With<SpaceCamera>>,
 ) {
     let draw_function = draw_functions.read().id::<DrawStars>();
+    if buffers.frame.points {
+        return;
+    }
     for (view, msaa) in &views {
         let Some(phase) = phases.get_mut(&view.retained_view_entity) else {
             continue;

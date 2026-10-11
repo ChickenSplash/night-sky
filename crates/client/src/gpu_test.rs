@@ -20,7 +20,9 @@ const FROM_CENTRE_LY: f64 = 500.0;
 /// After the last upload: pipelines compile and the exposure eases.
 pub const SETTLE_S: f64 = 2.0;
 pub const MEASURE_S: f64 = 20.0;
-const STAR_PASS: &str = "main_transparent_pass_3d";
+/// Passes drawing stars: the transparent pass, and the points pass when
+/// stars are points (`starfield_points.rs`).
+const STAR_PASSES: [&str; 2] = ["main_transparent_pass_3d", "star_points"];
 
 #[derive(Resource, Default)]
 pub enum GpuTest {
@@ -58,6 +60,8 @@ pub struct GpuResults {
     pub uploaded_stars: usize,
     pub star_memory_mb: f64,
     pub msaa: bool,
+    /// Stars drawn as points rather than triangles.
+    pub points: bool,
     pub size: [u32; 2],
     /// The star point magnitude limit.
     pub magnitude: f64,
@@ -82,8 +86,8 @@ fn gpu_times(diagnostics: &DiagnosticsStore) -> (Option<f64>, Option<f64>) {
         else {
             continue;
         };
-        if pass == STAR_PASS {
-            star = Some(latest.value);
+        if STAR_PASSES.contains(&pass) {
+            *star.get_or_insert(0.0) += latest.value;
         }
         if !pass.contains('/') {
             *total.get_or_insert(0.0) += latest.value;
@@ -212,6 +216,7 @@ pub fn run(
                 uploaded_stars: metrics.uploaded_stars,
                 star_memory_mb: (metrics.uploaded_stars * size_of::<StarInstance>()) as f64 / 1e6,
                 msaa: debug.msaa,
+                points: debug.point_stars,
                 size,
                 magnitude: nav.magnitude,
             };
