@@ -1,5 +1,9 @@
 use super::*;
+use bevy::math::DVec3;
+use space_shared::Star;
 use space_simulation::AU_METRES;
+use space_simulation::light;
+use std::f32::consts::PI;
 
 fn star(radiance: f64, pixels: f32) -> StarLight {
     StarLight {
