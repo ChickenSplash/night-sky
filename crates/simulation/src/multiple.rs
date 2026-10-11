@@ -139,6 +139,27 @@ pub(crate) struct Companion {
 }
 
 impl Kind {
+    fn mass(self) -> f64 {
+        match self {
+            Kind::Main { mass } | Kind::WhiteDwarf { mass, .. } => mass,
+        }
+    }
+
+    /// Radius in solar radii, as the star built from it has.
+    fn radius(self) -> f64 {
+        match self {
+            Kind::Main { mass } => star::main_sequence_radius(mass),
+            Kind::WhiteDwarf { mass, .. } => star::white_dwarf_radius(mass),
+        }
+    }
+
+    fn birth_mass(self) -> f64 {
+        match self {
+            Kind::Main { mass } => mass,
+            Kind::WhiteDwarf { progenitor, .. } => progenitor,
+        }
+    }
+
     fn luminosity(self) -> f64 {
         match self {
             Kind::Main { mass } => star::luminosity(mass),
@@ -152,6 +173,7 @@ impl Kind {
 /// The primary as companions see it: its origin, and its light and radius now.
 pub(crate) struct Primary {
     pub origin: Origin,
+    pub mass_solar: f64,
     pub luminosity: f64,
     pub radius_solar: f64,
     pub kelvin: f64,
@@ -161,6 +183,7 @@ impl Primary {
     pub(crate) fn of(formed: &Formation, origin: Origin) -> Self {
         Self {
             origin,
+            mass_solar: formed.star.mass_solar,
             luminosity: formed.star.luminosity_solar,
             radius_solar: formed.star.radius_solar,
             kelvin: formed.star.temperature_k,
@@ -295,16 +318,33 @@ fn p_type_limit(mu: f64, e: f64) -> f64 {
 
 /// A system's stars and how they pair up, before planets.
 pub(crate) struct Hierarchy {
-    /// Primary first, then in letter order.
+    /// Primary first, then in letter order. Empty when only the layout is
+    /// wanted (`companion_light`).
     pub stars: Vec<Formation>,
+    /// Each star's mass, in solar masses, and radius, in AU, in star order.
+    masses: Vec<f64>,
+    radii_au: Vec<f64>,
     /// Innermost first; the last holds the whole system.
     pub pairs: Vec<Pair>,
 }
 
 impl Hierarchy {
+    /// Stars of these masses (solar) and radii (solar), not yet paired.
+    fn of(stars: Vec<Formation>, bodies: impl Iterator<Item = (f64, f64)>) -> Self {
+        let (masses, radii_au) = bodies
+            .map(|(mass, radius)| (mass, radius * crate::SUN_RADIUS_METRES / crate::AU_METRES))
+            .unzip();
+        Self {
+            stars,
+            masses,
+            radii_au,
+            pairs: Vec::new(),
+        }
+    }
+
     pub(crate) fn mass(&self, node: Node) -> f64 {
         match node {
-            Node::Star(i) => self.stars[i].star.mass_solar,
+            Node::Star(i) => self.masses[i],
             Node::Pair(p) => self.pairs[p].members.iter().map(|&m| self.mass(m)).sum(),
         }
     }
@@ -338,14 +378,47 @@ impl Hierarchy {
     /// Furthest a member's stars reach from its barycentre, in AU.
     fn reach_au(&self, node: Node) -> f64 {
         match node {
-            Node::Star(i) => {
-                self.stars[i].star.radius_solar * crate::SUN_RADIUS_METRES / crate::AU_METRES
-            }
+            Node::Star(i) => self.radii_au[i],
             Node::Pair(p) => {
                 let orbit = &self.pairs[p].orbit;
                 orbit.semi_major_au * (1.0 + orbit.eccentricity)
             }
         }
+    }
+
+    /// Widest any two stars of the system get, in AU: zero for a single star.
+    pub(crate) fn separation_au(&self) -> f64 {
+        widest(self.pairs.len().checked_sub(1), |p| {
+            let pair = &self.pairs[p];
+            (
+                pair.orbit,
+                pair.members.map(|m| match m {
+                    Node::Pair(inner) => Some(inner),
+                    Node::Star(_) => None,
+                }),
+            )
+        })
+    }
+
+    /// ID of a star or pair: a pair by its stars' letters.
+    fn id(&self, key: &str, node: Node) -> String {
+        match node {
+            Node::Star(i) => self.stars[i].star.id.clone(),
+            Node::Pair(_) => member_id(key, &self.letters(node)),
+        }
+    }
+
+    /// The pairs as barycentres, innermost first.
+    fn barycentres(&self, key: &str) -> Vec<Barycentre> {
+        (0..self.pairs.len())
+            .map(|p| Barycentre {
+                id: self.id(key, Node::Pair(p)),
+                page: 0,
+                component: self.letters(Node::Pair(p)),
+                members: self.pairs[p].members.map(|m| self.id(key, m)),
+                orbit: self.pairs[p].orbit,
+            })
+            .collect()
     }
 
     /// Whether a member is or holds this star.
@@ -383,6 +456,8 @@ impl Hierarchy {
             .into_iter()
             .map(Some)
             .collect();
+        self.masses = order.iter().map(|&old| self.masses[old]).collect();
+        self.radii_au = order.iter().map(|&old| self.radii_au[old]).collect();
         for (index, &old) in order.iter().enumerate() {
             moved[old] = index;
             let mut formed = stars[old].take().expect("each star once");
@@ -397,6 +472,61 @@ impl Hierarchy {
                     *i = moved[*i];
                 }
             }
+        }
+    }
+
+    /// Pairs the stars up, from the companions' separations: a close pair and
+    /// its distant third, or two pairs, or a chain, spaced to stay stable.
+    fn arrange(&mut self, rng: &mut Rng, birth_mass: f64, companions: &[Companion]) {
+        // Orbits widened as stars that are now white dwarfs lost their envelopes.
+        let born: f64 = std::iter::once(birth_mass)
+            .chain(companions.iter().map(|c| c.kind.birth_mass()))
+            .sum();
+        let now: f64 = self.masses.iter().sum();
+        let widening = born / now;
+        // Companions by separation, innermost first.
+        let mut order: Vec<usize> = (1..self.masses.len()).collect();
+        order.sort_by(|&a, &b| {
+            companions[a - 1]
+                .separation_au
+                .total_cmp(&companions[b - 1].separation_au)
+        });
+        let orbit = |i: usize| {
+            let c = &companions[i - 1];
+            (c.separation_au * widening, c.eccentricity)
+        };
+        let star = Node::Star;
+        match *order.as_slice() {
+            [b] => {
+                let (a, e) = orbit(b);
+                self.join(rng, star(0), star(b), a, e);
+            }
+            [b, c] => {
+                let (inner, e_in) = orbit(b);
+                let (outer, e_out) = orbit(c);
+                // The primary in the close pair, as Alpha Centauri A is with
+                // Proxima far out, or orbited by a close pair of its companions.
+                let (pair, third) = if rng.chance(0.5) {
+                    (self.join(rng, star(0), star(b), inner, e_in), star(c))
+                } else {
+                    (self.join(rng, star(b), star(c), inner, e_in), star(0))
+                };
+                self.join(rng, pair, third, outer, e_out);
+            }
+            [b, c, d] => {
+                let ((ab, e_ab), (cd, e_cd), (outer, e_out)) = (orbit(b), orbit(c), orbit(d));
+                if rng.chance(0.5) {
+                    // Two pairs orbiting each other.
+                    let first = self.join(rng, star(0), star(b), ab, e_ab);
+                    let second = self.join(rng, star(c), star(d), cd, e_cd);
+                    self.join(rng, first, second, outer, e_out);
+                } else {
+                    let inner = self.join(rng, star(0), star(b), ab, e_ab);
+                    let triple = self.join(rng, inner, star(c), cd, e_cd);
+                    self.join(rng, triple, star(d), outer, e_out);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -490,67 +620,15 @@ fn hierarchy(
             } => star::white_dwarf_of_mass(&id, streams.stars(), progenitor, mass, kelvin),
         });
     }
-    let mut system = Hierarchy {
-        stars,
-        pairs: Vec::new(),
-    };
+    let bodies: Vec<_> = stars
+        .iter()
+        .map(|f| (f.star.mass_solar, f.star.radius_solar))
+        .collect();
+    let mut system = Hierarchy::of(stars, bodies.into_iter());
     if companions.is_empty() {
         return system;
     }
-    // Orbits widened as stars that are now white dwarfs lost their envelopes.
-    let born: f64 = std::iter::once(origin.birth_mass)
-        .chain(companions.iter().map(|c| match c.kind {
-            Kind::Main { mass } => mass,
-            Kind::WhiteDwarf { progenitor, .. } => progenitor,
-        }))
-        .sum();
-    let now: f64 = system.stars.iter().map(|s| s.star.mass_solar).sum();
-    let widening = born / now;
-    // Companions by separation, innermost first.
-    let mut order: Vec<usize> = (1..system.stars.len()).collect();
-    order.sort_by(|&a, &b| {
-        companions[a - 1]
-            .separation_au
-            .total_cmp(&companions[b - 1].separation_au)
-    });
-    let orbit = |i: usize| {
-        let c = &companions[i - 1];
-        (c.separation_au * widening, c.eccentricity)
-    };
-    let star = Node::Star;
-    let rng = &mut *streams.draws;
-    match *order.as_slice() {
-        [b] => {
-            let (a, e) = orbit(b);
-            system.join(rng, star(0), star(b), a, e);
-        }
-        [b, c] => {
-            let (inner, e_in) = orbit(b);
-            let (outer, e_out) = orbit(c);
-            // The primary in the close pair, as Alpha Centauri A is with
-            // Proxima far out, or orbited by a close pair of its companions.
-            let (pair, third) = if rng.chance(0.5) {
-                (system.join(rng, star(0), star(b), inner, e_in), star(c))
-            } else {
-                (system.join(rng, star(b), star(c), inner, e_in), star(0))
-            };
-            system.join(rng, pair, third, outer, e_out);
-        }
-        [b, c, d] => {
-            let ((ab, e_ab), (cd, e_cd), (outer, e_out)) = (orbit(b), orbit(c), orbit(d));
-            if rng.chance(0.5) {
-                // Two pairs orbiting each other.
-                let first = system.join(rng, star(0), star(b), ab, e_ab);
-                let second = system.join(rng, star(c), star(d), cd, e_cd);
-                system.join(rng, first, second, outer, e_out);
-            } else {
-                let inner = system.join(rng, star(0), star(b), ab, e_ab);
-                let triple = system.join(rng, inner, star(c), cd, e_cd);
-                system.join(rng, triple, star(d), outer, e_out);
-            }
-        }
-        _ => {}
-    }
+    system.arrange(&mut *streams.draws, origin.birth_mass, companions);
     system.reletter(key);
     system
 }
@@ -713,10 +791,7 @@ pub(crate) fn assemble(
     );
     // In letter order: the primary's planets first.
     found.sort_by_key(|host| system.letters(host.node));
-    let id = |node: Node| match node {
-        Node::Star(i) => system.stars[i].star.id.clone(),
-        Node::Pair(_) => member_id(key, &system.letters(node)),
-    };
+    let id = |node: Node| system.id(key, node);
     let mut planets = Vec::new();
     for host in found {
         if (CIRCUMBINARY_AU..CLOSE_AU).contains(&host.close_au) && !draws.chance(CLOSE_PLANETS) {
@@ -740,18 +815,7 @@ pub(crate) fn assemble(
             body,
         }));
     }
-    let barycentres = (0..system.pairs.len())
-        .map(|p| {
-            let pair = &system.pairs[p];
-            Barycentre {
-                id: id(Node::Pair(p)),
-                page: 0,
-                component: system.letters(Node::Pair(p)),
-                members: pair.members.map(id),
-                orbit: pair.orbit,
-            }
-        })
-        .collect();
+    let barycentres = system.barycentres(key);
     Bodies {
         stars: system.stars.into_iter().map(|f| f.star).collect(),
         barycentres,
@@ -759,22 +823,53 @@ pub(crate) fn assemble(
     }
 }
 
-/// The stars alone of the system `assemble` makes, without its planets.
+/// The stars and pairs alone of the system `assemble` makes, without its
+/// planets.
 pub(crate) fn stars_only(
     key: &str,
     formed: Formation,
     origin: Origin,
     draws: &mut Rng,
     stars: Option<&mut Rng>,
-) -> Vec<Star> {
+) -> (Vec<Star>, Vec<Barycentre>) {
     let primary = Primary::of(&formed, origin);
     let companions = companions(draws, &primary);
     let mut streams = Streams { draws, stars };
-    hierarchy(key, &mut streams, formed, &origin, &companions)
-        .stars
-        .into_iter()
-        .map(|f| f.star)
-        .collect()
+    let system = hierarchy(key, &mut streams, formed, &origin, &companions);
+    let barycentres = system.barycentres(key);
+    (
+        system.stars.into_iter().map(|f| f.star).collect(),
+        barycentres,
+    )
+}
+
+/// Widest any two stars get, in AU, from the outermost pair (`root`) down:
+/// each pair's apoapsis plus how far its members' own stars reach. `pair`
+/// gives a pair's orbit and which members are pairs themselves.
+fn widest(root: Option<usize>, pair: impl Fn(usize) -> (Orbit, [Option<usize>; 2])) -> f64 {
+    let apoapsis = |orbit: Orbit| orbit.semi_major_au * (1.0 + orbit.eccentricity);
+    // Furthest a member's stars get from its barycentre, at most.
+    fn reach(member: Option<usize>, pair: &impl Fn(usize) -> (Orbit, [Option<usize>; 2])) -> f64 {
+        member.map_or(0.0, |p| {
+            let (orbit, members) = pair(p);
+            let inner = reach(members[0], pair).max(reach(members[1], pair));
+            orbit.semi_major_au * (1.0 + orbit.eccentricity) + inner
+        })
+    }
+    root.map_or(0.0, |root| {
+        let (orbit, members) = pair(root);
+        apoapsis(orbit) + reach(members[0], &pair) + reach(members[1], &pair)
+    })
+}
+
+/// Widest any two stars of a system's pairs get, in AU, as `Hierarchy`
+/// works it out.
+pub fn widest_separation_au(barycentres: &[Barycentre]) -> f64 {
+    let index = |id: &str| barycentres.iter().position(|b| b.id == id);
+    widest(barycentres.len().checked_sub(1), |p| {
+        let pair = &barycentres[p];
+        (pair.orbit, pair.members.each_ref().map(|m| index(m)))
+    })
 }
 
 /// A pair's stars as one host: their mass and light together, with the disc
@@ -797,13 +892,21 @@ fn around_pair(system: &Hierarchy, node: Node, inner_au: f64) -> Formation {
     }
 }
 
-/// The light of a primary's companions, without building them: what `assemble`
-/// draws from the same sequence.
-pub(crate) fn companion_light(draws: &mut Rng, primary: &Primary) -> f64 {
-    companions(draws, primary)
-        .iter()
-        .map(|c| c.luminosity)
-        .sum()
+/// The light of a primary's companions, and the widest its stars get (AU),
+/// without building them: what `assemble` draws from the same sequence.
+pub(crate) fn companion_light(draws: &mut Rng, primary: &Primary) -> (f64, f64) {
+    let companions = companions(draws, primary);
+    if companions.is_empty() {
+        return (0.0, 0.0);
+    }
+    let bodies = std::iter::once((primary.mass_solar, primary.radius_solar))
+        .chain(companions.iter().map(|c| (c.kind.mass(), c.kind.radius())));
+    let mut system = Hierarchy::of(Vec::new(), bodies);
+    system.arrange(draws, primary.origin.birth_mass, &companions);
+    (
+        companions.iter().map(|c| c.luminosity).sum(),
+        system.separation_au(),
+    )
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use crate::{
 };
 use std::time::Duration;
 
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 pub fn encode(events: &[Event], pending: usize, elapsed: Duration, cancelled: usize) -> Vec<u8> {
     let mut out = Vec::new();
@@ -31,7 +31,12 @@ pub fn encode(events: &[Event], pending: usize, elapsed: Duration, cancelled: us
                     for position in star.position_pc {
                         out.extend_from_slice(&position.to_le_bytes());
                     }
-                    for value in [star.luminosity_solar, star.temperature_k, star.radius_solar] {
+                    for value in [
+                        star.luminosity_solar,
+                        star.temperature_k,
+                        star.radius_solar,
+                        star.separation_au,
+                    ] {
                         out.extend_from_slice(&value.to_le_bytes());
                     }
                     out.push(star.component.index() as u8);
@@ -75,7 +80,7 @@ pub fn decode(bytes: &[u8]) -> Option<(Vec<Event>, usize, Duration, usize)> {
             0 => events.push(Event::Dropped(cell)),
             1 => {
                 let count = u32::from_le_bytes(cursor.read()?) as usize;
-                if count > (bytes.len() - cursor.at) / 41 {
+                if count > (bytes.len() - cursor.at) / 45 {
                     return None;
                 }
                 let mut stars = Vec::with_capacity(count);
@@ -88,6 +93,7 @@ pub fn decode(bytes: &[u8]) -> Option<(Vec<Event>, usize, Duration, usize)> {
                     let luminosity_solar = f32::from_le_bytes(cursor.read()?);
                     let temperature_k = f32::from_le_bytes(cursor.read()?);
                     let radius_solar = f32::from_le_bytes(cursor.read()?);
+                    let separation_au = f32::from_le_bytes(cursor.read()?);
                     let component = *Component::ALL.get(cursor.read::<1>()?[0] as usize)?;
                     let index = u32::from_le_bytes(cursor.read()?);
                     stars.push(StarPoint {
@@ -95,6 +101,7 @@ pub fn decode(bytes: &[u8]) -> Option<(Vec<Event>, usize, Duration, usize)> {
                         luminosity_solar,
                         temperature_k,
                         radius_solar,
+                        separation_au,
                         component,
                         index,
                     });
@@ -126,6 +133,7 @@ mod tests {
                     luminosity_solar: 1.5,
                     temperature_k: 5772.0,
                     radius_solar: 1.0,
+                    separation_au: 1188.0,
                     component: Component::ThinDisc,
                     index: 987_654,
                 }],

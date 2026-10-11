@@ -268,8 +268,9 @@ pub fn bodies(key: &str) -> Bodies {
     })
 }
 
-/// The stars alone of a star's system, primary first, without its planets.
-pub fn system_stars(key: &str) -> Vec<space_shared::Star> {
+/// The stars of a star's system, primary first, and its pairs, without its
+/// planets.
+pub fn system_stars(key: &str) -> (Vec<space_shared::Star>, Vec<space_shared::Barycentre>) {
     crate::cells::parse_cell_star(key).map_or_else(
         || {
             let (formed, origin, mut rng) = census(key);

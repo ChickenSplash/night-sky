@@ -24,6 +24,7 @@ fn pointer_picks_visible_off_centre_star_by_stable_id() {
         luminosity_solar: 1.0,
         temperature_k: 5772.0,
         radius_solar: 1.0,
+        separation_au: 0.0,
         component: Component::ThinDisc,
         index: 8,
     };
@@ -97,6 +98,7 @@ fn grid_picking_matches_full_scan_and_caches_the_winner() {
             luminosity_solar: if index % 3 == 0 { 0.001 } else { 10_000.0 },
             temperature_k: 5772.0,
             radius_solar: 1.0,
+            separation_au: 0.0,
             component: Component::ThinDisc,
             index,
         })

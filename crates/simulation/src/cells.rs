@@ -654,12 +654,13 @@ impl Sky {
             .get(&(end, component))
             .ok_or(Need::Bound(end, component))?;
         let position_pc = within(&self.model, component, end, bound, &mut rng);
-        let (luminosity, kelvin, radius) = tiered_light(key, component, cell.level());
+        let light = tiered_light(key, component, cell.level());
         Ok(StarPoint {
             position_pc,
-            luminosity_solar: luminosity as f32,
-            temperature_k: kelvin as f32,
-            radius_solar: radius as f32,
+            luminosity_solar: light.luminosity as f32,
+            temperature_k: light.kelvin as f32,
+            radius_solar: light.radius as f32,
+            separation_au: light.separation_au as f32,
             component,
             index: index as u32,
         })
@@ -868,6 +869,14 @@ mod tests {
                         let error = (f64::from(point.luminosity_solar) / light - 1.0).abs();
                         assert!(error < 1e-6, "{}: {point:?} {light}", full.id);
                         assert_eq!(bodies.stars[0].luminosity_solar, full.star.luminosity_solar);
+                        // And as wide as its widest pair, worked out the same way.
+                        let widest = crate::multiple::widest_separation_au(&bodies.barycentres);
+                        let error = (f64::from(point.separation_au) - widest).abs();
+                        assert!(
+                            error <= 1e-6 * widest.max(1.0),
+                            "{}: {point:?} {widest}",
+                            full.id
+                        );
                         assert_eq!(point.temperature_k, full.star.temperature_k as f32);
                         assert_eq!(point.radius_solar, full.star.radius_solar as f32);
                         kinds.insert(full.star.kind);

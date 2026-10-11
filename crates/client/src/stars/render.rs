@@ -47,7 +47,33 @@ pub struct StarInstance {
     /// precise sprites.
     pub position: [f32; 3],
     pub luminosity: f32,
-    pub temperature: f32,
+    /// Half floats: the temperature in kelvin, then the base-2 logarithm of
+    /// the widest separation of a multiple system's stars in AU, or
+    /// `SINGLE` (`StarInstance::new`).
+    pub shape: [u16; 2],
+}
+
+/// The separation code of a single star, or of a star drawn alone.
+pub const SINGLE: f32 = -64.0;
+
+impl StarInstance {
+    pub fn new(position: [f32; 3], luminosity: f32, kelvin: f32, separation_au: f32) -> Self {
+        let code = if separation_au > 0.0 {
+            separation_au.log2()
+        } else {
+            SINGLE
+        };
+        Self {
+            position,
+            luminosity,
+            shape: [kelvin.min(60_000.0), code].map(|v| half::f16::from_f32(v).to_bits()),
+        }
+    }
+
+    /// The widest separation of its stars, in AU, as the shaders decode it.
+    pub fn separation_au(&self) -> f64 {
+        f64::from(half::f16::from_bits(self.shape[1]).to_f32()).exp2()
+    }
 }
 
 /// Uniforms shared by every star draw this frame.
@@ -76,8 +102,10 @@ pub struct StarDraw {
     /// parsec. Formed from f64 camera-relative offsets.
     pub origin: Vec4,
     /// Points closer than this times their distance from the origin are
-    /// hidden, as are those within the body range in parsecs. Both zero for
-    /// precise sprites.
+    /// hidden, as are those within the body range in parsecs; then multiple
+    /// systems whose separation would span more than this angle, in radians,
+    /// within this many parsecs (`starfield.rs`), drawn star by star as
+    /// precise sprites instead. All zero for precise sprites.
     pub near: Vec4,
 }
 
@@ -207,7 +235,7 @@ impl SpecializedRenderPipeline for StarPipeline {
                             shader_location: 1,
                         },
                         VertexAttribute {
-                            format: VertexFormat::Float32,
+                            format: VertexFormat::Float16x2,
                             offset: 16,
                             shader_location: 2,
                         },

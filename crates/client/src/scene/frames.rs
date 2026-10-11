@@ -25,6 +25,12 @@ pub fn page_frame(system: &StarSystem, page: u32) -> DQuat {
     rotation(page_tilt(system, page))
 }
 
+/// Rotation from a star's orbital-plane axes into galactic axes, from its ID
+/// alone: the same as `page_frame` for a page with this star.
+pub fn star_frame(id: &str) -> DQuat {
+    rotation(plane_tilt(id))
+}
+
 /// A body's wireframe orientation in its system's plane: its axis tilted, then
 /// turned to its current rotation angle.
 pub(super) fn spin_basis(frame: DQuat, spin: &Spin, seconds: f64) -> DQuat {

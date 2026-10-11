@@ -27,6 +27,9 @@ pub enum DebugSwitch {
     /// composite pass, rather than as triangles (`stars/points.rs`).
     /// No effect in the browser.
     PointStars,
+    /// Draw nearby multiple systems star by star once their stars could show
+    /// apart, rather than as one point until arrival (`starfield.rs`).
+    SplitMultiples,
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -39,6 +42,7 @@ pub struct RenderDebug {
     pub bloom: bool,
     pub cull_blocks: bool,
     pub point_stars: bool,
+    pub split_multiples: bool,
 }
 
 impl Default for RenderDebug {
@@ -52,12 +56,13 @@ impl Default for RenderDebug {
             bloom: true,
             cull_blocks: true,
             point_stars: cfg!(not(target_arch = "wasm32")),
+            split_multiples: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 8] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 9] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -66,6 +71,7 @@ impl RenderDebug {
         (DebugSwitch::Bloom, "Bloom"),
         (DebugSwitch::CullBlocks, "Cull blocks outside the view"),
         (DebugSwitch::PointStars, "Stars as points"),
+        (DebugSwitch::SplitMultiples, "Split multiple stars"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -78,6 +84,7 @@ impl RenderDebug {
             DebugSwitch::Bloom => self.bloom,
             DebugSwitch::CullBlocks => self.cull_blocks,
             DebugSwitch::PointStars => self.point_stars,
+            DebugSwitch::SplitMultiples => self.split_multiples,
         }
     }
 
@@ -91,6 +98,7 @@ impl RenderDebug {
             DebugSwitch::Bloom => &mut self.bloom,
             DebugSwitch::CullBlocks => &mut self.cull_blocks,
             DebugSwitch::PointStars => &mut self.point_stars,
+            DebugSwitch::SplitMultiples => &mut self.split_multiples,
         } = on;
     }
 

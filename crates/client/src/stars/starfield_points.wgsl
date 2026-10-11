@@ -32,8 +32,17 @@ const SIGMA_PX: f32 = 0.55;
 struct Star {
     @location(0) position: vec3<f32>,
     @location(1) luminosity: f32,
-    @location(2) temperature: f32,
+    @location(2) shape: vec2<f32>,
 }
+
+const AU_PC: f32 = 4.84813681e-6;
+
+// Multiple systems wide enough to show apart are drawn star by star instead.
+fn split(star: Star, distance_pc: f32) -> bool {
+    return draw.near.z > 0.0 && distance_pc < draw.near.w
+        && exp2(star.shape.y) * AU_PC > draw.near.z * distance_pc;
+}
+
 
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -50,7 +59,7 @@ fn vertex(star: Star) -> Output {
     let ratio = star.luminosity / max(distance_pc * distance_pc, 1e-16);
     out.position = vec4(2.0, 2.0, 0.0, 1.0);
     if clip.w <= 0.0 || distance_pc < max(draw.near.x * length(star.position), draw.near.y)
-        || ratio < globals.settings.y || globals.debug.x > 0.5 {
+        || split(star, distance_pc) || ratio < globals.settings.y || globals.debug.x > 0.5 {
         return out;
     }
     let ndc = clip.xyz / clip.w;
@@ -59,7 +68,7 @@ fn vertex(star: Star) -> Output {
     // Bodies in front hide stars (reverse Z: nearer is greater).
     let texel = vec2<i32>(floor(at)) + vec2<i32>(view.viewport.xy);
     if ndc.z < textureLoad(depth, texel, 0) { return out; }
-    let x = clamp(log(star.temperature / 1000.0) / log(50.0) * 31.0, 0.0, 31.0);
+    let x = clamp(log(star.shape.x / 1000.0) / log(50.0) * 31.0, 0.0, 31.0);
     let i = min(u32(x), 30u);
     var shown = globals.settings.z * ratio;
     var colour: vec3<f32>;

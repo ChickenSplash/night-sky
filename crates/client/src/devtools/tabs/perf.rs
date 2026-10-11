@@ -207,6 +207,17 @@ pub fn perf(
                     "Stars too close to the camera for batch precision, drawn one by one; should stay small.",
                 ),
             ),
+            (
+                "split systems",
+                format!(
+                    "{} ({} examined)",
+                    grouped(metrics.split_systems),
+                    grouped(metrics.split_examined)
+                ),
+                Some(
+                    "Multiple systems wide enough to show apart, drawn star by star as precise sprites, and the stars measured at the last search for them.",
+                ),
+            ),
         ],
     );
     terminal::heading(ui, "nearest star");

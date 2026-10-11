@@ -325,7 +325,10 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   luminosity, temperature and radius from the same `tiered_shape` draws as
   `tiered_formation`, plus its companions' light (`companion_light`), so a
   point is its whole system: under four times its primary, at most one tier
-  brighter than its band. Each star descends the tree once. It must give the
+  brighter than its band, at its barycentre. It also replays the pairs'
+  layout from the same draws (`Hierarchy::arrange` on masses and radii
+  alone) for `StarPoint::separation_au`, the widest its stars get. Each star
+  descends the tree once. It must give the
   same stars as `Sky::build`, bit for bit (`star_points_match_the_full_stars`).
   Keep both in step when changing star generation.
 - `try_point` only reads the `Sky`; it reports a missing integration or
@@ -450,7 +453,19 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   remains until a quarter of that radius, so both overlap. The
   visited star is a body only while the camera is at it (`scene::body_range`,
   where its planets show): batches hide points within that range and it has
-  no sprite. Elsewhere, it
+  no sprite. A multiple system is one point until its stars could appear
+  `SPLIT_PX` (0.5) pixels apart, inside the point spread, so the split never
+  shows; from there to arrival it is drawn star by star as precise sprites,
+  from `member_position` at the clock's time in `scene::star_frame`, exactly
+  where its bodies appear on arrival. `StarInstance` packs temperature and
+  log2 separation as half floats (still 20 bytes), and both star shaders hide
+  a batch point whose separation spans more than the draw's angle
+  (`near.z`) within `near.w` parsecs; CPU and shader decode the same value.
+  `StarCell::resolved` finds the candidates through a per-block pyramid of
+  widest separations (`StarCell::widest`), within a reach that halves
+  whenever a gather would measure over `SPLIT_BUDGET` stars, so crowded
+  regions split only nearby systems. Debug switch `split_multiples`, perf
+  tab `split systems`. Elsewhere, it
   is a galactic point under the same magnitude limit. Galactic points use
   apparent flux, scaled by `sky::radiance_gain`. Their colour (and,
   realistic, visual efficiency) comes from 32-entry tables by temperature in

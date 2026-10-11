@@ -30,7 +30,9 @@ struct Draw {
     // x: points closer than this times their offset from the origin are
     // hidden. This is smaller than the precise sprite's visibility radius, so
     // both overlap during the handoff (`starfield.rs`). y: body range in
-    // parsecs. Both zero for precise sprites.
+    // parsecs. z, w: multiple systems whose stars could appear more than z
+    // radians apart within w parsecs are hidden (`split`). All zero for
+    // precise sprites.
     near: vec4<f32>,
 }
 @group(2) @binding(1) var<uniform> draw: Draw;
@@ -48,9 +50,20 @@ struct Star {
     // Parsecs from the draw's origin.
     @location(0) position: vec3<f32>,
     @location(1) luminosity: f32,
-    @location(2) temperature: f32,
+    // Temperature in kelvin, and the base-2 logarithm of a multiple system's
+    // widest separation in AU (-64 for a single star).
+    @location(2) shape: vec2<f32>,
     @builtin(vertex_index) corner: u32,
 }
+
+const AU_PC: f32 = 4.84813681e-6;
+
+// Multiple systems wide enough to show apart are drawn star by star instead.
+fn split(star: Star, distance_pc: f32) -> bool {
+    return draw.near.z > 0.0 && distance_pc < draw.near.w
+        && exp2(star.shape.y) * AU_PC > draw.near.z * distance_pc;
+}
+
 
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -72,13 +85,13 @@ fn vertex(star: Star) -> Output {
     let ratio = star.luminosity / max(distance_pc * distance_pc, 1e-16);
     // The far plane is 1e22 render units; reject bodies behind the camera.
     if clip.w <= 0.0 || distance_pc < max(draw.near.x * length(star.position), draw.near.y)
-        || ratio < globals.settings.y || globals.debug.x > 0.5 {
+        || split(star, distance_pc) || ratio < globals.settings.y || globals.debug.x > 0.5 {
         clip = vec4(2.0, 2.0, 0.0, 1.0);
     }
     // Linear in apparent flux; above white it is stored as glare
     // (`hdr.wgsl`). In the wireframe view it is tone-mapped by the normal SDR
     // target.
-    let x = clamp(log(star.temperature / 1000.0) / log(50.0) * 31.0, 0.0, 31.0);
+    let x = clamp(log(star.shape.x / 1000.0) / log(50.0) * 31.0, 0.0, 31.0);
     let i = min(u32(x), 30u);
     var light = globals.settings.z * ratio;
     var colour: vec3<f32>;

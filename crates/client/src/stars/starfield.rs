@@ -51,6 +51,20 @@ const BATCH_HIDE: f64 = PRECISE * 0.25;
 const PREPARE: f64 = 2.0;
 /// Precise candidates are gathered again after the camera moves this far.
 const RESCAN_PC: f64 = 0.1;
+/// A multiple system is one point until its stars could appear this many
+/// pixels apart, well inside the point spread, so splitting never shows.
+const SPLIT_PX: f64 = 0.5;
+/// Split candidates are gathered for this share of the split angle, so the
+/// view can narrow (more pixels per radian) this far before gathering again.
+const SPLIT_SLACK: f64 = 0.5;
+/// Farthest a multiple system is ever split, in parsecs: its widest pairs,
+/// a few tenths of a parsec, show apart from about 600 pc.
+const SPLIT_REACH_PC: f64 = 1_000.0;
+/// Stars measured per gather of split candidates. Beyond it the reach halves
+/// and the gather starts again, so crowded regions split only nearby systems.
+const SPLIT_BUDGET: usize = 100_000;
+/// Systems kept built for splitting before the cache is cleared.
+const SPLIT_CACHE: usize = 4_096;
 
 /// Each temperature's realistic colour with unit luminance and visual
 /// efficiency (light per bolometric luminosity, as the eye and the exposure
@@ -91,11 +105,12 @@ fn bright_enough(star: &StarPoint, eye: DVec3, magnitude: f64) -> bool {
 
 /// A star's GPU record, `origin_pc` being where its draw is placed from.
 fn instance(star: &StarPoint, origin_pc: [f64; 3]) -> StarInstance {
-    StarInstance {
-        position: std::array::from_fn(|axis| (star.position_pc[axis] - origin_pc[axis]) as f32),
-        luminosity: star.luminosity_solar,
-        temperature: star.temperature_k,
-    }
+    StarInstance::new(
+        std::array::from_fn(|axis| (star.position_pc[axis] - origin_pc[axis]) as f32),
+        star.luminosity_solar,
+        star.temperature_k,
+        star.separation_au,
+    )
 }
 
 /// Stars bright enough to see from `eye`, as offsets from `centre`.
@@ -155,6 +170,102 @@ struct Precise {
     candidates: Vec<Candidate>,
 }
 
+/// Multiple systems that may show their stars apart, gathered now and then,
+/// and the stars of those that do, built once.
+#[derive(Resource)]
+struct Split {
+    /// Systems are split only within this distance, in parsecs; the batches
+    /// hide them as points only within it too.
+    reach_pc: f64,
+    /// The reach for the next gather: shrinks where gathers find too many
+    /// stars, grows back where they find few.
+    next_reach_pc: f64,
+    scanned_at: Option<DVec3>,
+    /// The angle and movement gathered for (`StarCell::resolved`).
+    scanned_angle: f64,
+    slack_pc: f64,
+    candidates: Vec<(String, StarPoint)>,
+    /// Each split system's stars and pairs, and its plane's rotation.
+    built: HashMap<String, (space_shared::StarSystem, bevy::math::DQuat)>,
+}
+
+impl Default for Split {
+    fn default() -> Self {
+        Self {
+            reach_pc: SPLIT_REACH_PC,
+            next_reach_pc: SPLIT_REACH_PC,
+            scanned_at: None,
+            scanned_angle: 0.0,
+            slack_pc: 0.0,
+            candidates: Vec::new(),
+            built: HashMap::new(),
+        }
+    }
+}
+
+/// A system's stars and pairs, for `member_position`.
+fn split_system(id: &str) -> (space_shared::StarSystem, bevy::math::DQuat) {
+    let (stars, barycentres) = space_simulation::system_stars(id);
+    let system = space_shared::StarSystem {
+        id: id.to_owned(),
+        name: String::new(),
+        position_ly: [0.0; 3],
+        planets: Vec::new(),
+        stars,
+        barycentres,
+        page_stars: Vec::new(),
+    };
+    (system, crate::scene::star_frame(id))
+}
+
+/// A multiple system's stars as precise sprites, its barycentre `at` parsecs
+/// from the eye, placed as `scene::draw` places them as bodies.
+fn apart(
+    system: &space_shared::StarSystem,
+    plane: bevy::math::DQuat,
+    at: DVec3,
+    seconds: f64,
+) -> impl Iterator<Item = StarInstance> + '_ {
+    system.stars.iter().map(move |member| {
+        let offset = space_simulation::member_position(system, 0, &member.id, seconds);
+        let position = at + plane * DVec3::from_array(offset) / PC_METRES;
+        StarInstance::new(
+            position.to_array().map(|v| v as f32),
+            member.luminosity_solar as f32,
+            member.temperature_k as f32,
+            0.0,
+        )
+    })
+}
+
+/// Multiple systems within `reach_pc` of `eye` whose stars could appear
+/// `angle` radians apart from anywhere within `slack_pc` of it, unless more
+/// than `SPLIT_BUDGET` stars must be measured to find them. Returns them and
+/// the stars measured.
+fn split_candidates(
+    field: &Starfield,
+    eye: DVec3,
+    (reach_pc, angle, slack_pc): (f64, f64, f64),
+) -> Option<(Vec<(String, StarPoint)>, usize)> {
+    let (mut found, mut examined) = (Vec::new(), 0);
+    for (&cell, stars) in &field.cells {
+        if gap_pc(cell, eye.to_array()) > reach_pc + slack_pc {
+            continue;
+        }
+        stars.resolved(
+            eye.to_array(),
+            (reach_pc + slack_pc, angle, slack_pc),
+            SPLIT_BUDGET,
+            &mut examined,
+            &mut |star| found.push((star.id(cell), *star)),
+        );
+        if examined > SPLIT_BUDGET {
+            return None;
+        }
+    }
+    Some((found, examined))
+}
+
 pub struct StarfieldRenderPlugin;
 
 impl Plugin for StarfieldRenderPlugin {
@@ -163,6 +274,7 @@ impl Plugin for StarfieldRenderPlugin {
         app.add_plugins(StarRenderPlugin)
             .init_resource::<Batches>()
             .init_resource::<Precise>()
+            .init_resource::<Split>()
             .add_systems(PostUpdate, sync.after(crate::scene::draw));
         #[cfg(not(target_arch = "wasm32"))]
         app.add_plugins(crate::stars::points::StarPointsPlugin);
@@ -244,15 +356,20 @@ fn sync(
     mut field: ResMut<Starfield>,
     mut metrics: ResMut<StreamMetrics>,
     mut batches: ResMut<Batches>,
-    mut precise: ResMut<Precise>,
+    (mut precise, mut split): (ResMut<Precise>, ResMut<Split>),
     mut frame: ResMut<StarFrame>,
     uploads: Res<StarUploads>,
-    view: (Res<Universe>, Res<Navigation>, Res<RenderDebug>),
+    view: (
+        Res<Universe>,
+        Res<Navigation>,
+        Res<RenderDebug>,
+        Res<crate::Clock>,
+    ),
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
     camera: Query<(&GlobalTransform, &Camera), With<SpaceCamera>>,
 ) {
-    let (universe, nav, debug) = view;
+    let (universe, nav, debug, clock) = view;
     let sync_start = bevy::platform::time::Instant::now();
     let Ok((camera_transform, view)) = camera.single() else {
         return;
@@ -431,7 +548,54 @@ fn sync(
         size,
         f64::from(radius_px) + 2.0,
     );
-    let batch_near = Vec4::new(BATCH_HIDE as f32, body_pc as f32, 0.0, 0.0);
+    // Multiple systems whose stars could show apart: gathered again when the
+    // camera has moved, the view narrowed or the cells changed.
+    let angle = SPLIT_PX * pixel;
+    if changed
+        || angle < split.scanned_angle
+        || angle > 4.0 * split.scanned_angle
+        || split
+            .scanned_at
+            .is_none_or(|at| at.distance(eye) > split.slack_pc)
+    {
+        let mut reach = split.next_reach_pc;
+        let gathered = loop {
+            let slack = (0.01 * reach).clamp(RESCAN_PC, 5.0);
+            let query = (reach, angle * SPLIT_SLACK, slack);
+            match split_candidates(&field, eye, query) {
+                Some(found) => break (found, query),
+                None if reach > 1e-3 => reach *= 0.5,
+                None => {
+                    break (
+                        (Vec::new(), SPLIT_BUDGET),
+                        (0.0, angle * SPLIT_SLACK, slack),
+                    );
+                }
+            }
+        };
+        let ((candidates, examined), (reach, scanned_angle, slack)) = gathered;
+        split.candidates = candidates;
+        split.reach_pc = reach;
+        split.next_reach_pc = if examined < SPLIT_BUDGET / 8 {
+            (reach * 1.5).min(SPLIT_REACH_PC)
+        } else {
+            reach
+        };
+        split.scanned_at = Some(eye);
+        split.scanned_angle = scanned_angle;
+        split.slack_pc = slack;
+        metrics.split_examined = examined;
+    }
+    let batch_near = Vec4::new(
+        BATCH_HIDE as f32,
+        body_pc as f32,
+        if debug.split_multiples {
+            angle as f32
+        } else {
+            0.0
+        },
+        split.reach_pc as f32,
+    );
     let (mut uploaded, mut drawn_stars) = (0, 0);
     let (mut blocks, mut blocks_drawn) = (0, 0);
     for entities in batches.active.values() {
@@ -483,7 +647,41 @@ fn sync(
         precise.scanned_at = Some(eye);
         precise.scanned_body = body_pc;
     }
+    // Each multiple system the batches hide as a point, star by star, where
+    // its orbits have them now. The visited system is drawn as bodies.
+    let mut shown_apart = std::collections::HashSet::new();
+    if split.built.len() > SPLIT_CACHE {
+        split.built.clear();
+    }
+    let split = &mut *split;
+    for (id, star) in &split.candidates {
+        let position = DVec3::from_array(star.position_pc);
+        let distance = position.distance(eye);
+        let separation =
+            instance(star, eye.to_array()).separation_au() * space_simulation::stream::AU_PC;
+        if !debug.galactic_points
+            || !debug.split_multiples
+            || distance >= split.reach_pc
+            || separation <= angle * distance
+            || body.is_some_and(|(visited, _)| visited == id)
+        {
+            continue;
+        }
+        let (system, plane) = split
+            .built
+            .entry(id.clone())
+            .or_insert_with(|| split_system(id));
+        let at = position - eye;
+        frame
+            .precise
+            .extend(apart(system, *plane, at, clock.0.seconds));
+        shown_apart.insert(id.as_str());
+    }
+    metrics.split_systems = shown_apart.len();
     for candidate in &precise.candidates {
+        if shown_apart.contains(candidate.id.as_str()) {
+            continue;
+        }
         let position = DVec3::from_array(candidate.star.position_pc);
         let radius = (PRECISE * candidate.offset_pc).max(body_pc);
         let drawn = body.is_some_and(|(id, _)| id == candidate.id);
@@ -543,6 +741,7 @@ mod tests {
             luminosity_solar: 1.0,
             temperature_k: 5772.0,
             radius_solar: 1.0,
+            separation_au: 0.0,
             component: space_simulation::galaxy::Component::ThinDisc,
             index: 0,
         };
@@ -602,6 +801,7 @@ mod tests {
             luminosity_solar: 1.0,
             temperature_k: 5772.0,
             radius_solar: 1.0,
+            separation_au: 0.0,
             component: space_simulation::galaxy::Component::ThinDisc,
             index,
         };
@@ -634,6 +834,7 @@ mod tests {
             luminosity_solar: 10_000.0,
             temperature_k: 10_000.0,
             radius_solar: 10.0,
+            separation_au: 0.0,
             component: space_simulation::galaxy::Component::ThinDisc,
             index: 0,
         };
@@ -653,5 +854,35 @@ mod tests {
             distance > BATCH_HIDE * candidate[0].offset_pc,
             "batch must still cover the six-light-year transition"
         );
+    }
+
+    #[test]
+    fn a_split_system_is_its_stars_where_their_bodies_are_drawn() {
+        let id = "g2e4960.3.6000";
+        let (system, plane) = split_system(id);
+        assert_eq!(system.stars.len(), 3);
+        // The same plane as the system's page when it is visited.
+        let visited = crate::galaxy_nav::generated(id, DVec3::ZERO).unwrap();
+        assert_eq!(plane, crate::scene::page_frame(&visited, 0));
+        let at = DVec3::new(30.0, -2.0, 5.0);
+        let seconds = 1.5e10;
+        let stars: Vec<_> = apart(&system, plane, at, seconds).collect();
+        let mut light = 0.0;
+        for (star, body) in stars.iter().zip(&system.stars) {
+            let local = space_simulation::member_position(&visited, 0, &body.id, seconds);
+            let expected = at + plane * DVec3::from_array(local) / PC_METRES;
+            let drawn = Vec3::from_array(star.position).as_dvec3();
+            assert!(drawn.distance(expected) < 1e-5, "{drawn} {expected}");
+            light += f64::from(star.luminosity);
+            // Never hidden again as a multiple.
+            assert!(star.separation_au() < 1e-15);
+        }
+        let point: f64 = visited.stars.iter().map(|s| s.luminosity_solar).sum();
+        assert!((light / point - 1.0).abs() < 1e-6);
+        // C is over a thousand AU from the close pair.
+        let separation = space_simulation::multiple::widest_separation_au(&system.barycentres);
+        assert!(separation > 1_000.0);
+        let packed = StarInstance::new([0.0; 3], 1.0, 5772.0, separation as f32);
+        assert!((packed.separation_au() / separation - 1.0).abs() < 2e-3);
     }
 }

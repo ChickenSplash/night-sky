@@ -55,7 +55,7 @@ pub fn system_letters(key: &str) -> String {
     cache
         .entry(key.to_owned())
         .or_insert_with(|| {
-            let stars = space_simulation::system_stars(key);
+            let (stars, _) = space_simulation::system_stars(key);
             if stars.len() > 1 {
                 ('A'..).take(stars.len()).collect()
             } else {

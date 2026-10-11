@@ -123,7 +123,8 @@ pub fn unresolved_table(magnitude: f64) -> Vec<[f32; 4]> {
             }
             for sample in 0..64 {
                 // A point is a whole system: resolved by its total light.
-                let stars = population::tiered_stars(&format!("glow:{sample}"), component, tier);
+                let (stars, _) =
+                    population::tiered_stars(&format!("glow:{sample}"), component, tier);
                 let total: f64 = stars.iter().map(|s| s.luminosity_solar).sum();
                 for star in &stars {
                     let colour = blackbody_colour(star.temperature_k);
@@ -151,7 +152,7 @@ pub fn mean_visual_luminosity() -> [f64; COMPONENTS] {
         let mut total = 0.0;
         for (tier, share) in population::tier_shares(component).into_iter().enumerate() {
             for sample in 0..64 {
-                for star in population::tiered_stars(&format!("glow:{sample}"), component, tier) {
+                for star in population::tiered_stars(&format!("glow:{sample}"), component, tier).0 {
                     total += share / 64.0
                         * star.luminosity_solar
                         * visual_efficiency(star.temperature_k);
