@@ -1,6 +1,7 @@
 //! The `perf` tab: frame times, star stream and star draw facts, and GPU
 //! passes.
 use crate::devtools::FRAMES;
+use crate::format::{grouped, si};
 use crate::stars::stream::{Starfield, StreamMetrics};
 use crate::ui::terminal::{self, DIM, TEXT};
 use bevy::diagnostic::DiagnosticsStore;
@@ -339,29 +340,6 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
                 ui.end_row();
             }
         });
-}
-
-/// `17,012,345`.
-pub fn grouped(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
-/// `51.2M`, `830k`.
-fn si(n: f64) -> String {
-    match n {
-        n if n >= 1e9 => format!("{:.1}G", n / 1e9),
-        n if n >= 1e6 => format!("{:.1}M", n / 1e6),
-        n if n >= 1e3 => format!("{:.0}k", n / 1e3),
-        n => format!("{n:.0}"),
-    }
 }
 
 /// Frame times, newest on the right, against 60 and 30 fps guides.

@@ -20,20 +20,6 @@ pub(super) fn scroll_speed(speed: f64, scroll: f32) -> f64 {
     (speed * (f64::from(scroll) * 0.35).exp()).clamp(MIN_SPEED, MAX_SPEED)
 }
 
-/// Use larger units only once the value reaches one whole unit.
-pub fn speed_label(metres_per_second: f64) -> String {
-    let (value, unit) = if metres_per_second >= LY_METRES {
-        (metres_per_second / LY_METRES, "ly/s")
-    } else if metres_per_second >= space_simulation::AU_METRES {
-        (metres_per_second / space_simulation::AU_METRES, "AU/s")
-    } else if metres_per_second >= 1000.0 {
-        (metres_per_second / 1000.0, "km/s")
-    } else {
-        (metres_per_second, "m/s")
-    };
-    format!("{value:.2} {unit}")
-}
-
 /// Right-drag moves the eye around a fixed target. That is real camera motion,
 /// but should not steer the travel-direction marker. Keyboard travel can still
 /// happen during the drag, so retain its precise displacement separately.

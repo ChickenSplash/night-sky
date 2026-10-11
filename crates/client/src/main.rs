@@ -2,6 +2,7 @@ mod actions;
 mod command_line;
 mod devtools;
 mod flight;
+mod format;
 mod galaxy_nav;
 mod network;
 mod objects;

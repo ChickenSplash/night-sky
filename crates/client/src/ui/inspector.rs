@@ -40,7 +40,7 @@ impl Info {
 }
 
 pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
-    use crate::ui::{luminosity_text, mass_text, period_text, rotation_text, star_radius_text};
+    use crate::format::{luminosity_text, mass_text, period_text, rotation_text, star_radius_text};
     let mut info = Info::default();
     match object {
         ObjectRef::Galaxy => {
@@ -79,7 +79,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
                     format!("{} solar", luminosity_text(star.luminosity_solar)),
                 );
                 info.fact("Rotation", rotation_text(star.spin.period_hours));
-                info.fact("Axial tilt", crate::ui::tilt_text(star.spin.tilt_rad));
+                info.fact("Axial tilt", crate::format::tilt_text(star.spin.tilt_rad));
             }
         }
         ObjectRef::Planet { id } => {
@@ -108,7 +108,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
                         rotation_text(planet.spin.period_hours)
                     },
                 );
-                info.fact("Axial tilt", crate::ui::tilt_text(planet.spin.tilt_rad));
+                info.fact("Axial tilt", crate::format::tilt_text(planet.spin.tilt_rad));
                 if let Some([p, q]) = planet.resonance {
                     info.fact("Resonance", format!("{p}:{q} with inner neighbour"));
                 }
@@ -126,7 +126,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
                     info.fact(
                         "Due",
                         task.due_date_ms
-                            .map_or("No due date".into(), crate::ui::due_text),
+                            .map_or("No due date".into(), crate::format::due_text),
                     );
                     info.description = task.description.clone();
                     info.url = task.url.clone();

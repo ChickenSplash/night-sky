@@ -1,4 +1,8 @@
+use super::canvas::project;
+use super::hud::{MAX_RATE, dragged_magnitude, dragged_rate, dragged_value, rate_text};
 use super::*;
+use crate::format::civil_date;
+use space_simulation::SimulationClock;
 
 #[test]
 fn travel_directions_project_through_the_camera_perspective() {
@@ -16,7 +20,7 @@ fn travel_directions_project_through_the_camera_perspective() {
     let up = project(Vec3::new(0.0, half(50.0), -1.0)).unwrap();
     assert!((up.y - rect.top()).abs() < 1e-3);
     // A 120° view (about 144° wide at 16:9) brings the diagonal on screen.
-    let wide = super::project(rect, diagonal, half(120.0)).unwrap();
+    let wide = super::canvas::project(rect, diagonal, half(120.0)).unwrap();
     assert!(rect.contains(wide));
 }
 

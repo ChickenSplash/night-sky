@@ -1,6 +1,7 @@
 //! The `state` tab: camera, navigation, anchor star and clock.
+use crate::format::speed_label;
 use crate::presentation::PresentationMode;
-use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
+use crate::scene::{CameraPose, CameraRig, CameraVelocity};
 use crate::ui::terminal;
 use crate::{Clock, Navigation, Selection, Universe, Visit};
 use bevy::prelude::*;

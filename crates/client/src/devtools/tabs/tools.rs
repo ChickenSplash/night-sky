@@ -8,7 +8,7 @@ use crate::ui::terminal;
 use bevy_egui::egui;
 #[cfg(not(target_arch = "wasm32"))]
 use {
-    super::perf::grouped,
+    crate::format::grouped,
     crate::scene::{CameraPose, CameraRig},
     crate::{Clock, Navigation, Universe},
     bevy::prelude::*,

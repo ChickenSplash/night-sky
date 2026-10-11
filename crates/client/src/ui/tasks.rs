@@ -3,7 +3,8 @@
 //! only through `UiCommand`s and the snapshot.
 use crate::Navigation;
 use crate::actions::UiCommand;
-use crate::ui::{MUTED, due_short, muted};
+use crate::format::due_short;
+use crate::ui::{MUTED, muted};
 use bevy_egui::egui;
 use space_shared::{Galaxy, StarSystem, Task};
 use std::collections::HashSet;
