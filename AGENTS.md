@@ -560,24 +560,42 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   while drawing gizmos; `render::sync_bodies`/`sync_points` place pooled mesh
   entities in the camera's cell and write `GlobalTransform` directly, because
   they run after propagation.
-- Body colours reach the GPU pre-exposed on the CPU. Never send raw radiance:
-  star surfaces reach 1e10 W m⁻² sr⁻¹ and HDR targets are half-float. The
-  galactic point shader instead computes bounded display light from luminosity
-  and camera distance.
+- Body colours reach the GPU pre-exposed on the CPU, in f32 uniforms (only an
+  arithmetic safety limit, `MAX_VALUE` 1e30). Never send raw radiance: star
+  surfaces reach 1e10 W m⁻² sr⁻¹. HDR targets are half-float (max 65504), but a
+  sunlit planet at galaxy exposure is about 2^24, so `body.wgsl` and
+  `point.wgsl` store light above 8192 logarithmically (`hdr.wgsl` `encode`),
+  after lighting, and the display pass decodes it. Below 8192 storage is
+  linear, so bloom, additive points and glow are unaffected; only MSAA edges
+  and bloom of light above 8192 mix encoded values (an approximation). Do not
+  reinstate a CPU half-float cap: it erases shading. Galactic star points and
+  glow keep their own 20,000 caps and are not encoded.
+- Corona and body point sprites size themselves until their light falls below
+  `CORONA_FLOOR` (1/1024), capped at `CORONA_MAX_PIXELS`, so the fade-out at
+  the sprite edge is never visible. Close to a star at galaxy exposure the
+  corona (a millionth of the disc at the limb, falling as r⁻³) is many stops
+  above white and fills the view; that is the camera model, not a bug.
 - Star colours are blackbody spectra white-balanced to the Sun. Red dwarfs
   look orange; there is no assisted saturation. Brightness is visual, not bolometric.
 - One manual linear exposure applies to bodies, galactic points and glow.
   No subject metering, brightness floors, artificial night-side ambient or
   per-object contrast compression. `exposure.rs`/`exposure.wgsl` apply one
-  scene-wide luminance curve after bloom, before the egui overlay. Bevy's
-  built-in tone mapping is disabled on the realistic space camera. Zero
-  compression clips linearly; increasing it lifts shadows and rolls off
-  highlights around fixed middle grey (0.18), preserving brightness order.
-  Half-float precision and HDR safety caps still limit recoverable detail.
+  per-pixel, per-channel highlight curve after bloom, before the egui overlay
+  (`exposure::Shoulder`, mirrored on the CPU for tests). Never apply it per
+  object or per point before drawing: that removed bright stars' clipped size
+  and bloom. Linear below a knee that falls from white to 0.4 as compression
+  rises, then a logarithmic shoulder (slope one at the knee) reaching white
+  at 2^(30 × compression). Zero is exact clipping and 1% is within 1% of it.
+  It never changes faint light. Fitting many stops gives each a small share
+  of the output, so bright surfaces get subtle contrast and terminators look
+  hard at 100%; only local tone mapping would fix that. The pass also applies
+  Bevy's deband dither, since Bevy's tone-mapping pass is disabled.
   `set_exposure <stops>` and `set_compression <0..1>` use the same path as
   the HUD. Future auto-exposure should supply stops, separately from rendering.
-  `node scripts/test-exposure.mjs` checks WebGL shaders, image changes and
-  immediate HUD text drags headlessly, after a web build with the server running.
+  `node scripts/test-exposure.mjs` checks WebGL shaders, that 1% matches 0%,
+  that faint light never changes, planet shading and immediate HUD text drags
+  headlessly, after a web build with a server running (`SPACE_URL` for
+  another port; it waits for streaming to finish before comparing).
 - Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
   over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
   spread integrates to its whole light, exposed as if spread over a point-sized

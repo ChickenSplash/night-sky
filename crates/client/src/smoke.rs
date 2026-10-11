@@ -168,7 +168,8 @@ pub fn exercise(
         }
         27 => capture(&mut commands, "realistic-constellation"),
         28 => {
-            nav.set_exposure(-36.0);
+            // Galaxy-friendly exposure: the corona must fade out smoothly.
+            nav.set_exposure(0.0);
             jump(&mut nav, &universe.0, 0);
             let radius = universe.0.systems[0]
                 .star(nav.page)

@@ -30,8 +30,10 @@ const POINT_SHADER: Handle<Shader> = uuid_handle!("0c9b5d2e-7a41-4e8f-a3d6-5b2f8
 /// Deep navy behind the wireframes; realistic space is black.
 pub const SPACE_BLUE: Color = Color::srgb(0.015, 0.035, 0.09);
 
-/// Keeps HDR values well inside half-float range.
-const MAX_VALUE: f64 = 20_000.0;
+/// Arithmetic safety for f32 uniforms only, not an HDR cap: the shaders store
+/// light above half-float range encoded (`hdr.wgsl`), so lit surfaces keep
+/// their shading at any exposure.
+const MAX_VALUE: f64 = 1e30;
 /// Bodies below this on-screen radius, in logical pixels, are drawn as points.
 pub const POINT_PIXELS: f32 = 1.5;
 /// Point spread in logical pixels: a sharp core and a faint halo. Bloom adds the
@@ -42,9 +44,14 @@ const HALO_SHARE: f32 = 0.12;
 /// Corona brightness just outside the limb, relative to the disc: the real
 /// inner corona is about a millionth.
 const CORONA_SHARE: f64 = 1e-6;
-/// Corona sprite half side and falloff, in disc radii.
-const CORONA_EXTENT: f32 = 4.0;
+/// Corona falloff power, and its smallest sprite half side in disc radii.
 const CORONA_FALLOFF: f32 = 3.0;
+const CORONA_EXTENT: f32 = 4.0;
+/// The sprite reaches until the corona is fainter than this display value, so
+/// its edge fade is never visible.
+const CORONA_FLOOR: f32 = 1.0 / 1024.0;
+/// Largest corona sprite half side, in pixels. Only extreme exposures reach it.
+const CORONA_MAX_PIXELS: f32 = 16_384.0;
 
 pub struct RenderPlugin;
 
@@ -177,14 +184,14 @@ impl Exposure {
 
     /// Light of a point, in display value × square pixels, exposed as if spread
     /// over a point-sized disc. It matches the disc it replaces at the switch,
-    /// and stays linear below the HDR safety cap.
+    /// and stays linear until the display curve.
     pub fn point(&self, radiance: f64, pixels: f32) -> f64 {
         let switch = disc_area(POINT_PIXELS);
         self.value(spread(radiance, pixels)) * switch
     }
 }
 
-/// Keep every colour channel within the HDR budget, preserving hue.
+/// Exposed colour for f32 uniforms, preserving hue at the safety limit.
 fn hdr_colour(colour: DVec3, value: f64) -> Vec3 {
     (colour * value.min(MAX_VALUE / colour.max_element().max(1.0))).as_vec3()
 }
@@ -282,11 +289,17 @@ impl Point {
     fn new(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3, light: f64) -> Self {
         // A point about to become a disc spreads as wide as the disc.
         let core = CORE_SIGMA.max(0.7 * pixels);
-        let half = 4.0 * core.max(HALO_SIGMA);
+        let colour = hdr_colour(colour, light);
+        // Reach until the halo is fainter than `CORONA_FLOOR`, so very bright
+        // points never show the sprite's square edge.
+        let halo =
+            colour.max_element() * HALO_SHARE / (std::f32::consts::TAU * HALO_SIGMA * HALO_SIGMA);
+        let faint = HALO_SIGMA * (2.0 * (halo / CORONA_FLOOR).max(1.0).ln()).sqrt();
+        let half = (4.0 * core.max(HALO_SIGMA)).max(faint.min(CORONA_MAX_PIXELS));
         Self {
             centre,
             half: half * per_pixel,
-            colour: hdr_colour(colour, light),
+            colour,
             shape: Vec4::new(half, core, HALO_SIGMA, HALO_SHARE),
             corona: Vec4::ZERO,
         }
@@ -294,11 +307,16 @@ impl Point {
 
     /// A glow around a star's disc, `colour` its brightness just outside the limb.
     fn corona(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3) -> Self {
-        let half = CORONA_EXTENT * pixels;
+        let colour = hdr_colour(colour, 1.0);
+        // `point.wgsl` fades out from 0.6 of the half side, so put that where
+        // the corona has already fallen below `CORONA_FLOOR`.
+        let reach = (colour.max_element() / CORONA_FLOOR).powf(1.0 / CORONA_FALLOFF) / 0.6;
+        let half =
+            (reach.max(CORONA_EXTENT) * pixels).min(CORONA_MAX_PIXELS.max(CORONA_EXTENT * pixels));
         Self {
             centre,
             half: half * per_pixel,
-            colour: hdr_colour(colour, 1.0),
+            colour,
             shape: Vec4::new(half, 0.0, 0.0, 0.0),
             corona: Vec4::new(pixels, CORONA_FALLOFF, 0.0, 0.0),
         }
@@ -784,6 +802,27 @@ mod tests {
             .zip(b.points.iter().chain(&b.coronas))
         {
             assert_eq!(b.colour, a.colour * 2.0);
+        }
+    }
+
+    #[test]
+    fn sprites_reach_until_their_light_is_invisible() {
+        // At extreme brightness the cap applies, its fade far off-screen.
+        let capped = Point::corona(Vec3::ZERO, 50.0, 1.0, DVec3::splat(1e8));
+        assert_eq!(capped.shape.x, CORONA_MAX_PIXELS);
+        for value in [1e-3, 1.0, 1e2, 3e3] {
+            let corona = Point::corona(Vec3::ZERO, 50.0, 1.0, DVec3::splat(value));
+            let edge = corona.colour.x * (50.0 / (0.6 * corona.shape.x)).powf(CORONA_FALLOFF);
+            assert!(edge <= CORONA_FLOOR * 1.001, "{value}: {edge}");
+            assert!(corona.shape.x >= CORONA_EXTENT * 50.0);
+        }
+        for light in [1.0, 1e4, 1e9] {
+            let point = Point::new(Vec3::ZERO, 1.0, 1.0, DVec3::ONE, light);
+            let r = point.shape.x;
+            let halo =
+                point.colour.x * HALO_SHARE * (-r * r / (2.0 * HALO_SIGMA * HALO_SIGMA)).exp()
+                    / (std::f32::consts::TAU * HALO_SIGMA * HALO_SIGMA);
+            assert!(halo <= CORONA_FLOOR * 1.001, "{light}: {halo}");
         }
     }
 

@@ -31,7 +31,11 @@ try {
   const state = () => page.evaluate(() => window.space.state());
   await command({ type: 'set_paused', paused: true });
   await command({ type: 'set_debug', switch: 'bloom', on: false });
-  await page.waitForTimeout(6000);
+  // Compare captures only once every star is loaded and uploaded.
+  await page.waitForFunction(() => {
+    const s = window.space.state();
+    return s.stream_stars > 0 && / 0 pending {2}· {2}0 mesh chunks/.test(s.stream);
+  }, null, { timeout: 300000, polling: 500 });
   await command({ type: 'set_debug', switch: 'freeze_stream', on: true });
   await page.waitForTimeout(3000);
   assert(!Object.hasOwn((await state()).display, 'physical'), 'Old physical/assisted toggle remains');
@@ -47,19 +51,49 @@ try {
     await page.screenshot({ path });
     return path;
   };
-  const images = [await capture('linear', 0, 0), await capture('dim', -6, 0), await capture('compressed', -6, 1)];
-  results.images = JSON.parse(execFileSync('python', ['-c', `
+  // Compares a reference capture with another: mean brightness, mean change
+  // where the reference is faint (below the 100% knee), white pixels (bright
+  // stars' size) and the spread of a lit patch.
+  const compare = (reference, other, lit) => JSON.parse(execFileSync('python', ['-c', `
 import json, sys
 from PIL import Image, ImageStat
-out=[]
-for path in json.load(sys.stdin):
- im=Image.open(path).convert('RGB'); w,h=im.size
- im=im.crop((int(w*.3),int(h*.2),int(w*.75),int(h*.7)))
- out.append(sum(ImageStat.Stat(im).mean)/3)
-print(json.dumps(out))
-`], { input: JSON.stringify(images), encoding: 'utf8' }));
-  assert(results.images[0] > results.images[1], 'Lower exposure did not darken the scene');
-  assert(results.images[2] > results.images[1], 'Compression did not recover visible shadow detail');
+a_path, b_path, lit = json.load(sys.stdin)
+box = (480, 200, 1200, 700)
+a, b = [Image.open(p).convert('L').crop(box) for p in (a_path, b_path)]
+pa, pb = list(a.get_flattened_data()), list(b.get_flattened_data())
+faint = [abs(x - y) for x, y in zip(pa, pb) if x < 150]
+def stats(path):
+    im = Image.open(path).convert('L')
+    return ImageStat.Stat(im.crop(tuple(lit))).stddev[0] if lit else 0
+print(json.dumps(dict(
+    mean=[sum(pa) / len(pa), sum(pb) / len(pb)],
+    faintChange=sum(faint) / max(len(faint), 1),
+    white=[sum(x >= 245 for x in pa), sum(x >= 245 for x in pb)],
+    litSpread=[stats(a_path), stats(b_path)])))
+`], { input: JSON.stringify([reference, other, lit]), encoding: 'utf8' }));
+  const linear = await capture('linear', 0, 0);
+  assert.deepEqual(errors, [], 'Browser or shader errors');
+  const dim = compare(linear, await capture('dim', -6, 0));
+  assert(dim.mean[0] > dim.mean[1], 'Lower exposure did not darken the scene');
+  const slight = compare(linear, await capture('slight', 0, 0.01));
+  assert(slight.faintChange < 0.5, '1% compression changed faint light');
+  assert(slight.white[1] >= 0.8 * slight.white[0], '1% compression shrank bright stars');
+  const full = compare(linear, await capture('compressed', 0, 1));
+  assert(full.faintChange < 0.5, 'Full compression changed light below its knee');
+  results.sky = { dim, slight, full };
+
+  const planet = await page.evaluate(async () => {
+    const galaxy = await (await fetch('/galaxy')).json();
+    return galaxy.systems[0].planets[0].id;
+  });
+  await command({ type: 'fly_to_planet', planet });
+  await command({ type: 'set_display', option: 'wireframe', on: false });
+  await page.waitForTimeout(5000);
+  const lit = [805, 455, 865, 545];
+  const planetLinear = await capture('planet-linear', 0, 0);
+  results.planet = compare(planetLinear, await capture('planet-compressed', 0, 1), lit);
+  assert(results.planet.faintChange < 0.5, 'Planet compression changed the faint galaxy');
+  assert(results.planet.litSpread[1] > results.planet.litSpread[0] + 1, 'Compression did not reveal the lit surface\'s shading');
 
   // These are the free-floating text drags, not slider tracks. A press alone
   // does nothing; moving while held applies before release.
