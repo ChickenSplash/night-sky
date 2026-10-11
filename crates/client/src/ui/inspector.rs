@@ -46,7 +46,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
         ObjectRef::Galaxy => {
             let model = space_simulation::galaxy::GalaxyModel::milky_way();
             info.title = "Milky Way".into();
-            info.fact("Stars", format!("{:.0} billion", model.stars / 1e9));
+            info.fact("Star systems", format!("{:.0} billion", model.stars / 1e9));
             info.fact(
                 "Model boundary radius",
                 format!("{:.0} kpc", model.radius_pc / 1000.0),
@@ -65,21 +65,45 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
                 info.note = galaxy.source.clone();
             }
         }
-        ObjectRef::Star { id } => {
-            if let Some((system, page)) = objects::system(galaxy, id)
-                && let Some(star) = system.star(page)
-            {
-                info.title = crate::galaxy_nav::label(galaxy, id);
-                info.fact("Type", format!("{} · {}", star.kind, star.spectral));
-                info.fact("Mass", format!("{:.2} solar masses", star.mass_solar));
-                info.fact("Radius", star_radius_text(star.radius_solar));
-                info.fact("Temperature", format!("{:.0} K", star.temperature_k));
-                info.fact(
-                    "Luminosity",
-                    format!("{} solar", luminosity_text(star.luminosity_solar)),
-                );
-                info.fact("Rotation", rotation_text(star.spin.period_hours));
-                info.fact("Axial tilt", crate::format::tilt_text(star.spin.tilt_rad));
+        ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
+            let key = space_simulation::multiple::system_key(id);
+            if let Some((system, page)) = objects::system(galaxy, key) {
+                let name = crate::galaxy_nav::label(galaxy, key);
+                // The system as a whole is its outermost barycentre.
+                let member = if id == key {
+                    system.root(page).unwrap_or(key).to_owned()
+                } else {
+                    id.clone()
+                };
+                if let Some(pair) = system.barycentre(&member) {
+                    info.title = objects::member_label(&name, &pair.component);
+                    pair_facts(&mut info, &system, page, pair, id == key);
+                } else if let Some(star) = system
+                    .stars_on(page)
+                    .find(|star| star.id == member)
+                    .or_else(|| system.star(page))
+                {
+                    info.title = objects::member_label(&name, &star.component);
+                    info.fact("Type", format!("{} · {}", star.kind, star.spectral));
+                    info.fact("Mass", format!("{:.2} solar masses", star.mass_solar));
+                    info.fact("Radius", star_radius_text(star.radius_solar));
+                    info.fact("Temperature", format!("{:.0} K", star.temperature_k));
+                    info.fact(
+                        "Luminosity",
+                        format!("{} solar", luminosity_text(star.luminosity_solar)),
+                    );
+                    info.fact("Rotation", rotation_text(star.spin.period_hours));
+                    info.fact("Axial tilt", crate::format::tilt_text(star.spin.tilt_rad));
+                    if let Some(pair) = system.pair_of(page, &star.id) {
+                        let other = pair.members.iter().find(|m| **m != star.id);
+                        let partner = other.map_or("", |m| member_component(&system, m));
+                        info.fact("Companion", objects::member_label(&name, partner));
+                        info.fact(
+                            "Separation",
+                            crate::format::au_text(pair.orbit.semi_major_au),
+                        );
+                    }
+                }
             }
         }
         ObjectRef::Planet { id } => {
@@ -87,11 +111,24 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
                 && let Some((system, _)) = objects::system(galaxy, star)
                 && let Some(planet) = system.planets.iter().find(|planet| planet.id == *id)
             {
-                let days =
-                    space_simulation::period_seconds(&planet.orbit, system.mass(planet.page()))
-                        / 86400.0;
+                let days = space_simulation::planet_period(&system, planet) / 86400.0;
                 info.title = planet.designation.clone();
                 info.fact("Type", planet.class.clone());
+                if system.barycentres_on(planet.page()).next().is_some() {
+                    let host: Vec<_> = member_component(&system, &planet.host)
+                        .chars()
+                        .map(String::from)
+                        .collect();
+                    info.fact(
+                        "Orbits",
+                        match host.split_last() {
+                            Some((last, rest)) if !rest.is_empty() => {
+                                format!("Stars {} and {last}", rest.join(", "))
+                            }
+                            _ => format!("Star {}", host.concat()),
+                        },
+                    );
+                }
                 info.fact("Mass", mass_text(planet.mass_earth));
                 info.fact("Radius", format!("{:.0} km", planet.radius_km));
                 info.fact(
@@ -138,6 +175,61 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
         info.title = "Object unavailable".into();
     }
     info
+}
+
+/// Letters of a star or barycentre within its system.
+fn member_component<'a>(system: &'a space_shared::StarSystem, id: &'a str) -> &'a str {
+    system.barycentre(id).map_or_else(
+        || space_simulation::multiple::member_letters(id),
+        |pair| pair.component.as_str(),
+    )
+}
+
+/// A pair's orbit, and for a whole system what it holds.
+fn pair_facts(
+    info: &mut Info,
+    system: &space_shared::StarSystem,
+    page: u32,
+    pair: &space_shared::Barycentre,
+    whole: bool,
+) {
+    use crate::format::{luminosity_text, period_text};
+    let stars: Vec<_> = system
+        .stars_on(page)
+        .filter(|star| pair.component.contains(star.component.as_str()))
+        .collect();
+    let kind = match stars.len() {
+        2 => "Binary",
+        3 => "Triple",
+        _ => "Quadruple",
+    };
+    info.fact(
+        "Type",
+        if whole {
+            format!("{kind} star system")
+        } else {
+            "Pair within its system".into()
+        },
+    );
+    for star in &stars {
+        info.fact(
+            &format!("Star {}", star.component),
+            format!("{} · {}", star.kind, star.spectral),
+        );
+    }
+    let [first, second] = pair.members.each_ref().map(|m| member_component(system, m));
+    info.fact("Pair", format!("{first} and {second}"));
+    let mass = system.member_mass(page, &pair.id);
+    info.fact("Total mass", format!("{mass:.2} solar masses"));
+    let light: f64 = stars.iter().map(|s| s.luminosity_solar).sum();
+    info.fact("Luminosity", format!("{} solar", luminosity_text(light)));
+    info.fact(
+        "Separation",
+        crate::format::au_text(pair.orbit.semi_major_au),
+    );
+    let days = space_simulation::period_seconds(&pair.orbit, mass) / 86_400.0;
+    info.fact("Orbital period", period_text(days));
+    info.fact("Eccentricity", format!("{:.3}", pair.orbit.eccentricity));
 }
 
 /// A one-click equivalent of a scene gesture on the inspected object.
@@ -191,7 +283,9 @@ pub fn actions(
             }
             actions
         }
-        ObjectRef::Star { id } => {
+        ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
+            // Any member acts for its whole system.
+            let id = &space_simulation::multiple::system_key(id).to_owned();
             if !crate::galaxy_nav::reachable(nav, galaxy, field, id) {
                 return Vec::new();
             }

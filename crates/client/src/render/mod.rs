@@ -87,6 +87,12 @@ pub struct BodyMaterial {
     /// contrast; zero for planets.
     #[uniform(0)]
     surface: Vec4,
+    /// A planet's direction to each star lighting it, and the colour each
+    /// gives a surface facing it (`Shaded`).
+    #[uniform(0)]
+    lights: [Vec4; MAX_LIGHTS],
+    #[uniform(0)]
+    tints: [Vec4; MAX_LIGHTS],
 }
 
 impl Material for BodyMaterial {

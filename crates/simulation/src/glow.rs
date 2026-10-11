@@ -109,7 +109,7 @@ pub fn distance(index: usize) -> f64 {
     10f64.powf(-1.0 + index as f64 * 6.0 / (DISTANCES - 1) as f64)
 }
 
-/// Mean visual RGB luminosity per star *below* the point renderer's magnitude
+/// Mean visual RGB luminosity per system *below* the point renderer's magnitude
 /// limit, `magnitude`. Which stars are resolved follows their luminosity, as streaming
 /// does; their light is visual, as the eye and the camera's exposure see it.
 /// Stratified samples include rare bright populations without a huge census.
@@ -122,16 +122,21 @@ pub fn unresolved_table(magnitude: f64) -> Vec<[f32; 4]> {
                 continue;
             }
             for sample in 0..64 {
-                let star = population::tiered_star(&format!("glow:{sample}"), component, tier);
-                let colour = blackbody_colour(star.temperature_k);
-                let visual = star.luminosity_solar * visual_efficiency(star.temperature_k);
-                for i in 0..DISTANCES {
-                    if star.luminosity_solar * reach >= distance(i).powi(2) {
-                        continue;
-                    }
-                    for (channel, value) in colour.into_iter().enumerate() {
-                        table[component as usize * DISTANCES + i][channel] +=
-                            (share / 64.0 * visual * value) as f32;
+                // A point is a whole system: resolved by its total light.
+                let (stars, _) =
+                    population::tiered_stars(&format!("glow:{sample}"), component, tier);
+                let total: f64 = stars.iter().map(|s| s.luminosity_solar).sum();
+                for star in &stars {
+                    let colour = blackbody_colour(star.temperature_k);
+                    let visual = star.luminosity_solar * visual_efficiency(star.temperature_k);
+                    for i in 0..DISTANCES {
+                        if total * reach >= distance(i).powi(2) {
+                            continue;
+                        }
+                        for (channel, value) in colour.into_iter().enumerate() {
+                            table[component as usize * DISTANCES + i][channel] +=
+                                (share / 64.0 * visual * value) as f32;
+                        }
                     }
                 }
             }
@@ -140,16 +145,18 @@ pub fn unresolved_table(magnitude: f64) -> Vec<[f32; 4]> {
     table
 }
 
-/// Mean visual luminosity per star of each component, resolved or not, from
+/// Mean visual luminosity per system of each component, resolved or not, from
 /// the same stratified samples as `unresolved_table`.
 pub fn mean_visual_luminosity() -> [f64; COMPONENTS] {
     Component::ALL.map(|component| {
         let mut total = 0.0;
         for (tier, share) in population::tier_shares(component).into_iter().enumerate() {
             for sample in 0..64 {
-                let star = population::tiered_star(&format!("glow:{sample}"), component, tier);
-                total +=
-                    share / 64.0 * star.luminosity_solar * visual_efficiency(star.temperature_k);
+                for star in population::tiered_stars(&format!("glow:{sample}"), component, tier).0 {
+                    total += share / 64.0
+                        * star.luminosity_solar
+                        * visual_efficiency(star.temperature_k);
+                }
             }
         }
         total

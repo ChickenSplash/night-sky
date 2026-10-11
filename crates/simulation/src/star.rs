@@ -67,6 +67,7 @@ pub(crate) const WHITE_DWARF_LIGHTEST: f64 = 0.46;
 const RED_SUPERGIANT_SHARE: f64 = 0.7;
 
 /// How the star shaped its planets, in addition to the star itself.
+#[derive(Clone)]
 pub(crate) struct Formation {
     pub star: Star,
     /// Distance where water froze in the disc, as the orbits are now.
@@ -182,8 +183,33 @@ fn hot_tilt(rng: &mut Rng) -> f64 {
     }
 }
 
+/// Where a star is in its life, for drawing companions of the same age.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stage {
+    Main,
+    Giant,
+    WhiteDwarf,
+}
+
+/// What a star's companions need to know about it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Origin {
+    pub stage: Stage,
+    /// Mass at birth: the progenitor's, for a white dwarf.
+    pub birth_mass: f64,
+    /// Age in billions of years, when the draw already knows it.
+    pub age_gyr: Option<f64>,
+    pub component: Component,
+}
+
 /// A page star, in the proportions of the solar neighbourhood.
 pub(crate) fn formation(id: &str) -> Formation {
+    census(id).0
+}
+
+/// A page star, its origin, and its draws so far, to continue with its
+/// companions.
+pub(crate) fn census(id: &str) -> (Formation, Origin, Rng) {
     let mut rng = Rng::new(&format!("{id}:star"));
     let mut roll = rng.unit() * 100.0;
     let &(kind, _, cool, hot) = CENSUS
@@ -193,14 +219,23 @@ pub(crate) fn formation(id: &str) -> Formation {
             roll < 0.0
         })
         .unwrap_or(&CENSUS[0]);
-    match kind {
+    let origin = |stage, birth_mass| Origin {
+        stage,
+        birth_mass,
+        age_gyr: None,
+        component: Component::ThinDisc,
+    };
+    let (formed, origin) = match kind {
         Kind::Giant => {
             let mass = rng.log_range(0.9, 3.0);
-            giant(id, &mut rng, mass)
+            (giant(id, &mut rng, mass), origin(Stage::Giant, mass))
         }
         Kind::WhiteDwarf => {
             let progenitor = rng.log_range(1.0, 4.0);
-            white_dwarf(id, &mut rng, progenitor, None)
+            (
+                white_dwarf(id, &mut rng, progenitor, None),
+                origin(Stage::WhiteDwarf, progenitor),
+            )
         }
         _ => {
             // Cool stars are far more common within each class too; B stars skew
@@ -210,9 +245,14 @@ pub(crate) fn formation(id: &str) -> Formation {
             } else {
                 rng.range(cool, hot)
             };
-            main_sequence(id, &mut rng, kelvin, mass_for_temperature(kelvin))
+            let mass = mass_for_temperature(kelvin);
+            (
+                main_sequence(id, &mut rng, kelvin, mass),
+                origin(Stage::Main, mass),
+            )
         }
-    }
+    };
+    (formed, origin, rng)
 }
 
 /// Birth mass for a uniform draw, by inverting the initial mass function.
@@ -283,9 +323,26 @@ pub(crate) fn cooled_kelvin(cooling_gyr: f64) -> f64 {
     (9_000.0 * cooling_gyr.max(1e-6).powf(-0.35)).clamp(3_500.0, 100_000.0)
 }
 
+/// Cooling time that leaves a white dwarf at this temperature: the inverse of
+/// `cooled_kelvin`.
+pub(crate) fn cooling_gyr(kelvin: f64) -> f64 {
+    (kelvin.clamp(3_500.0, 100_000.0) / 9_000.0).powf(-1.0 / 0.35)
+}
+
 /// A star of a galactic component: a birth mass and age, evolved to today.
 pub(crate) fn galactic_formation(id: &str, component: Component) -> Formation {
+    galactic(id, component).0
+}
+
+/// A galactic star, its origin, and its draws so far.
+pub(crate) fn galactic(id: &str, component: Component) -> (Formation, Origin, Rng) {
     let mut rng = Rng::new(&format!("{id}:star"));
+    let origin = |stage, birth_mass, age| Origin {
+        stage,
+        birth_mass,
+        age_gyr: Some(age),
+        component,
+    };
     // Neutron stars and black holes are drawn again, so the count is of stars.
     for _ in 0..32 {
         let mass = initial_mass(rng.unit());
@@ -293,17 +350,23 @@ pub(crate) fn galactic_formation(id: &str, component: Component) -> Formation {
         let life = lifetime_gyr(mass);
         if age < life {
             let kelvin = temperature(luminosity(mass), main_sequence_radius(mass));
-            return main_sequence(id, &mut rng, kelvin, mass);
+            let formed = main_sequence(id, &mut rng, kelvin, mass);
+            return (formed, origin(Stage::Main, mass, age), rng);
         }
         if age < life * (1.0 + GIANT_SHARE) {
-            return giant(id, &mut rng, mass);
+            let formed = giant(id, &mut rng, mass);
+            return (formed, origin(Stage::Giant, mass, age), rng);
         }
         if mass < WHITE_DWARF_LIMIT {
             let kelvin = cooled_kelvin(age - life * (1.0 + GIANT_SHARE));
-            return white_dwarf(id, &mut rng, mass, Some(kelvin));
+            let formed = white_dwarf(id, &mut rng, mass, Some(kelvin));
+            return (formed, origin(Stage::WhiteDwarf, mass, age), rng);
         }
     }
-    main_sequence(id, &mut rng, 3_200.0, mass_for_temperature(3_200.0))
+    let mass = mass_for_temperature(3_200.0);
+    let formed = main_sequence(id, &mut rng, 3_200.0, mass);
+    let age = component.age_between(&mut rng, 0.0, lifetime_gyr(mass));
+    (formed, origin(Stage::Main, mass, age), rng)
 }
 
 fn hours(rng: &mut Rng, low_days: f64, high_days: f64) -> f64 {
@@ -428,6 +491,7 @@ pub(crate) fn evolved(
             phase_rad: rng.range(0.0, TAU),
             locked: false,
         },
+        component: String::new(),
     };
     let swallowed = 3.0 * radius * crate::SUN_RADIUS_METRES / crate::AU_METRES;
     Formation {
@@ -456,11 +520,22 @@ pub(crate) fn white_dwarf(
     progenitor: f64,
     kelvin: Option<f64>,
 ) -> Formation {
+    let mass = white_dwarf_mass(rng, progenitor);
+    let kelvin = kelvin.unwrap_or_else(|| rng.log_range(4_500.0, 25_000.0));
+    white_dwarf_of_mass(id, rng, progenitor, mass, kelvin)
+}
+
+/// A white dwarf of this mass and temperature.
+pub(crate) fn white_dwarf_of_mass(
+    id: &str,
+    rng: &mut Rng,
+    progenitor: f64,
+    mass: f64,
+    kelvin: f64,
+) -> Formation {
     // The progenitor lost over half its mass, so surviving orbits widened by the
     // ratio of masses. Planets inside its giant phase were engulfed.
-    let mass = white_dwarf_mass(rng, progenitor);
     let widening = progenitor / mass;
-    let kelvin = kelvin.unwrap_or_else(|| rng.log_range(4_500.0, 25_000.0));
     let radius = white_dwarf_radius(mass);
     let light = surface_light(radius, kelvin);
     let star = Star {
@@ -481,6 +556,7 @@ pub(crate) fn white_dwarf(
             phase_rad: rng.range(0.0, TAU),
             locked: false,
         },
+        component: String::new(),
     };
     Formation {
         star,
@@ -535,6 +611,7 @@ pub(crate) fn main_sequence(id: &str, rng: &mut Rng, kelvin: f64, mass: f64) -> 
             phase_rad: rng.range(0.0, TAU),
             locked: false,
         },
+        component: String::new(),
     };
     // The disc's inner edge, where dust sublimates.
     Formation {

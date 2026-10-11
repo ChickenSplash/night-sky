@@ -11,12 +11,14 @@
 
 use crate::cells::StarKey;
 use crate::galaxy::{COMPONENTS, Component};
+use crate::multiple::{self, Bodies};
 use crate::star::{
-    self, Branch, Formation, GIANT_SHARE, IMF_RANGE, SUN_TEMPERATURE_K, WHITE_DWARF_LIGHTEST,
-    WHITE_DWARF_LIMIT, imf_cumulative, imf_density, imf_inverse, lifetime_gyr,
+    self, Branch, Formation, GIANT_SHARE, IMF_RANGE, Origin, SUN_TEMPERATURE_K, Stage,
+    WHITE_DWARF_LIGHTEST, WHITE_DWARF_LIMIT, imf_cumulative, imf_density, imf_inverse,
+    lifetime_gyr,
 };
 use crate::system::Rng;
-use space_shared::Star;
+use space_shared::{Barycentre, Star};
 use std::sync::OnceLock;
 
 pub const TIERS: usize = 20;
@@ -345,9 +347,16 @@ fn build(c: Component) -> Census {
 
 /// A star of this component and tier, from its own ID.
 pub(crate) fn tiered_formation(id: &str, component: Component, tier: usize) -> Formation {
+    tiered(id, component, tier).0
+}
+
+/// A tiered star, its origin, and its two draw sequences so far: `{id}:tier`
+/// for what sets its light, and `{id}:star` for the rest.
+pub(crate) fn tiered(id: &str, component: Component, tier: usize) -> (Formation, Origin, Rng, Rng) {
     let mut draw = Rng::new(&format!("{id}:tier"));
     let mut rng = Rng::new(&format!("{id}:star"));
-    match tiered_shape(&mut draw, component, tier) {
+    let shape = tiered_shape(&mut draw, component, tier);
+    let formed = match shape {
         Shape::Evolved {
             mass,
             branch,
@@ -358,31 +367,76 @@ pub(crate) fn tiered_formation(id: &str, component: Component, tier: usize) -> F
             star::white_dwarf(id, &mut rng, progenitor, Some(kelvin))
         }
         Shape::Main { kelvin, mass } => star::main_sequence(id, &mut rng, kelvin, mass),
-    }
+    };
+    (formed, shape.origin(component), draw, rng)
 }
 
-/// Luminosity (solar), temperature (K) and radius (solar) of the star
-/// `tiered_formation` makes for this key, without building the rest of it.
-pub(crate) fn tiered_light(key: StarKey, component: Component, tier: usize) -> (f64, f64, f64) {
-    match tiered_shape(&mut key.rng(":tier"), component, tier) {
-        Shape::Evolved { radius, kelvin, .. } => {
-            (star::surface_light(radius, kelvin), kelvin, radius)
-        }
+/// A tiered star's whole system.
+pub(crate) fn tiered_bodies(id: &str, component: Component, tier: usize) -> Bodies {
+    let (formed, origin, mut draw, mut rng) = tiered(id, component, tier);
+    multiple::assemble(id, formed, origin, &mut draw, Some(&mut rng))
+}
+
+/// The stars of a tiered system, primary first, and its pairs, without its
+/// planets.
+pub fn tiered_stars(id: &str, component: Component, tier: usize) -> (Vec<Star>, Vec<Barycentre>) {
+    let (formed, origin, mut draw, mut rng) = tiered(id, component, tier);
+    multiple::stars_only(id, formed, origin, &mut draw, Some(&mut rng))
+}
+
+/// What a streamed point needs of the system `tiered_bodies` makes for a key.
+pub(crate) struct TieredLight {
+    /// All its stars together, solar.
+    pub luminosity: f64,
+    /// The primary's temperature (K) and radius (solar).
+    pub kelvin: f64,
+    pub radius: f64,
+    /// Widest any two of its stars get, in AU; zero for a single star.
+    pub separation_au: f64,
+}
+
+/// A tiered system's light and size, without building the rest of it.
+pub(crate) fn tiered_light(key: StarKey, component: Component, tier: usize) -> TieredLight {
+    let mut draw = key.rng(":tier");
+    let shape = tiered_shape(&mut draw, component, tier);
+    let (mass, light, kelvin, radius) = match shape {
+        Shape::Evolved {
+            mass,
+            radius,
+            kelvin,
+            ..
+        } => (mass, star::surface_light(radius, kelvin), kelvin, radius),
         Shape::WhiteDwarf { progenitor, kelvin } => {
             let mass = star::white_dwarf_mass(&mut key.rng(":star"), progenitor);
             let radius = star::white_dwarf_radius(mass);
-            (star::surface_light(radius, kelvin), kelvin, radius)
+            (mass, star::surface_light(radius, kelvin), kelvin, radius)
         }
         Shape::Main { kelvin, mass } => (
+            mass,
             star::luminosity(mass),
             kelvin,
             star::main_sequence_radius(mass),
         ),
+    };
+    let primary = multiple::Primary {
+        origin: shape.origin(component),
+        mass_solar: mass,
+        luminosity: light,
+        radius_solar: radius,
+        kelvin,
+    };
+    let (companions, separation_au) = multiple::companion_light(&mut draw, &primary);
+    TieredLight {
+        luminosity: light + companions,
+        kelvin,
+        radius,
+        separation_au,
     }
 }
 
 /// What `tiered_formation` draws from `{id}:tier`: the kind of star and its
 /// shape. The rest comes from `{id}:star`.
+#[derive(Clone, Copy)]
 enum Shape {
     Evolved {
         mass: f64,
@@ -398,6 +452,22 @@ enum Shape {
         kelvin: f64,
         mass: f64,
     },
+}
+
+impl Shape {
+    fn origin(self, component: Component) -> Origin {
+        let (stage, birth_mass) = match self {
+            Shape::Evolved { mass, .. } => (Stage::Giant, mass),
+            Shape::WhiteDwarf { progenitor, .. } => (Stage::WhiteDwarf, progenitor),
+            Shape::Main { mass, .. } => (Stage::Main, mass),
+        };
+        Origin {
+            stage,
+            birth_mass,
+            age_gyr: None,
+            component,
+        }
+    }
 }
 
 fn tiered_shape(draw: &mut Rng, component: Component, tier: usize) -> Shape {
@@ -543,6 +613,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn companions_add_at_most_a_tier_of_light() {
+        let mut brighter = 0;
+        for component in [Component::ThinDisc, Component::Halo, Component::Arms] {
+            let shares = tier_shares(component);
+            for tier in (0..TIERS).filter(|&t| shares[t] > 0.0) {
+                for i in 0..200 {
+                    let id = format!("band:{i}");
+                    let bodies = tiered_bodies(&id, component, tier);
+                    let light: f64 = bodies.stars.iter().map(|s| s.luminosity_solar).sum();
+                    assert!(light < 4.0 * bodies.stars[0].luminosity_solar);
+                    brighter += usize::from(light > tier_limit(tier));
+                }
+            }
+        }
+        assert!(brighter > 0);
     }
 
     type Test<'a> = (&'a str, &'a dyn Fn(&Star) -> bool);

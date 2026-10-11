@@ -3,7 +3,38 @@ use crate::Navigation;
 use crate::actions::{GalaxyReference, UiCommand};
 use crate::objects::{self, ObjectRef};
 use bevy_egui::egui;
-use space_shared::Galaxy;
+use space_shared::{Galaxy, StarSystem};
+
+/// Crumbs from below a system's outermost barycentre down to a planet's host:
+/// none around a single star, its star in a binary, and the close pair too in a
+/// triple or quadruple. `name` is the system's.
+fn members(system: &StarSystem, page: u32, host: &str, name: &str) -> Vec<Crumb> {
+    system
+        .lineage(page, host)
+        .into_iter()
+        .skip(1)
+        .map(|id| match system.barycentre(&id) {
+            Some(pair) => Crumb {
+                level: Level::Barycentre,
+                label: objects::member_label(name, &pair.component),
+                object: ObjectRef::Barycentre { id },
+            },
+            None => Crumb {
+                level: Level::Star,
+                label: objects::member_label(name, space_simulation::multiple::member_letters(&id)),
+                object: ObjectRef::Star { id },
+            },
+        })
+        .collect()
+}
+
+/// The letters of a page's whole system, such as "AB"; empty for one star.
+fn root_letters(system: &StarSystem, page: u32) -> String {
+    system
+        .barycentres_on(page)
+        .last()
+        .map_or_else(String::new, |pair| pair.component.clone())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +55,8 @@ pub enum Level {
     /// A list's constellation.
     List,
     Star,
+    /// A pair within a multiple system.
+    Barycentre,
     Planet,
 }
 
@@ -58,16 +91,17 @@ pub fn trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
         return trail;
     };
     // A list's stars are its systems, numbered as the page controls number them.
-    let label = if list.is_some() {
+    let name = if list.is_some() {
         let pages = system.pages();
         let number = pages.iter().position(|p| *p == nav.page).unwrap_or(0) + 1;
         format!("System {number}")
     } else {
         system.name.clone()
     };
+    // A multiple system is its outermost barycentre, named for all its stars.
     trail.push(Crumb {
         level: Level::Star,
-        label,
+        label: objects::member_label(&name, &root_letters(system, nav.page)),
         object: ObjectRef::Star {
             id: objects::star_id(system, nav.page),
         },
@@ -78,6 +112,7 @@ pub fn trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
         .and_then(|id| system.planets.iter().find(|planet| planet.id == *id))
         .filter(|planet| planet.page() == nav.page)
     {
+        trail.extend(members(system, nav.page, &planet.host, &name));
         trail.push(Crumb {
             level: Level::Planet,
             label: planet.designation.clone(),
@@ -127,9 +162,18 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
         label: "Milky Way".into(),
         object: ObjectRef::Galaxy,
     }];
-    let mapped = objects::known_system(galaxy, star);
-    if let Some((system, page)) = &mapped {
-        if let Some(list) = galaxy.systems.iter().find(|list| list.id == system.id) {
+    // A list page, or the generated system being visited.
+    let local = objects::known_system(galaxy, star).or_else(|| {
+        let system = nav.system(galaxy)?;
+        let page = system
+            .pages()
+            .into_iter()
+            .find(|page| objects::star_id(system, *page) == star)?;
+        Some((system, page))
+    });
+    if let Some((system, page)) = local {
+        let list = galaxy.systems.iter().find(|list| list.id == system.id);
+        if let Some(list) = list {
             trail.push(Crumb {
                 level: Level::List,
                 label: list.name.clone(),
@@ -138,22 +182,23 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
                 },
             });
         }
-        let label = if galaxy.systems.iter().any(|list| list.id == system.id) {
+        let name = if list.is_some() {
             format!(
                 "System {}",
-                system.pages().iter().position(|p| p == page).unwrap_or(0) + 1
+                system.pages().iter().position(|p| *p == page).unwrap_or(0) + 1
             )
         } else {
             system.name.clone()
         };
         trail.push(Crumb {
             level: Level::Star,
-            label,
+            label: objects::member_label(&name, &root_letters(system, page)),
             object: ObjectRef::Star { id: star.into() },
         });
         if let ObjectRef::Planet { id } = &object
             && let Some(planet) = system.planets.iter().find(|planet| planet.id == *id)
         {
+            trail.extend(members(system, page, &planet.host, &name));
             trail.push(Crumb {
                 level: Level::Planet,
                 label: planet.designation.clone(),
@@ -161,18 +206,38 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
             });
         }
     } else {
+        // A remote system, never generated whole here: its host is in the
+        // planet's ID, though not a triple's pair above it.
+        let name = crate::galaxy_nav::label(galaxy, star);
         trail.push(Crumb {
             level: Level::Star,
-            label: crate::galaxy_nav::label(galaxy, star),
+            label: objects::member_label(&name, &objects::system_letters(star)),
             object: ObjectRef::Star { id: star.into() },
         });
         if let ObjectRef::Planet { id } = &object
+            && let Some(host) = objects::planet_host(id)
             && let Some((_, index)) = id.rsplit_once('/')
             && let Ok(index) = index.parse::<usize>()
         {
+            let letters = space_simulation::multiple::member_letters(host);
+            if !letters.is_empty() && letters != objects::system_letters(star) {
+                trail.push(Crumb {
+                    level: if letters.len() == 1 {
+                        Level::Star
+                    } else {
+                        Level::Barycentre
+                    },
+                    label: objects::member_label(&name, letters),
+                    object: if letters.len() == 1 {
+                        ObjectRef::Star { id: host.into() }
+                    } else {
+                        ObjectRef::Barycentre { id: host.into() }
+                    },
+                });
+            }
             trail.push(Crumb {
                 level: Level::Planet,
-                label: space_simulation::cells::planet_designation(star, index),
+                label: space_simulation::cells::planet_designation(host, index),
                 object,
             });
         }

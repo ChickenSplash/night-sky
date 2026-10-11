@@ -2,7 +2,7 @@
 //! for the GPU (`resolve`).
 use super::{
     POINT_PIXELS, PointMaterial,
-    lights::{Lights, Photometry, granulation_contrast, phase},
+    lights::{Lights, MAX_LIGHTS, Photometry, granulation_contrast, phase},
 };
 use bevy::{math::DVec3, prelude::*};
 use space_simulation::light::{self};
@@ -94,12 +94,18 @@ pub(super) fn spread(radiance: f64, pixels: f32) -> f64 {
 pub struct Shaded {
     pub centre: Vec3,
     pub radius: f32,
+    /// A star's surface, or a planet's colour facing its brightest star.
     pub colour: Vec3,
-    /// Direction to the star and night-side ambient; negative ambient for stars.
+    /// Direction to the brightest star and night-side ambient; negative
+    /// ambient for stars.
     pub light: Vec4,
     pub rotation: Quat,
     /// Granules per radius, on-screen radius and contrast; zero for planets.
     pub surface: Vec4,
+    /// A planet's direction to each star lighting it, brightest first, and
+    /// the colour each gives a surface facing it; zero when unused.
+    pub lights: [Vec4; MAX_LIGHTS],
+    pub tints: [Vec4; MAX_LIGHTS],
 }
 
 /// A camera-facing sprite ready for the GPU (`point.wgsl`): a point, or the
@@ -319,6 +325,8 @@ pub fn resolve(
                 granulation_contrast(star.kelvin),
                 0.0,
             ),
+            lights: [Vec4::ZERO; MAX_LIGHTS],
+            tints: [Vec4::ZERO; MAX_LIGHTS],
         });
         // The corona grows in from a point, and is whiter than the surface.
         let fade = f64::from(((star.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0));
@@ -336,17 +344,40 @@ pub fn resolve(
             (star.kelvin * 0.618_034).fract() as f32,
         ));
     }
-    let tint = DVec3::from_array(photometry.colour(lights.kelvin));
     for planet in &lights.planets {
-        let radiance = light::reflected_radiance(planet.surface.albedo, planet.flux);
-        let colour = tint * DVec3::from_array(planet.surface.tint);
-        // Keyed by the sub-stellar point, never by phase, so crescents stay dim.
+        // Each star's light, tinted by its colour and the surface's.
+        let surface = DVec3::from_array(planet.surface.tint);
+        let shine: Vec<(Vec3, DVec3, f64)> = planet
+            .light
+            .iter()
+            .take(MAX_LIGHTS)
+            .map(|l| {
+                (
+                    l.towards,
+                    DVec3::from_array(photometry.colour(l.kelvin)) * surface,
+                    light::reflected_radiance(planet.surface.albedo, l.flux),
+                )
+            })
+            .collect();
+        // Keyed by the brightest star's sub-stellar point, never by phase, so
+        // crescents stay dim and a faint companion never sets the exposure.
+        let radiance = shine.first().map_or(0.0, |s| s.2);
         let key = exposure.value(spread(radiance, planet.pixels.min(POINT_PIXELS)));
         let balance = balance(key, PLANET_KEY, compression);
         if planet.pixels < POINT_PIXELS {
             let towards_eye = (lights.eye - planet.centre).normalize_or_zero();
-            let angle = planet.towards_star.angle_between(towards_eye);
-            let light = exposure.point(radiance * phase(angle), planet.pixels) * balance;
+            let (mut colour, mut total) = (DVec3::ZERO, 0.0);
+            for (towards, tint, radiance) in &shine {
+                let seen = radiance * phase(towards.angle_between(towards_eye));
+                colour += *tint * seen;
+                total += seen;
+            }
+            let colour = if total > 0.0 {
+                colour / total
+            } else {
+                shine.first().map_or(surface, |s| s.1)
+            };
+            let light = exposure.point(total, planet.pixels) * balance;
             frame.points.push(Point::new(
                 planet.centre,
                 planet.pixels,
@@ -358,27 +389,44 @@ pub fn resolve(
             ));
             continue;
         }
-        let value = exposure.value(radiance) * balance;
+        let mut directions = [Vec4::ZERO; MAX_LIGHTS];
+        let mut tints = [Vec4::ZERO; MAX_LIGHTS];
+        for (i, (towards, tint, radiance)) in shine.iter().enumerate() {
+            directions[i] = towards.extend(0.0);
+            tints[i] = hdr_colour(*tint, exposure.value(*radiance) * balance).extend(0.0);
+        }
         frame.bodies.push(Shaded {
             centre: planet.centre,
             radius: planet.radius,
-            colour: hdr_colour(colour, value),
-            light: planet.towards_star.extend(0.0),
+            colour: tints[0].truncate(),
+            light: directions[0],
             rotation: Quat::IDENTITY,
             surface: Vec4::ZERO,
+            lights: directions,
+            tints,
         });
-        frame.rims.push(Point::rim(
-            planet.centre,
-            planet.pixels,
-            planet.per_pixel,
-            psf,
-            colour * value,
-            DVec3::ZERO,
-            streaks(colour, colour.max_element() * value, lights.streaks),
-            planet.towards_star,
-            false,
-            0.0,
-        ));
+        // A blurred limb on the side facing each star; streaks only from the
+        // brightest.
+        for (i, (towards, tint, radiance)) in shine.iter().enumerate() {
+            let colour = *tint * (exposure.value(*radiance) * balance);
+            let streaks = if i == 0 {
+                streaks(colour, colour.max_element(), lights.streaks)
+            } else {
+                Vec4::ZERO
+            };
+            frame.rims.push(Point::rim(
+                planet.centre,
+                planet.pixels,
+                planet.per_pixel,
+                psf,
+                colour,
+                DVec3::ZERO,
+                streaks,
+                *towards,
+                false,
+                0.0,
+            ));
+        }
     }
     frame
 }

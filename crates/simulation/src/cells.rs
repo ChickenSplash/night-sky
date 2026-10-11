@@ -14,9 +14,9 @@
 //!   order, on any machine. `Sky` only caches what it has worked out.
 
 use crate::galaxy::{COMPONENTS, Component, GalaxyModel};
-use crate::population::{TIERS, tiered_formation, tiered_light};
+use crate::population::{TIERS, tiered_bodies, tiered_formation, tiered_light};
 use crate::stream::StarPoint;
-use crate::system::{Body, Rng, system_around};
+use crate::system::{Body, Rng};
 use crate::{HASH_START, finish_hash, hash_bytes};
 use space_shared::Star;
 use std::collections::HashMap;
@@ -209,8 +209,15 @@ pub fn catalogue_name(id: &str) -> String {
     )
 }
 
-pub fn planet_designation(id: &str, index: usize) -> String {
-    format!("{} {}", catalogue_name(id), (b'b' + index as u8) as char)
+/// A planet's catalogue name, from its host's ID: a cell star, or a star or
+/// barycentre of its system.
+pub fn planet_designation(host: &str, index: usize) -> String {
+    crate::multiple::designation(
+        &catalogue_name(crate::multiple::system_key(host)),
+        " ",
+        crate::multiple::member_letters(host),
+        index,
+    )
 }
 
 /// The cell, component and index a cell star's ID names.
@@ -232,13 +239,21 @@ pub fn cell_star(id: &str) -> Option<(Component, Star)> {
     ))
 }
 
-/// A cell star's planets, innermost first.
+/// A cell star's planets, by host and innermost first.
 pub fn cell_planetary_system(id: &str) -> Option<Vec<Body>> {
+    Some(
+        cell_bodies(id)?
+            .planets
+            .into_iter()
+            .map(|p| p.body)
+            .collect(),
+    )
+}
+
+/// Everything a cell star's ID generates: its stars, pairs and planets.
+pub fn cell_bodies(id: &str) -> Option<crate::multiple::Bodies> {
     let (cell, component, _) = parse_cell_star(id)?;
-    Some(system_around(
-        id,
-        &tiered_formation(id, component, cell.level()),
-    ))
+    Some(tiered_bodies(id, component, cell.level()))
 }
 
 /// A seeded binomial draw: exact for small means, normal beyond.
@@ -639,12 +654,13 @@ impl Sky {
             .get(&(end, component))
             .ok_or(Need::Bound(end, component))?;
         let position_pc = within(&self.model, component, end, bound, &mut rng);
-        let (luminosity, kelvin, radius) = tiered_light(key, component, cell.level());
+        let light = tiered_light(key, component, cell.level());
         Ok(StarPoint {
             position_pc,
-            luminosity_solar: luminosity as f32,
-            temperature_k: kelvin as f32,
-            radius_solar: radius as f32,
+            luminosity_solar: light.luminosity as f32,
+            temperature_k: light.kelvin as f32,
+            radius_solar: light.radius as f32,
+            separation_au: light.separation_au as f32,
             component,
             index: index as u32,
         })
@@ -847,7 +863,20 @@ mod tests {
                         };
                         let full = sky.build(cell, component, index);
                         assert_eq!(point.position_pc, full.position_pc, "{}", full.id);
-                        assert_eq!(point.luminosity_solar, full.star.luminosity_solar as f32);
+                        // A point is the whole system's light.
+                        let bodies = cell_bodies(&full.id).unwrap();
+                        let light: f64 = bodies.stars.iter().map(|s| s.luminosity_solar).sum();
+                        let error = (f64::from(point.luminosity_solar) / light - 1.0).abs();
+                        assert!(error < 1e-6, "{}: {point:?} {light}", full.id);
+                        assert_eq!(bodies.stars[0].luminosity_solar, full.star.luminosity_solar);
+                        // And as wide as its widest pair, worked out the same way.
+                        let widest = crate::multiple::widest_separation_au(&bodies.barycentres);
+                        let error = (f64::from(point.separation_au) - widest).abs();
+                        assert!(
+                            error <= 1e-6 * widest.max(1.0),
+                            "{}: {point:?} {widest}",
+                            full.id
+                        );
                         assert_eq!(point.temperature_k, full.star.temperature_k as f32);
                         assert_eq!(point.radius_solar, full.star.radius_solar as f32);
                         kinds.insert(full.star.kind);

@@ -91,7 +91,13 @@ fn a_list_star_slots_its_constellation_in_and_numbers_its_system() {
         trail.iter().map(|c| c.level).collect::<Vec<_>>(),
         [Level::Galaxy, Level::List, Level::Star]
     );
-    assert_eq!(trail[2].label, "System 2");
+    // A multiple system is named for all its stars, as its barycentre.
+    let system = &galaxy.systems[0];
+    let letters = system
+        .barycentres_on(nav.page)
+        .last()
+        .map_or(String::new(), |b| format!(" {}", b.component));
+    assert_eq!(trail[2].label, format!("System 2{letters}"));
     assert_eq!(
         up(&nav, &galaxy),
         Some(UiCommand::Jump {
@@ -163,4 +169,71 @@ fn not_yet_arrived_shows_no_star() {
         ..at_list(&galaxy, 0)
     };
     assert_eq!(trail(&nav, &galaxy).len(), 1);
+}
+
+#[test]
+fn a_companions_planet_is_reached_through_the_barycentre_and_its_star() {
+    let galaxy = space_simulation::demo_galaxy();
+    let system = &galaxy.systems[0];
+    let mut nav = at_list(&galaxy, 1);
+    let root = system
+        .barycentres_on(nav.page)
+        .last()
+        .expect("the demo's second system is multiple");
+    let primary = &system.star(nav.page).unwrap().id;
+    let planet = system
+        .on_page(nav.page)
+        .find(|p| p.host != *primary && system.barycentre(&p.host).is_none())
+        .expect("a planet of a companion");
+    let letter = space_simulation::multiple::member_letters(&planet.host);
+    let expected = [
+        "Milky Way".to_owned(),
+        system.name.clone(),
+        format!("System 2 {}", root.component),
+        format!("System 2 {letter}"),
+        planet.designation.clone(),
+    ];
+    nav.location_planet = Some(planet.id.clone());
+    let location = trail(&nav, &galaxy);
+    assert_eq!(
+        location.iter().map(|c| &c.label).collect::<Vec<_>>(),
+        expected.iter().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        location[2].object,
+        ObjectRef::Star {
+            id: objects::star_id(system, nav.page)
+        }
+    );
+    assert_eq!(
+        location[3].object,
+        ObjectRef::Star {
+            id: planet.host.clone()
+        }
+    );
+    nav.location_planet = None;
+    nav.select(Some(Selection::Planet(planet.id.clone())));
+    let selected = selection_trail(&nav, &galaxy);
+    assert_eq!(
+        selected.iter().map(|c| &c.label).collect::<Vec<_>>(),
+        expected.iter().collect::<Vec<_>>()
+    );
+    // Each crumb describes its own object.
+    let fact = |object: &ObjectRef, label: &str| {
+        crate::ui::inspector::describe(object, &galaxy)
+            .rows
+            .into_iter()
+            .find(|(l, _)| l == label)
+            .map(|(_, value)| value)
+    };
+    assert_eq!(
+        fact(&location[2].object, "Type").unwrap(),
+        "Binary star system"
+    );
+    assert!(fact(&location[3].object, "Companion").is_some());
+    assert!(
+        fact(&location[4].object, "Orbits")
+            .unwrap()
+            .ends_with(letter)
+    );
 }

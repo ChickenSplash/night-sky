@@ -23,15 +23,27 @@ pub struct StarLight {
     pub granules: f64,
 }
 
+/// Stars lighting one planet, at most: a quadruple system's.
+pub const MAX_LIGHTS: usize = 4;
+
+/// Light reaching a planet from one star.
+#[derive(Clone, Copy, Debug)]
+pub struct Illumination {
+    /// Direction to the star, in world axes.
+    pub towards: Vec3,
+    /// Visual flux, W m⁻².
+    pub flux: f64,
+    pub kelvin: f64,
+}
+
 /// How a planet is lit, before exposure.
 pub struct PlanetLight {
     pub centre: Vec3,
     pub radius: f32,
     pub pixels: f32,
     pub per_pixel: f32,
-    /// Direction to the star, in world axes.
-    pub towards_star: Vec3,
-    pub flux: f64,
+    /// Each star's light, brightest first, at most `MAX_LIGHTS`.
+    pub light: Vec<Illumination>,
     pub surface: Surface,
 }
 
@@ -42,8 +54,6 @@ pub struct Lights {
     pub planets: Vec<PlanetLight>,
     /// Render position of the camera.
     pub eye: Vec3,
-    /// Temperature of the star lighting the planets.
-    pub kelvin: f64,
     /// Streak visibility, from zero at the edge of the body range to one well
     /// inside it, so streaks never appear suddenly as bodies take over.
     pub streaks: f32,

@@ -1,7 +1,8 @@
 //! Procedural planetary systems: one per star, generated as a whole so every
 //! planet's mass, size and orbit is consistent with its neighbours.
 //!
-//! - Planet counts vary from `MIN_PLANETS` to `MAX_PLANETS` per system.
+//! - Planet counts vary from `MIN_PLANETS` to `MAX_PLANETS` per star or close
+//!   pair, fewer where a companion's pull cuts the system short (`multiple`).
 //! - Composition follows the snow line: rocky worlds and sub-Neptunes inside it,
 //!   gas and ice giants just beyond it, dwarf planets far out.
 //! - Radii follow empirical mass-radius relations (after Chen & Kipping 2017),
@@ -12,7 +13,8 @@
 //!   conjunctions away from the outer planet's periapsis, as for Neptune and Pluto.
 
 use crate::galaxy::Component;
-use crate::star::{Formation, formation, galactic_formation};
+use crate::multiple::{Bodies, assemble, designation};
+use crate::star::{Formation, census, galactic};
 use crate::{period_seconds, stable_hash};
 use space_shared::{Galaxy, MAX_PLANETS, MIN_PLANETS, Orbit, Planet, Spin, StarSystem, Task};
 use std::{
@@ -118,11 +120,17 @@ pub fn star_id(list_id: &str, page: u32) -> String {
     format!("{list_id}:page-{page}")
 }
 
-/// Number of planets around a star.
-pub fn planet_count(star: &str) -> u32 {
+/// Number of planets that form around a star or close pair, before any
+/// companion cuts the system short.
+fn host_planet_count(host: &str) -> u32 {
     MIN_PLANETS
-        + (stable_hash(&format!("{star}:planets")) % u64::from(MAX_PLANETS - MIN_PLANETS + 1))
+        + (stable_hash(&format!("{host}:planets")) % u64::from(MAX_PLANETS - MIN_PLANETS + 1))
             as u32
+}
+
+/// Number of planets in a star's whole system, around every star and pair.
+pub fn planet_count(star: &str) -> u32 {
+    bodies(star).planets.len() as u32
 }
 
 /// Number of planets, and so of task slots, in a page's system.
@@ -136,21 +144,30 @@ fn assigned_star(system: &StarSystem, page: u32) -> String {
         .map_or_else(|| star_id(&system.id, page), |s| s.id.clone())
 }
 
-fn capacity(system: &StarSystem, page: u32) -> u32 {
-    planet_count(&assigned_star(system, page))
+/// Each page's generated bodies, worked out once while placing a list.
+type Generated = BTreeMap<u32, Bodies>;
+
+fn generated<'a>(system: &StarSystem, cache: &'a mut Generated, page: u32) -> &'a Bodies {
+    cache
+        .entry(page)
+        .or_insert_with(|| bodies(&assigned_star(system, page)))
 }
 
-/// An append-only slot mapped through this list's actual assigned stars.
-pub fn system_page_of_slot(system: &StarSystem, slot: u32) -> (u32, u32) {
+fn slot_page(system: &StarSystem, cache: &mut Generated, slot: u32) -> (u32, u32) {
     let (mut page, mut first) = (0, 0);
     loop {
-        let count = capacity(system, page);
+        let count = generated(system, cache, page).planets.len() as u32;
         if slot < first + count {
             return (page, slot - first);
         }
         first += count;
         page += 1;
     }
+}
+
+/// An append-only slot mapped through this list's actual assigned stars.
+pub fn system_page_of_slot(system: &StarSystem, slot: u32) -> (u32, u32) {
+    slot_page(system, &mut Generated::new(), slot)
 }
 
 /// Page and orbit index within the page for an append-only list slot.
@@ -242,18 +259,51 @@ fn stable(inner: &Body, outer_au: f64, outer_e: f64, outer_mass: f64, star: f64)
             >= 2.0 * 3f64.sqrt() * hill
 }
 
-/// The whole planetary system of one page star, innermost first.
+/// Everything a star's key generates, for a galactic cell star or a legacy
+/// page star.
+pub fn bodies(key: &str) -> Bodies {
+    crate::cells::cell_bodies(key).unwrap_or_else(|| {
+        let (formed, origin, mut rng) = census(key);
+        assemble(key, formed, origin, &mut rng, None)
+    })
+}
+
+/// The stars of a star's system, primary first, and its pairs, without its
+/// planets.
+pub fn system_stars(key: &str) -> (Vec<space_shared::Star>, Vec<space_shared::Barycentre>) {
+    crate::cells::parse_cell_star(key).map_or_else(
+        || {
+            let (formed, origin, mut rng) = census(key);
+            crate::multiple::stars_only(key, formed, origin, &mut rng, None)
+        },
+        |(cell, component, _)| crate::population::tiered_stars(key, component, cell.level()),
+    )
+}
+
+/// Every planet of one page star's system, by host and innermost first.
 pub fn planetary_system(star: &str) -> Vec<Body> {
-    system_around(star, &formation(star))
+    bodies(star).planets.into_iter().map(|p| p.body).collect()
 }
 
-/// The whole planetary system of a galactic star, innermost first.
+/// Everything a galactic star of this component generates.
+pub fn galactic_bodies(star: &str, component: Component) -> Bodies {
+    let (formed, origin, mut rng) = galactic(star, component);
+    assemble(star, formed, origin, &mut rng, None)
+}
+
+/// Every planet of a galactic star's system, by host and innermost first.
 pub fn galactic_planetary_system(star: &str, component: Component) -> Vec<Body> {
-    system_around(star, &galactic_formation(star, component))
+    galactic_bodies(star, component)
+        .planets
+        .into_iter()
+        .map(|p| p.body)
+        .collect()
 }
 
-pub(crate) fn system_around(star: &str, formed: &Formation) -> Vec<Body> {
-    let ordinary = generate_system(star, formed, false);
+/// Planets around a star or close pair, innermost first, none reaching past
+/// `limit_au` from it.
+pub(crate) fn system_within(star: &str, formed: &Formation, limit_au: f64) -> Vec<Body> {
+    let ordinary = generate_system(star, formed, false, limit_au);
     if ordinary.last().is_none_or(|body| {
         body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity) <= MAX_SYSTEM_APOAPSIS_AU
     }) {
@@ -262,11 +312,11 @@ pub(crate) fn system_around(star: &str, formed: &Formation) -> Vec<Body> {
         // A crowded page around an evolved star can otherwise push its outer
         // bodies thousands of AU out. Form a compact, low-mass system instead;
         // reducing mass makes Hill-stable spacing possible within the disc.
-        generate_system(star, formed, true)
+        generate_system(star, formed, true, limit_au)
     }
 }
 
-fn generate_system(star: &str, formed: &Formation, compact: bool) -> Vec<Body> {
+fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64) -> Vec<Body> {
     let suffix = if compact { ":compact" } else { "" };
     let mut rng = Rng::new(&format!("{star}:system{suffix}"));
     // Spins draw from their own sequence, so they never move an orbit.
@@ -276,7 +326,7 @@ fn generate_system(star: &str, formed: &Formation, compact: bool) -> Vec<Body> {
     // A few systems form tight resonant chains, like TRAPPIST-1 or Kepler-223.
     let chain = !compact && rng.chance(0.12);
     let mut bodies: Vec<Body> = Vec::new();
-    for _ in 0..planet_count(star) {
+    for _ in 0..host_planet_count(star) {
         let previous = bodies.last();
         let tentative = match previous {
             Some(p) if compact => p.orbit.semi_major_au * rng.log_range(1.12, 1.22),
@@ -333,6 +383,10 @@ fn generate_system(star: &str, formed: &Formation, compact: bool) -> Vec<Body> {
                 phase = ((std::f64::consts::PI + q * inner_longitude + (p - q) * node) / p - node)
                     .rem_euclid(TAU);
             }
+        }
+        // A companion's pull clears everything beyond its stable zone.
+        if semi_major * (1.0 + eccentricity) > limit_au {
+            break;
         }
         let radius = radius_earth(mass, class) * rng.range(0.92, 1.1);
         let orbit = Orbit {
@@ -428,66 +482,71 @@ pub fn shape(system: &mut StarSystem) {
     place(system, tasks);
 }
 
-/// Replaces a system's planets and stars with those of the pages the tasks'
-/// slots fall on, or of page 0 when there are no tasks.
+/// Replaces a system's planets, stars and barycentres with those of the pages
+/// the tasks' slots fall on, or of page 0 when there are no tasks.
 pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
-    let empty = |page| vec![None; capacity(system, page) as usize];
+    let mut cache = Generated::new();
     let mut pages: BTreeMap<u32, Vec<Option<Task>>> = BTreeMap::new();
+    let empty =
+        |cache: &mut Generated, page| vec![None; generated(system, cache, page).planets.len()];
     for task in tasks {
-        let (page, index) = system_page_of_slot(system, task.slot);
-        pages.entry(page).or_insert_with(|| empty(page))[index as usize] = Some(task);
+        let (page, index) = slot_page(system, &mut cache, task.slot);
+        pages.entry(page).or_insert_with(|| empty(&mut cache, page))[index as usize] = Some(task);
     }
     // A reserved page is still a real star and has its whole planetary system,
     // even when its last task disappears from the latest snapshot.
-    for assigned in &system.page_stars {
-        pages
-            .entry(assigned.page)
-            .or_insert_with(|| empty(assigned.page));
+    for page in system.page_stars.iter().map(|s| s.page) {
+        pages.entry(page).or_insert_with(|| empty(&mut cache, page));
     }
     if pages.is_empty() {
-        pages.insert(0, empty(0));
+        pages.insert(0, empty(&mut cache, 0));
     }
-    system.planets.clear();
-    system.stars.clear();
+    let mut planets = Vec::new();
+    let mut stars = Vec::new();
+    let mut barycentres = Vec::new();
     for (page, tasks) in pages {
-        let star = assigned_star(system, page);
-        let (bodies, star_data) = if system.page_star(page).is_some() {
-            (
-                crate::cells::cell_planetary_system(&star).expect("assigned cell star"),
-                crate::cells::cell_star(&star)
-                    .expect("assigned cell star")
-                    .1,
-            )
-        } else {
-            (planetary_system(&star), crate::star(&star))
-        };
-        for (index, (body, task)) in bodies.into_iter().zip(tasks).enumerate() {
-            system.planets.push(Planet {
-                id: format!("{star}/{index}"),
-                // Exoplanet style: the innermost planet is b.
-                designation: if system.page_star(page).is_some() {
-                    crate::cells::planet_designation(&star, index)
-                } else {
-                    format!(
-                        "{} {}{}",
-                        system.name,
-                        page + 1,
-                        (b'b' + index as u8) as char
-                    )
-                },
+        let key = assigned_star(system, page);
+        let generated = cache.remove(&page).unwrap_or_else(|| bodies(&key));
+        let cell = system.page_star(page).is_some();
+        for (hosted, task) in generated.planets.into_iter().zip(tasks) {
+            // Exoplanet style: the innermost planet is b.
+            let designation = if cell {
+                crate::cells::planet_designation(&hosted.host, hosted.index)
+            } else {
+                let name = format!("{} {}", system.name, page + 1);
+                designation(&name, "", &hosted.host_letters, hosted.index)
+            };
+            planets.push(Planet {
+                id: hosted.id(),
+                designation,
                 page,
-                orbit_index: index as u32,
-                orbit: body.orbit,
-                radius_km: body.radius_km,
-                mass_earth: body.mass_earth,
-                class: body.class.name().into(),
-                resonance: body.resonance,
-                spin: body.spin,
+                orbit_index: hosted.index as u32,
+                host: hosted.host,
+                orbit: hosted.body.orbit,
+                radius_km: hosted.body.radius_km,
+                mass_earth: hosted.body.mass_earth,
+                class: hosted.body.class.name().into(),
+                resonance: hosted.body.resonance,
+                spin: hosted.body.spin,
                 task,
             });
         }
-        system.stars.push(space_shared::Star { page, ..star_data });
+        stars.extend(
+            generated
+                .stars
+                .into_iter()
+                .map(|star| space_shared::Star { page, ..star }),
+        );
+        barycentres.extend(
+            generated
+                .barycentres
+                .into_iter()
+                .map(|pair| space_shared::Barycentre { page, ..pair }),
+        );
     }
+    system.planets = planets;
+    system.stars = stars;
+    system.barycentres = barycentres;
 }
 
 pub fn shape_galaxy(galaxy: &mut Galaxy) {
@@ -639,6 +698,7 @@ pub fn demo_galaxy() -> Galaxy {
             position_ly: position_ly.unwrap_or_else(|| crate::star_position(id)),
             planets: Vec::new(),
             stars: Vec::new(),
+            barycentres: Vec::new(),
             page_stars: Vec::new(),
         };
         place(&mut system, tasks);
@@ -717,8 +777,10 @@ pub fn assign_page_stars<E: From<PageStarError>>(
                     .expect("ordinal within tier");
                 let distance_sq: f64 = offset(candidate.position_pc).iter().map(|d| d * d).sum();
                 // Assigned stars must appear in the magnitude-limited sky that
-                // the client streams and can pick from the galaxy overview.
+                // the client streams and can pick from the galaxy overview, and
+                // have planets to hold tasks: a companion can leave none.
                 if distance_sq <= candidate.star.luminosity_solar * reach
+                    && planet_count(&candidate.id) > 0
                     && claim(page, &candidate.id)?
                 {
                     chosen = Some(candidate);
@@ -744,6 +806,7 @@ pub fn assign_page_stars<E: From<PageStarError>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::star::{formation, galactic_formation};
 
     #[test]
     fn demo_has_repeatable_multi_star_constellations() {
@@ -759,9 +822,20 @@ mod tests {
             473
         );
         let mut ids = std::collections::HashSet::new();
+        // Multiple-star pages, some with planets around more than one host.
+        let pages = || {
+            first
+                .systems
+                .iter()
+                .flat_map(|s| s.pages().into_iter().map(move |p| (s, p)))
+        };
+        assert!(pages().any(|(s, p)| s.stars_on(p).count() > 2));
+        assert!(pages().filter(|(s, p)| s.hosts(*p).len() > 1).count() >= 5);
         for system in &first.systems {
-            assert!(system.pages().len() >= 5);
-            assert_eq!(system.pages().len(), system.stars.len());
+            assert!(system.pages().len() >= 4);
+            let mut star_pages: Vec<_> = system.stars.iter().map(|s| s.page).collect();
+            star_pages.dedup();
+            assert_eq!(system.pages(), star_pages);
             for (slot, (_, task)) in system.tasks().enumerate() {
                 assert_eq!(task.slot, slot as u32);
                 assert!(ids.insert(&task.id));
@@ -769,7 +843,9 @@ mod tests {
             }
             for assigned in &system.page_stars {
                 let cell_star = crate::cells::cell_star(&assigned.id).unwrap();
-                assert_eq!(system.star(assigned.page).unwrap().id, cell_star.1.id);
+                let primary = system.star(assigned.page).unwrap();
+                assert_eq!(crate::multiple::system_key(&primary.id), cell_star.1.id);
+                assert_eq!(primary.mass_solar, cell_star.1.mass_solar);
                 assert!(ids.insert(&assigned.id));
             }
         }
@@ -780,14 +856,15 @@ mod tests {
         let mut system = demo_galaxy().systems.remove(0);
         for page in system.pages() {
             let star = &system.page_star(page).unwrap().id;
-            let bodies = crate::cells::cell_planetary_system(star).unwrap();
+            let bodies = crate::cells::cell_bodies(star).unwrap();
             let planets: Vec<_> = system.on_page(page).collect();
-            assert_eq!(planets.len(), bodies.len());
-            for (planet, body) in planets.iter().zip(&bodies) {
-                assert_eq!(planet.orbit, body.orbit);
-                assert_eq!(planet.id, format!("{star}/{}", planet.orbit_index));
+            assert_eq!(planets.len(), bodies.planets.len());
+            for (planet, hosted) in planets.iter().zip(&bodies.planets) {
+                assert_eq!(planet.orbit, hosted.body.orbit);
+                assert_eq!(planet.host, hosted.host);
+                assert_eq!(planet.id, format!("{}/{}", planet.host, planet.orbit_index));
             }
-            assert_eq!(&system.star(page).unwrap().id, star);
+            assert_eq!(system.star(page).unwrap().id, bodies.stars[0].id);
         }
         // The last page is only partly tasked; the rest are bare planets.
         assert!(system.planets.iter().any(|p| p.task.is_none()));
@@ -823,28 +900,62 @@ mod tests {
         (0..400).map(|page| planetary_system(&star_id("list", page)))
     }
 
+    /// Each host's planets on the first 400 legacy pages: the page, the
+    /// host's mass, whether it is the primary, and its planets.
+    fn hosted() -> impl Iterator<Item = (u32, f64, bool, Vec<Body>)> {
+        (0..400).flat_map(|page| {
+            let bodies = bodies(&star_id("list", page));
+            let primary = bodies.stars[0].id.as_str();
+            bodies
+                .by_host()
+                .into_iter()
+                .map(|(host, planets)| {
+                    (
+                        page,
+                        bodies.mass(host),
+                        host == primary,
+                        planets.into_iter().cloned().collect(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+    }
+
     #[test]
     fn planet_counts_vary_within_bounds() {
-        let counts: Vec<_> = (0..400).map(|page| page_capacity("list", page)).collect();
+        let (mut single, mut multiple) = (Vec::new(), Vec::new());
+        for page in 0..400 {
+            let bodies = bodies(&star_id("list", page));
+            let count = bodies.planets.len() as u32;
+            if bodies.stars.len() == 1 {
+                single.push(count);
+            } else {
+                multiple.push(count);
+            }
+        }
         assert!(
-            counts
+            single
                 .iter()
                 .all(|c| (MIN_PLANETS..=MAX_PLANETS).contains(c))
         );
         for n in MIN_PLANETS..=MAX_PLANETS {
-            assert!(counts.contains(&n));
+            assert!(single.contains(&n));
         }
+        // Companions cut some systems short, and give others planets around
+        // more than one star.
+        assert!(multiple.iter().any(|&c| c < MIN_PLANETS));
+        assert!(multiple.iter().any(|&c| c > MAX_PLANETS));
     }
 
     #[test]
     fn slots_fill_pages_in_order() {
         let mut expected = (0, 0);
         for slot in 0..500 {
-            assert_eq!(page_of_slot("list", slot), expected);
-            expected.1 += 1;
-            if expected.1 == page_capacity("list", expected.0) {
+            while page_capacity("list", expected.0) == expected.1 {
                 expected = (expected.0 + 1, 0);
             }
+            assert_eq!(page_of_slot("list", slot), expected);
+            expected.1 += 1;
         }
     }
 
@@ -860,8 +971,7 @@ mod tests {
 
     #[test]
     fn neighbours_are_hill_stable_and_never_cross() {
-        for (page, bodies) in systems().enumerate() {
-            let star = formation(&star_id("list", page as u32)).star.mass_solar;
+        for (_, star, _, bodies) in hosted() {
             for pair in bodies.windows(2) {
                 let (inner, outer) = (&pair[0], &pair[1]);
                 assert!(outer.orbit.semi_major_au > inner.orbit.semi_major_au);
@@ -883,31 +993,35 @@ mod tests {
             for page in 0..1_000 {
                 let star = star_id(list, page);
                 let formed = formation(&star);
-                let ordinary = generate_system(&star, &formed, false);
+                let ordinary = generate_system(&star, &formed, false, f64::INFINITY);
                 if ordinary.last().is_some_and(|body| {
                     body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity)
                         > MAX_SYSTEM_APOAPSIS_AU
                 }) {
                     compact_count += 1;
                 }
-                let bodies = planetary_system(&star);
-                assert_eq!(bodies.len(), page_capacity(list, page) as usize);
-                for body in &bodies {
-                    let apoapsis = body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity);
-                    assert!(
-                        apoapsis <= MAX_SYSTEM_APOAPSIS_AU,
-                        "{list} page {page}: {apoapsis} AU"
-                    );
-                    assert!(body.orbit.semi_major_au >= formed.inner_au);
-                }
-                for pair in bodies.windows(2) {
-                    assert!(stable(
-                        &pair[0],
-                        pair[1].orbit.semi_major_au,
-                        pair[1].orbit.eccentricity,
-                        pair[1].mass_earth,
-                        formed.star.mass_solar
-                    ));
+                let generated = bodies(&star);
+                assert_eq!(generated.planets.len(), page_capacity(list, page) as usize);
+                for (host, planets) in generated.by_host() {
+                    for body in &planets {
+                        let apoapsis = body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity);
+                        assert!(
+                            apoapsis <= MAX_SYSTEM_APOAPSIS_AU,
+                            "{list} page {page}: {apoapsis} AU"
+                        );
+                        if host == generated.stars[0].id {
+                            assert!(body.orbit.semi_major_au >= formed.inner_au);
+                        }
+                    }
+                    for pair in planets.windows(2) {
+                        assert!(stable(
+                            pair[0],
+                            pair[1].orbit.semi_major_au,
+                            pair[1].orbit.eccentricity,
+                            pair[1].mass_earth,
+                            generated.mass(host)
+                        ));
+                    }
                 }
             }
         }
@@ -931,21 +1045,24 @@ mod tests {
         for (star, component) in sample.chain(rare) {
             let formed = galactic_formation(&star, component);
             kinds.insert(formed.star.kind.clone());
-            let bodies = galactic_planetary_system(&star, component);
-            assert_eq!(bodies.len() as u32, planet_count(&star));
-            for body in &bodies {
-                let apoapsis = body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity);
-                assert!(apoapsis <= MAX_SYSTEM_APOAPSIS_AU, "{star}: {apoapsis} AU");
-                assert!(body.orbit.semi_major_au >= formed.inner_au);
-            }
-            for pair in bodies.windows(2) {
-                assert!(stable(
-                    &pair[0],
-                    pair[1].orbit.semi_major_au,
-                    pair[1].orbit.eccentricity,
-                    pair[1].mass_earth,
-                    formed.star.mass_solar
-                ));
+            let generated = galactic_bodies(&star, component);
+            for (host, planets) in generated.by_host() {
+                for body in &planets {
+                    let apoapsis = body.orbit.semi_major_au * (1.0 + body.orbit.eccentricity);
+                    assert!(apoapsis <= MAX_SYSTEM_APOAPSIS_AU, "{star}: {apoapsis} AU");
+                    if host == generated.stars[0].id {
+                        assert!(body.orbit.semi_major_au >= formed.inner_au);
+                    }
+                }
+                for pair in planets.windows(2) {
+                    assert!(stable(
+                        pair[0],
+                        pair[1].orbit.semi_major_au,
+                        pair[1].orbit.eccentricity,
+                        pair[1].mass_earth,
+                        generated.mass(host)
+                    ));
+                }
             }
         }
         for kind in [
@@ -961,7 +1078,7 @@ mod tests {
     #[test]
     fn resonant_pairs_have_exact_periods_and_protected_conjunctions() {
         let mut found = 0;
-        for bodies in systems() {
+        for (_, _, _, bodies) in hosted() {
             for pair in bodies.windows(2) {
                 let Some([p, q]) = pair[1].resonance else {
                     continue;
@@ -982,8 +1099,11 @@ mod tests {
 
     #[test]
     fn composition_follows_the_snow_line() {
-        for (page, bodies) in systems().enumerate() {
-            let formed = formation(&star_id("list", page as u32));
+        for (page, _, primary, bodies) in hosted() {
+            if !primary {
+                continue;
+            }
+            let formed = formation(&star_id("list", page));
             for body in bodies {
                 if body.orbit.semi_major_au < 0.7 * formed.snow_au {
                     assert!(matches!(body.class, Class::Rocky | Class::SubNeptune));

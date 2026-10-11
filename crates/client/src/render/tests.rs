@@ -24,8 +24,11 @@ fn planet(flux: f64, pixels: f32) -> PlanetLight {
         radius: 1.0,
         pixels,
         per_pixel: 1.0,
-        towards_star: -Vec3::X,
-        flux,
+        light: vec![Illumination {
+            towards: -Vec3::X,
+            flux,
+            kelvin: 5772.0,
+        }],
         surface: light::surface("Rocky planet"),
     }
 }
@@ -43,7 +46,6 @@ fn lights() -> Lights {
             planet(sun / 10.0, 1.4),
         ],
         eye: Vec3::ZERO,
-        kelvin: 5772.0,
         streaks: 1.0,
     }
 }
@@ -83,12 +85,49 @@ fn manual_exposure_preserves_physical_brightness_ratios() {
 fn manual_exposure_has_no_brightness_floors() {
     let photometry = Photometry::default();
     let mut dim = lights();
-    dim.planets[2].flux = 0.0;
-    dim.planets[0].flux = 0.0;
+    dim.planets[2].light[0].flux = 0.0;
+    dim.planets[0].light[0].flux = 0.0;
     let dim = resolve(&dim, &photometry, -30.0, 0.0, PSF_SIGMA_PX);
     assert_eq!(dim.points[2].light(), 0.0);
     assert_eq!(brightness(&dim.bodies[1]), 0.0);
     assert_eq!(dim.bodies[1].light.w, 0.0);
+}
+
+#[test]
+fn each_star_lights_its_own_side_in_its_own_colour() {
+    let photometry = Photometry::default();
+    let sun = light::flux(1.0, AU_METRES);
+    let mut binary = lights();
+    // A cool companion behind the planet, a thousand times fainter.
+    binary.planets[0].light.push(Illumination {
+        towards: Vec3::X,
+        flux: sun / 1000.0,
+        kelvin: 3500.0,
+    });
+    let single = resolve(&lights(), &photometry, -30.0, 0.0, PSF_SIGMA_PX);
+    let lit = resolve(&binary, &photometry, -30.0, 0.0, PSF_SIGMA_PX);
+    let (body, alone) = (&lit.bodies[1], &single.bodies[1]);
+    // The brightest star sets the exposure: the day side is unchanged.
+    assert_eq!(body.tints[0], alone.tints[0]);
+    assert_eq!(body.colour, alone.colour);
+    assert_eq!(body.lights[1].truncate(), Vec3::X);
+    let ratio = body.tints[0].max_element() / body.tints[1].max_element();
+    assert!((500.0..2000.0).contains(&ratio), "{ratio}");
+    // The red dwarf's side is redder than the Sun's.
+    let warmth = |t: Vec4| t.x / t.z;
+    assert!(warmth(body.tints[1]) > 1.5 * warmth(body.tints[0]));
+    assert_eq!(body.tints[2], Vec4::ZERO);
+    // A limb on each lit side, streaks only from the brighter.
+    assert_eq!(lit.rims.len(), single.rims.len() + 1);
+    // A point adds both stars' light.
+    binary.planets[2].light.push(Illumination {
+        towards: -Vec3::X,
+        flux: 10.0 * sun,
+        kelvin: 5772.0,
+    });
+    let doubled = resolve(&binary, &photometry, -30.0, 0.0, PSF_SIGMA_PX);
+    let ratio = doubled.points[2].light() / single.points[2].light();
+    assert!((ratio - 2.0).abs() < 1e-3, "{ratio}");
 }
 
 #[test]

@@ -4730,6 +4730,7 @@ dependencies = [
  "bytemuck",
  "gloo-net",
  "gloo-timers",
+ "half",
  "js-sys",
  "reqwest",
  "serde",

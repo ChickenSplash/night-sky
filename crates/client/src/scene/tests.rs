@@ -34,6 +34,7 @@ fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
                 luminosity_solar: star.star.luminosity_solar as f32,
                 temperature_k: star.star.temperature_k as f32,
                 radius_solar: star.star.radius_solar as f32,
+                separation_au: 0.0,
                 component: parse_cell_star(&id).unwrap().1,
                 index: parse_cell_star(&id).unwrap().2 as u32,
             }],
@@ -159,7 +160,7 @@ fn planet_neighbourhood_has_hysteresis_and_uses_physical_orbits() {
     let planet = system.on_page(system.first_page()).next().unwrap();
     let page = planet.page();
     for seconds in [0.0, 1e7] {
-        let centre = DVec3::from_array(position(&planet.orbit, system.mass(page), seconds));
+        let centre = DVec3::from_array(space_simulation::planet_position(system, planet, seconds));
         let radius = planet.radius_km * 1000.0;
         let check = |radii, previous| {
             nearby_planet(
@@ -200,7 +201,7 @@ fn drifting_near_a_planet_sets_location_without_selection_or_following() {
     let page = system.first_page();
     let planet = system.on_page(page).next().unwrap();
     let id = planet.id.clone();
-    let local = DVec3::from_array(position(&planet.orbit, system.mass(page), 0.0))
+    let local = DVec3::from_array(space_simulation::planet_position(system, planet, 0.0))
         + DVec3::Y * (planet.radius_km * 1000.0 * 12.0);
     let mut app = visited_list(
         page_frame(system, page) * local,
@@ -301,14 +302,15 @@ fn close_star_exaggeration_does_not_depend_on_maximum_camera_range() {
         ..close
     };
     let physical = SUN_RADIUS_METRES;
-    let radius = star_display_radius(&maximum, physical, true, false, false);
+    let away = eye.length();
+    let radius = star_display_radius(&maximum, physical, away, (true, false, false));
     assert_eq!(
         radius,
-        star_display_radius(&close, physical, true, false, false)
+        star_display_radius(&close, physical, away, (true, false, false))
     );
     assert!(radius < eye.length());
     assert_eq!(
-        star_display_radius(&maximum, physical, false, false, false),
+        star_display_radius(&maximum, physical, away, (false, false, false)),
         physical
     );
 }
@@ -332,6 +334,7 @@ fn streamed_star_tightens_render_scale_before_system_handoff_at_max_range() {
                 luminosity_solar: 1.0,
                 temperature_k: 5772.0,
                 radius_solar: 1.0,
+                separation_au: 0.0,
                 component: Component::ThinDisc,
                 index: 0,
             }],

@@ -165,6 +165,7 @@ mod tests {
             temperature_k: SUN_TEMPERATURE_K,
             colour: [255, 255, 255],
             spin: Default::default(),
+            component: String::new(),
         }
     }
 

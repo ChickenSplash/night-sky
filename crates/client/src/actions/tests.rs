@@ -166,6 +166,7 @@ fn stream(app: &mut App, id: &str) {
         luminosity_solar: star.star.luminosity_solar as f32,
         temperature_k: star.star.temperature_k as f32,
         radius_solar: star.star.radius_solar as f32,
+        separation_au: 0.0,
         component,
         index: index as u32,
     });

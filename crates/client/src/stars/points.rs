@@ -189,7 +189,7 @@ impl SpecializedRenderPipeline for PointsPipeline {
                                 shader_location: 1,
                             },
                             VertexAttribute {
-                                format: VertexFormat::Float32,
+                                format: VertexFormat::Float16x2,
                                 offset: 16,
                                 shader_location: 2,
                             },

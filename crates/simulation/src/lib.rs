@@ -1,13 +1,14 @@
 pub mod cells;
 pub mod galaxy;
 pub mod light;
+pub mod multiple;
 pub mod population;
 mod star;
 pub mod stream;
 pub mod stream_wire;
 mod system;
 
-use space_shared::Orbit;
+use space_shared::{Orbit, Planet, StarSystem};
 pub use star::{galactic_star, lifetime_gyr, luminosity, spectral_colour, spin_angle, star};
 use std::f64::consts::TAU;
 pub use system::*;
@@ -46,6 +47,59 @@ pub fn position_at_eccentric_anomaly(orbit: &Orbit, anomaly: f64) -> [f64; 3] {
     let z = z * orbit.inclination_rad.cos();
     let (s, c) = orbit.ascending_node_rad.sin_cos();
     [c * x + s * z, y, -s * x + c * z]
+}
+
+/// Where a star or barycentre is, in metres from its page's outermost
+/// barycentre: each pair's members sit on opposite sides of their own
+/// barycentre, at distances inverse to their masses. A single star is at the
+/// origin.
+pub fn member_position(system: &StarSystem, page: u32, id: &str, seconds: f64) -> [f64; 3] {
+    let Some(pair) = system.pair_of(page, id) else {
+        return [0.0; 3];
+    };
+    let base = member_position(system, page, &pair.id, seconds);
+    let masses = pair.members.each_ref().map(|m| system.member_mass(page, m));
+    let total = masses[0] + masses[1];
+    let relative = position(&pair.orbit, total, seconds);
+    let share = if pair.members[0] == id {
+        -masses[1] / total
+    } else {
+        masses[0] / total
+    };
+    std::array::from_fn(|axis| base[axis] + relative[axis] * share)
+}
+
+/// Where a planet is, in metres from its page's outermost barycentre.
+pub fn planet_position(system: &StarSystem, planet: &Planet, seconds: f64) -> [f64; 3] {
+    let host = member_position(system, planet.page, &planet.host, seconds);
+    let local = position(&planet.orbit, system.host_mass(planet), seconds);
+    std::array::from_fn(|axis| host[axis] + local[axis])
+}
+
+/// Furthest any star or planet of a page gets from its barycentre, in AU.
+pub fn system_extent_au(system: &StarSystem, page: u32) -> f64 {
+    let apoapsis = |orbit: &Orbit| orbit.semi_major_au * (1.0 + orbit.eccentricity);
+    let stars = system
+        .barycentres_on(page)
+        .map(|pair| apoapsis(&pair.orbit))
+        .fold(0.0, f64::max);
+    system
+        .on_page(page)
+        .map(|planet| {
+            // A host other than the whole system is at most `stars` out.
+            let host = if system.root(page) == Some(planet.host.as_str()) {
+                0.0
+            } else {
+                stars
+            };
+            host + apoapsis(&planet.orbit)
+        })
+        .fold(stars, f64::max)
+}
+
+/// Orbital period of a planet around its host, in seconds.
+pub fn planet_period(system: &StarSystem, planet: &Planet) -> f64 {
+    period_seconds(&planet.orbit, system.host_mass(planet))
 }
 
 #[derive(Debug)]
@@ -181,6 +235,50 @@ mod tests {
         let mean = tilts.iter().map(|t| t[0].cos()).sum::<f64>() / 4000.0;
         let square = tilts.iter().map(|t| t[0].cos().powi(2)).sum::<f64>() / 4000.0;
         assert!(mean.abs() < 0.05 && (square - 1.0 / 3.0).abs() < 0.03);
+    }
+
+    #[test]
+    fn multiple_stars_orbit_their_barycentres() {
+        let galaxy = demo_galaxy();
+        let mut checked = 0;
+        for system in &galaxy.systems {
+            for page in system.pages() {
+                if system.barycentres_on(page).next().is_none() {
+                    continue;
+                }
+                checked += 1;
+                for seconds in [0.0, 1e7, 3.3e9] {
+                    // The centre of mass stays at the origin.
+                    let mut centre = [0.0; 3];
+                    let mut mass = 0.0;
+                    for star in system.stars_on(page) {
+                        let p = member_position(system, page, &star.id, seconds);
+                        mass += star.mass_solar;
+                        (0..3).for_each(|i| centre[i] += p[i] * star.mass_solar);
+                    }
+                    assert!(radius(centre) / mass < 1.0, "{centre:?}");
+                    // Each pair's members follow their relative orbit.
+                    for pair in system.barycentres_on(page) {
+                        let [a, b] = pair
+                            .members
+                            .each_ref()
+                            .map(|m| member_position(system, page, m, seconds));
+                        let total = system.member_mass(page, &pair.id);
+                        let expected = position(&pair.orbit, total, seconds);
+                        let gap: [f64; 3] = std::array::from_fn(|i| b[i] - a[i] - expected[i]);
+                        assert!(radius(gap) < 1e-6 * radius(expected), "{pair:?}");
+                    }
+                    for planet in system.on_page(page) {
+                        let host = member_position(system, page, &planet.host, seconds);
+                        let local = position(&planet.orbit, system.host_mass(planet), seconds);
+                        let at = planet_position(system, planet, seconds);
+                        let gap: [f64; 3] = std::array::from_fn(|i| at[i] - host[i] - local[i]);
+                        assert!(radius(gap) < 1e-9 * radius(at).max(1.0));
+                    }
+                }
+            }
+        }
+        assert!(checked > 3);
     }
 
     #[test]

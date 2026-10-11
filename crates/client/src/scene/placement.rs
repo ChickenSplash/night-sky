@@ -14,7 +14,7 @@ use big_space::prelude::*;
 use space_simulation::{
     LY_METRES,
     galaxy::{GalaxyModel, PC_METRES},
-    position,
+    planet_position,
 };
 
 /// Keep nearby streamed points well clear of the camera's near clip plane even
@@ -50,9 +50,9 @@ pub fn place_camera(
     if nav.following
         && let Some(followed) = nav.system(&universe.0).and_then(|system| {
             let planet = system.planets.get(nav.selected_planet(&universe.0)?)?;
-            Some(DVec3::from_array(position(
-                &planet.orbit,
-                system.mass(planet.page()),
+            Some(DVec3::from_array(planet_position(
+                system,
+                planet,
                 clock.0.seconds,
             )))
         })

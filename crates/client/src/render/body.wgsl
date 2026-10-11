@@ -12,6 +12,10 @@ struct Body {
     spin: vec4<f32>,
     // Granules per radius, on-screen radius in pixels and granulation contrast.
     surface: vec4<f32>,
+    // A planet's direction to each star lighting it, brightest first, and the
+    // exposed colour each gives a surface facing it; zero when unused.
+    lights: array<vec4<f32>, 4>,
+    tints: array<vec4<f32>, 4>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> body: Body;
@@ -86,6 +90,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let surface = 1.0 + texture * body.surface.z * sqrt(mu);
         return vec4(encode(body.colour.rgb * limb * surface), 1.0);
     }
-    let lit = max(dot(normal, body.light.xyz), 0.0);
-    return vec4(encode(body.colour.rgb * (lit + body.light.w)), 1.0);
+    // Every star lights the side facing it in its own colour: a binary's
+    // planet has a second, fainter day side towards the far star.
+    var shade = body.colour.rgb * body.light.w;
+    for (var i = 0u; i < 4u; i++) {
+        shade += body.tints[i].rgb * max(dot(normal, body.lights[i].xyz), 0.0);
+    }
+    return vec4(encode(shade), 1.0);
 }

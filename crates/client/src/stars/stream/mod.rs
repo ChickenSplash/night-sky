@@ -298,6 +298,7 @@ mod tests {
                 luminosity_solar: 1.0,
                 temperature_k: 5772.0,
                 radius_solar: 1.0,
+                separation_au: 0.0,
                 component: Component::ThinDisc,
                 index,
             });

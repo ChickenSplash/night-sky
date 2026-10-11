@@ -28,10 +28,22 @@ pub fn mass_text(earths: f64) -> String {
 }
 
 pub fn period_text(days: f64) -> String {
-    if days >= 730.0 {
-        format!("{:.1} years", days / 365.25)
+    let years = days / 365.25;
+    if years >= 1_000.0 {
+        format!("{} years", grouped(years.round() as usize))
+    } else if days >= 730.0 {
+        format!("{years:.1} years")
     } else {
         format!("{days:.1} days")
+    }
+}
+
+/// A distance in AU, with more places when small.
+pub fn au_text(au: f64) -> String {
+    if au < 10.0 {
+        format!("{au:.3} AU")
+    } else {
+        format!("{} AU", grouped(au.round() as usize))
     }
 }
 

@@ -29,6 +29,10 @@ pub struct StreamMetrics {
     /// Stars in uploaded batches, after the CPU magnitude filter.
     pub uploaded_stars: usize,
     pub precise_sprites: usize,
+    /// Multiple systems drawn star by star, and stars examined finding them
+    /// at the last gather.
+    pub split_systems: usize,
+    pub split_examined: usize,
     pub built_batches: usize,
     pub mesh_wait_ms: f64,
     pub mesh_wait_samples: usize,
@@ -64,6 +68,8 @@ impl Default for StreamMetrics {
             drawn_stars: 0,
             uploaded_stars: 0,
             precise_sprites: 0,
+            split_systems: 0,
+            split_examined: 0,
             built_batches: 0,
             mesh_wait_ms: 0.0,
             mesh_wait_samples: 0,

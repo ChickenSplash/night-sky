@@ -24,6 +24,7 @@ fn pointer_picks_visible_off_centre_star_by_stable_id() {
         luminosity_solar: 1.0,
         temperature_k: 5772.0,
         radius_solar: 1.0,
+        separation_au: 0.0,
         component: Component::ThinDisc,
         index: 8,
     };
@@ -97,6 +98,7 @@ fn grid_picking_matches_full_scan_and_caches_the_winner() {
             luminosity_solar: if index % 3 == 0 { 0.001 } else { 10_000.0 },
             temperature_k: 5772.0,
             radius_solar: 1.0,
+            separation_au: 0.0,
             component: Component::ThinDisc,
             index,
         })
@@ -181,7 +183,7 @@ fn generated_system_is_stable_and_has_no_tasks() {
     assert_eq!(first.name, catalogue_name(&picked.id));
     assert_eq!(
         first.planets[0].designation,
-        planet_designation(&picked.id, 0)
+        planet_designation(&first.planets[0].host, 0)
     );
     assert_eq!(nav.selection, None);
     nav.selection = Some(Selection::Star(picked));
@@ -221,7 +223,7 @@ fn visiting_an_assigned_star_shows_its_tasks_without_changing_orbits() {
     assert!(shown.task_planet(&task_id).is_some());
     assert_eq!(
         shown.planets[0].orbit,
-        cell_planetary_system(&star.id).unwrap()[0].orbit
+        space_simulation::cells::cell_planetary_system(&star.id).unwrap()[0].orbit
     );
 }
 
