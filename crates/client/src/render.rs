@@ -217,10 +217,28 @@ impl Lights {
     }
 }
 
-/// The camera's exposure in words, for the caption under the 3D view.
-pub fn exposure_caption(nav: &Navigation, lights: &Lights, sky: &Sky) -> String {
+/// Exposure readouts and expandable explanations for the debug render tab.
+pub fn exposure_facts(
+    nav: &Navigation,
+    lights: &Lights,
+    sky: &Sky,
+) -> Vec<(&'static str, String, Option<&'static str>)> {
+    let mut rows = vec![(
+        "mode",
+        if !nav.realistic {
+            "off (wireframe)"
+        } else if nav.physical {
+            "physical"
+        } else {
+            "assisted"
+        }
+        .into(),
+        Some(
+            "Physical uses one linear exposure for bodies, star points and galaxy glow. Assisted compresses contrast and exposes the galaxy separately to keep faint objects readable. These readouts do not change the exposure.",
+        ),
+    )];
     if !nav.realistic {
-        return "Exposure off / wireframe".into();
+        return rows;
     }
     let metering = match lights.metered {
         Some((metres, true)) => format!("followed planet at {:.3} AU", metres / AU_METRES),
@@ -233,10 +251,11 @@ pub fn exposure_caption(nav: &Navigation, lights: &Lights, sky: &Sky) -> String 
         } else {
             "brightest star".into()
         };
-        return format!(
-            "Exposure assisted / metered on {metering} / galaxy x{:.3}",
-            sky.exposure
-        );
+        rows.extend([
+            ("metered on", metering, Some("The followed planet's orbit, or a typical orbit in the visited system, sets the subject brightness. Without a subject, assisted rendering uses the brightest star.")),
+            ("galaxy gain", format!("×{:.3}", sky.exposure), Some("A separate, eased multiplier for galactic light in assisted mode, capped at one. It reduces the brightness of dense galaxy views without changing the bodies' exposure.")),
+        ]);
+        return rows;
     }
     // Adding zero turns -0.0 into 0.0 when fully dark-adapted.
     let stops = |key: f64| -(key / sky::dark_key()).log2() + 0.0;
@@ -249,7 +268,7 @@ pub fn exposure_caption(nav: &Navigation, lights: &Lights, sky: &Sky) -> String 
         } else {
             "opening up"
         };
-        format!("{way} to {:+.1}", stops(sky.target))
+        way.into()
     };
     let base = lights
         .subject_key
@@ -264,22 +283,26 @@ pub fn exposure_caption(nav: &Navigation, lights: &Lights, sky: &Sky) -> String 
     };
     let subject = lights
         .subject_key
-        .map_or("none".into(), |k| format!("{k:.2e} ({metering})"));
+        .map_or("none".into(), |k| format!("{k:.2e} W/m²/sr"));
     let disc = if disc {
-        format!("{:.2e}", sky.target)
+        format!("{:.2e} W/m²/sr", sky.target)
     } else {
-        "none".into()
+        "not dominant".into()
     };
     let galaxy = 100.0 * sky.galaxy_share;
-    format!(
-        "Exposure physical / key {:.2e} W/m²/sr / {:+.1} stops from dark-adapted, {status}\n\
-         Set by {winner} / subject {subject} / view {:.2e} / disc {disc}\n\
-         View light: galaxy {galaxy:.0}% / visited star {:.0}%",
-        sky.key,
-        stops(sky.key),
-        sky.sky_key,
-        100.0 - galaxy,
-    )
+    rows.extend([
+        ("current key", format!("{:.2e} W/m²/sr", sky.key), Some("Visual radiance mapped to the reference display brightness. A larger key means less exposure, so the whole scene becomes darker. This value eases towards the target rather than jumping instantly.")),
+        ("exposure offset", format!("{:+.1} stops", stops(sky.key)), Some("Relative to the dark-adapted exposure. Zero is maximum sensitivity; -1 stop admits half as much light, -2 a quarter. This is a relative offset, not an absolute camera EV.")),
+        ("adaptation", status, Some("Steady means current and target exposure are within 0.05 stops. Stopping down reduces sensitivity; opening up increases it. Adaptation is faster towards bright views (about 0.1 s) than dark ones (about 0.5 s).")),
+        ("target key", format!("{:.2e} W/m²/sr ({:+.1} stops)", sky.target, stops(sky.target)), Some("The exposure requested before temporal easing. The brightest requirement wins: the subject, the view average (with a dark-adapted floor), or a large star disc.")),
+        ("set by", winner.into(), Some("Which requirement sets the target right now. Subject protects the system's reference surface, view responds to average light in the camera, and star disc stops down to reveal a large star's surface.")),
+        ("subject key", subject, Some("The reference surface brightness at the followed planet's orbit, or a typical orbit in the visited system. It can set exposure even if the subject is not in view. No subject is available in open space.")),
+        ("metered on", if lights.subject_key.is_some() { metering } else { "no subject".into() }, Some("The orbital distance used to compute the subject key. Following a planet meters its orbit; otherwise the visited system uses a typical orbit. This is not the camera's distance from the star.")),
+        ("view key", format!("{:.2e} W/m²/sr", sky.sky_key), Some("The average visual radiance in the camera's view, converted to an exposure key and floored at dark-adapted sensitivity. Includes the smooth galaxy model and visited-system star discs in view. The galaxy contribution does not depend on streaming progress.")),
+        ("star disc key", disc, Some("Shown only when the large-disc requirement outranks both subject and view. It reduces exposure as a visited star's apparent disc grows, keeping its surface readable. Not dominant does not mean no star is visible.")),
+        ("view light", format!("galaxy {galaxy:.0}% · system stars {:.0}%", 100.0 - galaxy), Some("Contributions to the average view radiance, before the dark-adapted floor. Galaxy is the smooth model, including resolved and unresolved stars; system stars are the visited system's discs in view. These percentages are not object counts or final screen brightness.")),
+    ]);
+    rows
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1096,7 +1119,7 @@ mod tests {
     }
 
     #[test]
-    fn the_exposure_caption_names_what_set_the_key() {
+    fn exposure_readouts_name_the_driver_and_adaptation() {
         let nav = Navigation::default();
         let lit = lights();
         let subject = lit.subject_key.unwrap();
@@ -1104,21 +1127,62 @@ mod tests {
         sky.sky_key = subject / 10.0;
         sky.target = subject;
         sky.key = subject;
-        let caption = exposure_caption(&nav, &lit, &sky);
-        assert!(caption.contains("Set by subject"), "{caption}");
-        assert!(caption.contains("steady"), "{caption}");
-        assert_eq!(caption.lines().count(), 3);
+        let value = |sky: &Sky, label: &str| {
+            exposure_facts(&nav, &lit, sky)
+                .into_iter()
+                .find(|row| row.0 == label)
+                .unwrap()
+                .1
+        };
+        assert_eq!(value(&sky, "set by"), "subject");
+        assert_eq!(value(&sky, "adaptation"), "steady");
+        assert!(
+            exposure_facts(&nav, &lit, &sky)
+                .iter()
+                .all(|row| row.2.is_some())
+        );
         // Ten times brighter than dark-adapted is about 3.3 stops down.
         sky.key = 10.0 * sky::dark_key();
         sky.target = sky.key;
-        assert!(exposure_caption(&nav, &lit, &sky).contains("-3.3 stops"));
+        assert_eq!(value(&sky, "exposure offset"), "-3.3 stops");
         // A bright view outranks the subject; a filling disc outranks both.
         sky.sky_key = subject * 10.0;
         sky.target = sky.sky_key;
-        assert!(exposure_caption(&nav, &lit, &sky).contains("Set by view"));
+        assert_eq!(value(&sky, "set by"), "view");
         sky.target = subject * 1e3;
-        let caption = exposure_caption(&nav, &lit, &sky);
-        assert!(caption.contains("Set by star disc") && caption.contains("stopping down"));
+        assert_eq!(value(&sky, "set by"), "star disc");
+        assert_eq!(value(&sky, "adaptation"), "stopping down");
+        sky.key = sky.target * 2.0;
+        assert_eq!(value(&sky, "adaptation"), "opening up");
+    }
+
+    #[test]
+    fn exposure_readouts_only_show_relevant_mode_facts() {
+        let mut nav = Navigation::default();
+        let mut lit = lights();
+        let sky = Sky::default();
+        nav.realistic = false;
+        let rows = exposure_facts(&nav, &lit, &sky);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "off (wireframe)");
+        nav.realistic = true;
+        nav.physical = false;
+        let rows = exposure_facts(&nav, &lit, &sky);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].1, "assisted");
+        assert!(rows.iter().all(|row| row.2.is_some()));
+        lit.subject_key = None;
+        assert_eq!(exposure_facts(&nav, &lit, &sky)[1].1, "brightest star");
+        nav.physical = true;
+        let rows = exposure_facts(&nav, &lit, &sky);
+        assert_eq!(
+            rows.iter().find(|row| row.0 == "subject key").unwrap().1,
+            "none"
+        );
+        assert_eq!(
+            rows.iter().find(|row| row.0 == "metered on").unwrap().1,
+            "no subject"
+        );
     }
 
     #[test]

@@ -549,9 +549,12 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - On by default (`Navigation::realistic`); the wireframe bodies must stay
   unchanged when it is off (galactic stars appear in both modes). The smoke
   test turns it off for its wireframe captures.
-  `render::exposure_caption` (debug window, `render` tab) shows the key (and stops from `dark_key`), its
-  target and which candidate set it (subject, view or star disc), and the
-  view's galaxy/star split, from values `sky::expose` already computes.
+  `render::exposure_facts` (debug window, `render` tab) shows aligned readouts
+  with expandable explanations: mode, current key and stops from `dark_key`,
+  adaptation, target key, winning requirement (subject, view or star disc),
+  subject metering, view key and galaxy/system-star light split. Assisted mode
+  shows its metering and separate galaxy gain; wireframe only shows the mode.
+  These read values already computed by `sky::expose`, without changing rendering.
   Photometry lives in `space_simulation::light`;
   exposure, the pools and the HDR camera in `crates/client/src/render.rs`,
   with the shaders in `body.wgsl` and `point.wgsl`.

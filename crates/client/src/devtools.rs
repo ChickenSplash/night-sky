@@ -6,7 +6,7 @@ use crate::command_line::{self, Source, Typed};
 use crate::core_load::CoreLoad;
 use crate::gpu_test::GpuTest;
 use crate::presentation::PresentationMode;
-use crate::render::{Lights, exposure_caption};
+use crate::render::{Lights, exposure_facts};
 use crate::render_debug::RenderDebug;
 use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
 use crate::stream::{Starfield, StreamMetrics};
@@ -922,7 +922,7 @@ fn render(
     out: &mut Vec<UiCommand>,
 ) {
     terminal::heading(ui, "exposure");
-    terminal::note(ui, &exposure_caption(nav, lights, sky));
+    terminal::facts_with_details(ui, "debug-exposure", &exposure_facts(nav, lights, sky));
     terminal::heading(ui, "realistic rendering");
     for (option, on, label) in [
         (
