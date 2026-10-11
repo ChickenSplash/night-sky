@@ -63,8 +63,11 @@ pub struct StreamMetrics {
     pub blocks_drawn: usize,
     /// Stars in the batches drawn this frame.
     pub drawn_stars: usize,
-    /// Stars in uploaded batches, after the CPU magnitude filter.
+    /// Points in uploaded batches, after the CPU magnitude filter and
+    /// merging.
     pub uploaded_stars: usize,
+    /// Stars folded into another uploaded point by merging.
+    pub merged_stars: usize,
     pub precise_sprites: usize,
     pub built_batches: usize,
     pub mesh_wait_ms: f64,
@@ -100,6 +103,7 @@ impl Default for StreamMetrics {
             blocks_drawn: 0,
             drawn_stars: 0,
             uploaded_stars: 0,
+            merged_stars: 0,
             precise_sprites: 0,
             built_batches: 0,
             mesh_wait_ms: 0.0,

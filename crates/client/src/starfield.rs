@@ -19,10 +19,11 @@ use space_simulation::{
     galaxy::PC_METRES,
     light::visual_efficiency,
     population::{reach_pc, reach_sq_per_luminosity},
-    stream::{Block, StarPoint, gap_pc},
+    stream::{Block, StarCell, StarPoint, gap_pc},
 };
 use std::{
     collections::{HashMap, VecDeque},
+    ops::Range,
     time::Duration,
 };
 
@@ -51,6 +52,15 @@ const BATCH_HIDE: f64 = PRECISE * 0.25;
 const PREPARE: f64 = 2.0;
 /// Precise candidates are gathered again after the camera moves this far.
 const RESCAN_PC: f64 = 0.1;
+/// A retained cell is rebuilt after the camera travels this share of its
+/// tier's reach.
+const REBUILD: f64 = 0.2;
+/// Stars merged into one point share a cube whose diagonal spans at most this
+/// many pixels, even from the closest the camera comes before a rebuild.
+const MERGE_PX: f64 = 0.5;
+/// A cell with merged stars is rebuilt once a pixel shrinks below this share
+/// of the one it was merged for (zooming in, or a taller window).
+const MERGE_ZOOM: f64 = 0.8;
 
 /// Each temperature's realistic colour with unit luminance and visual
 /// efficiency (light per bolometric luminosity, as the eye and the exposure
@@ -79,6 +89,8 @@ struct Batch {
     centre_pc: [f64; 3],
     /// Half its block's edge.
     half_pc: f64,
+    /// Stars merged into its other points.
+    merged: usize,
 }
 
 /// Whether a star is bright enough to upload, seen from `eye` with the
@@ -98,20 +110,99 @@ fn instance(star: &StarPoint, origin_pc: [f64; 3]) -> StarInstance {
     }
 }
 
-/// Stars bright enough to see from `eye`, as offsets from `centre`.
-fn pack(
-    stars: &mut Vec<StarInstance>,
-    points: &[StarPoint],
-    centre: [f64; 3],
+/// How one cell's stars are filtered and merged, fixed when its build starts.
+#[derive(Clone, Copy)]
+struct Filter {
     eye: DVec3,
     magnitude: f64,
-) {
-    stars.extend(
-        points
-            .iter()
-            .filter(|star| bright_enough(star, eye, magnitude))
-            .map(|star| instance(star, centre)),
-    );
+    /// Radians per pixel, or zero not to merge.
+    pixel: f64,
+    /// How far the camera may move before the cell is rebuilt.
+    slack_pc: f64,
+    /// Visual efficiency by temperature, as the shader's palette.
+    efficiency: [f32; PALETTE],
+}
+
+impl Filter {
+    /// Visual efficiency at `kelvin`, interpolated as the shader does.
+    fn efficiency(&self, kelvin: f32) -> f64 {
+        let last = (PALETTE - 1) as f32;
+        let x = ((kelvin / 1000.0).ln() / 50f32.ln() * last).clamp(0.0, last);
+        let i = (x as usize).min(PALETTE - 2);
+        let t = x - i as f32;
+        f64::from(self.efficiency[i] * (1.0 - t) + self.efficiency[i + 1] * t)
+    }
+}
+
+/// Stars bright enough to see from the filter's eye, as offsets from `centre`.
+/// Within each grid box of `range` (whose ends are box boundaries), visible
+/// stars sharing a cube smaller than `MERGE_PX` become one point with their
+/// visual light, at their light's centre, with its mean temperature. Returns
+/// the stars merged away.
+fn pack(
+    out: &mut Vec<StarInstance>,
+    cell: &StarCell,
+    range: Range<usize>,
+    centre: [f64; 3],
+    filter: &Filter,
+) -> usize {
+    let reach_sq = reach_sq_per_luminosity(filter.magnitude);
+    let mut merged = 0;
+    let mut keyed: Vec<([i64; 3], &StarPoint)> = Vec::new();
+    for run in cell.box_runs(range) {
+        keyed.clear();
+        let mut nearest = f64::INFINITY;
+        for star in &cell.stars[run] {
+            if bright_enough(star, filter.eye, filter.magnitude) {
+                let distance = DVec3::from_array(star.position_pc).distance(filter.eye);
+                nearest = nearest.min(distance);
+                keyed.push(([0; 3], star));
+            }
+        }
+        let cube = MERGE_PX * filter.pixel * (nearest - filter.slack_pc) / 3f64.sqrt();
+        // Far below the spacing of any stars, and keys must not overflow.
+        if keyed.len() < 2 || cube < 1e-6 {
+            out.extend(keyed.iter().map(|(_, star)| instance(star, centre)));
+            continue;
+        }
+        for (index, (key, star)) in keyed.iter_mut().enumerate() {
+            let distance = DVec3::from_array(star.position_pc).distance(filter.eye);
+            // Only stars visible wherever the camera is before the rebuild,
+            // so merging never shows one the shader would cut off.
+            let stays =
+                f64::from(star.luminosity_solar) * reach_sq >= (distance + filter.slack_pc).powi(2);
+            *key = if stays {
+                star.position_pc.map(|p| (p / cube).floor() as i64)
+            } else {
+                [i64::MIN, index as i64, 0]
+            };
+        }
+        keyed.sort_unstable_by_key(|(key, _)| *key);
+        for group in keyed.chunk_by(|a, b| a.0 == b.0) {
+            if let [(_, star)] = group {
+                out.push(instance(star, centre));
+                continue;
+            }
+            let (mut light, mut log_kelvin, mut position) = (0.0, 0.0, DVec3::ZERO);
+            for (_, star) in group {
+                let visual =
+                    f64::from(star.luminosity_solar) * filter.efficiency(star.temperature_k);
+                light += visual;
+                log_kelvin += visual * f64::from(star.temperature_k).ln();
+                position += visual * DVec3::from_array(star.position_pc);
+            }
+            let temperature = (log_kelvin / light).exp() as f32;
+            let point = StarPoint {
+                position_pc: (position / light).to_array(),
+                luminosity_solar: (light / filter.efficiency(temperature)) as f32,
+                temperature_k: temperature,
+                ..*group[0].1
+            };
+            out.push(instance(&point, centre));
+            merged += group.len() - 1;
+        }
+    }
+    merged
 }
 
 /// The cell whose batches are being built, possibly across several frames.
@@ -124,6 +215,9 @@ struct Building {
     /// The block being packed: no batch spans two.
     block: usize,
     packing: Vec<StarInstance>,
+    /// Stars merged into `packing`.
+    merged: usize,
+    filter: Filter,
 }
 
 #[derive(Resource, Default)]
@@ -133,7 +227,11 @@ struct Batches {
     fresh: HashMap<Cell, Vec<Batch>>,
     building: Option<Building>,
     queued: VecDeque<(Cell, usize)>,
-    built_at: HashMap<Cell, DVec3>,
+    /// Where each cell was built from, and the pixel its merging assumed
+    /// (zero unmerged).
+    built_at: HashMap<Cell, (DVec3, f64)>,
+    /// Whether the batches merge stars (`RenderDebug::merge_stars`).
+    merging: bool,
     next_id: u64,
     /// The colour tables, and whether they are the physical ones.
     palettes: Option<(bool, [Vec4; PALETTE], [Vec4; PALETTE])>,
@@ -326,13 +424,18 @@ fn sync(
             batches.queued.push_back((added, 0));
         }
     }
+    // Switching merging rebuilds everything.
+    let remerge = std::mem::replace(&mut batches.merging, debug.merge_stars) != debug.merge_stars;
+    let merge_pixel = if debug.merge_stars { pixel } else { 0.0 };
     let moved: Vec<Cell> = batches
         .built_at
         .iter()
-        .filter_map(|(&owner, &built)| {
-            let threshold = 0.2 * reach_pc(owner.level(), nav.magnitude);
-            (eye.distance(built) > threshold && !batches.queued.iter().any(|(c, _)| *c == owner))
-                .then_some(owner)
+        .filter_map(|(&owner, &(built, built_pixel))| {
+            let threshold = REBUILD * reach_pc(owner.level(), nav.magnitude);
+            let zoomed = merge_pixel < MERGE_ZOOM * built_pixel;
+            ((remerge || zoomed || eye.distance(built) > threshold)
+                && !batches.queued.iter().any(|(c, _)| *c == owner))
+            .then_some(owner)
         })
         .collect();
     batches
@@ -357,7 +460,7 @@ fn sync(
                 metrics.mesh_wait_ms += at.elapsed().as_secs_f64() * 1000.0;
                 metrics.mesh_wait_samples += 1;
             }
-            batches.built_at.insert(owner, eye);
+            batches.built_at.insert(owner, (eye, merge_pixel));
         }
         if batches
             .building
@@ -370,6 +473,14 @@ fn sync(
                 blocks: loaded.blocks(BLOCK),
                 block: 0,
                 packing: Vec::new(),
+                merged: 0,
+                filter: Filter {
+                    eye,
+                    magnitude: nav.magnitude,
+                    pixel: merge_pixel,
+                    slack_pc: REBUILD * reach_pc(owner.level(), nav.magnitude),
+                    efficiency: palette.map(|entry| entry.w),
+                },
             });
         }
         let next_id = &mut batches.next_id;
@@ -378,13 +489,13 @@ fn sync(
             building.block += 1;
         }
         let block = building.blocks[building.block];
-        let end = (offset + SLICE).min(block.end);
-        pack(
+        let end = loaded.box_boundary(offset + SLICE).min(block.end);
+        building.merged += pack(
             &mut building.packing,
-            &stars[offset..end],
+            loaded,
+            offset..end,
             block.centre_pc,
-            eye,
-            nav.magnitude,
+            &building.filter,
         );
         metrics.built_batches += 1;
         let done = end == stars.len();
@@ -398,6 +509,7 @@ fn sync(
                     stars: packing.len(),
                     centre_pc: block.centre_pc,
                     half_pc: block.half_pc,
+                    merged: std::mem::take(&mut building.merged),
                 };
                 uploads.add(batch.id, packing);
                 finished = Some((building.replacing, batch));
@@ -446,6 +558,7 @@ fn sync(
             stars,
             centre_pc,
             half_pc,
+            ..
         } in entities
         {
             let offset = DVec3::from_array(centre_pc) - eye;
@@ -476,6 +589,7 @@ fn sync(
     metrics.blocks_drawn = blocks_drawn;
     metrics.drawn_stars = drawn_stars;
     metrics.uploaded_stars = uploaded;
+    metrics.merged_stars = batches.active.values().flatten().map(|b| b.merged).sum();
     // Close up, each star is placed alone by an f64 subtraction. The visited
     // star has no sprite while its body is drawn at the exact position.
     if changed
@@ -540,36 +654,87 @@ mod tests {
         assert!(sight.sees(DVec3::new(0.0, 0.0, 5.0), 10.0));
     }
 
-    #[test]
-    fn batches_only_upload_stars_near_enough_to_see() {
-        let eye = DVec3::new(8200.0, 20.0, 0.0);
-        let point = |distance: f64| StarPoint {
-            position_pc: [8200.0 + distance, 20.0, 0.0],
-            luminosity_solar: 1.0,
-            temperature_k: 5772.0,
+    /// Packs every star of a level-10 cell (128 pc) around home.
+    fn packed(points: Vec<StarPoint>, filter: &Filter) -> (Vec<StarInstance>, usize) {
+        let cell = Cell::containing(10, [8250.0, 20.0, 0.0]).unwrap();
+        let cell = StarCell::new(cell, points);
+        let mut out = Vec::new();
+        let merged = pack(
+            &mut out,
+            &cell,
+            0..cell.stars.len(),
+            [8200.0, 0.0, 0.0],
+            filter,
+        );
+        (out, merged)
+    }
+
+    fn filter(pixel: f64, slack_pc: f64) -> Filter {
+        Filter {
+            eye: DVec3::new(8200.0, 20.0, 0.0),
+            magnitude: VISIBLE_MAGNITUDE,
+            pixel,
+            slack_pc,
+            efficiency: palettes(true).0.map(|entry| entry.w),
+        }
+    }
+
+    fn star(x: f64, luminosity_solar: f32, temperature_k: f32) -> StarPoint {
+        StarPoint {
+            position_pc: [x, 20.0, 0.0],
+            luminosity_solar,
+            temperature_k,
             radius_solar: 1.0,
             component: space_simulation::galaxy::Component::ThinDisc,
             index: 0,
-        };
-        let mut stars = Vec::new();
-        pack(
-            &mut stars,
-            &[point(10.0), point(100.0)],
-            [8200.0, 0.0, 0.0],
-            eye,
-            VISIBLE_MAGNITUDE,
+        }
+    }
+
+    #[test]
+    fn batches_only_upload_stars_near_enough_to_see() {
+        let (stars, _) = packed(
+            vec![star(8210.0, 1.0, 5772.0), star(8300.0, 1.0, 5772.0)],
+            &filter(0.0, 0.0),
         );
         assert_eq!(stars.len(), 1);
         assert_eq!(stars[0].position, [10.0, 20.0, 0.0]);
-        stars.clear();
-        pack(
-            &mut stars,
-            &[point(100.0)],
-            [8200.0, 0.0, 0.0],
-            eye,
-            VISIBLE_MAGNITUDE,
-        );
+        let (stars, _) = packed(vec![star(8300.0, 1.0, 5772.0)], &filter(0.0, 0.0));
         assert!(stars.is_empty());
+    }
+
+    #[test]
+    fn stars_sharing_a_sub_pixel_cube_merge_keeping_their_visual_light() {
+        let stars = vec![
+            star(8300.0, 1000.0, 4000.0),
+            star(8300.0, 3000.0, 9000.0),
+            // A pixel is 0.1 pc here: a parsec apart stays apart.
+            star(8301.0, 1000.0, 5772.0),
+        ];
+        let (unmerged, merged) = packed(stars.clone(), &filter(0.0, 0.0));
+        assert_eq!((unmerged.len(), merged), (3, 0));
+        let at = filter(1e-3, 0.0);
+        let (points, merged) = packed(stars, &at);
+        assert_eq!((points.len(), merged), (2, 1));
+        let both = points.iter().find(|p| p.position[0] < 100.5).unwrap();
+        let visual = |l: f32, t: f32| f64::from(l) * at.efficiency(t);
+        let expected = visual(1000.0, 4000.0) + visual(3000.0, 9000.0);
+        let light = visual(both.luminosity, both.temperature);
+        assert!((light / expected - 1.0).abs() < 1e-5, "{light} {expected}");
+        assert!(both.temperature > 4000.0 && both.temperature < 9000.0);
+        assert!((both.position[0] - 100.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn stars_near_their_cutoff_or_the_camera_never_merge() {
+        // Visible from here (with the upload margin), but not from 10 pc
+        // farther, where the camera may go before a rebuild.
+        let faint = vec![star(8300.0, 25.0, 5772.0), star(8300.0, 25.0, 5772.0)];
+        let (points, merged) = packed(faint, &filter(1e-3, 10.0));
+        assert_eq!((points.len(), merged), (2, 0));
+        // Merging assumes the camera can come `slack_pc` closer.
+        let close = vec![star(8300.0, 1000.0, 5772.0), star(8300.0, 1000.0, 5772.0)];
+        assert_eq!(packed(close.clone(), &filter(1e-3, 100.0)).1, 0);
+        assert_eq!(packed(close, &filter(1e-3, 50.0)).1, 1);
     }
 
     /// Repeats the GPU's f32 placement of a batched point: its f32 offset

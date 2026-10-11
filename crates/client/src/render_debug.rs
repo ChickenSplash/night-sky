@@ -23,6 +23,8 @@ pub enum DebugSwitch {
     Bloom,
     /// Hide star batches whose grid block lies outside the view.
     CullBlocks,
+    /// Upload the stars of a grid box that share a sub-pixel cube as one point.
+    MergeStars,
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -34,6 +36,7 @@ pub struct RenderDebug {
     pub msaa: bool,
     pub bloom: bool,
     pub cull_blocks: bool,
+    pub merge_stars: bool,
 }
 
 impl Default for RenderDebug {
@@ -46,12 +49,13 @@ impl Default for RenderDebug {
             msaa: true,
             bloom: true,
             cull_blocks: true,
+            merge_stars: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 7] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 8] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -59,6 +63,7 @@ impl RenderDebug {
         (DebugSwitch::Msaa, "4x MSAA"),
         (DebugSwitch::Bloom, "Bloom"),
         (DebugSwitch::CullBlocks, "Cull blocks outside the view"),
+        (DebugSwitch::MergeStars, "Merge sub-pixel stars"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -70,6 +75,7 @@ impl RenderDebug {
             DebugSwitch::Msaa => self.msaa,
             DebugSwitch::Bloom => self.bloom,
             DebugSwitch::CullBlocks => self.cull_blocks,
+            DebugSwitch::MergeStars => self.merge_stars,
         }
     }
 
@@ -82,6 +88,7 @@ impl RenderDebug {
             DebugSwitch::Msaa => &mut self.msaa,
             DebugSwitch::Bloom => &mut self.bloom,
             DebugSwitch::CullBlocks => &mut self.cull_blocks,
+            DebugSwitch::MergeStars => &mut self.merge_stars,
         } = on;
     }
 
