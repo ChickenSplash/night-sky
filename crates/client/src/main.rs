@@ -26,8 +26,6 @@ mod sky;
 mod smoke;
 mod starfield;
 mod starfield_render;
-#[cfg(not(target_arch = "wasm32"))]
-mod starfield_splat;
 mod stream;
 mod tasks;
 mod terminal;

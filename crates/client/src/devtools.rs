@@ -1191,7 +1191,7 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                         "star pass",
                         format!("{:.2} ms", r.star_pass_ms),
                         Some(
-                            "Mean GPU time of the main view's transparent pass and, when splatted, the star splat compute pass.",
+                            "Mean GPU time of the main view's transparent pass, where stars draw.",
                         ),
                     ),
                     (
@@ -1216,15 +1216,14 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     (
                         "view",
                         format!(
-                            "{} x {}, MSAA {}, magnitude {:.1}, {}",
+                            "{} x {}, MSAA {}, magnitude {:.1}",
                             r.size[0],
                             r.size[1],
                             if r.msaa { "on" } else { "off" },
-                            r.magnitude,
-                            if r.splat { "splatted" } else { "instanced" }
+                            r.magnitude
                         ),
                         Some(
-                            "Window size in physical pixels, the 4x MSAA switch, the magnitude limit and whether stars were splatted or instanced.",
+                            "Window size in physical pixels, the 4x MSAA switch and the magnitude limit.",
                         ),
                     ),
                     (

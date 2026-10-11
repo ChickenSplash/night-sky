@@ -77,12 +77,12 @@ pub struct StarDraw {
     pub origin: Vec4,
     /// Points closer than this times their distance from the origin are
     /// hidden, as are those within the body range in parsecs. Both zero for
-    /// precise sprites. Then the stars in the draw, for the splat path.
+    /// precise sprites.
     pub near: Vec4,
 }
 
 #[derive(Clone, Copy, ShaderType)]
-pub(crate) struct DrawUniform {
+struct DrawUniform {
     origin: Vec4,
     near: Vec4,
 }
@@ -94,8 +94,6 @@ pub struct StarFrame {
     pub draws: Vec<StarDraw>,
     /// Precise sprites, placed relative to the eye each frame.
     pub precise: Vec<StarInstance>,
-    /// Draw by compute splatting (`starfield_splat.rs`), not as instances.
-    pub splat: bool,
 }
 
 /// Batches to upload or free, taken once by the render world.
@@ -247,22 +245,15 @@ impl SpecializedRenderPipeline for StarPipeline {
     }
 }
 
-/// Star batches are read as vertices, and natively by the splat's compute
-/// pass too. WebGL 2 has no storage buffers.
-#[cfg(not(target_arch = "wasm32"))]
-const STAR_USAGE: BufferUsages = BufferUsages::VERTEX.union(BufferUsages::STORAGE);
-#[cfg(target_arch = "wasm32")]
-const STAR_USAGE: BufferUsages = BufferUsages::VERTEX;
-
 #[derive(Resource)]
-pub(crate) struct StarBuffers {
-    pub(crate) batches: HashMap<u64, (Buffer, u32)>,
-    pub(crate) frame: StarFrame,
-    pub(crate) precise: RawBufferVec<StarInstance>,
-    pub(crate) globals: UniformBuffer<Globals>,
-    pub(crate) draws: DynamicUniformBuffer<DrawUniform>,
+struct StarBuffers {
+    batches: HashMap<u64, (Buffer, u32)>,
+    frame: StarFrame,
+    precise: RawBufferVec<StarInstance>,
+    globals: UniformBuffer<Globals>,
+    draws: DynamicUniformBuffer<DrawUniform>,
     /// Each draw's dynamic offset into `draws`.
-    pub(crate) offsets: Vec<u32>,
+    offsets: Vec<u32>,
     bind_group: Option<BindGroup>,
 }
 
@@ -271,7 +262,7 @@ impl Default for StarBuffers {
         Self {
             batches: HashMap::new(),
             frame: StarFrame::default(),
-            precise: RawBufferVec::new(STAR_USAGE),
+            precise: RawBufferVec::new(BufferUsages::VERTEX),
             globals: UniformBuffer::default(),
             draws: DynamicUniformBuffer::default(),
             offsets: Vec::new(),
@@ -292,7 +283,7 @@ fn extract(
         let buffer = device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("star batch"),
             contents: bytemuck::cast_slice(&stars),
-            usage: STAR_USAGE,
+            usage: BufferUsages::VERTEX,
         });
         buffers.batches.insert(id, (buffer, stars.len() as u32));
     }
@@ -312,9 +303,6 @@ fn queue(
     views: Query<(&ExtractedView, &Msaa), With<SpaceCamera>>,
 ) {
     let draw_function = draw_functions.read().id::<DrawStars>();
-    if buffers.frame.splat {
-        return;
-    }
     for (view, msaa) in &views {
         let Some(phase) = phases.get_mut(&view.retained_view_entity) else {
             continue;
