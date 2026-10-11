@@ -93,10 +93,14 @@ rewinds or jumps the orbit phase.
 Exposure and compression share the Magnitude limit's free-floating halo-text
 style. Exposure ranges from -64 to +16 stops relative to a fixed dark-space
 reference, with no automatic adaptation. Compression uses one display curve
-for planets, stars and galaxy glow: zero clips linearly, higher values lift
-shadows and roll off highlights while reducing brightness differences. Neither
+for planets, stars and galaxy glow: zero clips linearly, higher values fit
+highlights into display range without lifting faint background light. Set
+Exposure for the galaxy first, then increase Compression to reveal bright
+planet shading. The shared curve runs after lighting, before HDR storage;
+bloom and additive overlaps combine mapped light, an approximation. Neither
 control is persisted; defaults are 0 stops and 50% compression. The debug
-Render tab explains both. HDR precision and safety caps limit recoverable detail.
+Render tab explains both. Extreme highlights still lose contrast; HDR precision
+and dense additive overlaps remain limitations.
 
 Presentation mode controls the scene layout, not whether the camera is tracking
 or navigating freely: **Simulation** uses simulated orbital positions,

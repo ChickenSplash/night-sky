@@ -5,7 +5,7 @@
 use crate::{
     Navigation,
     scene::{CameraPose, CameraRig, SpaceCamera},
-    sky::radiance_gain,
+    sky::irradiance_per_ratio,
 };
 use bevy::{
     asset::{RenderAssetUsages, load_internal_asset, uuid_handle},
@@ -100,7 +100,7 @@ impl Material for GlowMaterial {
 struct CompositeSettings {
     /// View origin and size in pixels.
     viewport: Vec4,
-    /// Current over drawn exposure, then unused.
+    /// Current over drawn exposure, shared compression, then unused.
     scale: Vec4,
 }
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
@@ -442,10 +442,9 @@ fn sync(
         up: camera_transform.up().into(),
         tan_half_fov: nav.tan_half_fov() as f32,
         size,
-        exposure: {
-            let pixel = 2.0 * nav.tan_half_fov() / f64::from(size.y);
-            radiance_gain(&nav, pixel * pixel) as f32
-        },
+        // Cache at a fixed reference gain, not the user's potentially extreme
+        // exposure. Apply manual gain and the shoulder after summing/upscaling.
+        exposure: (irradiance_per_ratio() * crate::exposure::gain(0.0)) as f32,
     };
     if glow.drawn.is_none_or(|drawn| !view.matches(&drawn)) || compiling.0.load(Ordering::Relaxed) {
         glow.settle = SETTLE;
@@ -502,7 +501,12 @@ fn sync(
             size.x as f32,
             size.y as f32,
         ),
-        scale: Vec4::new(view.exposure / drawn.exposure, 0.0, 0.0, 0.0),
+        scale: Vec4::new(
+            view.exposure / drawn.exposure * nav.exposure.exp2() as f32,
+            nav.compression as f32,
+            0.0,
+            0.0,
+        ),
     };
     if composites
         .get(&glow.composite_material)

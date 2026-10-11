@@ -3,6 +3,7 @@
 // shader cuts out a small Gaussian. Every star has the same one- to two-pixel
 // profile, as in a perfect camera: brightness shows in its peak, never its size.
 #import bevy_render::view::View
+#import night_sky::exposure::highlight
 
 @group(0) @binding(0) var<uniform> view: View;
 
@@ -12,7 +13,7 @@ struct Globals {
     // realistic colour and visual brightness from the palette.
     settings: vec4<f32>,
     // x: one to skip rasterising every point, y: footprint radius in physical
-    // pixels (debug switches, `render_debug.rs`).
+    // pixels (debug switches, `render_debug.rs`), z: shared compression.
     debug: vec4<f32>,
     // Unit-luminance colour, then visual efficiency, log-spaced in
     // temperature from 1,000 to 50,000 K (`starfield.rs`).
@@ -66,9 +67,8 @@ fn vertex(star: Star) -> Output {
         || ratio < globals.settings.y || globals.debug.x > 0.5 {
         clip = vec4(2.0, 2.0, 0.0, 1.0);
     }
-    // Linear in apparent flux, up to the HDR safety cap. Exposure and bloom operate on
-    // this HDR colour; in the wireframe view it is tone-mapped by the normal
-    // SDR target.
+    // Linear in apparent flux until the shared peak shoulder. The wireframe
+    // path retains its legacy knee and normal SDR target.
     let x = clamp(log(star.temperature / 1000.0) / log(50.0) * 31.0, 0.0, 31.0);
     let i = min(u32(x), 30u);
     var light = globals.settings.z * ratio;
@@ -82,7 +82,8 @@ fn vertex(star: Star) -> Output {
     }
     let peak = light / (2.0 * PI * SIGMA_PX * SIGMA_PX);
     if globals.settings.w > 0.5 {
-        out.peak = min(peak, 20000.0 / max(max(colour.r, colour.g), max(colour.b, 1.0)));
+        colour = highlight(colour * peak, globals.debug.z);
+        out.peak = 1.0;
     } else {
         // Preserve the old wireframe point rendering only.
         out.peak = select(1.0 + log(max(peak, 1.0)), peak, peak <= 1.0);

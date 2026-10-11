@@ -395,7 +395,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `MainOpaquePass` and `MainTransmissivePass`, GPU span `star_points`) draws
   them additively into an `Rgba16Float` image at `SUPERSAMPLE` (2) times the
   view's resolution per axis, without MSAA. `starfield_points.wgsl` applies
-  the same cutoff, near hiding, colour and HDR cap as `starfield.wgsl` (keep them
+  the same cutoff, near hiding, colour and highlight shoulder as `starfield.wgsl` (keep them
   in step) and depth-tests each star's centre against the opaque bodies (the
   space camera's depth texture has `TEXTURE_BINDING` natively for this;
   never enable that usage on WebGL's multisampled depth texture, which
@@ -426,7 +426,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   point is a
   0.55 px sigma Gaussian (2 px footprint, a uniform so the compact debug
   switch can shrink it), as in a perfect camera: brightness
-  shows only in its peak, linear up to the HDR safety cap, never in its size.
+  shows only in its peak, with the shared highlight shoulder, never in its size.
   The former logarithmic point knee remains only in wireframe mode. Crowds
   are never widened or blurred.
 - `sky.rs` now contains only fixed unit conversions and a fixed zero-stop
@@ -456,11 +456,12 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   comparing full to 1/32), and
   `glow_composite.wgsl` scales it up additively at the far plane, with a cubic
   B-spline (four bilinear taps), not plain bilinear. Patch light is radiance
-  times `sky::radiance_gain`, visual (eye-weighted), so it matches the points
-   and bodies under manual exposure. The image is redrawn only when the eye,
-  axes, field of view, size or (beyond 2x) exposure change by more than a
+  times a fixed zero-stop radiance gain, visual (eye-weighted). The composite
+  applies manual exposure and the shared shoulder after summing/upscaling.
+  The image is redrawn only when the eye,
+  axes, field of view or size change by more than a
   quarter glow pixel, plus `SETTLE` frames and while any pipeline compiles;
-  otherwise the composite rescales it by the exposure ratio.
+  otherwise the composite reuses it. Exposure/compression changes need no redraw.
   Camera-relative origins are formed in f64 before converting to f32. Patches
   are built lazily and hidden when disabled.
   Glow is shown only with
@@ -560,24 +561,30 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   while drawing gizmos; `render::sync_bodies`/`sync_points` place pooled mesh
   entities in the camera's cell and write `GlobalTransform` directly, because
   they run after propagation.
-- Body colours reach the GPU pre-exposed on the CPU. Never send raw radiance:
-  star surfaces reach 1e10 W m⁻² sr⁻¹ and HDR targets are half-float. The
-  galactic point shader instead computes bounded display light from luminosity
-  and camera distance.
+- Body colours reach the GPU exposed but unclipped in f32 uniforms (arithmetic
+  safety limit 1e30), not in half-float textures. Evaluate phase, Lambert lighting,
+  limb darkening and granulation before the highlight shoulder and HDR storage.
+  Do not reinstate a CPU half-float cap: it erases shading at galaxy exposure.
 - Star colours are blackbody spectra white-balanced to the Sun. Red dwarfs
   look orange; there is no assisted saturation. Brightness is visual, not bolometric.
 - One manual linear exposure applies to bodies, galactic points and glow.
   No subject metering, brightness floors, artificial night-side ambient or
-  per-object contrast compression. `exposure.rs`/`exposure.wgsl` apply one
-  scene-wide luminance curve after bloom, before the egui overlay. Bevy's
-  built-in tone mapping is disabled on the realistic space camera. Zero
-  compression clips linearly; increasing it lifts shadows and rolls off
-  highlights around fixed middle grey (0.18), preserving brightness order.
-  Half-float precision and HDR safety caps still limit recoverable detail.
+  per-object exposure keys. `exposure.wgsl` exports a shared peak-based highlight
+  shoulder imported by bodies, points and glow. No final fullscreen compression
+  pass. The shoulder is linear below its knee (1 down to 0.18 as compression
+  increases); above it a smooth logarithmic-power tail fits extreme highlights
+  below white with no hue clipping. Zero compression retains linear clipping.
+  Bevy's built-in tone mapping is disabled on the realistic space camera.
+  Faint background light is unchanged, not lifted. Bloom and additive overlaps
+  combine already-mapped light, an intentional approximation rather than a
+  scene-linear compositor. Point profiles are scaled from their mapped peaks
+  in both native and triangle paths. The glow cache retains half-float limits
+  at its fixed reference gain; extremely dense patches can still saturate.
   `set_exposure <stops>` and `set_compression <0..1>` use the same path as
   the HUD. Future auto-exposure should supply stops, separately from rendering.
-  `node scripts/test-exposure.mjs` checks WebGL shaders, image changes and
-  immediate HUD text drags headlessly, after a web build with the server running.
+  `node scripts/test-exposure.mjs` checks WebGL shaders, exposure changes,
+  unchanged faint backgrounds, restored bright-planet shading and immediate
+  HUD text drags headlessly, after a web build with the server running.
 - Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
   over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
   spread integrates to its whole light, exposed as if spread over a point-sized

@@ -1,6 +1,7 @@
-// Realistic bodies under the wireframes. Colours arrive already exposed, so the
-// HDR target never sees raw radiance.
+// Keep exposed radiance in uniforms until lighting and surface detail have
+// been evaluated, then map highlights before half-float storage.
 #import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings::view}
+#import night_sky::exposure::highlight
 
 struct Body {
     colour: vec4<f32>,
@@ -9,7 +10,7 @@ struct Body {
     light: vec4<f32>,
     // Rotation of the surface, as a quaternion.
     spin: vec4<f32>,
-    // Granules per radius, on-screen radius in pixels and granulation contrast.
+    // Granules per radius, on-screen radius, granulation contrast, compression.
     surface: vec4<f32>,
 }
 
@@ -83,8 +84,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             texture += SUPERGRANULES * coarse * cells(local * size / SUPERGRANULE_SIZE + 17.0);
         }
         let surface = 1.0 + texture * body.surface.z * sqrt(mu);
-        return vec4(body.colour.rgb * limb * surface, 1.0);
+        return vec4(highlight(body.colour.rgb * limb * surface, body.surface.w), 1.0);
     }
     let lit = max(dot(normal, body.light.xyz), 0.0);
-    return vec4(body.colour.rgb * (lit + body.light.w), 1.0);
+    return vec4(highlight(body.colour.rgb * (lit + body.light.w), body.surface.w), 1.0);
 }
