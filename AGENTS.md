@@ -114,8 +114,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   main view's),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
   bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
-  open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
-  browser). New debug readouts and switches go there, not in Settings or the
+  open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (GPU test, core load test and bug report
+  natively, star-stream benchmark in the browser). New debug readouts and switches go there, not in Settings or the
   canvas. The performance switches (`render_debug::RenderDebug`, not
   `Navigation`; `set_debug <switch> <on>`) are for A/B tests and reset on
   restart: freeze star streaming (the loader keeps its last aim), galactic
@@ -327,6 +327,16 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   generation speed-ups: 157 cells, 114,992,223 stars in 141.6 s. With the
   nuclear stellar disc: 145,751,381 stars. The star count is deterministic,
   so a changed count means generation changed.
+  The native **GPU test** (`tools` tab, `gpu_test.rs`) is the fixed
+  before-and-after benchmark for star rendering: it places the camera 500 ly
+  from the black hole facing it, restarts streaming the same way, waits until
+  every cell is loaded and uploaded plus `SETTLE_S` (2 s), then measures
+  `MEASURE_S` (20 s) of frame times and the main view's GPU pass times. Each
+  run is logged (`GPU test (...)`) and appended as one JSON line, with the
+  commit (`+dirty` for uncommitted changes), window size and MSAA state, to
+  `data/logs/gpu-test.jsonl`. The user runs the GPU test and other
+  benchmarks on their own focused window; agents read the results from the
+  logs and do not launch benchmark runs themselves.
   The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each

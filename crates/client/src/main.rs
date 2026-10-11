@@ -13,6 +13,7 @@ mod diagnostics;
 mod flight;
 mod galaxy_nav;
 mod glow;
+mod gpu_test;
 mod inspector;
 mod network;
 mod objects;
@@ -344,6 +345,7 @@ fn main() {
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
     .init_resource::<core_load::CoreLoad>()
+    .init_resource::<gpu_test::GpuTest>()
     .insert_resource(initial_nav)
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
@@ -356,6 +358,8 @@ fn main() {
             scene::controls,
             #[cfg(not(target_arch = "wasm32"))]
             core_load::run,
+            #[cfg(not(target_arch = "wasm32"))]
+            gpu_test::run,
             #[cfg(target_arch = "wasm32")]
             benchmark::advance,
             scene::locate,

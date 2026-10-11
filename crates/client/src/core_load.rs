@@ -26,16 +26,16 @@ pub enum CoreLoad {
     },
 }
 
-/// Places the camera `FROM_CENTRE_PC` from the black hole, facing it.
-fn at_core(nav: &mut Navigation) {
+/// Places the camera `from_pc` from the black hole towards home, facing it.
+pub fn facing_centre(nav: &mut Navigation, from_pc: f64) {
     let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
-    let eye = DVec3::X * FROM_CENTRE_PC;
+    let eye = DVec3::X * from_pc;
     nav.visit = None;
     nav.page = 0;
     nav.selection = None;
     nav.following = false;
     nav.presentation_mode = PresentationMode::Simulation;
-    nav.distance = FROM_CENTRE_PC * PC_METRES;
+    nav.distance = from_pc * PC_METRES;
     nav.target = -home * PC_METRES;
     nav.rotation = Transform::default()
         .looking_to(Vec3::NEG_X, Vec3::Y)
@@ -55,7 +55,7 @@ pub fn run(
 ) {
     match *load {
         CoreLoad::Requested => {
-            at_core(&mut nav);
+            facing_centre(&mut nav, FROM_CENTRE_PC);
             rig.land();
             restart.0 = true;
             *load = CoreLoad::Running(Instant::now());
@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn core_eye_is_beside_the_black_hole_facing_it() {
         let mut nav = Navigation::default();
-        at_core(&mut nav);
+        facing_centre(&mut nav, FROM_CENTRE_PC);
         let home = DVec3::from_array(GalaxyModel::milky_way().home_pc) * PC_METRES;
         let eye = nav.eye.unwrap() + home;
         assert!((eye.length() / PC_METRES - FROM_CENTRE_PC).abs() < 1e-6);
