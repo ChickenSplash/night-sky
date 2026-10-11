@@ -245,6 +245,11 @@ is available it retains its last data, initially the clearly labelled demo.
 
 ```text
 crates/client/       Bevy scene, controls and the egui UI
+  src/scene/         Camera, controls, location, placement and wireframes
+  src/stars/         Galactic star streaming, batching and drawing
+  src/render/        Bodies, exposure, glow, black hole and their shaders
+  src/ui/            HUD, breadcrumbs, inspector, tasks window, terminal look
+  src/devtools/      Debug window, tests, benchmarks and diagnostics
 crates/server/       Axum API serving the demo galaxy and web client
 crates/shared/       Serializable API models and offline demo
 crates/simulation/   Orbital mechanics, clock, galaxy model and deterministic layout
