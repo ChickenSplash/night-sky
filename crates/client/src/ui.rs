@@ -1110,8 +1110,8 @@ mod tests {
                 magnitude: dragged_magnitude(6.5, -100.0)
             }]
         );
-        assert_eq!(dragged_magnitude(6.5, -100.0), 5.5);
-        assert_eq!(dragged_magnitude(6.5, 1000.0), 7.0);
+        assert_eq!(dragged_magnitude(6.5, -100.0), 5.1);
+        assert_eq!(dragged_magnitude(6.5, 1000.0), 8.5);
     }
 
     #[test]

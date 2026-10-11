@@ -24,6 +24,8 @@ const AIM_PC: f64 = 0.01;
 /// Stars loaded around the camera, by cell.
 #[derive(Resource, Default)]
 pub struct Starfield {
+    /// Last resolved ID and point; invalidated whenever loaded cells change.
+    pub picked: std::sync::Mutex<Option<(String, StarPoint)>>,
     pub cells: HashMap<Cell, StarCell>,
     /// Newly loaded cells awaiting upload to the point-cloud renderer.
     pub added: VecDeque<Cell>,
@@ -260,6 +262,20 @@ impl Starfield {
 
     fn apply(&mut self, events: Vec<Event>) {
         for event in events {
+            let changed_cell = match &event {
+                Event::Loaded(cell) => cell.cell,
+                Event::Dropped(cell) => *cell,
+            };
+            let cached = self
+                .picked
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if cached.as_ref().is_some_and(|(id, _)| {
+                space_simulation::cells::parse_cell_star(id)
+                    .is_some_and(|(cell, ..)| cell == changed_cell)
+            }) {
+                *cached = None;
+            }
             match event {
                 Event::Loaded(cell) => {
                     self.stars += cell.stars.len();
@@ -281,6 +297,10 @@ impl Starfield {
 
     /// Drops every loaded star, as before the first load.
     fn clear(&mut self) {
+        *self
+            .picked
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.removed
             .extend(self.cells.drain().map(|(cell, _)| cell));
         self.added.clear();
@@ -727,6 +747,24 @@ mod web {
 mod tests {
     use super::*;
     use space_simulation::galaxy::Component;
+
+    #[test]
+    fn picked_cache_survives_unrelated_changes_but_not_removal_or_restart() {
+        let mut field = field();
+        field.stars = field.cells.values().map(|cell| cell.stars.len()).sum();
+        let (&cell, stars) = field.cells.iter().next().unwrap();
+        let star = stars.stars[0];
+        let id = star.id(cell);
+        *field.picked.lock().unwrap() = Some((id.clone(), star));
+        let other = *field.cells.keys().find(|&&other| other != cell).unwrap();
+        field.apply(vec![Event::Dropped(other)]);
+        assert!(field.picked.lock().unwrap().is_some());
+        field.apply(vec![Event::Dropped(cell)]);
+        assert!(field.picked.lock().unwrap().is_none());
+        *field.picked.lock().unwrap() = Some((id, star));
+        field.clear();
+        assert!(field.picked.lock().unwrap().is_none());
+    }
 
     /// Scattered stars in cells of two levels, by a fixed linear congruence.
     fn field() -> Starfield {

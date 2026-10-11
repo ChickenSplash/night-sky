@@ -174,7 +174,7 @@ pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
 
 /// Selectable star point magnitude limits. Each magnitude fainter draws
 /// about four times the stars.
-pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=7.0;
+pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=8.5;
 
 impl Navigation {
     /// Clamped to `MAGNITUDE`, to a tenth.

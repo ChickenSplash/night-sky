@@ -199,7 +199,7 @@ pub const USAGE: [Usage; 19] = [
     Usage {
         name: "set_magnitude",
         fields: &["magnitude"],
-        about: "Faintest star magnitude drawn as a point, 3 to 7; reloads the stars",
+        about: "Faintest star magnitude drawn as a point, 3 to 8.5; reloads the stars",
     },
     Usage {
         name: "galaxy_reference",

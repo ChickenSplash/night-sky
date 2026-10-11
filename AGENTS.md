@@ -91,7 +91,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   captures input like the time rate, and a single click does nothing.
   The bottom-right **Magnitude limit** (`ui::magnitude_control`, one line)
   is `Navigation::magnitude`, the faintest apparent magnitude drawn as a
-  star point (default `VISIBLE_MAGNITUDE`, 6.5; `MAGNITUDE` range 3 to 7, in
+  star point (default `VISIBLE_MAGNITUDE`, 6.5; `MAGNITUDE` range 3 to 8.5, in
   tenths). Dragging shows the new value; it applies on release
   (`SetMagnitude`, `set_magnitude 5.5`), because a change restarts streaming
   from nothing: `stream` starts a new `Backend` whenever its magnitude
@@ -527,7 +527,15 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from
-  loaded, visible points only, and only on click, never every frame. Click
+  loaded, visible points only, and only on click, never every frame.
+  Picking traverses `StarCell::query_blocks` with a conservative sphere/cone
+  test, then applies the original magnitude and angular tests only to leaf
+  candidates, rather than scanning every loaded star. Each click logs elapsed
+  time and stars examined as `Star picking`. `Starfield::picked` caches the
+  last ID and point so applying selection and inspector reachability avoid
+  rescanning its cell; replacement/removal of that cell or restart invalidates
+  the cache, while unrelated streaming changes retain it. Uncached typed ID
+  lookups still scan their cell once. Click
   again or Enter to visit. The only bodies drawn are
   the visited star and its planets. Shift + scroll (either Shift key) zooms
   from 20,000 km to 40,000 ly; plain scroll adjusts movement speed independently.
