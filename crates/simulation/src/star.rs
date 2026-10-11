@@ -230,23 +230,41 @@ pub(crate) fn imf_density(mass: f64) -> f64 {
     }
 }
 
+/// Powers of the IMF's limits, worked out once: every star's mass draw uses
+/// them.
+struct ImfPowers {
+    low: f64,
+    break_high: f64,
+    /// Stars born below the break.
+    below_break: f64,
+}
+
+fn imf_powers() -> &'static ImfPowers {
+    static POWERS: std::sync::LazyLock<ImfPowers> = std::sync::LazyLock::new(|| ImfPowers {
+        low: IMF_LOW.powf(-0.3),
+        break_high: IMF_BREAK.powf(-1.3),
+        below_break: (IMF_LOW.powf(-0.3) - IMF_BREAK.powf(-0.3)) / 0.3,
+    });
+    &POWERS
+}
+
 /// Stars born below this mass, in the units of `imf_density`.
 pub(crate) fn imf_cumulative(mass: f64) -> f64 {
     let mass = mass.clamp(IMF_LOW, IMF_HIGH);
-    let low = (IMF_LOW.powf(-0.3) - IMF_BREAK.powf(-0.3)) / 0.3;
+    let powers = imf_powers();
     if mass < IMF_BREAK {
-        (IMF_LOW.powf(-0.3) - mass.powf(-0.3)) / 0.3
+        (powers.low - mass.powf(-0.3)) / 0.3
     } else {
-        low + IMF_BREAK * (IMF_BREAK.powf(-1.3) - mass.powf(-1.3)) / 1.3
+        powers.below_break + IMF_BREAK * (powers.break_high - mass.powf(-1.3)) / 1.3
     }
 }
 
 pub(crate) fn imf_inverse(x: f64) -> f64 {
-    let low = (IMF_LOW.powf(-0.3) - IMF_BREAK.powf(-0.3)) / 0.3;
-    if x < low {
-        (IMF_LOW.powf(-0.3) - 0.3 * x).powf(-1.0 / 0.3)
+    let powers = imf_powers();
+    if x < powers.below_break {
+        (powers.low - 0.3 * x).powf(-1.0 / 0.3)
     } else {
-        (IMF_BREAK.powf(-1.3) - 1.3 * (x - low) / IMF_BREAK).powf(-1.0 / 1.3)
+        (powers.break_high - 1.3 * (x - powers.below_break) / IMF_BREAK).powf(-1.0 / 1.3)
     }
 }
 
@@ -392,7 +410,7 @@ pub(crate) fn evolved(
         Branch::RedSupergiant => ("Red supergiant", "I", hours(rng, 1_000.0, 10_000.0)),
         Branch::BlueSupergiant => ("Blue supergiant", "I", hours(rng, 5.0, 50.0)),
     };
-    let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
+    let light = surface_light(radius, kelvin);
     let star = Star {
         id: id.into(),
         page: 0,
@@ -419,6 +437,17 @@ pub(crate) fn evolved(
     }
 }
 
+/// Luminosity, in solar units, of a surface of this radius and temperature.
+pub(crate) fn surface_light(radius_solar: f64, kelvin: f64) -> f64 {
+    radius_solar.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4)
+}
+
+/// The mass of the white dwarf a star of this birth mass leaves: the first
+/// draw `white_dwarf` makes.
+pub(crate) fn white_dwarf_mass(rng: &mut Rng, progenitor: f64) -> f64 {
+    0.5 + 0.3 * (progenitor - 1.0) / 3.0 + rng.range(-0.03, 0.03)
+}
+
 /// The white dwarf left by a star of this birth mass, at this temperature or a
 /// random one.
 pub(crate) fn white_dwarf(
@@ -429,11 +458,11 @@ pub(crate) fn white_dwarf(
 ) -> Formation {
     // The progenitor lost over half its mass, so surviving orbits widened by the
     // ratio of masses. Planets inside its giant phase were engulfed.
-    let mass = 0.5 + 0.3 * (progenitor - 1.0) / 3.0 + rng.range(-0.03, 0.03);
+    let mass = white_dwarf_mass(rng, progenitor);
     let widening = progenitor / mass;
     let kelvin = kelvin.unwrap_or_else(|| rng.log_range(4_500.0, 25_000.0));
     let radius = white_dwarf_radius(mass);
-    let light = radius.powi(2) * (kelvin / SUN_TEMPERATURE_K).powi(4);
+    let light = surface_light(radius, kelvin);
     let star = Star {
         id: id.into(),
         page: 0,

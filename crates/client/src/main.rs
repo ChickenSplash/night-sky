@@ -6,6 +6,7 @@ mod benchmark;
 mod black_hole;
 mod breadcrumb;
 mod command_line;
+mod core_load;
 mod devtools;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
@@ -17,6 +18,7 @@ mod network;
 mod objects;
 mod presentation;
 mod render;
+mod render_debug;
 mod scene;
 mod sky;
 #[cfg(not(target_arch = "wasm32"))]
@@ -324,6 +326,7 @@ fn main() {
         BigSpaceDefaultPlugins,
         EguiPlugin::default(),
         render::RenderPlugin,
+        render_debug::RenderDebugPlugin,
         stream::StreamPlugin,
         starfield::StarfieldRenderPlugin,
         glow::GlowPlugin,
@@ -339,6 +342,7 @@ fn main() {
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
+    .init_resource::<core_load::CoreLoad>()
     .insert_resource(initial_nav)
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
@@ -349,6 +353,8 @@ fn main() {
             actions::apply,
             tick,
             scene::controls,
+            #[cfg(not(target_arch = "wasm32"))]
+            core_load::run,
             #[cfg(target_arch = "wasm32")]
             benchmark::advance,
             scene::locate,

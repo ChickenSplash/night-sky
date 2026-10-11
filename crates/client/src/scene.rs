@@ -161,6 +161,13 @@ pub struct CameraRig {
     warned_stall: bool,
 }
 
+impl CameraRig {
+    /// Ends any flight, so the next placement jumps straight to `Navigation`.
+    pub fn land(&mut self) {
+        self.flight = None;
+    }
+}
+
 fn rebase(
     nav: &mut Navigation,
     rig: &CameraRig,
@@ -209,6 +216,7 @@ fn within(arrived: bool, distance: f64, range: f64) -> bool {
 pub fn locate(
     #[cfg(target_arch = "wasm32")] benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
     field: Res<crate::stream::Starfield>,
+    mut metrics: ResMut<crate::stream::StreamMetrics>,
     lists: Res<Universe>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
@@ -244,27 +252,10 @@ pub fn locate(
     let eye_pc =
         DVec3::from_array(GalaxyModel::milky_way().home_pc) + eye_ly * (LY_METRES / PC_METRES);
     let reach_pc = APPROACH_METRES / PC_METRES;
-    let mut closest = None;
-    for (&cell, stars) in &field.cells {
-        if space_simulation::stream::gap_pc(cell, eye_pc.to_array()) > reach_pc {
-            continue;
-        }
-        for star in &stars.stars {
-            let distance = (DVec3::from_array(star.position_pc) - eye_pc).length();
-            if distance >= reach_pc {
-                continue;
-            }
-            let id = star.id(cell);
-            if closest.as_ref().is_none_or(|(best, old_id, _)| {
-                distance < *best || (distance == *best && id < *old_id)
-            }) {
-                closest = Some((distance, id, star.position_pc));
-            }
-        }
-    }
-    let Some((_, id, position_pc)) = closest else {
+    let Some((_, cell, star)) = field.nearest(eye_pc, reach_pc, &mut metrics) else {
         return;
     };
+    let (id, position_pc) = (star.id(cell), star.position_pc);
     let position_ly = (DVec3::from_array(position_pc)
         - DVec3::from_array(GalaxyModel::milky_way().home_pc))
         * (PC_METRES / LY_METRES);
@@ -578,6 +569,7 @@ pub fn place_camera(
     time: Res<Time>,
     universe: Res<Universe>,
     field: Res<crate::stream::Starfield>,
+    mut metrics: ResMut<crate::stream::StreamMetrics>,
     clock: Res<Clock>,
     mut nav: ResMut<Navigation>,
     mut rig: ResMut<CameraRig>,
@@ -705,7 +697,7 @@ pub fn place_camera(
     let eye_pc = DVec3::from_array(GalaxyModel::milky_way().home_pc)
         + frame * (LY_METRES / PC_METRES)
         + pose.eye / PC_METRES;
-    pose.scale_distance = proximity_scale_distance(&field, eye_pc, shown.distance);
+    pose.scale_distance = proximity_scale_distance(&field, eye_pc, shown.distance, &mut metrics);
     if nav.arrived {
         pose.scale_distance = pose.scale_distance.min(pose.eye.length().max(20_000_000.0));
     }
@@ -734,20 +726,14 @@ fn proximity_scale_distance(
     field: &crate::stream::Starfield,
     eye_pc: DVec3,
     selected_range: f64,
+    metrics: &mut crate::stream::StreamMetrics,
 ) -> f64 {
-    let mut scale = selected_range;
-    for (&cell, stars) in &field.cells {
-        if space_simulation::stream::gap_pc(cell, eye_pc.to_array()) > PRECISE_SCALE_PC {
-            continue;
-        }
-        for star in &stars.stars {
-            let distance = DVec3::from_array(star.position_pc).distance(eye_pc);
-            if distance < PRECISE_SCALE_PC {
-                scale = scale.min(distance * PC_METRES);
-            }
-        }
-    }
-    scale.max(20_000_000.0)
+    field
+        .nearest(eye_pc, PRECISE_SCALE_PC, metrics)
+        .map_or(selected_range, |(distance, ..)| {
+            selected_range.min(distance * PC_METRES)
+        })
+        .max(20_000_000.0)
 }
 
 fn rotation([inclination, node, twist]: [f64; 3]) -> DQuat {
@@ -1258,9 +1244,9 @@ mod tests {
         let mut field = crate::stream::Starfield::default();
         field.cells.insert(
             cell,
-            StarCell {
+            StarCell::new(
                 cell,
-                stars: vec![StarPoint {
+                vec![StarPoint {
                     position_pc: star.position_pc,
                     luminosity_solar: star.star.luminosity_solar as f32,
                     temperature_k: star.star.temperature_k as f32,
@@ -1268,7 +1254,7 @@ mod tests {
                     component: parse_cell_star(&id).unwrap().1,
                     index: parse_cell_star(&id).unwrap().2 as u32,
                 }],
-            },
+            ),
         );
         let mut nav = Navigation {
             rotation: Quat::IDENTITY,
@@ -1298,6 +1284,7 @@ mod tests {
             .insert_resource(rig)
             .insert_resource(pose)
             .insert_resource(nav)
+            .init_resource::<crate::stream::StreamMetrics>()
             .add_systems(Update, (locate, locate_planet).chain());
         app.update();
         let nav = app.world().resource::<Navigation>();
@@ -1378,6 +1365,7 @@ mod tests {
                 ..default()
             })
             .insert_resource(nav)
+            .init_resource::<crate::stream::StreamMetrics>()
             .add_systems(Update, (locate, locate_planet).chain());
         app
     }
@@ -1556,9 +1544,9 @@ mod tests {
         let mut field = crate::stream::Starfield::default();
         field.cells.insert(
             cell,
-            StarCell {
+            StarCell::new(
                 cell,
-                stars: vec![StarPoint {
+                vec![StarPoint {
                     position_pc: star_pc.to_array(),
                     luminosity_solar: 1.0,
                     temperature_k: 5772.0,
@@ -1566,18 +1554,15 @@ mod tests {
                     component: Component::ThinDisc,
                     index: 0,
                 }],
-            },
+            ),
         );
         let maximum = 40_000.0 * LY_METRES;
         let eye = star_pc + DVec3::X * (6.0 * LY_METRES / PC_METRES);
-        let scale = proximity_scale_distance(&field, eye, maximum);
-        assert!((scale / LY_METRES - 6.0).abs() < 1e-9);
+        let mut metrics = crate::stream::StreamMetrics::default();
+        let mut scale = |eye| proximity_scale_distance(&field, eye, maximum, &mut metrics);
+        assert!((scale(eye) / LY_METRES - 6.0).abs() < 1e-9);
         assert_eq!(
-            proximity_scale_distance(
-                &field,
-                eye + DVec3::X * 30.0 * LY_METRES / PC_METRES,
-                maximum
-            ),
+            scale(eye + DVec3::X * 30.0 * LY_METRES / PC_METRES),
             maximum
         );
     }

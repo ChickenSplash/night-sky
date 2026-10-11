@@ -31,7 +31,7 @@ use bevy::{
     shader::ShaderRef,
 };
 use space_simulation::{
-    galaxy::{GalaxyModel, PC_METRES},
+    galaxy::{COMPONENTS, GalaxyModel, PC_METRES},
     glow::{DISTANCES, patches, unresolved_table},
 };
 use std::sync::{
@@ -60,7 +60,7 @@ struct Settings {
     forward: Vec4,
     /// tan(half vertical FOV), view aspect and glow image size in pixels.
     projection: Vec4,
-    light: [Vec4; 6 * DISTANCES],
+    light: [Vec4; COMPONENTS * DISTANCES],
 }
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 struct GlowMaterial {

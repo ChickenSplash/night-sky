@@ -9,7 +9,8 @@
 //!   birth mass, age and shape are sampled from the same distributions as
 //!   `galactic_star`, restricted to the tier. The mix over all tiers matches it.
 
-use crate::galaxy::Component;
+use crate::cells::StarKey;
+use crate::galaxy::{COMPONENTS, Component};
 use crate::star::{
     self, Branch, Formation, GIANT_SHARE, IMF_RANGE, SUN_TEMPERATURE_K, WHITE_DWARF_LIGHTEST,
     WHITE_DWARF_LIMIT, imf_cumulative, imf_density, imf_inverse, lifetime_gyr,
@@ -85,6 +86,8 @@ const PHASES: [Phase; 4] = [
 /// Birth masses in a range, weighted by the chance of each being in a phase.
 struct Masses {
     edges: Vec<f64>,
+    /// `imf_cumulative` at each edge.
+    born: Vec<f64>,
     cumulative: Vec<f64>,
     /// Upper bound of the weight in each bin, for rejection.
     bounds: Vec<f64>,
@@ -117,6 +120,7 @@ impl Masses {
             bounds.push((bound * 1.05).min(1.0));
         }
         Self {
+            born: edges.iter().map(|&m| imf_cumulative(m)).collect(),
             edges,
             cumulative,
             bounds,
@@ -135,10 +139,7 @@ impl Masses {
             .partition_point(|&c| c <= target)
             .clamp(1, BINS)
             - 1;
-        let (low, high) = (
-            imf_cumulative(self.edges[bin]),
-            imf_cumulative(self.edges[bin + 1]),
-        );
+        let (low, high) = (self.born[bin], self.born[bin + 1]);
         let mut mass = self.edges[bin];
         for _ in 0..256 {
             mass = imf_inverse(low + rng.unit() * (high - low));
@@ -278,7 +279,7 @@ fn dwarf_weight(c: Component, m: f64, cooling: (f64, f64)) -> f64 {
 }
 
 fn census(component: Component) -> &'static Census {
-    static CENSUS: [OnceLock<Census>; 6] = [const { OnceLock::new() }; 6];
+    static CENSUS: [OnceLock<Census>; COMPONENTS] = [const { OnceLock::new() }; COMPONENTS];
     CENSUS[component.index()].get_or_init(|| build(component))
 }
 
@@ -344,11 +345,65 @@ fn build(c: Component) -> Census {
 
 /// A star of this component and tier, from its own ID.
 pub(crate) fn tiered_formation(id: &str, component: Component, tier: usize) -> Formation {
+    let mut draw = Rng::new(&format!("{id}:tier"));
+    let mut rng = Rng::new(&format!("{id}:star"));
+    match tiered_shape(&mut draw, component, tier) {
+        Shape::Evolved {
+            mass,
+            branch,
+            radius,
+            kelvin,
+        } => star::evolved(id, &mut rng, mass, branch, radius, kelvin),
+        Shape::WhiteDwarf { progenitor, kelvin } => {
+            star::white_dwarf(id, &mut rng, progenitor, Some(kelvin))
+        }
+        Shape::Main { kelvin, mass } => star::main_sequence(id, &mut rng, kelvin, mass),
+    }
+}
+
+/// Luminosity (solar), temperature (K) and radius (solar) of the star
+/// `tiered_formation` makes for this key, without building the rest of it.
+pub(crate) fn tiered_light(key: StarKey, component: Component, tier: usize) -> (f64, f64, f64) {
+    match tiered_shape(&mut key.rng(":tier"), component, tier) {
+        Shape::Evolved { radius, kelvin, .. } => {
+            (star::surface_light(radius, kelvin), kelvin, radius)
+        }
+        Shape::WhiteDwarf { progenitor, kelvin } => {
+            let mass = star::white_dwarf_mass(&mut key.rng(":star"), progenitor);
+            let radius = star::white_dwarf_radius(mass);
+            (star::surface_light(radius, kelvin), kelvin, radius)
+        }
+        Shape::Main { kelvin, mass } => (
+            star::luminosity(mass),
+            kelvin,
+            star::main_sequence_radius(mass),
+        ),
+    }
+}
+
+/// What `tiered_formation` draws from `{id}:tier`: the kind of star and its
+/// shape. The rest comes from `{id}:star`.
+enum Shape {
+    Evolved {
+        mass: f64,
+        branch: Branch,
+        radius: f64,
+        kelvin: f64,
+    },
+    WhiteDwarf {
+        progenitor: f64,
+        kelvin: f64,
+    },
+    Main {
+        kelvin: f64,
+        mass: f64,
+    },
+}
+
+fn tiered_shape(draw: &mut Rng, component: Component, tier: usize) -> Shape {
     let census = census(component);
     let tier = tier.min(TIERS - 1);
     let row = &census.tiers[tier];
-    let mut draw = Rng::new(&format!("{id}:tier"));
-    let mut rng = Rng::new(&format!("{id}:star"));
     let total: f64 = row.weights.iter().sum();
     let mut roll = draw.unit() * total;
     let phase = PHASES
@@ -366,16 +421,19 @@ pub(crate) fn tiered_formation(id: &str, component: Component, tier: usize) -> F
     };
     match (phase, &row.main, &row.dwarfs) {
         (Phase::Giant, ..) => {
-            let mass = census
-                .giants
-                .sample(&mut draw, |m| evolved_weight(component, m));
-            let (radius, kelvin) = draw_shape(&mut draw, Branch::Giant, faint, bright);
-            star::evolved(id, &mut rng, mass, Branch::Giant, radius, kelvin)
+            let mass = census.giants.sample(draw, |m| evolved_weight(component, m));
+            let (radius, kelvin) = draw_shape(draw, Branch::Giant, faint, bright);
+            Shape::Evolved {
+                mass,
+                branch: Branch::Giant,
+                radius,
+                kelvin,
+            }
         }
         (Phase::Supergiant, ..) => {
             let mass = census
                 .supergiants
-                .sample(&mut draw, |m| evolved_weight(component, m));
+                .sample(draw, |m| evolved_weight(component, m));
             let red = Branch::RedSupergiant.share(mass) * row.shapes[1];
             let blue = Branch::BlueSupergiant.share(mass) * row.shapes[2];
             let branch = if draw.unit() * (red + blue) < red {
@@ -383,27 +441,38 @@ pub(crate) fn tiered_formation(id: &str, component: Component, tier: usize) -> F
             } else {
                 Branch::BlueSupergiant
             };
-            let (radius, kelvin) = draw_shape(&mut draw, branch, faint, bright);
-            star::evolved(id, &mut rng, mass, branch, radius, kelvin)
+            let (radius, kelvin) = draw_shape(draw, branch, faint, bright);
+            Shape::Evolved {
+                mass,
+                branch,
+                radius,
+                kelvin,
+            }
         }
         (Phase::WhiteDwarf, _, Some(dwarfs)) => {
             let window = row.cooling;
-            let mass = dwarfs.sample(&mut draw, |m| dwarf_weight(component, m, window));
-            let end = life(mass) * (1.0 + GIANT_SHARE);
-            let age = component.age_between(&mut draw, end + window.0, end + window.1);
-            let kelvin = star::cooled_kelvin((age - end).max(window.0));
-            star::white_dwarf(id, &mut rng, mass, Some(kelvin))
+            let progenitor = dwarfs.sample(draw, |m| dwarf_weight(component, m, window));
+            let end = life(progenitor) * (1.0 + GIANT_SHARE);
+            let age = component.age_between(draw, end + window.0, end + window.1);
+            Shape::WhiteDwarf {
+                progenitor,
+                kelvin: star::cooled_kelvin((age - end).max(window.0)),
+            }
         }
         (_, Some(main), _) => {
             let mass = main
-                .sample(&mut draw, |m| main_weight(component, m))
+                .sample(draw, |m| main_weight(component, m))
                 .clamp(row.main_range.0, row.main_range.1);
-            let kelvin =
-                star::temperature(star::luminosity(mass), star::main_sequence_radius(mass));
-            star::main_sequence(id, &mut rng, kelvin, mass)
+            Shape::Main {
+                kelvin: star::temperature(star::luminosity(mass), star::main_sequence_radius(mass)),
+                mass,
+            }
         }
         // Only reached for a tier without stars of this component.
-        _ => star::main_sequence(id, &mut rng, 3_200.0, 0.2),
+        _ => Shape::Main {
+            kelvin: 3_200.0,
+            mass: 0.2,
+        },
     }
 }
 

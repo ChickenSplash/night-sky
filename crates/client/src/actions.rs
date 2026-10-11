@@ -69,6 +69,11 @@ pub enum UiCommand {
     GalaxyReference {
         view: GalaxyReference,
     },
+    /// Debug-only performance switches (`render_debug.rs`).
+    SetDebug {
+        switch: crate::render_debug::DebugSwitch,
+        on: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -132,6 +137,7 @@ pub fn apply(
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     field: Res<crate::stream::Starfield>,
+    mut debug: ResMut<crate::render_debug::RenderDebug>,
 ) {
     let galaxy = &universe.0;
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
@@ -245,6 +251,7 @@ pub fn apply(
             },
             UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
             UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
+            UiCommand::SetDebug { switch, on } => debug.set(*switch, *on),
         }
     }
 }
@@ -390,6 +397,7 @@ mod tests {
             .init_resource::<Navigation>()
             .init_resource::<Clock>()
             .init_resource::<crate::stream::Starfield>()
+            .init_resource::<crate::render_debug::RenderDebug>()
             .add_systems(Update, apply);
         send(&mut app, commands);
         app
@@ -407,11 +415,11 @@ mod tests {
         let (cell, component, index) = parse_cell_star(id).unwrap();
         let star = Sky::default().star(id).unwrap();
         let mut field = app.world_mut().resource_mut::<crate::stream::Starfield>();
-        field.cells.entry(cell).or_insert(StarCell {
-            cell,
-            stars: vec![],
-        });
-        field.cells.get_mut(&cell).unwrap().stars.push(StarPoint {
+        let mut stars = field
+            .cells
+            .remove(&cell)
+            .map_or_else(Vec::new, |loaded| loaded.stars);
+        stars.push(StarPoint {
             position_pc: star.position_pc,
             luminosity_solar: star.star.luminosity_solar as f32,
             temperature_k: star.star.temperature_k as f32,
@@ -419,6 +427,7 @@ mod tests {
             component,
             index: index as u32,
         });
+        field.cells.insert(cell, StarCell::new(cell, stars));
     }
 
     fn nav(app: &App) -> &Navigation {

@@ -13,12 +13,45 @@
 //! - Everything follows from cell codes, so any cell gives the same stars in any
 //!   order, on any machine. `Sky` only caches what it has worked out.
 
-use crate::galaxy::{Component, GalaxyModel};
-use crate::population::{TIERS, tiered_formation};
+use crate::galaxy::{COMPONENTS, Component, GalaxyModel};
+use crate::population::{TIERS, tiered_formation, tiered_light};
 use crate::stream::StarPoint;
 use crate::system::{Body, Rng, system_around};
+use crate::{HASH_START, finish_hash, hash_bytes};
 use space_shared::Star;
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+
+/// A fast hasher for `Sky`'s small integer keys, looked up at every level of
+/// every star's descent. Only lookup speed depends on it, never a result.
+#[derive(Default)]
+struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(u64::from(byte));
+        }
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+
+    fn write_isize(&mut self, n: isize) {
+        self.write_u64(n as u64);
+    }
+}
+
+type Cache<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
 
 /// Side of the root cell, in parsecs: the galaxy's diameter, rounded up to a
 /// power of two.
@@ -119,7 +152,7 @@ impl Cell {
 
 /// Stars of each component (in `Component::ALL` order) and tier within a cell.
 /// Tiers brighter than the cell's level belong to its ancestors and count zero.
-pub type Counts = [[u64; TIERS]; 6];
+pub type Counts = [[u64; TIERS]; COMPONENTS];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CellStar {
@@ -133,6 +166,39 @@ pub struct CellStar {
 /// ID of the `index`th star of a component in a cell.
 pub fn cell_star_id(cell: Cell, component: Component, index: u64) -> String {
     format!("g{:x}.{}.{index}", cell.0, component.index())
+}
+
+/// A cell star's ID hashed as `stable_hash` hashes it, without building the
+/// string: `key.rng(":place")` is `Rng::new(&format!("{id}:place"))`.
+#[derive(Clone, Copy)]
+pub(crate) struct StarKey(u64);
+
+impl StarKey {
+    pub(crate) fn new(cell: Cell, component: Component, index: u64) -> Self {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut hash = hash_bytes(HASH_START, b"g");
+        let nibbles = 16 - cell.0.leading_zeros() / 4;
+        for i in (0..nibbles.max(1)).rev() {
+            hash = hash_bytes(hash, &[HEX[(cell.0 >> (4 * i) & 15) as usize]]);
+        }
+        hash = hash_bytes(hash, &[b'.', b'0' + component.index() as u8, b'.']);
+        let mut digits = [0u8; 20];
+        let mut start = digits.len();
+        let mut n = index;
+        loop {
+            start -= 1;
+            digits[start] = b'0' + (n % 10) as u8;
+            n /= 10;
+            if n == 0 {
+                break;
+            }
+        }
+        Self(hash_bytes(hash, &digits[start..]))
+    }
+
+    pub(crate) fn rng(self, suffix: &str) -> Rng {
+        Rng::seeded(finish_hash(hash_bytes(self.0, suffix.as_bytes())))
+    }
 }
 
 /// Stable catalogue label, derived from a cell star ID without storing names.
@@ -239,7 +305,13 @@ fn seeded(parts: [u64; 3]) -> Rng {
 
 /// Nearest distance from the centre to a box, in 3D and in the disc plane.
 fn nearest(min: [f64; 3], size: f64) -> (f64, f64) {
-    let gap = |axis: usize| {
+    let [x, y, z] = gaps(min, size);
+    ((x * x + y * y + z * z).sqrt(), x.hypot(z))
+}
+
+/// Gap from the centre to a box along each axis.
+fn gaps(min: [f64; 3], size: f64) -> [f64; 3] {
+    std::array::from_fn(|axis| {
         let (a, b) = (min[axis], min[axis] + size);
         if a > 0.0 {
             a
@@ -248,21 +320,24 @@ fn nearest(min: [f64; 3], size: f64) -> (f64, f64) {
         } else {
             0.0
         }
-    };
-    let [x, y, z] = [gap(0), gap(1), gap(2)];
-    ((x * x + y * y + z * z).sqrt(), x.hypot(z))
+    })
 }
 
 /// Largest box the three-point rule integrates a component over accurately.
 fn resolution(model: &GalaxyModel, component: Component, min: [f64; 3], size: f64) -> f64 {
-    let (r, radius) = nearest(min, size);
+    // Each component needs only one of `nearest`'s distances: work out just
+    // that one, the same way.
+    let [x, y, z] = gaps(min, size);
+    let r = || (x * x + y * y + z * z).sqrt();
+    let radius = || x.hypot(z);
     match component {
-        Component::Nucleus => model.nucleus_pc.max(0.3 * r),
-        Component::Bulge => model.bar_pc[1].min(model.bar_pc[2]).max(0.3 * r),
-        Component::Halo => model.halo_core_pc.max(0.3 * r),
+        Component::Nucleus => model.nucleus_pc.max(0.3 * r()),
+        Component::Bulge => model.bar_pc[1].min(model.bar_pc[2]).max(0.3 * r()),
+        Component::Halo => model.halo_core_pc.max(0.3 * r()),
         // Arms are about a tenth of their radius across.
-        Component::ThinDisc | Component::Arms => (0.05 * radius).clamp(250.0, 1_000.0),
-        Component::ThickDisc => (0.1 * radius).clamp(500.0, 1_000.0),
+        Component::ThinDisc | Component::Arms => (0.05 * radius()).clamp(250.0, 1_000.0),
+        Component::ThickDisc => (0.1 * radius()).clamp(500.0, 1_000.0),
+        Component::NuclearDisc => (0.3 * radius()).max(0.5 * model.nuclear.scale_length_pc),
     }
 }
 
@@ -330,33 +405,42 @@ fn corner(min: [f64; 3], half: f64, octant: usize) -> [f64; 3] {
     std::array::from_fn(|axis| min[axis] + if octant >> axis & 1 == 1 { half } else { 0.0 })
 }
 
+/// What `Sky::try_point` needs worked out before it can place a star.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Need {
+    /// A cell's child masses, to descend through it.
+    Masses(Cell, Component),
+    /// The rejection bound in the cell a descent ended in.
+    Bound(Cell, Component),
+}
+
 /// Streams the galaxy's stars cell by cell, caching counts and masses.
 pub struct Sky {
     pub model: GalaxyModel,
-    counts: HashMap<Cell, Box<Counts>>,
+    counts: Cache<Cell, Box<Counts>>,
     /// Stars of a component in each child of a cell, by octant.
-    masses: HashMap<(Cell, Component), [f64; 8]>,
+    masses: Cache<(Cell, Component), [f64; 8]>,
     /// Children integrated so far, for masses not yet complete.
-    partial: HashMap<(Cell, Component), Vec<f64>>,
+    partial: Cache<(Cell, Component), Vec<f64>>,
     /// Rejection bound of a component's density in the cells stars end in.
-    bounds: HashMap<(Cell, Component), f64>,
+    bounds: Cache<(Cell, Component), f64>,
 }
 
 impl Sky {
     pub fn new(model: GalaxyModel) -> Self {
         Self {
             model,
-            counts: HashMap::new(),
-            masses: HashMap::new(),
-            partial: HashMap::new(),
-            bounds: HashMap::new(),
+            counts: Cache::default(),
+            masses: Cache::default(),
+            partial: Cache::default(),
+            bounds: Cache::default(),
         }
     }
 
     /// Exact counts at the root: each component's stars, shared among tiers by
     /// largest remainder so nothing is lost to rounding.
     fn root(&self) -> Counts {
-        let mut counts = [[0; TIERS]; 6];
+        let mut counts = [[0; TIERS]; COMPONENTS];
         for component in Component::ALL {
             let total = self.model.stars_in(component).round() as u64;
             let shares = crate::population::tier_shares(component);
@@ -426,7 +510,7 @@ impl Sky {
         };
         let above = self.counts(parent);
         let level = cell.level();
-        let mut children = [[[0; TIERS]; 6]; 8];
+        let mut children = [[[0; TIERS]; COMPONENTS]; 8];
         let finer = above.iter().any(|row| row[level..].iter().any(|&n| n > 0));
         if finer {
             for component in Component::ALL {
@@ -527,7 +611,7 @@ impl Sky {
     fn build(&mut self, cell: Cell, component: Component, index: u64) -> CellStar {
         let id = cell_star_id(cell, component, index);
         let star = tiered_formation(&id, component, cell.level()).star;
-        let position_pc = self.place(&id, cell, component);
+        let position_pc = self.place(StarKey::new(cell, component, index), cell, component);
         CellStar {
             id,
             cell,
@@ -537,33 +621,66 @@ impl Sky {
         }
     }
 
-    /// One cell star, as `build` makes it, without its names.
-    pub(crate) fn point(&mut self, cell: Cell, component: Component, index: u64) -> StarPoint {
-        let star = self.build(cell, component, index);
-        StarPoint {
-            position_pc: star.position_pc,
-            luminosity_solar: star.star.luminosity_solar as f32,
-            temperature_k: star.star.temperature_k as f32,
-            radius_solar: star.star.radius_solar as f32,
+    /// One cell star, as `build` makes it, without its names; or what placing
+    /// it still needs, for `supply`. Changes nothing, so threads can share it.
+    pub(crate) fn try_point(
+        &self,
+        cell: Cell,
+        component: Component,
+        index: u64,
+    ) -> Result<StarPoint, Need> {
+        let key = StarKey::new(cell, component, index);
+        let mut rng = key.rng(":place");
+        let end = self
+            .descend(&mut rng, cell, component)
+            .map_err(|(cell, component)| Need::Masses(cell, component))?;
+        let bound = *self
+            .bounds
+            .get(&(end, component))
+            .ok_or(Need::Bound(end, component))?;
+        let position_pc = within(&self.model, component, end, bound, &mut rng);
+        let (luminosity, kelvin, radius) = tiered_light(key, component, cell.level());
+        Ok(StarPoint {
+            position_pc,
+            luminosity_solar: luminosity as f32,
+            temperature_k: kelvin as f32,
+            radius_solar: radius as f32,
             component,
             index: index as u32,
+        })
+    }
+
+    /// Works out part of what `try_point` reported missing: one more child's
+    /// masses, or a rejection bound. Repeating a need is harmless.
+    pub(crate) fn supply(&mut self, need: Need) {
+        match need {
+            Need::Masses(cell, component) => self.integrate(cell, component),
+            Need::Bound(end, component) => {
+                let model = &self.model;
+                self.bounds
+                    .entry((end, component))
+                    .or_insert_with(|| bound(model, component, end));
+            }
+        }
+    }
+
+    /// Works out all of a need at once: every child's masses.
+    pub(crate) fn complete(&mut self, need: Need) {
+        match need {
+            Need::Masses(cell, component) => {
+                self.child_masses(cell, component);
+            }
+            Need::Bound(..) => self.supply(need),
         }
     }
 
     /// Where a star lies in its cell: down through the children in proportion
     /// to their stars, then by rejection once the density is smooth.
-    fn place(&mut self, id: &str, cell: Cell, component: Component) -> [f64; 3] {
+    fn place(&mut self, key: StarKey, cell: Cell, component: Component) -> [f64; 3] {
         loop {
-            let mut rng = Rng::new(&format!("{id}:place"));
+            let mut rng = key.rng(":place");
             match self.descend(&mut rng, cell, component) {
-                Ok(cell) => {
-                    let model = &self.model;
-                    let bound = *self
-                        .bounds
-                        .entry((cell, component))
-                        .or_insert_with(|| bound(model, component, cell));
-                    return within(model, component, cell, bound, &mut rng);
-                }
+                Ok(end) => return self.within_end(end, component, &mut rng),
                 Err((cell, component)) => {
                     self.child_masses(cell, component);
                 }
@@ -571,19 +688,19 @@ impl Sky {
         }
     }
 
-    /// Masses placing a cell star still needs, if any.
-    pub(crate) fn place_need(
-        &self,
-        cell: Cell,
-        component: Component,
-        index: u64,
-    ) -> Option<(Cell, Component)> {
-        let id = cell_star_id(cell, component, index);
-        let mut rng = Rng::new(&format!("{id}:place"));
-        self.descend(&mut rng, cell, component).err()
+    /// A point by rejection in the cell a descent ended in.
+    fn within_end(&mut self, end: Cell, component: Component, rng: &mut Rng) -> [f64; 3] {
+        let model = &self.model;
+        let bound = *self
+            .bounds
+            .entry((end, component))
+            .or_insert_with(|| bound(model, component, end));
+        within(model, component, end, bound, rng)
     }
 
-    /// The cell a star's descent ends in, or the masses it needs first.
+    /// The cell a star's descent ends in, or the masses it needs first. Tracks
+    /// the cell's corner on the way down: exact, as every corner is a sum of
+    /// powers of two.
     fn descend(
         &self,
         rng: &mut Rng,
@@ -591,9 +708,8 @@ impl Sky {
         component: Component,
     ) -> Result<Cell, (Cell, Component)> {
         let mut cell = cell;
-        while cell.level() < DEEPEST
-            && cell.size_pc() > resolution(&self.model, component, cell.min_pc(), cell.size_pc())
-        {
+        let (mut min, mut size) = (cell.min_pc(), cell.size_pc());
+        while cell.level() < DEEPEST && size > resolution(&self.model, component, min, size) {
             let weights = self
                 .masses
                 .get(&(cell, component))
@@ -611,6 +727,8 @@ impl Sky {
                 })
                 .unwrap_or(7);
             cell = cell.child(octant);
+            size /= 2.0;
+            min = corner(min, size, octant);
         }
         Ok(cell)
     }
@@ -690,6 +808,59 @@ fn within(
 mod tests {
     use super::*;
     use crate::population::{reach_pc, tier_limit};
+
+    #[test]
+    fn star_keys_seed_as_their_id_strings_do() {
+        for (cell, index) in [
+            (Cell::ROOT, 0),
+            (Cell(0xf), 9),
+            (Cell(0x10), 10),
+            (Cell(0x1234_5678_9abc), 4_294_967_295),
+        ] {
+            for component in Component::ALL {
+                let id = cell_star_id(cell, component, index);
+                for suffix in [":place", ":tier", ":star"] {
+                    let mut key = StarKey::new(cell, component, index).rng(suffix);
+                    let mut text = Rng::new(&format!("{id}{suffix}"));
+                    assert_eq!(key.unit(), text.unit(), "{id}{suffix}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn star_points_match_the_full_stars() {
+        let mut sky = Sky::default();
+        let model = GalaxyModel::milky_way();
+        let mut kinds = std::collections::HashSet::new();
+        for p in [[3.0, 1.0, -2.0], [200.0, 10.0, 50.0], model.home_pc] {
+            for level in [5, 9, 13] {
+                let cell = Cell::containing(level, p).unwrap();
+                let counts = sky.counts(cell);
+                for component in Component::ALL {
+                    for index in 0..counts[component.index()][level].min(40) {
+                        let point = loop {
+                            match sky.try_point(cell, component, index) {
+                                Ok(point) => break point,
+                                Err(need) => sky.supply(need),
+                            }
+                        };
+                        let full = sky.build(cell, component, index);
+                        assert_eq!(point.position_pc, full.position_pc, "{}", full.id);
+                        assert_eq!(point.luminosity_solar, full.star.luminosity_solar as f32);
+                        assert_eq!(point.temperature_k, full.star.temperature_k as f32);
+                        assert_eq!(point.radius_solar, full.star.radius_solar as f32);
+                        kinds.insert(full.star.kind);
+                    }
+                }
+            }
+        }
+        // Each way `tiered_light` works a star out: main sequence, evolved
+        // and white dwarf.
+        for kind in ["Orange dwarf", "giant", "White dwarf"] {
+            assert!(kinds.iter().any(|k| k.contains(kind)), "{kinds:?}");
+        }
+    }
 
     #[test]
     fn catalogue_names_are_unique_stable_and_planets_are_lettered() {
@@ -789,7 +960,7 @@ mod tests {
                 let cell = Cell::containing(level, p).unwrap();
                 let counts = sky.counts(cell);
                 let children: Vec<Counts> = cell.children().map(|c| sky.counts(c)).to_vec();
-                for c in 0..6 {
+                for c in 0..COMPONENTS {
                     for tier in 0..TIERS {
                         let below: u64 = children.iter().map(|k| k[c][tier]).sum();
                         let wanted = if tier > level { counts[c][tier] } else { 0 };

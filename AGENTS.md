@@ -103,12 +103,20 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   site included), with tabs `log` (an in-memory console of the last 2,000
   tracing events from `devtools::log_layers`, with level filter and grep; the
   tab shows errors and warnings logged while it was hidden), `terminal` (a
-  command line and its output), `perf` (frame graph, star-stream metrics),
+  command line and its output), `perf` (frame graph; star stream and star
+  draw facts: draw calls, uploaded stars, vertices and vertex memory; natively,
+  a GPU passes table of GPU/CPU time and vertex/fragment shader invocations
+  per render pass from Bevy's `RenderDiagnosticsPlugin`),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
-  bodies, galaxy reference views), `state` (camera; navigation: location,
+  bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
   open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
   browser). New debug readouts and switches go there, not in Settings or the
-  canvas.
+  canvas. The performance switches (`render_debug::RenderDebug`, not
+  `Navigation`; `set_debug <switch> <on>`) are for A/B tests and reset on
+  restart: freeze star streaming (the loader keeps its last aim), galactic
+  star points, shade point pixels (off, points still run the vertex shader
+  but are never rasterised), compact 1.25 px points, 4x MSAA (both window
+  cameras) and bloom.
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
@@ -123,7 +131,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   mismatch).
 - The debug window uses the terminal look (`terminal.rs`): a translucent
   black, Hyprland-like window with a light grey border and text-mode
-  checkboxes and buttons.
+  checkboxes and buttons. A fact's explanation goes behind its label with
+  `terminal::facts_with_details` (`label +`, click to show it below, `label -`
+  to hide), not as an always-visible note.
 - There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in
@@ -220,7 +230,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 - `space_simulation::galaxy::GalaxyModel` (parameterised, `milky_way()` by
   default) gives stars per cubic parsec at any point, per `Component`: nuclear
-  cluster, bar and bulge, thin disc, young arm stars, thick disc and halo. Axes
+  cluster, bar and bulge, thin disc, young arm stars, thick disc, halo and
+  nuclear stellar disc (an exponential `Disc`, 75 pc by 45 pc, last in
+  `Component::ALL` so the others keep their star ID indices). Axes
   are parsecs from the central black hole, disc in XZ, Y to the north pole;
   home is 8.2 kpc out on +X, between arms.
 - Every profile has a closed-form integral, so components hold exactly their
@@ -251,6 +263,25 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - A cell star's ID is `g{cell hex}.{component}.{index}`. `cell_star(id)` and
   `cell_planetary_system(id)` rebuild it from the ID alone; its position needs
   `Sky::star(id)`.
+- Streaming makes about 100 million stars at the galactic centre, so the
+  per-star path (`Sky::try_point`) builds no strings or `Star`: `StarKey`
+  hashes the ID exactly as `stable_hash` would, `tiered_light` takes only
+  luminosity, temperature and radius from the same `tiered_shape` draws as
+  `tiered_formation`, and each star descends the tree once. It must give the
+  same stars as `Sky::build`, bit for bit (`star_points_match_the_full_stars`).
+  Keep both in step when changing star generation.
+- `try_point` only reads the `Sky`; it reports a missing integration or
+  rejection bound as a `Need`, which `supply`/`complete` work out. So
+  `Loader::with_threads(n)` shares each cell's stars among n threads (native
+  `star_threads`, three quarters of the machine's threads, at least 1;
+  the browser uses 1; the perf tab's **threads** row shows them and how many
+  were busy, from `Loader::take_worked`): stars needing something become
+  holes, made again once it is worked out, so a cell is identical with any
+  thread count (tested). With several threads, a made cell's grid
+  (`StarCell::new`) builds on a thread of its own while the next cell's stars
+  are made (`Loader::gridding`, at most `GRIDDING` at once, delivered in
+  order). Moving away from a cell whose grid is building discards it without
+  a `Dropped` event, as it was never delivered.
 - `space_simulation::stream`: `wanted(camera, magnitude)` lists, per tier, the
   level-t cells within `reach_pc`, most visible first. `Loader` builds them one
   unit at a time (one child box integrated, via `Sky::integrate`, or one star)
@@ -272,6 +303,25 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   wait, render-sync time and frame-time percentiles once per second; the
   debug window's `perf` tab shows them on both clients.
   Instrumentation does not change loading policy.
+  `StarCell::new` (simulation `stream.rs`) sorts a cell's stars into a uniform
+  grid of boxes (about 8 stars each, never under 0.1 pc, a power of two per
+  axis, numbered in Morton order so aligned cubes are contiguous runs), on the loader's
+  thread, so `stars` is in grid order, not generation order. Build cells only
+  through `StarCell::new`; changing `stars` afterwards leaves the grid stale.
+  Spatial questions use the grid: `StarCell::nearest` (rings of boxes outward)
+  behind `Starfield::nearest` for automatic arrival in `scene::locate` and the
+  close-up render scale in `place_camera`, and `StarCell::near` (boxes within a
+  radius) for precise-sprite `candidates`. Never scan `Starfield::cells` star
+  by star per frame or per streaming change: the cells containing the camera
+  hold tens of millions of stars at the galactic centre. The perf tab's
+  nearest star section times the lookups.
+  The native debug window's **core load test** (`tools` tab, `core_load.rs`)
+  jumps 1 pc from the black hole, restarts streaming from nothing
+  (`StreamRestart`: a new loader thread with an empty `Sky` cache, every
+  cell dropped) and times until no cells are pending. Baseline before any
+  generation speed-ups: 157 cells, 114,992,223 stars in 141.6 s. With the
+  nuclear stellar disc: 145,751,381 stars. The star count is deterministic,
+  so a changed count means generation changed.
   The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each
@@ -281,13 +331,21 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   <label>`; it writes JSON results under `data/logs/`. Headless SwiftShader is
   too slow for meaningful comparisons, so use headed Chromium on Wayland.
 - `starfield.rs` draws one oversized triangle per visible star in mesh batches
-  of at most 4,096 source stars (never an entity per star). Star positions are
-  local to the owning cell; per-frame transforms subtract the camera in f64,
+  of up to `PACK` (65,536) uploaded stars, filled from `SLICE`-sized steps of
+  a cell's stars within the upload budget, so a large cell may take several
+  frames. Keep batches few and large: Bevy's per-mesh-entity work
+  (specialization, extraction, queueing) runs every frame, hidden or not, and
+  17k small batches cost about 30 ms of CPU at the galactic centre. A rebuilt
+  cell's new batches wait in `Batches::fresh` and replace the old ones only
+  once complete, so rebuilds never leave holes. Star positions are
+  local to their grid block's centre (`StarCell::blocks`, at most `BLOCK`
+  loaded stars, an aligned cube of the cell's grid; no batch spans two
+  blocks); per-frame transforms subtract the camera in f64,
   then scale to render units. Filter points beyond 1.25 times their apparent
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
   retained cells after the camera travels 0.2 of the tier's reach. New entities
   start hidden for one frame, avoiding Bevy's material specialization race.
-  Batch vertices are f32 offsets from their cell's centre, so their error grows
+  Batch vertices are f32 offsets from their block's centre, so their error grows
   with that offset: within `PRECISE` times it of the camera a single-star sprite
   placed by an f64 subtraction takes over (built at `PREPARE` times the radius,
   so its hidden frame is spent). The batch remains until a quarter of that
@@ -300,7 +358,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   visual efficiency come from a blackbody palette by temperature (the vertex
   corner attribute carries the corner index and temperature); which stars
   load still follows bolometric luminosity. Every point is a
-  0.55 px sigma Gaussian (2 px footprint), as in a perfect camera: brightness
+  0.55 px sigma Gaussian (2 px footprint, a uniform so the compact debug
+  switch can shrink it), as in a perfect camera: brightness
   shows only in its peak, linear up to a knee and logarithmic above it, never
   in its size. Crowds are never widened or blurred.
 - `sky.rs` meters the view on the CPU (about 0.3 ms): the smooth galaxy model

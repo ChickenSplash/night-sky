@@ -2,7 +2,7 @@
 //! No dust or spiral modulation yet. Each component is normalised to its model
 //! population, so tessellation changes do not change the represented light.
 use crate::{
-    galaxy::{Component, GalaxyModel},
+    galaxy::{COMPONENTS, Component, GalaxyModel},
     light::{blackbody_colour, visual_efficiency},
     population,
 };
@@ -20,7 +20,7 @@ pub struct Patch {
 
 /// Patch grid step and half-extent per component, in parsecs. Each grid
 /// reaches past `FLOOR`, so the floor, not the grid, sets the galaxy's edge.
-const GRIDS: [(Component, [f64; 3], [f64; 3]); 5] = [
+const GRIDS: [(Component, [f64; 3], [f64; 3]); 6] = [
     (
         Component::Bulge,
         [400.0, 250.0, 400.0],
@@ -42,6 +42,11 @@ const GRIDS: [(Component, [f64; 3], [f64; 3]); 5] = [
         [48000.0, 10800.0, 48000.0],
     ),
     (Component::Halo, [6000.0; 3], [48000.0; 3]),
+    (
+        Component::NuclearDisc,
+        [60.0, 40.0, 60.0],
+        [1000.0, 600.0, 1000.0],
+    ),
 ];
 /// Patches fainter than this share of their component's densest are dropped.
 /// Profiles fall smoothly to it, so there is no visible edge.
@@ -109,7 +114,7 @@ pub fn distance(index: usize) -> f64 {
 /// does; their light is visual, as the eye and the camera's exposure see it.
 /// Stratified samples include rare bright populations without a huge census.
 pub fn unresolved_table() -> Vec<[f32; 4]> {
-    let mut table = vec![[0.0; 4]; 6 * DISTANCES];
+    let mut table = vec![[0.0; 4]; COMPONENTS * DISTANCES];
     let reach = population::reach_sq_per_luminosity(population::VISIBLE_MAGNITUDE);
     for component in Component::ALL {
         for (tier, share) in population::tier_shares(component).into_iter().enumerate() {
@@ -137,7 +142,7 @@ pub fn unresolved_table() -> Vec<[f32; 4]> {
 
 /// Mean visual luminosity per star of each component, resolved or not, from
 /// the same stratified samples as `unresolved_table`.
-pub fn mean_visual_luminosity() -> [f64; 6] {
+pub fn mean_visual_luminosity() -> [f64; COMPONENTS] {
     Component::ALL.map(|component| {
         let mut total = 0.0;
         for (tier, share) in population::tier_shares(component).into_iter().enumerate() {

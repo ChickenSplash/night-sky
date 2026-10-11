@@ -1,5 +1,5 @@
 // Analytic line integral through a Gaussian ellipsoid. No galaxy raymarch loop.
-struct Settings { values: vec4<f32>, origin: vec4<f32>, right: vec4<f32>, up: vec4<f32>, forward: vec4<f32>, projection: vec4<f32>, light: array<vec4<f32>, 192> }
+struct Settings { values: vec4<f32>, origin: vec4<f32>, right: vec4<f32>, up: vec4<f32>, forward: vec4<f32>, projection: vec4<f32>, light: array<vec4<f32>, 224> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> settings: Settings;
 struct Vertex { @location(0) position: vec3<f32>, @location(1) corner: vec2<f32>, @location(2) data: vec4<f32>, @builtin(instance_index) instance_index: u32 }
 struct Output { @builtin(position) position: vec4<f32>, @location(0) @interpolate(flat) centre: vec3<f32>, @location(1) @interpolate(flat) data: vec4<f32> }
