@@ -14,7 +14,7 @@ use space_shared::StarSystem;
 use space_simulation::{
     LY_METRES,
     galaxy::{GalaxyModel, PC_METRES},
-    position,
+    planet_position,
 };
 
 /// Beyond this camera range stars draw at their true separation. Planet
@@ -30,11 +30,8 @@ pub(super) const LEAVE_FACTOR: f64 = 2.0;
 /// wide systems include their initial fitted range and an outer planet being
 /// followed. Small systems keep the original cutoff.
 pub(super) fn system_range(system: &StarSystem, page: u32) -> f64 {
-    let outer_apoapsis = system
-        .on_page(page)
-        .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
-        .fold(0.0, f64::max);
-    WIDE_METRES.max(4.0 * outer_apoapsis * space_simulation::AU_METRES)
+    let extent = space_simulation::system_extent_au(system, page);
+    WIDE_METRES.max(4.0 * extent * space_simulation::AU_METRES)
 }
 
 /// While the camera is at the visited system, its planets and body are drawn
@@ -190,7 +187,7 @@ pub(super) fn nearby_planet(
         return None;
     }
     let distance = |planet: &space_shared::Planet| {
-        (eye - DVec3::from_array(position(&planet.orbit, system.mass(page), seconds))).length()
+        (eye - DVec3::from_array(planet_position(system, planet, seconds))).length()
     };
     if let Some(planet) = system
         .on_page(page)

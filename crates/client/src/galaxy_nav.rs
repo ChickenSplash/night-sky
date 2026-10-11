@@ -9,7 +9,7 @@ use bevy::{math::DVec3, prelude::*};
 use space_shared::{Galaxy, PageStar, Planet, StarSystem};
 use space_simulation::{
     LY_METRES,
-    cells::{catalogue_name, cell_planetary_system, cell_star, planet_designation},
+    cells::{catalogue_name, cell_bodies, planet_designation},
     galaxy::{GalaxyModel, PC_METRES},
     population::reach_sq_per_luminosity,
 };
@@ -200,22 +200,22 @@ pub fn label(lists: &Galaxy, id: &str) -> String {
 
 /// A task-free system built from a cell star's ID alone.
 pub fn generated(id: &str, position_ly: DVec3) -> Option<StarSystem> {
-    let (_, mut star) = cell_star(id)?;
-    star.page = 0;
-    let planets = cell_planetary_system(id)?
+    let bodies = cell_bodies(id)?;
+    let planets = bodies
+        .planets
         .into_iter()
-        .enumerate()
-        .map(|(index, body)| Planet {
-            id: format!("{id}/{index}"),
-            designation: planet_designation(id, index),
+        .map(|hosted| Planet {
+            id: hosted.id(),
+            designation: planet_designation(&hosted.host, hosted.index),
             page: 0,
-            orbit_index: index as u32,
-            orbit: body.orbit,
-            radius_km: body.radius_km,
-            mass_earth: body.mass_earth,
-            class: body.class.name().into(),
-            resonance: body.resonance,
-            spin: body.spin,
+            orbit_index: hosted.index as u32,
+            host: hosted.host,
+            orbit: hosted.body.orbit,
+            radius_km: hosted.body.radius_km,
+            mass_earth: hosted.body.mass_earth,
+            class: hosted.body.class.name().into(),
+            resonance: hosted.body.resonance,
+            spin: hosted.body.spin,
             task: None,
         })
         .collect();
@@ -224,7 +224,8 @@ pub fn generated(id: &str, position_ly: DVec3) -> Option<StarSystem> {
         name: catalogue_name(id),
         position_ly: position_ly.to_array(),
         planets,
-        stars: vec![star],
+        stars: bodies.stars,
+        barycentres: bodies.barycentres,
         page_stars: vec![PageStar {
             page: 0,
             id: id.to_owned(),

@@ -111,8 +111,18 @@ fn table_uses_true_sizes_and_fits_the_star() {
         columns.len() as u32,
         planet_count(&system.page_star(1).unwrap().id)
     );
-    assert!(columns.windows(2).all(|r| r[1] - r[0] > 2.0 * layout.unit));
-    assert!(system.on_page(1).all(|p| layout.position(p).z == 0.0));
+    // One row per star or pair the planets orbit, the first level with the star.
+    let hosts = system.hosts(1);
+    for (index, host) in hosts.iter().enumerate() {
+        let row: Vec<_> = system
+            .on_page(1)
+            .filter(|p| p.host == *host)
+            .map(|p| layout.position(p))
+            .collect();
+        assert!(row.windows(2).all(|r| r[1].x - r[0].x > 2.0 * layout.unit));
+        assert!(row.iter().all(|p| p.z == row[0].z));
+        assert_eq!(row[0].z == 0.0, index == 0);
+    }
     // A large star shows only its right tip; a small one fits whole.
     let star = system.star(1).unwrap().radius_solar * SUN_RADIUS_METRES;
     if star >= 5.0 * layout.unit {
@@ -120,8 +130,8 @@ fn table_uses_true_sizes_and_fits_the_star() {
     } else {
         assert!(layout.left < -star);
     }
-    assert!(columns[0] - layout.unit > star);
-    assert!(columns[columns.len() - 1] + layout.unit < layout.right);
+    assert!(columns.iter().all(|x| x - layout.unit > star));
+    assert!(columns.iter().all(|x| x + layout.unit < layout.right));
     let mut nav = Navigation {
         page: 1,
         visit: Some(crate::Visit::List(0)),

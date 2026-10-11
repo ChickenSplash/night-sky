@@ -226,8 +226,9 @@ fn smoothstep(low: f64, high: f64, x: f64) -> f64 {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GalaxyModel {
-    /// Stars, including white dwarfs but not brown dwarfs, neutron stars or
-    /// stellar black holes.
+    /// Star systems, each a single star or a multiple's brightest with its
+    /// companions (`multiple`), including white dwarfs but not brown dwarfs,
+    /// neutron stars or stellar black holes.
     pub stars: f64,
     /// Share of the stars in each component, in `Component::ALL` order.
     pub shares: [f64; COMPONENTS],

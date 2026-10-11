@@ -7,7 +7,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 - Native Linux and browser/WASM clients. Rust workspace: `client` (Bevy/egui), `server` (Axum),
   `shared` (wire models), `simulation` (engine-independent orbital maths).
-- Lists are constellations of system pages (7 to 14 slots each); tasks are planets. Deep navy background (black with realistic lighting) and line-based
+- Lists are constellations of system pages (7 to 14 slots per star or close
+  pair, more in a multiple system, fewer where a companion cuts it short);
+  tasks are planets. Deep navy background (black with realistic lighting) and line-based
   wireframe bodies. Preserve real distances, with explicit visual size exaggeration.
 - A space simulator first. Lists, pages and tasks stay as a general way of
   tracking information; the ClickUp integration was removed and will be
@@ -74,7 +76,14 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   by ID if mapped, visited or streamed (`galaxy_nav::reachable`/`visit_star`);
   unreachable actions are hidden, not disabled. New object kinds should extend
   `ObjectRef`, hierarchy builders and inspector resolution (moons do not yet
-  exist). `UiCommand::Up` is separate keyboard navigation: reframe tracking,
+  exist). `ObjectRef::Star` by a system's key is the system as a whole: its
+  star, or a multiple system's outermost barycentre, labelled with all its
+  letters (`System 2 AB`). Below it, both trails show the planet's lineage
+  (`StarSystem::lineage`): a component star (`ObjectRef::Star` by `key#B`)
+  and, in triples and quadruples, an inner pair (`ObjectRef::Barycentre`).
+  Any member's actions act on its whole system. Remote systems' crumbs use
+  `objects::system_letters` (stars only, cached) and the host in the planet
+  ID, never a whole generated system per frame. `UiCommand::Up` is separate keyboard navigation: reframe tracking,
   else clear selection, else move up physically; no crumb contains travel code.
 - Time controls (`ui/hud.rs`) are two free-floating, centred lines at the bottom
   of the 3D viewport, using the breadcrumb font, colours and `halo_text`.
@@ -212,7 +221,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   append-only per list, including when tasks disappear from a snapshot.
 - Changing task status or deadline must not change orbital elements.
 - Planets and tasks are separate: a `Planet` is a generated body with a stable
-  ID (its star's ID and orbit index) and an optional `Task`. Select and follow
+  ID (its host's ID and orbit index: `key/n` around a single star, `key#B/n`
+  around one star of a multiple, `key#AB/n` around a close pair; `Planet::host`) and an optional `Task`. Select and follow
   planets by stable body ID (`Selection::Planet(String)`); resolve a local
   index only against the visited system with `selected_planet(galaxy)`. Remote
   `Inspect { planet }` resolves the encoded parent star without visiting or
@@ -237,10 +247,11 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   immutable per list/page; include removed tasks' allocated slots when deciding
   how many pages need a star. Mapped pages use the cell star's ID, position,
   formation and plane tilt, so visiting that star from the galaxy shows the same
-  planets, with tasks as an optional overlay.
+  planets, with tasks as an optional overlay. Assignment skips stars whose
+  system has no planets (a close companion can prevent them).
 - Each legacy page (with no cell star) has its own star (`space_simulation::star(&star_id(list_id, page))`),
   drawn in solar-neighbourhood proportions (mostly red dwarfs, a few giants and
-  white dwarfs). Its mass sets orbital periods (`StarSystem::mass(page)`), its
+  white dwarfs). Its host's mass sets orbital periods (`StarSystem::host_mass`), its
   radius and temperature colour (`spectral_colour`) are drawn, and it shapes
   planet formation. Stars and planets carry a `Spin`; planets and star spins
   draw from their own seeds, so they never move an orbit. Planet mass is capped
@@ -267,8 +278,28 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - Galactic stars (`galactic_star(id, component)`, `GalaxyModel::star(id, p)`)
   draw a Kroupa birth mass and an age from the component's formation history,
   then evolve (main sequence, giant or supergiant, white dwarf). Neutron stars
-  and stellar black holes are redrawn: `stars` counts stars only. Their systems
-  come from `galactic_planetary_system(id, component)`.
+  and stellar black holes are redrawn: `stars` counts star systems only. Their
+  systems come from `galactic_bodies(id, component)`.
+- Multiple stars (`simulation::multiple`): every drawn star is a system's
+  primary, its brightest star, and draws its companions from the same
+  sequence (no separate seed): `{id}:star` for page and galactic stars, and
+  for tiered stars `{id}:tier` for what sets their light, `{id}:star` for
+  the rest. Multiplicity rises with mass (about 26% of red dwarfs, 46% of
+  Sun-like stars, most B stars), a quarter of multiples have three or four
+  stars, and about a quarter of white dwarfs have companions (all tested).
+  Companions share the primary's age, so some born heavier are white dwarfs;
+  ones a giant phase would have engulfed are gone. Pairs nest hierarchically
+  (`Barycentre`, innermost first, the last holding the system), each a
+  two-body orbit widened to stay stable (Mardling & Aarseth); stars are
+  lettered down the hierarchy (a close pair AB, its distant third C). Planets
+  orbit one star inside its stable zone, or a pair closer than 1 AU from
+  outside it (Holman & Wiegert); pairs under 50 AU keep planets a third of
+  the time. `bodies(key)`/`cell_bodies(id)` build a whole system;
+  `member_position` and `planet_position` place stars and planets from the
+  page's outermost barycentre. `place` and `galaxy_nav::generated` both build
+  from `Bodies`; a page's capacity is its total planets. The census and IMF
+  describe primaries; companions add about a third more stars, mostly red
+  dwarfs.
 - Page stars (`star(id)`) keep the fixed solar-neighbourhood census until
   lists move onto galactic stars. Both share the builders in `star.rs`; census
   draws must keep their order, or every page star changes.
@@ -292,7 +323,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   per-star path (`Sky::try_point`) builds no strings or `Star`: `StarKey`
   hashes the ID exactly as `stable_hash` would, `tiered_light` takes only
   luminosity, temperature and radius from the same `tiered_shape` draws as
-  `tiered_formation`, and each star descends the tree once. It must give the
+  `tiered_formation`, plus its companions' light (`companion_light`), so a
+  point is its whole system: under four times its primary, at most one tier
+  brighter than its band. Each star descends the tree once. It must give the
   same stars as `Sky::build`, bit for bit (`star_points_match_the_full_stars`).
   Keep both in step when changing star generation.
 - `try_point` only reads the `Sky`; it reports a missing integration or
@@ -491,8 +524,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `Navigation::location` (the visit while `Navigation::arrived`) is physical,
   and `Navigation::list` is the open list (a `Visit::List`, kept in
   constellation view). `scene::locate` sets `arrived` every frame: within
-  `system_range` of the page star (0.02 ly, or 4 times the outermost apoapsis
-  if wider) it arrives, and it leaves beyond `LEAVE_FACTOR` (2) times that.
+  `system_range` of the page star (0.02 ly, or 4 times the system's extent,
+  `system_extent_au`, stars and planets, if wider) it arrives, and it leaves beyond `LEAVE_FACTOR` (2) times that.
   Constellation view is never at a star, and a flight arrives only on getting
   there. Clicking Visit and drifting in arrive the same way. Leaving in simulation
   mode, however the visit began, returns to open space and closes the list;
@@ -558,6 +591,14 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Photometry lives in `space_simulation::light`;
   per-body exposure in `crates/client/src/render/resolve.rs`, the pools and
   the HDR camera in `render/bodies.rs`, with the shaders in `body.wgsl` and `point.wgsl`.
+- Every star of a multiple system lights its planets: `PlanetLight::light`
+  holds up to `MAX_LIGHTS` (4) stars' direction, flux and temperature,
+  brightest first, and `body.wgsl` adds each in its own colour, so a
+  binary's planet has a fainter second day side towards the far star. The
+  brightest sets the exposure key; each lit side gets a blurred limb (streaks
+  from the brightest only), and a point planet sums every star's light by
+  its own phase. The table shows only the primary, one row of planets per
+  host (`TableLayout`), lit from the primary's side.
 - Bodies are plain spheres under the wireframes. `scene::draw` gathers `Lights`
   while drawing gizmos; `render::bodies::sync_bodies`/`sync_points` place pooled mesh
   entities in the camera's cell and write `GlobalTransform` directly, because

@@ -14,24 +14,22 @@ pub enum PresentationMode {
     Constellation,
 }
 
-/// Camera range that frames a page's planets in simulation mode.
+/// Camera range that frames a page's stars and planets in simulation mode.
 pub fn fit_distance(system: &StarSystem, page: u32) -> f64 {
-    system
-        .on_page(page)
-        .map(|p| p.orbit.semi_major_au * (1.0 + p.orbit.eccentricity))
-        .fold(3.0, f64::max)
-        * 3.1
-        * AU_METRES
+    space_simulation::system_extent_au(system, page).max(3.0) * 3.1 * AU_METRES
 }
 
-/// A row of planets to the right of their star, all at physical radii. Spacing
-/// scales with the page's largest planet; a large star shows only its right limb.
+/// A row of planets to the right of their star, all at physical radii, one row
+/// per star or pair they orbit. Spacing scales with the page's largest planet;
+/// a large star shows only its right limb. Only the primary is shown.
 pub struct TableLayout {
     pub unit: f64,
     first: f64,
     pitch: f64,
     pub left: f64,
     pub right: f64,
+    /// Planet hosts, one per row, top to bottom.
+    hosts: Vec<String>,
 }
 
 impl TableLayout {
@@ -62,12 +60,32 @@ impl TableLayout {
             pitch,
             left,
             right,
+            hosts: system.hosts(page).into_iter().map(str::to_owned).collect(),
         }
     }
 
     pub fn position(&self, planet: &Planet) -> DVec3 {
         let column = f64::from(planet.orbit_index);
-        DVec3::new(self.first + column * self.pitch, 0.0, 0.0)
+        let row = self
+            .hosts
+            .iter()
+            .position(|h| *h == planet.host)
+            .unwrap_or(0);
+        DVec3::new(
+            self.first + column * self.pitch,
+            0.0,
+            row as f64 * self.row_pitch(),
+        )
+    }
+
+    /// Distance between rows, leaving room for the labels below each.
+    fn row_pitch(&self) -> f64 {
+        5.0 * self.unit
+    }
+
+    /// Distance from the first row to the last.
+    pub fn depth(&self) -> f64 {
+        self.hosts.len().saturating_sub(1) as f64 * self.row_pitch()
     }
 }
 
@@ -178,10 +196,14 @@ impl Navigation {
                 // The width fits every planet at its true radius. Leave vertical
                 // room for the row's labels without giving a giant star more space.
                 let width = layout.right - layout.left;
-                let height = 7.0 * layout.unit;
+                let height = 7.0 * layout.unit + layout.depth();
                 let distance = height.max(width / aspect) * 0.5 / self.tan_half_fov();
                 Some((
-                    DVec3::new((layout.left + layout.right) * 0.5, 0.0, layout.unit),
+                    DVec3::new(
+                        (layout.left + layout.right) * 0.5,
+                        0.0,
+                        layout.unit + layout.depth() * 0.5,
+                    ),
                     distance,
                     true,
                 ))

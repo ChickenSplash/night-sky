@@ -14,9 +14,9 @@
 //!   order, on any machine. `Sky` only caches what it has worked out.
 
 use crate::galaxy::{COMPONENTS, Component, GalaxyModel};
-use crate::population::{TIERS, tiered_formation, tiered_light};
+use crate::population::{TIERS, tiered_bodies, tiered_formation, tiered_light};
 use crate::stream::StarPoint;
-use crate::system::{Body, Rng, system_around};
+use crate::system::{Body, Rng};
 use crate::{HASH_START, finish_hash, hash_bytes};
 use space_shared::Star;
 use std::collections::HashMap;
@@ -209,8 +209,15 @@ pub fn catalogue_name(id: &str) -> String {
     )
 }
 
-pub fn planet_designation(id: &str, index: usize) -> String {
-    format!("{} {}", catalogue_name(id), (b'b' + index as u8) as char)
+/// A planet's catalogue name, from its host's ID: a cell star, or a star or
+/// barycentre of its system.
+pub fn planet_designation(host: &str, index: usize) -> String {
+    crate::multiple::designation(
+        &catalogue_name(crate::multiple::system_key(host)),
+        " ",
+        crate::multiple::member_letters(host),
+        index,
+    )
 }
 
 /// The cell, component and index a cell star's ID names.
@@ -232,13 +239,21 @@ pub fn cell_star(id: &str) -> Option<(Component, Star)> {
     ))
 }
 
-/// A cell star's planets, innermost first.
+/// A cell star's planets, by host and innermost first.
 pub fn cell_planetary_system(id: &str) -> Option<Vec<Body>> {
+    Some(
+        cell_bodies(id)?
+            .planets
+            .into_iter()
+            .map(|p| p.body)
+            .collect(),
+    )
+}
+
+/// Everything a cell star's ID generates: its stars, pairs and planets.
+pub fn cell_bodies(id: &str) -> Option<crate::multiple::Bodies> {
     let (cell, component, _) = parse_cell_star(id)?;
-    Some(system_around(
-        id,
-        &tiered_formation(id, component, cell.level()),
-    ))
+    Some(tiered_bodies(id, component, cell.level()))
 }
 
 /// A seeded binomial draw: exact for small means, normal beyond.
@@ -847,7 +862,12 @@ mod tests {
                         };
                         let full = sky.build(cell, component, index);
                         assert_eq!(point.position_pc, full.position_pc, "{}", full.id);
-                        assert_eq!(point.luminosity_solar, full.star.luminosity_solar as f32);
+                        // A point is the whole system's light.
+                        let bodies = cell_bodies(&full.id).unwrap();
+                        let light: f64 = bodies.stars.iter().map(|s| s.luminosity_solar).sum();
+                        let error = (f64::from(point.luminosity_solar) / light - 1.0).abs();
+                        assert!(error < 1e-6, "{}: {point:?} {light}", full.id);
+                        assert_eq!(bodies.stars[0].luminosity_solar, full.star.luminosity_solar);
                         assert_eq!(point.temperature_k, full.star.temperature_k as f32);
                         assert_eq!(point.radius_solar, full.star.radius_solar as f32);
                         kinds.insert(full.star.kind);

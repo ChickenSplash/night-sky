@@ -229,11 +229,14 @@ pub(super) fn sync_bodies(
             light: body.light,
             spin: Vec4::from(body.rotation),
             surface: body.surface,
+            lights: body.lights,
+            tints: body.tints,
         };
-        if materials.get(material).is_some_and(|m| {
-            (m.colour, m.light, m.spin, m.surface)
-                != (changed.colour, changed.light, changed.spin, changed.surface)
-        }) && let Some(m) = materials.get_mut(material)
+        let key = |m: &BodyMaterial| (m.colour, m.light, m.spin, m.surface, m.lights, m.tints);
+        if materials
+            .get(material)
+            .is_some_and(|m| key(m) != key(&changed))
+            && let Some(m) = materials.get_mut(material)
         {
             *m = changed;
         }

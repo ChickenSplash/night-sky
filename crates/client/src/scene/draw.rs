@@ -6,14 +6,16 @@ use super::{
     location::{LEAVE_FACTOR, WIDE_METRES, body_range},
 };
 use crate::presentation::{PresentationMode, TableLayout};
-use crate::render::{self, Lights, Photometry, PlanetLight, StarLight};
+use crate::render::{self, Illumination, Lights, MAX_LIGHTS, Photometry, PlanetLight, StarLight};
 use crate::{Clock, Navigation, Universe};
 use bevy::{
     math::{DQuat, DVec3},
     prelude::*,
 };
-use space_shared::{Orbit, StarSystem};
-use space_simulation::{SUN_RADIUS_METRES, position, position_at_eccentric_anomaly};
+use space_shared::{Orbit, Star, StarSystem};
+use space_simulation::{
+    SUN_RADIUS_METRES, member_position, planet_position, position_at_eccentric_anomaly,
+};
 use std::f64::consts::TAU;
 
 /// A planet's label and hit target. Stars have none: they are picked from the
@@ -49,20 +51,20 @@ const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
 
 /// Exaggeration is a screen-space aid, not an orbit-sized shell tied to zoom.
 /// Once the camera is close, even a 40,000 ly range must not put the camera
-/// inside a star inflated to hundreds of light years across.
+/// inside a star inflated to hundreds of light years across. `away` is the
+/// camera's distance from the star.
 pub(super) fn star_display_radius(
     pose: &CameraPose,
     physical: f64,
-    exaggerate: bool,
-    table: bool,
-    wide: bool,
+    away: f64,
+    (exaggerate, table, wide): (bool, bool, bool),
 ) -> f64 {
     if table {
         physical
     } else if wide {
-        (pose.eye.length() * 0.004).max(physical)
+        (away * 0.004).max(physical)
     } else if exaggerate {
-        (pose.distance.min(pose.eye.length()) * 0.008).max(physical)
+        (pose.distance.min(away) * 0.008).max(physical)
     } else {
         physical
     }
@@ -262,21 +264,49 @@ impl Canvas<'_> {
         }
     }
 
-    /// The visited page's star, within `body_range`. Every other star, including
-    /// the rest of its list, is a streamed galactic point.
-    fn star(&self, gizmos: &mut Gizmos, lights: &mut Lights) {
-        let (nav, pose, system) = (self.nav, self.pose, self.system);
+    /// Where a star or barycentre of the page is drawn, in its orbital-plane
+    /// axes: on its orbit, or gathered at the primary in the table.
+    fn member(&self, id: &str) -> DVec3 {
+        let orbital = DVec3::from_array(member_position(
+            self.system,
+            self.pose.page,
+            id,
+            self.seconds,
+        ));
+        orbital * (1.0 - self.pose.layout)
+    }
+
+    /// The visited page's stars, within `body_range`. Every other star,
+    /// including the rest of its list, is a streamed galactic point. The table
+    /// shows only the primary, its largest.
+    fn stars(&self, gizmos: &mut Gizmos, lights: &mut Lights) {
+        let (pose, system) = (self.pose, self.system);
+        let table = pose.layout > 0.5;
+        let stars: Vec<_> = system.stars_on(pose.page).collect();
+        if stars.is_empty() {
+            self.star(gizmos, lights, None, DVec3::ZERO);
+        }
+        for (index, body) in stars.into_iter().enumerate() {
+            if index == 0 || !table {
+                self.star(gizmos, lights, Some(body), self.member(&body.id));
+            }
+        }
+    }
+
+    fn star(&self, gizmos: &mut Gizmos, lights: &mut Lights, body: Option<&Star>, local: DVec3) {
+        let (nav, pose) = (self.nav, self.pose);
         let wide = pose.distance > WIDE_METRES && pose.eye.length() > WIDE_METRES;
         let table = pose.layout > 0.5;
-        let centre = self.world(DVec3::ZERO);
-        let body = system.star(pose.page);
+        let galactic = self.frame * local;
+        let centre = self.world(galactic);
         let physical = body.map_or(SUN_RADIUS_METRES, |b| b.radius_solar * SUN_RADIUS_METRES);
         let tint = body.map_or([255, 192, 108], |b| b.colour);
         let basis = match body {
             Some(b) => spin_basis(self.frame, &b.spin, self.seconds),
             None => self.frame,
         };
-        let radius = star_display_radius(pose, physical, nav.exaggerate, table, wide);
+        let away = (galactic - pose.eye).length();
+        let radius = star_display_radius(pose, physical, away, (nav.exaggerate, table, wide));
         if nav.realistic
             && let Some(body) = body
             && let Some(per_pixel) = self.per_pixel(centre)
@@ -311,6 +341,53 @@ impl Canvas<'_> {
         );
     }
 
+    /// Each star's orbit around its pair's barycentre, which itself moves.
+    fn star_orbits(&self, gizmos: &mut Gizmos) {
+        let (page, system) = (self.pose.page, self.system);
+        for pair in system.barycentres_on(page) {
+            let centre = self.member(&pair.id);
+            let masses = pair.members.each_ref().map(|m| system.member_mass(page, m));
+            let total = masses[0] + masses[1];
+            for share in [-masses[1] / total, masses[0] / total] {
+                gizmos.linestrip(
+                    (0..=192).map(|step| {
+                        let local = centre + orbit_point(&pair.orbit, step, 192) * share;
+                        self.world(self.frame * local)
+                    }),
+                    ORBIT,
+                );
+            }
+        }
+    }
+
+    /// Light reaching a planet at `orbital` (drawn at `drawn`, both in the
+    /// page's axes) from each star, brightest first.
+    fn illumination(&self, orbital: DVec3, drawn: DVec3) -> Vec<Illumination> {
+        let page = self.pose.page;
+        let mut light: Vec<Illumination> = self
+            .system
+            .stars_on(page)
+            .map(|star| {
+                let at =
+                    DVec3::from_array(member_position(self.system, page, &star.id, self.seconds));
+                Illumination {
+                    // Lit from the stars even in the table, which is only a layout.
+                    towards: (self.frame * (self.member(&star.id) - drawn))
+                        .normalize_or_zero()
+                        .as_vec3(),
+                    flux: space_simulation::light::flux(
+                        self.photometry.visual_luminosity(star),
+                        (at - orbital).length(),
+                    ),
+                    kelvin: star.temperature_k,
+                }
+            })
+            .collect();
+        light.sort_by(|a, b| b.flux.total_cmp(&a.flux));
+        light.truncate(MAX_LIGHTS);
+        light
+    }
+
     /// The destination page's planets, blending between running orbits and the
     /// table row while the camera flies. Orbital radii are never presentation-scaled.
     fn planets(
@@ -325,9 +402,13 @@ impl Canvas<'_> {
         let place = |local: DVec3| self.frame * local;
         if nav.orbits && nav.presentation_mode == PresentationMode::Simulation && pose.layout <= 0.5
         {
+            self.star_orbits(gizmos);
             for planet in system.on_page(pose.page) {
+                let host = self.member(&planet.host);
                 gizmos.linestrip(
-                    (0..=192).map(|step| self.world(place(orbit_point(&planet.orbit, step, 192)))),
+                    (0..=192).map(|step| {
+                        self.world(place(host + orbit_point(&planet.orbit, step, 192)))
+                    }),
                     ORBIT,
                 );
             }
@@ -336,9 +417,9 @@ impl Canvas<'_> {
             if planet.page() != pose.page {
                 continue;
             }
-            let orbital =
-                DVec3::from_array(position(&planet.orbit, system.mass(pose.page), seconds));
-            let galactic = place(orbital.lerp(layout.position(planet), pose.layout));
+            let orbital = DVec3::from_array(planet_position(system, planet, seconds));
+            let local = orbital.lerp(layout.position(planet), pose.layout);
+            let galactic = place(local);
             let centre = self.world(galactic);
             let physical = planet.radius_km * 1000.0;
             // Exaggerated sizes keep the cube root of the real ratio, so giants still
@@ -355,18 +436,13 @@ impl Canvas<'_> {
             if nav.realistic
                 && let Some(per_pixel) = self.per_pixel(centre)
             {
-                let luminosity = system
-                    .star(pose.page)
-                    .map_or(1.0, |s| self.photometry.visual_luminosity(s));
                 let disc = self.units(radius);
                 lights.planets.push(PlanetLight {
                     centre,
                     radius: disc,
                     pixels: disc / per_pixel,
                     per_pixel,
-                    // Lit from the star even in the table, which is only a layout.
-                    towards_star: (-galactic).normalize_or_zero().as_vec3(),
-                    flux: space_simulation::light::flux(luminosity, orbital.length()),
+                    light: self.illumination(orbital, local),
                     surface: space_simulation::light::surface(&planet.class),
                 });
             }
@@ -431,8 +507,7 @@ pub fn draw(
         lights.streaks = ((arrive - pose.eye.length()) / (0.5 * arrive)).clamp(0.0, 1.0) as f32;
     }
     if planets_shown {
-        canvas.star(&mut gizmos, &mut lights);
+        canvas.stars(&mut gizmos, &mut lights);
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
-        lights.kelvin = system.star(pose.page).map_or(5772.0, |s| s.temperature_k);
     }
 }
