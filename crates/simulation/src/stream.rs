@@ -266,33 +266,6 @@ impl StarCell {
         self.grid.starts.len() - 1
     }
 
-    /// The first box boundary in `stars` at or after `at`: a star index where
-    /// one box's run ends and the next begins, or the end of `stars`.
-    pub fn box_boundary(&self, at: usize) -> usize {
-        let k = self.grid.starts.partition_point(|&s| (s as usize) < at);
-        self.grid
-            .starts
-            .get(k)
-            .map_or(self.stars.len(), |&s| s as usize)
-    }
-
-    /// The runs of `stars` of each non-empty box within `range`, in order.
-    /// Both ends of `range` must be box boundaries (`box_boundary`).
-    pub fn box_runs(
-        &self,
-        range: std::ops::Range<usize>,
-    ) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
-        let first = self
-            .grid
-            .starts
-            .partition_point(|&s| (s as usize) < range.start);
-        self.grid.starts[first..]
-            .windows(2)
-            .map(|pair| pair[0] as usize..pair[1] as usize)
-            .take_while(move |run| run.start < range.end)
-            .filter(|run| !run.is_empty())
-    }
-
     /// Non-empty aligned cubes of the grid holding at most `most` stars each,
     /// unless a single box holds more, in star order: together they cover
     /// `stars` from start to end. Each is a compact region with its own centre.
@@ -935,29 +908,6 @@ mod tests {
                 assert_eq!(seen, block.end - block.start);
             }
         }
-    }
-
-    #[test]
-    fn box_runs_split_a_range_into_one_run_per_box() {
-        let cell = scattered_cell();
-        for block in cell.blocks(700) {
-            assert_eq!(cell.box_boundary(block.start), block.start);
-            assert_eq!(cell.box_boundary(block.end), block.end);
-            let middle = cell.box_boundary((block.start + block.end) / 2);
-            let mut next = block.start;
-            for range in [block.start..middle, middle..block.end] {
-                for run in cell.box_runs(range) {
-                    assert_eq!(run.start, next);
-                    next = run.end;
-                    let first = cell.grid.coords(cell.stars[run.start].position_pc);
-                    for star in &cell.stars[run.clone()] {
-                        assert_eq!(cell.grid.coords(star.position_pc), first);
-                    }
-                }
-            }
-            assert_eq!(next, block.end);
-        }
-        assert_eq!(cell.box_boundary(cell.stars.len() + 5), cell.stars.len());
     }
 
     fn run(loader: &mut Loader, more: &mut dyn FnMut() -> bool) -> HashMap<Cell, StarCell> {

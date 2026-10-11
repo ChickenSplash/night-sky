@@ -56,15 +56,11 @@ pub struct GpuResults {
     pub gpu_total_ms: f64,
     pub drawn_stars: usize,
     pub uploaded_stars: usize,
-    /// Stars merged into other uploaded points.
-    pub merged_stars: usize,
     pub star_memory_mb: f64,
     pub msaa: bool,
     pub size: [u32; 2],
     /// The star point magnitude limit.
     pub magnitude: f64,
-    /// The merge sub-pixel stars switch.
-    pub merge_stars: bool,
 }
 
 /// This frame's star pass and total GPU times in ms, from the latest
@@ -214,12 +210,10 @@ pub fn run(
                 gpu_total_ms: mean(gpu),
                 drawn_stars: metrics.drawn_stars,
                 uploaded_stars: metrics.uploaded_stars,
-                merged_stars: metrics.merged_stars,
                 star_memory_mb: (metrics.uploaded_stars * size_of::<StarInstance>()) as f64 / 1e6,
                 msaa: debug.msaa,
                 size,
                 magnitude: nav.magnitude,
-                merge_stars: debug.merge_stars,
             };
             info!(
                 "GPU test ({}): {:.1} fps, frame {:.2} ms (p99 {:.2}), star pass {:.2} ms, GPU {:.2} ms, {} stars drawn",

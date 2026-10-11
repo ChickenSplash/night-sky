@@ -134,8 +134,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
   but are never rasterised), compact 1.25 px points, 4x MSAA (both window
-  cameras), bloom, cull blocks outside the view and merge sub-pixel stars
-  (both on by default).
+  cameras), bloom and cull blocks outside the view (on by default).
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
@@ -382,19 +381,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   blocks); each draw's origin subtracts the camera in f64,
   then scales to render units. Filter points beyond 1.25 times their apparent
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
-  retained cells after the camera travels `REBUILD` (0.2) of the tier's reach.
-  Stars are packed one grid box at a time (`StarCell::box_runs`, slices end
-  on `box_boundary`): within a box, stars sharing a cube whose diagonal is at
-  most `MERGE_PX` (half a pixel), sized from the box's nearest star minus the
-  rebuild distance, upload as one point with their summed visual light (by
-  the palette's efficiency), at their light's centre and light-weighted
-  log-mean temperature. Only stars still visible from the rebuild distance
-  farther merge, so the shader's cutoff never splits a merged point. Cells
-  with merging rebuild when a pixel shrinks below `MERGE_ZOOM` (0.8) of the
-  one they were merged for, and all rebuild when the `merge_stars` switch
-  changes. Assisted colours and the shader's knee act on merged light, so
-  bright merged groups differ slightly from their separate stars. The perf
-  tab shows stars merged; the GPU test records them and the switch.
+  retained cells after the camera travels 0.2 of the tier's reach.
   `starfield::Sight` skips batches outside the view each frame (the
   `cull_blocks` switch): a sphere around each batch's block, in f64 against
   the view's four side planes, widened by the point footprint.

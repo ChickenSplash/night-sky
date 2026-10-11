@@ -701,14 +701,7 @@ fn perf(
                     grouped(field.stars)
                 ),
                 Some(
-                    "Points bright enough to pass the CPU filter; the shader drops the rest of the faint ones and those behind the camera.",
-                ),
-            ),
-            (
-                "merged",
-                format!("{} stars into other points", grouped(metrics.merged_stars)),
-                Some(
-                    "Stars in one grid box sharing a cube under half a pixel are uploaded as one point (render tab switch).",
+                    "Stars bright enough to pass the CPU filter; the shader drops the rest of the faint ones and those behind the camera.",
                 ),
             ),
             (
@@ -1209,14 +1202,11 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     (
                         "stars",
                         format!(
-                            "{} drawn of {}, {} merged",
+                            "{} drawn of {}",
                             grouped(r.drawn_stars),
-                            grouped(r.uploaded_stars),
-                            grouped(r.merged_stars)
+                            grouped(r.uploaded_stars)
                         ),
-                        Some(
-                            "Points in batches inside the view, of all uploaded, and stars merged into other points.",
-                        ),
+                        Some("Stars in batches inside the view, of all uploaded."),
                     ),
                     (
                         "star memory",
@@ -1226,15 +1216,14 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     (
                         "view",
                         format!(
-                            "{} x {}, MSAA {}, magnitude {:.1}, merging {}",
+                            "{} x {}, MSAA {}, magnitude {:.1}",
                             r.size[0],
                             r.size[1],
                             if r.msaa { "on" } else { "off" },
-                            r.magnitude,
-                            if r.merge_stars { "on" } else { "off" }
+                            r.magnitude
                         ),
                         Some(
-                            "Window size in physical pixels, the 4x MSAA switch, the magnitude limit and the merge switch.",
+                            "Window size in physical pixels, the 4x MSAA switch and the magnitude limit.",
                         ),
                     ),
                     (
