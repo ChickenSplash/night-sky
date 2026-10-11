@@ -480,6 +480,11 @@ pub struct Loader {
 const GRIDDING: usize = 2;
 
 impl Loader {
+    /// The faintest apparent magnitude it loads.
+    pub fn magnitude(&self) -> f64 {
+        self.magnitude
+    }
+
     pub fn new(sky: Sky, magnitude: f64) -> Self {
         Self {
             sky,

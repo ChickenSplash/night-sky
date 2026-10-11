@@ -8,7 +8,8 @@ self.onmessage = ({ data }) => {
   if (loader) aim();
 };
 await init();
-loader = new StarWorker();
+// The client starts a new worker for each magnitude limit (`?magnitude=`).
+loader = new StarWorker(Number(new URL(self.location.href).searchParams.get('magnitude') ?? NaN));
 let scheduled = false;
 if (latest) aim();
 function aim() {

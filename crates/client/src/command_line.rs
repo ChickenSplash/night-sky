@@ -115,7 +115,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 18] = [
+pub const USAGE: [Usage; 19] = [
     Usage {
         name: "pick_star",
         fields: &["id"],
@@ -195,6 +195,11 @@ pub const USAGE: [Usage; 18] = [
         name: "set_fov",
         fields: &["degrees"],
         about: "Vertical field of view, 30 to 130",
+    },
+    Usage {
+        name: "set_magnitude",
+        fields: &["magnitude"],
+        about: "Faintest star magnitude drawn as a point, 3 to 7; reloads the stars",
     },
     Usage {
         name: "galaxy_reference",
@@ -347,7 +352,7 @@ mod tests {
                 .iter()
                 .map(|field| match *field {
                     "page" => "1",
-                    "rate" | "degrees" | "speed" => "60",
+                    "rate" | "degrees" | "speed" | "magnitude" => "60",
                     "paused" | "on" => "true",
                     "option" => "orbits",
                     "switch" => "bloom",
@@ -403,6 +408,10 @@ mod tests {
         assert_eq!(
             parse("set_fov 72.5").unwrap(),
             UiCommand::SetFov { degrees: 72.5 }
+        );
+        assert_eq!(
+            parse("set_magnitude 5.5").unwrap(),
+            UiCommand::SetMagnitude { magnitude: 5.5 }
         );
     }
 

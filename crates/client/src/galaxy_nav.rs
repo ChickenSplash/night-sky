@@ -37,7 +37,7 @@ pub fn pick_pointer(
     rotation: Quat,
     pointer: [f64; 2],
     viewport: [f64; 2],
-    tan_half: f64,
+    (tan_half, magnitude): (f64, f64),
 ) -> Option<PickedStar> {
     let [x, y] = pointer;
     let [width, height] = viewport;
@@ -51,6 +51,7 @@ pub fn pick_pointer(
         pose,
         direction,
         1.0 / (1.0 + radius * radius).sqrt(),
+        magnitude,
     )
 }
 
@@ -60,10 +61,11 @@ fn pick_ray(
     pose: &CameraPose,
     forward: DVec3,
     min_alignment: f64,
+    magnitude: f64,
 ) -> Option<PickedStar> {
     let eye = rig.galactic_ly(pose);
     let pc_per_ly = LY_METRES / PC_METRES;
-    let reach = reach_sq_per_luminosity(crate::stream::MAGNITUDE) / (pc_per_ly * pc_per_ly);
+    let reach = reach_sq_per_luminosity(magnitude) / (pc_per_ly * pc_per_ly);
     let mut best: Option<(f64, PickedStar)> = None;
     for (&cell, stars) in &field.cells {
         for star in &stars.stars {
@@ -243,6 +245,7 @@ pub fn visit_star(nav: &mut Navigation, lists: &Galaxy, field: &Starfield, id: &
 mod tests {
     use super::*;
     use crate::Selection;
+    use space_simulation::population::VISIBLE_MAGNITUDE;
     use space_simulation::{
         cells::{Cell, Sky},
         galaxy::Component,
@@ -281,7 +284,7 @@ mod tests {
             Quat::IDENTITY,
             [x, 500.0],
             [1000.0, 1000.0],
-            tan_half,
+            (tan_half, VISIBLE_MAGNITUDE),
         )
         .unwrap();
         // A wider view puts the same star closer to the centre of the screen.
@@ -296,7 +299,7 @@ mod tests {
                 Quat::IDENTITY,
                 [x_wide, 500.0],
                 [1000.0, 1000.0],
-                wide,
+                (wide, VISIBLE_MAGNITUDE),
             )
             .unwrap()
             .id,
@@ -315,7 +318,7 @@ mod tests {
                 Quat::IDENTITY,
                 [x + 30.0, 500.0],
                 [1000.0, 1000.0],
-                tan_half,
+                (tan_half, VISIBLE_MAGNITUDE),
             )
             .is_none()
         );

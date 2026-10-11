@@ -1216,12 +1216,15 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     (
                         "view",
                         format!(
-                            "{} x {}, MSAA {}",
+                            "{} x {}, MSAA {}, magnitude {:.1}",
                             r.size[0],
                             r.size[1],
-                            if r.msaa { "on" } else { "off" }
+                            if r.msaa { "on" } else { "off" },
+                            r.magnitude
                         ),
-                        Some("Window size in physical pixels, and the 4x MSAA switch."),
+                        Some(
+                            "Window size in physical pixels, the 4x MSAA switch and the magnitude limit.",
+                        ),
                     ),
                     (
                         "load",

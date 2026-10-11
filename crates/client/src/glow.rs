@@ -178,6 +178,17 @@ struct Glow {
     image: Handle<Image>,
     drawn: Option<View>,
     settle: u8,
+    /// The star point magnitude limit its light leaves out.
+    magnitude: f64,
+}
+
+/// Each population's light per star below `magnitude`, by distance.
+fn unresolved_light(magnitude: f64) -> [Vec4; COMPONENTS * DISTANCES] {
+    let light: Vec<_> = unresolved_table(magnitude)
+        .into_iter()
+        .map(Vec4::from_array)
+        .collect();
+    light.try_into().expect("a table per population")
 }
 
 /// Whether any render pipeline is still compiling, reported by the render world.
@@ -237,7 +248,7 @@ fn spawn(
     materials: &mut Assets<GlowMaterial>,
     composites: &mut Assets<CompositeMaterial>,
     images: &mut Assets<Image>,
-    low: UVec2,
+    (low, magnitude): (UVec2, f64),
 ) -> Glow {
     let image = images.add(target(low));
     let camera = commands
@@ -277,10 +288,6 @@ fn spawn(
         ))
         .id();
 
-    let light: Vec<_> = unresolved_table()
-        .into_iter()
-        .map(Vec4::from_array)
-        .collect();
     let template = GlowMaterial {
         settings: Settings {
             values: Vec4::ZERO,
@@ -289,7 +296,7 @@ fn spawn(
             up: Vec4::Y,
             forward: -Vec4::Z,
             projection: Vec4::ONE,
-            light: light.try_into().expect("six populations"),
+            light: unresolved_light(magnitude),
         },
     };
     let mut blocks = std::collections::BTreeMap::<[i32; 3], Vec<_>>::new();
@@ -353,6 +360,7 @@ fn spawn(
         image,
         drawn: None,
         settle: SETTLE,
+        magnitude,
     }
 }
 
@@ -389,7 +397,14 @@ fn sync(
     let Some(mut glow) = glow else {
         if enabled {
             let low = glow_size(size);
-            let glow = spawn(&mut commands, meshes, materials, composites, images, low);
+            let glow = spawn(
+                &mut commands,
+                meshes,
+                materials,
+                composites,
+                images,
+                (low, nav.magnitude),
+            );
             commands.insert_resource(glow);
         }
         return;
@@ -410,6 +425,16 @@ fn sync(
         return;
     }
 
+    if glow.magnitude != nav.magnitude {
+        glow.magnitude = nav.magnitude;
+        let light = unresolved_light(nav.magnitude);
+        for (_, handle) in &glow.batches {
+            if let Some(material) = materials.get_mut(handle) {
+                material.settings.light = light;
+            }
+        }
+        glow.drawn = None;
+    }
     let model = GalaxyModel::milky_way();
     let view = View {
         eye: DVec3::from_array(model.home_pc)

@@ -89,9 +89,22 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Horizontal dragging adjusts speed logarithmically from `scene::MIN_SPEED`
   to `scene::MAX_SPEED` (1 m/s to 10,000 ly/s), through `SetMoveSpeed`; it
   captures input like the time rate, and a single click does nothing.
-  All three text HUDs share
+  The bottom-right **Magnitude limit** (`ui::magnitude_control`, one line)
+  is `Navigation::magnitude`, the faintest apparent magnitude drawn as a
+  star point (default `VISIBLE_MAGNITUDE`, 6.5; `MAGNITUDE` range 3 to 7, in
+  tenths). Dragging shows the new value; it applies on release
+  (`SetMagnitude`, `set_magnitude 5.5`), because a change restarts streaming
+  from nothing: `stream` starts a new `Backend` whenever its magnitude
+  differs (in the browser a new worker, `star-worker.js?magnitude=`, the old
+  one terminated). The starfield's upload filter, shader cutoff and rebuild
+  distance, star picking and the glow's unresolved light table all follow
+  it, so fainter stars move into the glow and the total light is unchanged.
+  Each magnitude fainter draws about four times the stars. Page-star
+  assignment (`system.rs`) stays at `VISIBLE_MAGNITUDE`. Not persisted.
+  All four text HUDs share
   `breadcrumb::HUD_PADDING` (20 logical pixels from the 3D viewport edges);
-  movement and time share `HUD_LINE_GAP` and their bottom line alignment.
+  movement, magnitude and time share `HUD_LINE_GAP` and their bottom line
+  alignment.
   `ui::pointer_captured` protects the background-layer breadcrumb/inspector and draggable text and captures
   its full drag, including outside its bounds; scene camera input and canvas
   picking both use it so time interactions never also move/select the scene.
@@ -295,7 +308,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `Sky::descend` with `place`, so sliced loading gives the same stars. Loaded
   cells drop beyond `KEEP` × reach. Stars stream as compact `StarPoint`s.
 - `crates/client/src/stream.rs` aims the loader at the camera
-  (`CameraRig::galactic_ly`, lists anchored at home) to `MAGNITUDE` 6.5: a
+  (`CameraRig::galactic_ly`, lists anchored at home) to
+  `Navigation::magnitude` (6.5 by default): a
   worker thread natively, a dedicated module Web Worker in the browser, into
   the `Starfield` resource. The worker's generation-only WASM crate is
   `crates/star-worker`, with `web/star-worker.js` as its entry point; both WASM
@@ -333,7 +347,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   every cell is loaded and uploaded plus `SETTLE_S` (2 s), then measures
   `MEASURE_S` (20 s) of frame times and the main view's GPU pass times. Each
   run is logged (`GPU test (...)`) and appended as one JSON line, with the
-  commit (`+dirty` for uncommitted changes), window size and MSAA state, to
+  commit (`+dirty` for uncommitted changes), window size, MSAA state and
+  magnitude limit, to
   `data/logs/gpu-test.jsonl`. The user runs the GPU test and other
   benchmarks on their own focused window; agents read the results from the
   logs and do not launch benchmark runs themselves.
@@ -405,7 +420,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - `simulation::glow` builds smooth, population-normalised Gaussian volume patches
   for the first galaxy-glow milestone, with spiral modulation averaged out only
   in the glow. A stratified, distance-indexed RGB luminosity table statistically
-  excludes magnitude-visible stars. This is approximate at finite patch/table
+  excludes stars visible at the magnitude limit (`unresolved_table`,
+  recomputed by `client::glow` when it changes). This is approximate at finite patch/table
   resolution. Patch grids reach past `FLOOR` (1e-5 of each component's
   densest patch), so profiles fade out instead of stopping at a grid edge
   (tested). The nuclear cluster is four Gaussians fitted to its Plummer

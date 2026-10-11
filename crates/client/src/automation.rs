@@ -74,6 +74,7 @@ fn publish(
             "wireframe": nav.wireframe,
         },
         "fov_deg": nav.fov_deg,
+        "magnitude": nav.magnitude,
         "stream": metrics.caption,
         "stream_stars": starfield.stars,
         "benchmark": benchmark.and_then(|flight| flight.report.clone()),

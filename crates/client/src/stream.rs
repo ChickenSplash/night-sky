@@ -17,8 +17,6 @@ use space_simulation::{
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-/// Faintest apparent magnitude loaded: the naked-eye limit.
-pub const MAGNITUDE: f64 = space_simulation::population::VISIBLE_MAGNITUDE;
 /// Camera moves shorter than this, in parsecs, do not re-aim the loader: about
 /// 2,000 AU, so moving within a planetary system never does.
 const AIM_PC: f64 = 0.01;
@@ -318,7 +316,9 @@ impl Plugin for StreamPlugin {
         app.init_resource::<Starfield>()
             .init_resource::<StreamMetrics>()
             .init_resource::<StreamRestart>()
-            .insert_resource(Backend::start())
+            .insert_resource(Backend::start(
+                space_simulation::population::VISIBLE_MAGNITUDE,
+            ))
             .add_systems(Update, stream.after(crate::scene::place_camera));
     }
 }
@@ -329,11 +329,15 @@ fn stream(
     mut field: ResMut<Starfield>,
     mut metrics: ResMut<StreamMetrics>,
     (rig, pose): (Res<CameraRig>, Res<CameraPose>),
-    debug: Res<crate::render_debug::RenderDebug>,
+    (debug, nav): (
+        Res<crate::render_debug::RenderDebug>,
+        Res<crate::Navigation>,
+    ),
     mut restart: ResMut<StreamRestart>,
 ) {
-    if std::mem::take(&mut restart.0) {
-        *backend = Backend::start();
+    // A new magnitude limit changes which cells and stars load: start over.
+    if std::mem::take(&mut restart.0) || backend.magnitude() != nav.magnitude {
+        *backend = Backend::start(nav.magnitude);
         field.clear();
         metrics.loaded_at.clear();
     }
@@ -421,6 +425,7 @@ mod native {
 
     #[derive(Resource)]
     pub struct Backend {
+        magnitude: f64,
         aim: mpsc::Sender<[f64; 3]>,
         batches: Mutex<mpsc::Receiver<Batch>>,
         threads: usize,
@@ -433,6 +438,10 @@ mod native {
             "NATIVE THREAD"
         }
 
+        pub fn magnitude(&self) -> f64 {
+            self.magnitude
+        }
+
         pub fn threads(&self) -> usize {
             self.threads
         }
@@ -441,7 +450,7 @@ mod native {
             Duration::from_nanos(self.worked.swap(0, Ordering::Relaxed))
         }
 
-        pub fn start() -> Self {
+        pub fn start(magnitude: f64) -> Self {
             let (aim, aims) = mpsc::channel();
             let (sender, batches) = mpsc::channel();
             let threads = star_threads();
@@ -449,7 +458,7 @@ mod native {
             let worked = Arc::new(AtomicU64::new(0));
             let tally = worked.clone();
             let work = move || {
-                let mut loader = Loader::new(Sky::default(), MAGNITUDE).with_threads(threads);
+                let mut loader = Loader::new(Sky::default(), magnitude).with_threads(threads);
                 loop {
                     // Idle until the camera moves.
                     let mut latest = None;
@@ -487,6 +496,7 @@ mod native {
                 bevy::log::error!("Cannot start the galaxy stream: {err}");
             }
             Self {
+                magnitude,
                 aim,
                 batches: Mutex::new(batches),
                 threads,
@@ -537,6 +547,7 @@ mod web {
     #[derive(Resource)]
     pub enum Backend {
         Worker {
+            magnitude: f64,
             batches: Mutex<mpsc::Receiver<Batch>>,
             failed: Arc<AtomicBool>,
             next_aim: Option<[f64; 3]>,
@@ -556,6 +567,13 @@ mod web {
             }
         }
 
+        pub fn magnitude(&self) -> f64 {
+            match self {
+                Self::Worker { magnitude, .. } => *magnitude,
+                Self::Inline(loader) => loader.magnitude(),
+            }
+        }
+
         /// One: the browser makes stars on one worker, or in frame slices.
         pub fn threads(&self) -> usize {
             1
@@ -565,12 +583,19 @@ mod web {
             Duration::ZERO
         }
 
-        pub fn start() -> Self {
+        pub fn start(magnitude: f64) -> Self {
+            // A restart replaces the worker; the old one would keep loading.
+            WORKER.with_borrow_mut(|slot| {
+                if let Some((worker, ..)) = slot.take() {
+                    worker.terminate();
+                }
+            });
             let options = WorkerOptions::new();
             options.set_type(WorkerType::Module);
-            let Ok(worker) = Worker::new_with_options("star-worker.js", &options) else {
+            let url = format!("star-worker.js?magnitude={magnitude}");
+            let Ok(worker) = Worker::new_with_options(&url, &options) else {
                 warn!("Cannot start star worker; using the frame-sliced loader");
-                return Self::Inline(Loader::new(Sky::default(), MAGNITUDE));
+                return Self::Inline(Loader::new(Sky::default(), magnitude));
             };
             let (sender, receiver) = mpsc::channel();
             let failed = Arc::new(AtomicBool::new(false));
@@ -598,6 +623,7 @@ mod web {
             worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
             WORKER.with_borrow_mut(|slot| *slot = Some((worker, onmessage, onerror)));
             Self::Worker {
+                magnitude,
                 batches: Mutex::new(receiver),
                 failed,
                 next_aim: None,
@@ -607,7 +633,13 @@ mod web {
         }
 
         pub fn exchange(&mut self, aim: Option<[f64; 3]>) -> Option<Batch> {
-            if let Self::Worker { failed, camera, .. } = self {
+            if let Self::Worker {
+                failed,
+                camera,
+                magnitude,
+                ..
+            } = self
+            {
                 if failed.load(Ordering::Relaxed) {
                     warn!("Falling back to frame-sliced galaxy loading");
                     WORKER.with_borrow_mut(|slot| {
@@ -615,7 +647,7 @@ mod web {
                             worker.terminate();
                         }
                     });
-                    let mut loader = Loader::new(Sky::default(), MAGNITUDE);
+                    let mut loader = Loader::new(Sky::default(), *magnitude);
                     if let Some(camera) = *camera {
                         loader.aim(camera);
                     }

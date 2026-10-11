@@ -34,6 +34,8 @@ pub struct Hud {
     tasks: crate::tasks::Tasks,
     time_drag_start: Option<f64>,
     speed_drag_start: Option<f64>,
+    /// The limit when a magnitude drag began, and where it is now.
+    magnitude_drag: Option<(f64, f64)>,
     inspector: crate::inspector::Cache,
 }
 
@@ -120,6 +122,7 @@ pub fn draw_ui(
         &mut hud.speed_drag_start,
         &mut out,
     );
+    magnitude_control(ctx, rect, nav.magnitude, &mut hud.magnitude_drag, &mut out);
     canvas_overlay(
         ctx,
         rect,
@@ -276,6 +279,7 @@ pub(crate) fn pointer_captured(ctx: &egui::Context) -> bool {
         || [
             "time-pointer-capture",
             "speed-pointer-capture",
+            "magnitude-pointer-capture",
             "breadcrumb-pointer-capture",
             "icons-pointer-capture",
         ]
@@ -568,6 +572,73 @@ fn speed_readout(
         });
 }
 
+/// The magnitude limit `start` dragged `delta` points, to a tenth: the same
+/// span as the other HUD controls covers its whole range.
+fn dragged_magnitude(start: f64, delta: f32) -> f64 {
+    let (min, max) = (*crate::MAGNITUDE.start(), *crate::MAGNITUDE.end());
+    ((start + f64::from(delta) / HUD_DRAG_SPAN * (max - min)).clamp(min, max) * 10.0).round() / 10.0
+}
+
+/// The draggable star point magnitude limit, at the bottom right. It applies
+/// on release, as each change reloads the stars.
+fn magnitude_control(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    magnitude: f64,
+    drag: &mut Option<(f64, f64)>,
+    out: &mut Vec<UiCommand>,
+) {
+    use crate::breadcrumb::{HOVER, HUD_PADDING, LINK, halo_text};
+
+    egui::Area::new(egui::Id::new("magnitude-control"))
+        .order(egui::Order::Background)
+        .movable(false)
+        .pivot(egui::Align2::RIGHT_BOTTOM)
+        .fixed_pos(rect.right_bottom() + egui::vec2(-HUD_PADDING, -HUD_PADDING))
+        .show(ctx, |ui| {
+            let shown = drag.map_or(magnitude, |(_, now)| now);
+            let response = halo_text(
+                ui,
+                &format!("Magnitude limit {shown:.1}"),
+                egui::Sense::click_and_drag(),
+                |response| {
+                    if response.hovered() || response.dragged() || response.has_focus() {
+                        HOVER
+                    } else {
+                        LINK
+                    }
+                },
+            )
+            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+            .on_hover_text(
+                "Faintest star drawn as a point; fainter ones join the galaxy glow · Drag left/right, stars reload on release",
+            );
+            ctx.data_mut(|data| {
+                data.insert_temp(
+                    egui::Id::new("magnitude-pointer-capture"),
+                    (
+                        response.rect,
+                        response.dragged() || response.is_pointer_button_down_on(),
+                    ),
+                );
+            });
+            if response.drag_started() {
+                *drag = Some((magnitude, magnitude));
+            }
+            if response.dragged()
+                && let Some((start, now)) = drag
+            {
+                *now = dragged_magnitude(*start, response.total_drag_delta().unwrap_or_default().x);
+            }
+            if response.drag_stopped()
+                && let Some((_, now)) = drag.take()
+                && now != magnitude
+            {
+                out.push(UiCommand::SetMagnitude { magnitude: now });
+            }
+        });
+}
+
 /// Captions, labels, hover rings and clicks on the 3D view itself.
 #[allow(clippy::too_many_arguments)]
 fn canvas_overlay(
@@ -721,7 +792,7 @@ fn canvas_overlay(
                 f64::from(pointer.y - rect.min.y),
             ],
             [f64::from(rect.width()), f64::from(rect.height())],
-            nav.tan_half_fov(),
+            (nav.tan_half_fov(), nav.magnitude),
         )
     {
         out.push(UiCommand::PickStar { id: star.id });
@@ -998,6 +1069,52 @@ mod tests {
     }
 
     #[test]
+    fn magnitude_drag_applies_once_on_release() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut drag = None;
+        let mut frame = |events| {
+            let mut commands = Vec::new();
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| magnitude_control(ctx, rect, 6.5, &mut drag, &mut commands),
+            );
+            let (hit, _) = ctx
+                .data(|data| {
+                    data.get_temp::<(egui::Rect, bool)>(egui::Id::new("magnitude-pointer-capture"))
+                })
+                .unwrap();
+            (commands, hit)
+        };
+        frame(vec![]);
+        let (_, hit) = frame(vec![]);
+        let start = hit.center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
+        let end = start - egui::vec2(100.0, 0.0);
+        assert!(frame(vec![egui::Event::PointerMoved(end)]).0.is_empty());
+        assert!(pointer_captured(&ctx));
+        let (commands, _) = frame(vec![button(end, false)]);
+        assert_eq!(
+            commands,
+            [UiCommand::SetMagnitude {
+                magnitude: dragged_magnitude(6.5, -100.0)
+            }]
+        );
+        assert_eq!(dragged_magnitude(6.5, -100.0), 5.5);
+        assert_eq!(dragged_magnitude(6.5, 1000.0), 7.0);
+    }
+
+    #[test]
     fn text_huds_share_edge_padding_and_bottom_baseline() {
         use crate::breadcrumb::{CURRENT, HUD_LINE_GAP, HUD_PADDING, LINK};
         for size in [egui::vec2(1000.0, 700.0), egui::vec2(1600.0, 1000.0)] {
@@ -1006,6 +1123,7 @@ mod tests {
             let clock = SimulationClock::default();
             let mut drag = None;
             let mut speed_drag = None;
+            let mut magnitude_drag = None;
             let mut commands = Vec::new();
             let nav = Navigation::default();
             let galaxy = space_simulation::demo_galaxy();
@@ -1030,6 +1148,7 @@ mod tests {
                         );
                         time_controls(ctx, rect, &clock, &mut drag, &mut commands);
                         speed_readout(ctx, rect, 1000.0, 0.0, &mut speed_drag, &mut commands);
+                        magnitude_control(ctx, rect, 6.5, &mut magnitude_drag, &mut commands);
                     },
                 );
             }
@@ -1061,6 +1180,9 @@ mod tests {
             assert!((velocity.left() - crumb.left()).abs() < 1.0);
             assert!((rect.bottom() - speed.bottom() - HUD_PADDING).abs() < 1.0);
             assert!((speed.bottom() - time_rate.bottom()).abs() < 1.0);
+            let magnitude = bounds("Magnitude limit", LINK);
+            assert!((rect.right() - magnitude.right() - HUD_PADDING).abs() < 1.0);
+            assert!((magnitude.bottom() - speed.bottom()).abs() < 1.0);
             assert!((speed.top() - velocity.bottom() - HUD_LINE_GAP).abs() < 1.0);
             assert!((time_rate.center().x - rect.center().x).abs() < 1.0);
         }

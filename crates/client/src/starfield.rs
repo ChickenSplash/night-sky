@@ -81,9 +81,10 @@ struct Batch {
     half_pc: f64,
 }
 
-/// Whether a star is bright enough to upload, seen from `eye`.
-fn bright_enough(star: &StarPoint, eye: DVec3) -> bool {
-    let reach = MARGIN * MARGIN * reach_sq_per_luminosity(crate::stream::MAGNITUDE);
+/// Whether a star is bright enough to upload, seen from `eye` with the
+/// `magnitude` limit.
+fn bright_enough(star: &StarPoint, eye: DVec3, magnitude: f64) -> bool {
+    let reach = MARGIN * MARGIN * reach_sq_per_luminosity(magnitude);
     let squared = (DVec3::from_array(star.position_pc) - eye).length_squared();
     squared <= f64::from(star.luminosity_solar) * reach
 }
@@ -98,11 +99,17 @@ fn instance(star: &StarPoint, origin_pc: [f64; 3]) -> StarInstance {
 }
 
 /// Stars bright enough to see from `eye`, as offsets from `centre`.
-fn pack(stars: &mut Vec<StarInstance>, points: &[StarPoint], centre: [f64; 3], eye: DVec3) {
+fn pack(
+    stars: &mut Vec<StarInstance>,
+    points: &[StarPoint],
+    centre: [f64; 3],
+    eye: DVec3,
+    magnitude: f64,
+) {
     stars.extend(
         points
             .iter()
-            .filter(|star| bright_enough(star, eye))
+            .filter(|star| bright_enough(star, eye, magnitude))
             .map(|star| instance(star, centre)),
     );
 }
@@ -272,7 +279,7 @@ fn sync(
     frame.globals = Some(Globals {
         settings: Vec4::new(
             pc_per_unit as f32,
-            (1.0 / reach_sq_per_luminosity(crate::stream::MAGNITUDE)) as f32,
+            (1.0 / reach_sq_per_luminosity(nav.magnitude)) as f32,
             gain,
             realistic,
         ),
@@ -323,7 +330,7 @@ fn sync(
         .built_at
         .iter()
         .filter_map(|(&owner, &built)| {
-            let threshold = 0.2 * reach_pc(owner.level(), crate::stream::MAGNITUDE);
+            let threshold = 0.2 * reach_pc(owner.level(), nav.magnitude);
             (eye.distance(built) > threshold && !batches.queued.iter().any(|(c, _)| *c == owner))
                 .then_some(owner)
         })
@@ -377,6 +384,7 @@ fn sync(
             &stars[offset..end],
             block.centre_pc,
             eye,
+            nav.magnitude,
         );
         metrics.built_batches += 1;
         let done = end == stars.len();
@@ -487,7 +495,7 @@ fn sync(
         if position.distance(eye) < radius
             && !drawn
             && debug.galactic_points
-            && bright_enough(&candidate.star, eye)
+            && bright_enough(&candidate.star, eye, nav.magnitude)
         {
             frame
                 .precise
@@ -515,6 +523,7 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use space_simulation::population::VISIBLE_MAGNITUDE;
 
     #[test]
     fn blocks_outside_the_view_are_culled() {
@@ -548,11 +557,18 @@ mod tests {
             &[point(10.0), point(100.0)],
             [8200.0, 0.0, 0.0],
             eye,
+            VISIBLE_MAGNITUDE,
         );
         assert_eq!(stars.len(), 1);
         assert_eq!(stars[0].position, [10.0, 20.0, 0.0]);
         stars.clear();
-        pack(&mut stars, &[point(100.0)], [8200.0, 0.0, 0.0], eye);
+        pack(
+            &mut stars,
+            &[point(100.0)],
+            [8200.0, 0.0, 0.0],
+            eye,
+            VISIBLE_MAGNITUDE,
+        );
         assert!(stars.is_empty());
     }
 
