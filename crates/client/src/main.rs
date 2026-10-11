@@ -10,6 +10,7 @@ mod core_load;
 mod devtools;
 #[cfg(not(target_arch = "wasm32"))]
 mod diagnostics;
+mod exposure;
 mod flight;
 mod galaxy_nav;
 mod glow;
@@ -124,8 +125,11 @@ pub struct Navigation {
     /// Lit and glowing bodies in HDR under the wireframes.
     pub realistic: bool,
     pub galaxy_glow: bool,
-    /// One linear exposure for the frame instead of the assisted, readable one.
-    pub physical: bool,
+    /// Manual exposure in stops relative to the fixed reference sensitivity.
+    pub exposure: f64,
+    /// How far each body is exposed for itself: zero is one physical exposure,
+    /// one shows every body correctly exposed (`render::resolve`).
+    pub compression: f64,
     /// Wireframes over the realistic bodies. Always drawn otherwise.
     pub wireframe: bool,
     pub search: String,
@@ -160,7 +164,8 @@ impl Default for Navigation {
             velocity_marker: true,
             realistic: true,
             galaxy_glow: true,
-            physical: true,
+            exposure: 0.0,
+            compression: 0.5,
             wireframe: true,
             search: String::new(),
             notice: "Connecting to local API…".into(),
@@ -177,6 +182,18 @@ pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
 pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=8.5;
 
 impl Navigation {
+    pub fn set_exposure(&mut self, stops: f64) {
+        if stops.is_finite() {
+            self.exposure = stops.clamp(*exposure::STOPS.start(), *exposure::STOPS.end());
+        }
+    }
+
+    pub fn set_compression(&mut self, amount: f64) {
+        if amount.is_finite() {
+            self.compression = amount.clamp(0.0, 1.0);
+        }
+    }
+
     /// Clamped to `MAGNITUDE`, to a tenth.
     pub fn set_magnitude(&mut self, magnitude: f64) {
         if magnitude.is_finite() {

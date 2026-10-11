@@ -5,7 +5,7 @@
 use crate::{
     Navigation,
     scene::{CameraPose, CameraRig, SpaceCamera},
-    sky::{Sky, radiance_gain},
+    sky::radiance_gain,
 };
 use bevy::{
     asset::{RenderAssetUsages, load_internal_asset, uuid_handle},
@@ -213,7 +213,7 @@ impl Plugin for GlowPlugin {
         .insert_resource(compiling.clone())
         .add_systems(
             PostUpdate,
-            sync.after(crate::sky::expose)
+            sync.after(crate::scene::draw)
                 .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         );
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
@@ -378,7 +378,6 @@ fn sync(
     nav: Res<Navigation>,
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
-    sky: Res<Sky>,
     compiling: Res<Compiling>,
     mut assets: GlowAssets,
     space: Query<(&GlobalTransform, &Camera), With<SpaceCamera>>,
@@ -445,7 +444,7 @@ fn sync(
         size,
         exposure: {
             let pixel = 2.0 * nav.tan_half_fov() / f64::from(size.y);
-            radiance_gain(&nav, &sky, pixel * pixel) as f32
+            radiance_gain(&nav, pixel * pixel) as f32
         },
     };
     if glow.drawn.is_none_or(|drawn| !view.matches(&drawn)) || compiling.0.load(Ordering::Relaxed) {

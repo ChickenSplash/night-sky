@@ -19,7 +19,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
-- `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (assisted, physical, lit planet close-up, constellation, star close-up in both exposures).
+- `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures at galaxy exposure (0 stops: system at 100% and 0% compression, lit planet close-up, constellation, star close-up at both compression settings).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
   run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
   documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
@@ -101,7 +101,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   it, so fainter stars move into the glow and the total light is unchanged.
   Each magnitude fainter draws about four times the stars. Page-star
   assignment (`system.rs`) stays at `VISIBLE_MAGNITUDE`. Not persisted.
-  All four text HUDs share
+  Above it, two matching halo-text controls adjust manual Exposure and Dynamic
+  Range Compression (`ui::exposure_controls`), right-aligned with the same font
+  and line gap. Drag exposure at 20 pixels per stop (-64 to +16); +1 doubles
+  all light, -1 halves it. Drag compression across 400 pixels for 0 to 100%.
+  Both apply continuously through `SetExposure`/`SetCompression`, capture the
+  full drag and do nothing on a click. Disabled in wireframe mode; not persisted.
+  All text HUDs share
   `breadcrumb::HUD_PADDING` (20 logical pixels from the 3D viewport edges);
   movement, magnitude and time share `HUD_LINE_GAP` and their bottom line
   alignment.
@@ -125,7 +131,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   passes of the same names; the vendored `bevy_render` suffixes repeats on
   earlier cameras `~1`, `~2`, so the glow camera's pass no longer hides the
   main view's),
-  `render` (exposure readout, galaxy glow, physical exposure, wireframes over
+  `render` (manual exposure/compression readouts, galaxy glow, wireframes over
   bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
   open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (GPU test, core load test and bug report
   natively, star-stream benchmark in the browser). New debug readouts and switches go there, not in Settings or the
@@ -389,7 +395,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `MainOpaquePass` and `MainTransmissivePass`, GPU span `star_points`) draws
   them additively into an `Rgba16Float` image at `SUPERSAMPLE` (2) times the
   view's resolution per axis, without MSAA. `starfield_points.wgsl` applies
-  the same cutoff, near hiding, colour and knee as `starfield.wgsl` (keep them
+  the same cutoff, near hiding, colour and HDR cap as `starfield.wgsl` (keep them
   in step) and depth-tests each star's centre against the opaque bodies (the
   space camera's depth texture has `TEXTURE_BINDING` natively for this;
   never enable that usage on WebGL's multisampled depth texture, which
@@ -420,19 +426,14 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   point is a
   0.55 px sigma Gaussian (2 px footprint, a uniform so the compact debug
   switch can shrink it), as in a perfect camera: brightness
-  shows only in its peak, linear up to a knee and logarithmic above it, never
-  in its size. Crowds are never widened or blurred.
-- `sky.rs` meters the view on the CPU (about 0.3 ms): the smooth galaxy model
-  (coarse glow patches of every star, resolved or not, at their mean visual
-  luminosity), so the exposure never changes as stars stream in, plus the
-  visited system's stars in view. The average radiance in view shows at
-  `SKY_BACKGROUND`. `Sky::key` is the physical key (radiance shown at display
-  `KEY`), the brightest of that, the subject's and a filling star disc
-  (`render::physical_key`), never below `dark_key` (a dark-adapted eye).
-  `Sky::exposure` is the assisted/wireframe galactic multiplier, at most one.
-  Both ease like an eye: about 0.1 s to a brighter view, 0.5 s to a darker.
-  `sky::radiance_gain` is the one conversion from galactic light to display
-  value, shared by points and glow.
+  shows only in its peak, linear up to the HDR safety cap, never in its size.
+  The former logarithmic point knee remains only in wireframe mode. Crowds
+  are never widened or blurred.
+- `sky.rs` now contains only fixed unit conversions and a fixed zero-stop
+  reference (the former dark-space calibration), with no `Sky` resource,
+  view meter or adaptation. `exposure::gain` is `2^stops / reference_radiance`.
+  `sky::radiance_gain` converts galactic light with that same gain for points
+  and glow. Camera location, selection and streaming never adjust exposure.
 - `black_hole.rs` draws an opaque sphere at the central black hole's physical
   Schwarzschild radius; it is not visible from home. No accretion disc or
   lensing yet.
@@ -456,7 +457,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `glow_composite.wgsl` scales it up additively at the far plane, with a cubic
   B-spline (four bilinear taps), not plain bilinear. Patch light is radiance
   times `sky::radiance_gain`, visual (eye-weighted), so it matches the points
-  and bodies under physical exposure. The image is redrawn only when the eye,
+   and bodies under manual exposure. The image is redrawn only when the eye,
   axes, field of view, size or (beyond 2x) exposure change by more than a
   quarter glow pixel, plus `SETTLE` frames and while any pipeline compiles;
   otherwise the composite rescales it by the exposure ratio.
@@ -549,9 +550,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - On by default (`Navigation::realistic`); the wireframe bodies must stay
   unchanged when it is off (galactic stars appear in both modes). The smoke
   test turns it off for its wireframe captures.
-  `render::exposure_caption` (debug window, `render` tab) shows the key (and stops from `dark_key`), its
-  target and which candidate set it (subject, view or star disc), and the
-  view's galaxy/star split, from values `sky::expose` already computes.
+  `exposure::facts` (debug window, `render` tab) shows only manual exposure
+  in stops and compression as a percentage, with expandable explanations.
+  No physical/assisted checkbox, metering, target key or adaptation remains.
   Photometry lives in `space_simulation::light`;
   exposure, the pools and the HDR camera in `crates/client/src/render.rs`,
   with the shaders in `body.wgsl` and `point.wgsl`.
@@ -559,33 +560,60 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   while drawing gizmos; `render::sync_bodies`/`sync_points` place pooled mesh
   entities in the camera's cell and write `GlobalTransform` directly, because
   they run after propagation.
-- Body colours reach the GPU pre-exposed on the CPU. Never send raw radiance:
-  star surfaces reach 1e10 W m⁻² sr⁻¹ and HDR targets are half-float. The
-  galactic point shader instead computes bounded display light from luminosity
-  and camera distance.
-- Star colours are blackbody spectra white-balanced to the Sun. True colours make
-  red dwarfs orange; assisted exposure saturates them (`light::saturate`) so they
-  read red. Brightness is visual, not bolometric.
-- Assisted exposure compresses contrast around the planets, exposes the star
-  field on its own and floors planet brightness. Physical exposure (default) is
-  one linear exposure per frame for bodies, galactic points and glow alike, at
-  `Sky::key`; it stops down as a star disc fills the view (`Exposure::adapt`),
-  so a close star shows its surface, and beside a sunlit planet the galaxy
-  falls below display range, as in a real camera. Bevy's tone mapping is the
-  frame's one tone curve.
+- Body colours reach the GPU pre-exposed on the CPU, in f32 uniforms (only an
+  arithmetic safety limit, `MAX_VALUE` 1e30). Never send raw radiance: star
+  surfaces reach 1e10 W m⁻² sr⁻¹. HDR targets are half-float (max 65504), but a
+  sunlit planet at galaxy exposure is about 2^24, so `body.wgsl` and
+  `point.wgsl` store light above 8192 logarithmically (`hdr.wgsl` `encode`),
+  after lighting, and the display pass decodes it. Below 8192 storage is
+  linear, so bloom, additive points and glow are unaffected; only MSAA edges
+  and bloom of light above 8192 mix encoded values (an approximation). Do not
+  reinstate a CPU half-float cap: it erases shading. Galactic star points and
+  glow keep their own 20,000 caps and are not encoded.
+- Corona and body point sprites size themselves until their light falls below
+  `CORONA_FLOOR` (1/1024), capped at `CORONA_MAX_PIXELS`, so the fade-out at
+  the sprite edge is never visible. Close to a star at galaxy exposure and 0%
+  compression the corona (a millionth of the disc at the limb, falling as
+  r⁻³) is many stops above white and fills the view; that is the camera
+  model, not a bug. Compression balances it with its star.
+- Star colours are blackbody spectra white-balanced to the Sun. Red dwarfs
+  look orange; there is no assisted saturation. Brightness is visual, not bolometric.
+- One manual linear exposure applies to bodies, galactic points and glow.
+  No subject metering, brightness floors, artificial night-side ambient,
+  adaptation or display curve. Dynamic Range Compression is per-body
+  balance (`render::balance`, in `resolve`): each star (with its corona) and
+  planet is moved from the shared exposure towards its own, by that share of
+  the stops between them. A body's key is how strongly it is lit, never phase
+  or screen coverage: a planet's sub-stellar radiance (shown at `PLANET_KEY`,
+  0.8) and a star's surface (`STAR_KEY`, 2.0). Points use their light spread
+  over a point-sized disc, which matches the disc at the switch. Bodies are
+  only dimmed, never brightened beyond physical. 0% is one physical
+  exposure; 100% exposes every body for itself, so they look equally bright.
+  Shading within a body is untouched, so terminators stay soft. Galactic
+  points and glow never balance: Exposure alone sets the galaxy. A former
+  scene-wide highlight curve (`af68625`) could not do this: squeezing ~24
+  stops into the display washed out and kept terminators hard. Do not bring
+  one back. `exposure.wgsl` only decodes stored headroom, clips at white
+  and applies Bevy's deband dither (Bevy's tone-mapping pass is disabled).
+  The visited star balances only while it is a body; leaving `body_range`
+  it becomes an unbalanced galactic point, a jump at high compression.
+  `set_exposure <stops>` and `set_compression <0..1>` use the same path as
+  the HUD. Future auto-exposure should supply stops, separately from rendering.
+  `node scripts/test-exposure.mjs` checks WebGL shaders, that compression
+  never changes the galaxy, planet shading at 100% and immediate HUD text drags
+  headlessly, after a web build with a server running (`SPACE_URL` for
+  another port; it waits for streaming to finish before comparing).
 - Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
   over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
   spread integrates to its whole light, exposed as if spread over a point-sized
-  disc (`Exposure::point`), so it matches the sphere it replaces and physical
-  stays linear. Point planets dim with phase (`render::phase`). Assisted floors
-  apply to points, not to dim spheres.
+  disc (`Exposure::point`), so it matches the sphere it replaces, and is
+  balanced like it. Point planets dim with phase (`render::phase`).
 - Close star discs have per-channel limb darkening and procedural granulation
   in `body.wgsl`, fixed to the star's spin. Granule size follows the pressure
   scale height (`render::granules`); patterns fade out before their cells reach
-  a pixel, and hot stars have none. Assisted exposure eases large discs down to
-  `DISC_KEY` so the surface survives tone mapping. Coronas are additive sprites
-  (`Frame::coronas`, `point.wgsl`) at a millionth of the disc when physical;
-  assisted, capped relative to `DISC_KEY`. Coronas come first in the sprite
+  a pixel, and hot stars have none. Manual exposure never changes with apparent
+  disc size. Coronas are additive sprites (`Frame::coronas`, `point.wgsl`) at
+  a millionth of the physical disc radiance. Coronas come first in the sprite
   pool so they keep their entity.
 - Cameras sharing the window must agree on `Hdr`: the egui overlay camera switches
   with the 3D camera (without tone mapping), or it presents a stale frame.

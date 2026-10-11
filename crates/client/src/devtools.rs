@@ -6,7 +6,6 @@ use crate::command_line::{self, Source, Typed};
 use crate::core_load::CoreLoad;
 use crate::gpu_test::GpuTest;
 use crate::presentation::PresentationMode;
-use crate::render::{Lights, exposure_caption};
 use crate::render_debug::RenderDebug;
 use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
 use crate::stream::{Starfield, StreamMetrics};
@@ -240,8 +239,6 @@ type Camera<'w> = (
 type Rendering<'w> = (
     Res<'w, Starfield>,
     Res<'w, StreamMetrics>,
-    Res<'w, Lights>,
-    Res<'w, crate::sky::Sky>,
     Res<'w, RenderDebug>,
     Option<Res<'w, DiagnosticsStore>>,
     ResMut<'w, CoreLoad>,
@@ -265,8 +262,7 @@ pub fn draw(
     let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (starfield, metrics, lights, sky, debug, diagnostics, mut core_load, mut gpu_test) =
-        rendering;
+    let (starfield, metrics, debug, diagnostics, mut core_load, mut gpu_test) = rendering;
     if tools.frames.len() == FRAMES {
         tools.frames.pop_front();
     }
@@ -320,7 +316,7 @@ pub fn draw(
                             &starfield,
                             diagnostics.as_deref(),
                         ),
-                        Tab::Render => render(ui, &nav, &lights, &sky, &debug, &mut out),
+                        Tab::Render => render(ui, &nav, &debug, &mut out),
                         Tab::State => state(ui, &universe, &nav, &clock, &rig, &pose, &velocity),
                         _ => {
                             report = tools_tab(
@@ -913,16 +909,9 @@ fn frame_graph(ui: &mut egui::Ui, frames: &VecDeque<f32>) {
     painter.add(egui::Shape::line(points, (1.0, TEXT)));
 }
 
-fn render(
-    ui: &mut egui::Ui,
-    nav: &Navigation,
-    lights: &Lights,
-    sky: &crate::sky::Sky,
-    debug: &RenderDebug,
-    out: &mut Vec<UiCommand>,
-) {
+fn render(ui: &mut egui::Ui, nav: &Navigation, debug: &RenderDebug, out: &mut Vec<UiCommand>) {
     terminal::heading(ui, "exposure");
-    terminal::note(ui, &exposure_caption(nav, lights, sky));
+    terminal::facts_with_details(ui, "debug-exposure", &crate::exposure::facts(nav));
     terminal::heading(ui, "realistic rendering");
     for (option, on, label) in [
         (
@@ -930,7 +919,6 @@ fn render(
             nav.galaxy_glow,
             "Smooth galaxy glow (prototype)",
         ),
-        (Display::Physical, nav.physical, "Physical exposure"),
         (Display::Wireframe, nav.wireframe, "Wireframes over bodies"),
     ] {
         if terminal::check(ui, on, label, nav.realistic) {
@@ -940,7 +928,7 @@ fn render(
     terminal::note(
         ui,
         if nav.realistic {
-            "Physical exposure shows true contrast, as one camera exposure adapting like an eye; assisted exposure keeps faint planets and stars readable."
+            "Exposure and Dynamic Range Compression are manual controls at the bottom right."
         } else {
             "Turn on realistic lighting in Settings to use these."
         },

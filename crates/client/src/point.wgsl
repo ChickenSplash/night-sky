@@ -3,6 +3,7 @@
 // square pixel, so its colour carries the body's whole exposed light. A corona's
 // colour is its brightness just outside the limb.
 #import bevy_pbr::forward_io::VertexOutput
+#import night_sky::hdr::encode
 
 struct Point {
     colour: vec4<f32>,
@@ -43,5 +44,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         spread = mix(gaussian(r2, point.shape.y), gaussian(r2, point.shape.z), point.shape.w);
     }
     // Bevy blends additive materials as premultiplied alpha: zero alpha adds.
-    return vec4(point.colour.rgb * spread, 0.0);
+    return vec4(encode(point.colour.rgb * spread), 0.0);
 }

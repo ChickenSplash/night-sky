@@ -7,7 +7,7 @@ use crate::{
     render::Photometry,
     render_debug::RenderDebug,
     scene::{CameraPose, CameraRig, SpaceCamera},
-    sky::{Sky, radiance_gain},
+    sky::radiance_gain,
     starfield_render::{
         Globals, PALETTE, SHADER, StarDraw, StarFrame, StarInstance, StarRenderPlugin, StarUploads,
     },
@@ -54,20 +54,20 @@ const RESCAN_PC: f64 = 0.1;
 
 /// Each temperature's realistic colour with unit luminance and visual
 /// efficiency (light per bolometric luminosity, as the eye and the exposure
-/// see it), then its assisted colour, linear.
-fn palettes(physical: bool) -> ([Vec4; PALETTE], [Vec4; PALETTE]) {
+/// see it), then its wireframe colour, linear.
+fn palettes() -> ([Vec4; PALETTE], [Vec4; PALETTE]) {
     let photometry = Photometry::default();
     let kelvin = |i: usize| 1000.0 * 50f64.powf(i as f64 / (PALETTE - 1) as f64);
     let realistic = std::array::from_fn(|i| {
-        let [r, g, b] = photometry.colour(kelvin(i), physical).map(|c| c as f32);
+        let [r, g, b] = photometry.colour(kelvin(i)).map(|c| c as f32);
         Vec4::new(r, g, b, visual_efficiency(kelvin(i)) as f32)
     });
-    let assisted = std::array::from_fn(|i| {
+    let wireframe = std::array::from_fn(|i| {
         let [r, g, b] = space_simulation::spectral_colour(kelvin(i));
         let linear = Color::srgb_u8(r, g, b).to_linear();
         Vec4::new(linear.red, linear.green, linear.blue, 1.0)
     });
-    (realistic, assisted)
+    (realistic, wireframe)
 }
 
 /// One uploaded batch.
@@ -135,8 +135,8 @@ struct Batches {
     queued: VecDeque<(Cell, usize)>,
     built_at: HashMap<Cell, DVec3>,
     next_id: u64,
-    /// The colour tables, and whether they are the physical ones.
-    palettes: Option<(bool, [Vec4; PALETTE], [Vec4; PALETTE])>,
+    /// Physical colours and the unchanged wireframe palette.
+    palettes: Option<([Vec4; PALETTE], [Vec4; PALETTE])>,
 }
 
 /// A star that may come close enough to need a precise sprite.
@@ -163,7 +163,7 @@ impl Plugin for StarfieldRenderPlugin {
         app.add_plugins(StarRenderPlugin)
             .init_resource::<Batches>()
             .init_resource::<Precise>()
-            .add_systems(PostUpdate, sync.after(crate::sky::expose));
+            .add_systems(PostUpdate, sync.after(crate::scene::draw));
         #[cfg(not(target_arch = "wasm32"))]
         app.add_plugins(crate::starfield_points::StarPointsPlugin);
     }
@@ -247,12 +247,12 @@ fn sync(
     mut precise: ResMut<Precise>,
     mut frame: ResMut<StarFrame>,
     uploads: Res<StarUploads>,
-    view: (Res<Sky>, Res<Universe>, Res<Navigation>, Res<RenderDebug>),
+    view: (Res<Universe>, Res<Navigation>, Res<RenderDebug>),
     pose: Res<CameraPose>,
     rig: Res<CameraRig>,
     camera: Query<(&GlobalTransform, &Camera), With<SpaceCamera>>,
 ) {
-    let (sky, universe, nav, debug) = view;
+    let (universe, nav, debug) = view;
     let sync_start = bevy::platform::time::Instant::now();
     let Ok((camera_transform, view)) = camera.single() else {
         return;
@@ -265,19 +265,11 @@ fn sync(
     let pixel = 2.0 * nav.tan_half_fov() / f64::from(size.y);
     let pixel_sr = pixel * pixel;
     // A point's light over its pixels: radiance gain over a pixel's solid angle.
-    let gain = (radiance_gain(&nav, &sky, pixel_sr) / pixel_sr) as f32;
+    let gain = (radiance_gain(&nav, pixel_sr) / pixel_sr) as f32;
     let realistic = if nav.realistic { 1.0 } else { 0.0 };
-    if batches
-        .palettes
-        .as_ref()
-        .is_none_or(|(physical, ..)| *physical != nav.physical)
-    {
-        let (realistic, assisted) = palettes(nav.physical);
-        batches.palettes = Some((nav.physical, realistic, assisted));
-    }
+    let (palette, wireframe) = *batches.palettes.get_or_insert_with(palettes);
     let skip_pixels = if debug.point_pixels { 0.0 } else { 1.0 };
     let radius_px = debug.point_radius_px();
-    let (_, palette, assisted) = batches.palettes.expect("set above");
     frame.globals = Some(Globals {
         settings: Vec4::new(
             pc_per_unit as f32,
@@ -287,7 +279,7 @@ fn sync(
         ),
         debug: Vec4::new(skip_pixels, radius_px, 0.0, 0.0),
         palette,
-        assisted,
+        wireframe,
     });
     frame.draws.clear();
     frame.precise.clear();

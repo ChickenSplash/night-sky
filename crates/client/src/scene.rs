@@ -867,8 +867,6 @@ struct Canvas<'a> {
     frame: DQuat,
     seconds: f64,
     photometry: &'a Photometry,
-    /// The current page's planets are on screen.
-    subject: bool,
 }
 
 impl Canvas<'_> {
@@ -1084,7 +1082,6 @@ impl Canvas<'_> {
                 per_pixel,
                 radiance,
                 kelvin: body.temperature_k,
-                subject: self.subject,
                 spin: basis.as_quat(),
                 granules: render::granules(body),
             });
@@ -1207,7 +1204,6 @@ pub fn draw(
         frame: page_frame(system, pose.page),
         seconds: clock.0.seconds,
         photometry: &photometry,
-        subject: planets_shown,
     };
     let markers = &mut markers.0;
     if nav.presentation_mode == PresentationMode::Constellation {
@@ -1216,21 +1212,6 @@ pub fn draw(
     if planets_shown {
         canvas.star(&mut gizmos, &mut lights);
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
-        let luminosity = system
-            .star(pose.page)
-            .map_or(1.0, |s| photometry.visual_luminosity(s));
-        let followed = nav
-            .selected_planet(&universe.0)
-            .filter(|_| nav.following)
-            .and_then(|i| system.planets.get(i))
-            .filter(|p| p.page() == pose.page)
-            .map(|p| {
-                DVec3::from_array(position(&p.orbit, system.mass(pose.page), clock.0.seconds))
-                    .length()
-            });
-        let reference = render::reference_distance(system, pose.page, followed, luminosity);
-        lights.subject_key = Some(render::subject_key(luminosity, reference));
-        lights.metered = Some((reference, followed.is_some()));
         lights.kelvin = system.star(pose.page).map_or(5772.0, |s| s.temperature_k);
     }
 }

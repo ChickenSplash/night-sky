@@ -192,7 +192,7 @@ pub fn text(trail: &[Crumb]) -> String {
 pub(crate) const LINK: egui::Color32 = egui::Color32::from_rgb(150, 174, 202);
 pub(crate) const HOVER: egui::Color32 = egui::Color32::from_rgb(99, 214, 240);
 pub(crate) const CURRENT: egui::Color32 = egui::Color32::from_rgb(238, 244, 252);
-const SIZE: f32 = 13.0;
+pub(crate) const SIZE: f32 = 13.0;
 /// Shared inset for text HUDs around the 3D viewport.
 pub(crate) const HUD_PADDING: f32 = 20.0;
 pub(crate) const HUD_LINE_GAP: f32 = 8.0;

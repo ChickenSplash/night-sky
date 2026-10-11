@@ -69,6 +69,8 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 | Pause/resume orbital motion | Space, or click the bottom-centre time speed |
 | Adjust simulation speed continuously | Drag the time speed left/right (real time to 100 years/s) |
 | Adjust camera movement speed | Drag the bottom-left set speed left/right, or scroll |
+| Adjust manual exposure | Drag **Exposure** at the bottom right (20 pixels per stop; +1 doubles brightness) |
+| Adjust dynamic range compression | Drag **Dynamic Range Compression** at the bottom right (0 to 100%, applies immediately) |
 | Clear selection without moving the camera | Escape when not tracking |
 | Return from tracking a planet to its system overview | Escape while tracking |
 | Go up a level (star, list, then the whole galaxy) | Escape with nothing selected |
@@ -87,6 +89,17 @@ the development machine. The pinned toolchain is declared in `rust-toolchain.tom
 Search covers all systems. The simulation clock starts at an arbitrary epoch;
 task deadlines always use wall-clock time. Changing simulation speed never
 rewinds or jumps the orbit phase.
+
+Exposure and compression share the Magnitude limit's free-floating halo-text
+style. Exposure ranges from -64 to +16 stops relative to a fixed dark-space
+reference, with no automatic adaptation, and sets the galaxy. Compression
+exposes each star (with its corona) and planet towards its own exposure,
+keyed by how strongly it is lit: 0% is one physical exposure for everything,
+50% keeps half of each body's excess stops, and 100% shows every body
+correctly exposed, with soft terminators, while the galaxy stays at your
+Exposure. Bodies are never brightened beyond physical. Neither control is
+persisted; defaults are 0 stops and 50% compression. The debug Render tab
+explains both.
 
 Presentation mode controls the scene layout, not whether the camera is tracking
 or navigating freely: **Simulation** uses simulated orbital positions,
@@ -208,10 +221,9 @@ is available it retains its last data, initially the clearly labelled demo.
   light. Their line integrals are analytic, not full-galaxy raymarching. The
   glow renders at an eighth of the view's resolution per axis, only when the
   view changes, and is scaled up into the main HDR view. Individual stars and bodies
-  remain unchanged. Under physical exposure (the default), bodies, stars and
-  glow share one camera exposure in eye-weighted light. It adapts like an eye
-  to the whole view, metered from the galaxy model, so the galaxy fades beside
-  a sunlit planet and does not darken as stars stream in. The disc glow deliberately averages spiral modulation.
+   remain unchanged. Bodies, stars and glow share one manual camera exposure
+   in eye-weighted light and one display-compression curve. Exposure does not
+   adapt to the view or change as stars stream in. The disc glow deliberately averages spiral modulation.
   Component populations are conserved across patch resolutions. A sampled RGB
   luminosity table excludes magnitude-visible stars statistically; finite patch
   sizes and table interpolation remain approximations, not exact per-star removal.
@@ -266,8 +278,8 @@ The graphical smoke test requires a working desktop session. It exercises the
 system view, close tracking, a zoomed-out galaxy, interstellar jumps (one captured mid-flight),
 a 50-task table fixture, its last page, constellation framing, restored orbits
 and a second orbital page (one captured mid-flight), then realistic rendering in
-assisted and physical exposure, a lit planet close-up, a constellation and a
-star close-up in both exposures. Each capture waits for camera flights to finish. It saves seventeen
+compressed and linear display curves, a lit planet close-up, a constellation and a
+star close-up with both curves. Each capture waits for camera flights to finish. It saves seventeen
 screenshots under `data/`
 and exits automatically. Unit tests cover physical orbit invariants, clock
 continuity, the galaxy's star count, profile and regional star mix, cell counts
@@ -317,7 +329,7 @@ Debugging has its own window, toggled with `` ` `` or F3 on both clients:
 | `log` | The last 2,000 client log lines, with level filter and grep. Its tab shows errors and warnings you haven't seen |
 | `terminal` | A command line and its output |
 | `perf` | Frame time graph, star-stream metrics |
-| `render` | Exposure readout, galaxy glow, physical exposure, wireframes over bodies, galaxy reference views |
+| `render` | Manual exposure/compression readouts with expandable explanations, galaxy glow, wireframes over bodies, galaxy reference views |
 | `state` | Camera, navigation (location, open list, camera anchor), anchor star and clock values |
 | `tools` | Save bug report (native), star-stream benchmark (browser) |
 
