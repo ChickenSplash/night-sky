@@ -464,6 +464,7 @@ impl FrameData {
                 }
             }
 
+            number_repeats(&mut diagnostics);
             callback(RenderDiagnostics(diagnostics));
             return;
         };
@@ -584,6 +585,7 @@ impl FrameData {
             }
         }
 
+        number_repeats(&mut diagnostics);
         callback(RenderDiagnostics(diagnostics));
 
         drop(data);
@@ -591,6 +593,24 @@ impl FrameData {
         self.is_mapped.store(false, Ordering::Release);
 
         true
+    }
+}
+
+/// TASK SPACE PATCH (see vendor/README.md): every camera records its passes
+/// under the same names, and a second measurement at the same instant leaves a
+/// diagnostic's smoothed value unchanged, so the first camera's pass hid the
+/// others'. A path repeated later in the frame gets `~n` on its span, n being
+/// how many later spans share it, so the last camera's keeps the plain name.
+fn number_repeats(diagnostics: &mut [RenderDiagnostic]) {
+    let mut later = std::collections::HashMap::<DiagnosticPath, usize>::new();
+    for diagnostic in diagnostics.iter_mut().rev() {
+        let n = later.entry(diagnostic.path.clone()).or_insert(0);
+        if *n > 0
+            && let Some((span, field)) = diagnostic.path.as_str().rsplit_once('/')
+        {
+            diagnostic.path = DiagnosticPath::new(alloc::format!("{span}~{n}/{field}"));
+        }
+        *n += 1;
     }
 }
 

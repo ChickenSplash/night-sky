@@ -110,12 +110,12 @@ pub fn distance(index: usize) -> f64 {
 }
 
 /// Mean visual RGB luminosity per star *below* the point renderer's magnitude
-/// limit. Which stars are resolved follows their luminosity, as streaming
+/// limit, `magnitude`. Which stars are resolved follows their luminosity, as streaming
 /// does; their light is visual, as the eye and the camera's exposure see it.
 /// Stratified samples include rare bright populations without a huge census.
-pub fn unresolved_table() -> Vec<[f32; 4]> {
+pub fn unresolved_table(magnitude: f64) -> Vec<[f32; 4]> {
     let mut table = vec![[0.0; 4]; COMPONENTS * DISTANCES];
-    let reach = population::reach_sq_per_luminosity(population::VISIBLE_MAGNITUDE);
+    let reach = population::reach_sq_per_luminosity(magnitude);
     for component in Component::ALL {
         for (tier, share) in population::tier_shares(component).into_iter().enumerate() {
             if share == 0.0 {
@@ -196,7 +196,7 @@ mod tests {
     }
     #[test]
     fn unresolved_light_is_finite_and_increases_with_distance() {
-        let table = unresolved_table();
+        let table = unresolved_table(population::VISIBLE_MAGNITUDE);
         for component in table.chunks_exact(DISTANCES) {
             for pair in component.windows(2) {
                 for (&near, &far) in pair[0][..3].iter().zip(&pair[1][..3]) {
@@ -208,7 +208,7 @@ mod tests {
     }
     #[test]
     fn unresolved_light_approaches_the_mean_from_far_away() {
-        let table = unresolved_table();
+        let table = unresolved_table(population::VISIBLE_MAGNITUDE);
         for (component, mean) in mean_visual_luminosity().into_iter().enumerate() {
             let far = table[component * DISTANCES + DISTANCES - 1];
             let y = crate::light::luminance([far[0], far[1], far[2]].map(f64::from));

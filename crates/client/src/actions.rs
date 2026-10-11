@@ -65,6 +65,11 @@ pub enum UiCommand {
     SetFov {
         degrees: f32,
     },
+    /// Faintest star point magnitude, clamped to `MAGNITUDE`. Changing it
+    /// reloads the stars.
+    SetMagnitude {
+        magnitude: f64,
+    },
     /// Repeatable views for evaluating the smooth galaxy prototype.
     GalaxyReference {
         view: GalaxyReference,
@@ -250,6 +255,7 @@ pub fn apply(
                 Display::Wireframe => nav.wireframe = *on,
             },
             UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
+            UiCommand::SetMagnitude { magnitude } => nav.set_magnitude(*magnitude),
             UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
             UiCommand::SetDebug { switch, on } => debug.set(*switch, *on),
         }
@@ -464,6 +470,17 @@ mod tests {
         assert_eq!(nav(&app).fov_deg, 30.0);
         send(&mut app, vec![set(500.0), set(f32::NAN)]);
         assert_eq!(nav(&app).fov_deg, 130.0);
+    }
+
+    #[test]
+    fn magnitude_is_clamped_to_its_range_in_tenths() {
+        let set = |magnitude| UiCommand::SetMagnitude { magnitude };
+        let mut app = run(space_simulation::demo_galaxy(), vec![set(5.54)]);
+        assert_eq!(nav(&app).magnitude, 5.5);
+        send(&mut app, vec![set(1.0)]);
+        assert_eq!(nav(&app).magnitude, 3.0);
+        send(&mut app, vec![set(9.0), set(f64::NAN)]);
+        assert_eq!(nav(&app).magnitude, 8.5);
     }
 
     #[test]

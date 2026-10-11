@@ -37,7 +37,7 @@ pub fn pick_pointer(
     rotation: Quat,
     pointer: [f64; 2],
     viewport: [f64; 2],
-    tan_half: f64,
+    (tan_half, magnitude): (f64, f64),
 ) -> Option<PickedStar> {
     let [x, y] = pointer;
     let [width, height] = viewport;
@@ -51,6 +51,7 @@ pub fn pick_pointer(
         pose,
         direction,
         1.0 / (1.0 + radius * radius).sqrt(),
+        magnitude,
     )
 }
 
@@ -60,49 +61,95 @@ fn pick_ray(
     pose: &CameraPose,
     forward: DVec3,
     min_alignment: f64,
+    magnitude: f64,
 ) -> Option<PickedStar> {
     let eye = rig.galactic_ly(pose);
     let pc_per_ly = LY_METRES / PC_METRES;
-    let reach = reach_sq_per_luminosity(crate::stream::MAGNITUDE) / (pc_per_ly * pc_per_ly);
+    let reach = reach_sq_per_luminosity(magnitude) / (pc_per_ly * pc_per_ly);
+    let eye_pc = eye * pc_per_ly + DVec3::from_array(GalaxyModel::milky_way().home_pc);
+    // Widen traversal slightly for the f32 quaternion/ray rounding; the
+    // exact original angular test below still decides the winner.
+    let tan = (1.0 / (min_alignment * min_alignment) - 1.0).sqrt() + 1e-5;
+    let plane_scale = (1.0 + tan * tan).sqrt();
+    let cone_axis = forward.normalize();
+    let start = bevy::platform::time::Instant::now();
+    let mut checked = 0usize;
+    let mut winning_point = None;
     let mut best: Option<(f64, PickedStar)> = None;
     for (&cell, stars) in &field.cells {
-        for star in &stars.stars {
-            let position_ly = relative_ly(star.position_pc);
-            let delta = position_ly - eye;
-            let distance_sq = delta.length_squared();
-            if distance_sq < 1e-16 || distance_sq > f64::from(star.luminosity_solar) * reach {
-                continue;
-            }
-            let alignment = delta.dot(forward) / distance_sq.sqrt();
-            // Prefer angular proximity within the caller's hit cone; a stable
-            // ID resolves equal scores regardless of HashMap ordering.
-            if alignment < min_alignment {
-                continue;
-            }
-            let score = 1.0 - alignment;
-            let picked = PickedStar {
-                id: star.id(cell),
-                position_ly,
-            };
-            if best.as_ref().is_none_or(|(old, previous)| {
-                score < *old || (score == *old && picked.id < previous.id)
-            }) {
-                best = Some((score, picked));
-            }
-        }
+        stars.query_blocks(
+            |centre, radius| {
+                let delta = DVec3::from_array(centre) - eye_pc;
+                let depth = delta.dot(cone_axis);
+                let lateral = (delta - cone_axis * depth).length();
+                depth >= -radius && lateral - depth * tan <= radius * plane_scale
+            },
+            |star| {
+                checked += 1;
+                let position_ly = relative_ly(star.position_pc);
+                let delta = position_ly - eye;
+                let distance_sq = delta.length_squared();
+                if distance_sq < 1e-16 || distance_sq > f64::from(star.luminosity_solar) * reach {
+                    return;
+                }
+                let alignment = delta.dot(forward) / distance_sq.sqrt();
+                // Prefer angular proximity within the caller's hit cone; a stable
+                // ID resolves equal scores regardless of HashMap ordering.
+                if alignment < min_alignment {
+                    return;
+                }
+                let score = 1.0 - alignment;
+                let picked = PickedStar {
+                    id: star.id(cell),
+                    position_ly,
+                };
+                if best.as_ref().is_none_or(|(old, previous)| {
+                    score < *old || (score == *old && picked.id < previous.id)
+                }) {
+                    best = Some((score, picked));
+                    winning_point = Some(*star);
+                }
+            },
+        );
     }
+    if let (Some((_, picked)), Some(point)) = (&best, winning_point) {
+        *field
+            .picked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((picked.id.clone(), point));
+    }
+    bevy::log::info!(
+        "Star picking: {:.2} ms, {} of {} stars examined",
+        start.elapsed().as_secs_f64() * 1000.0,
+        checked,
+        field.stars
+    );
     best.map(|(_, star)| star)
 }
 
 /// Find a picked point by stable ID, never by its batch or vertex number.
 pub fn picked_id(field: &Starfield, id: &str) -> Option<PickedStar> {
     let (cell, component, index) = space_simulation::cells::parse_cell_star(id)?;
+    let mut cached = field
+        .picked
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((previous, star)) = &*cached
+        && previous == id
+        && field.cells.contains_key(&cell)
+    {
+        return Some(PickedStar {
+            id: id.to_owned(),
+            position_ly: relative_ly(star.position_pc),
+        });
+    }
     let star = field
         .cells
         .get(&cell)?
         .stars
         .iter()
         .find(|s| s.component == component && u64::from(s.index) == index)?;
+    *cached = Some((id.to_owned(), *star));
     Some(PickedStar {
         id: id.to_owned(),
         position_ly: relative_ly(star.position_pc),
@@ -243,6 +290,7 @@ pub fn visit_star(nav: &mut Navigation, lists: &Galaxy, field: &Starfield, id: &
 mod tests {
     use super::*;
     use crate::Selection;
+    use space_simulation::population::VISIBLE_MAGNITUDE;
     use space_simulation::{
         cells::{Cell, Sky},
         galaxy::Component,
@@ -281,7 +329,7 @@ mod tests {
             Quat::IDENTITY,
             [x, 500.0],
             [1000.0, 1000.0],
-            tan_half,
+            (tan_half, VISIBLE_MAGNITUDE),
         )
         .unwrap();
         // A wider view puts the same star closer to the centre of the screen.
@@ -296,7 +344,7 @@ mod tests {
                 Quat::IDENTITY,
                 [x_wide, 500.0],
                 [1000.0, 1000.0],
-                wide,
+                (wide, VISIBLE_MAGNITUDE),
             )
             .unwrap()
             .id,
@@ -315,11 +363,80 @@ mod tests {
                 Quat::IDENTITY,
                 [x + 30.0, 500.0],
                 [1000.0, 1000.0],
-                tan_half,
+                (tan_half, VISIBLE_MAGNITUDE),
             )
             .is_none()
         );
         assert!(picked_id(&field, "g1.2.8").is_none());
+    }
+
+    #[test]
+    fn grid_picking_matches_full_scan_and_caches_the_winner() {
+        let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+        let cell = Cell::containing(10, home.to_array()).unwrap();
+        let min = DVec3::from_array(cell.min_pc());
+        let points: Vec<_> = (0..20_000u32)
+            .map(|index| StarPoint {
+                position_pc: (min
+                    + DVec3::new(
+                        f64::from(index % 97) / 97.0,
+                        f64::from(index * 31 % 101) / 101.0,
+                        f64::from(index * 47 % 103) / 103.0,
+                    ) * cell.size_pc())
+                .to_array(),
+                luminosity_solar: if index % 3 == 0 { 0.001 } else { 10_000.0 },
+                temperature_k: 5772.0,
+                radius_solar: 1.0,
+                component: Component::ThinDisc,
+                index,
+            })
+            .collect();
+        let mut field = Starfield::default();
+        field.cells.insert(cell, StarCell::new(cell, points));
+        let rig = CameraRig::default();
+        let pose = CameraPose::default();
+        let eye = rig.galactic_ly(&pose);
+        let pc_per_ly = LY_METRES / PC_METRES;
+        for axis in [
+            DVec3::X,
+            DVec3::Y,
+            DVec3::Z,
+            -DVec3::Z,
+            DVec3::new(1.0, 0.2, -0.5).normalize(),
+        ] {
+            for magnitude in [6.5, 8.5] {
+                let threshold = 1.0 / (1.0 + 0.01f64.powi(2)).sqrt();
+                let reach = reach_sq_per_luminosity(magnitude) / pc_per_ly.powi(2);
+                let mut expected: Option<(f64, String)> = None;
+                for star in &field.cells[&cell].stars {
+                    let delta = relative_ly(star.position_pc) - eye;
+                    let distance = delta.length_squared();
+                    if distance < 1e-16 || distance > f64::from(star.luminosity_solar) * reach {
+                        continue;
+                    }
+                    let alignment = delta.dot(axis) / distance.sqrt();
+                    if alignment < threshold {
+                        continue;
+                    }
+                    let score = 1.0 - alignment;
+                    let id = star.id(cell);
+                    if expected.as_ref().is_none_or(|(old, previous)| {
+                        score < *old || (score == *old && id < *previous)
+                    }) {
+                        expected = Some((score, id));
+                    }
+                }
+                let actual = pick_ray(&field, &rig, &pose, axis, threshold, magnitude);
+                assert_eq!(
+                    actual.as_ref().map(|p| &p.id),
+                    expected.as_ref().map(|(_, id)| id)
+                );
+                if let Some(picked) = actual {
+                    assert_eq!(picked_id(&field, &picked.id), Some(picked.clone()));
+                    assert_eq!(field.picked.lock().unwrap().as_ref().unwrap().0, picked.id);
+                }
+            }
+        }
     }
 
     #[test]

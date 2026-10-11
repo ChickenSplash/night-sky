@@ -125,7 +125,8 @@ pub fn measure_velocity(
     velocity.previous = Some(current);
 }
 
-#[derive(Component)]
+/// The main 3D camera. Extracted so the star pipeline draws only in its view.
+#[derive(Component, Clone, bevy::render::extract_component::ExtractComponent)]
 pub struct SpaceCamera;
 
 /// The displayed camera, which may still be flying towards `Navigation`'s target.
@@ -391,7 +392,14 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
         root.spawn_spatial((
             SpaceCamera,
             FloatingOrigin,
-            Camera3d::default(),
+            Camera3d {
+                // Star points test their depth against it (`starfield_points.rs`).
+                depth_texture_usages:
+                    (bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
+                        | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
+                        .into(),
+                ..default()
+            },
             Projection::Perspective(PerspectiveProjection {
                 near: 1000.0,
                 far: 1e22,

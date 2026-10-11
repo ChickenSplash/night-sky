@@ -89,9 +89,22 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   Horizontal dragging adjusts speed logarithmically from `scene::MIN_SPEED`
   to `scene::MAX_SPEED` (1 m/s to 10,000 ly/s), through `SetMoveSpeed`; it
   captures input like the time rate, and a single click does nothing.
-  All three text HUDs share
+  The bottom-right **Magnitude limit** (`ui::magnitude_control`, one line)
+  is `Navigation::magnitude`, the faintest apparent magnitude drawn as a
+  star point (default `VISIBLE_MAGNITUDE`, 6.5; `MAGNITUDE` range 3 to 8.5, in
+  tenths). Dragging shows the new value; it applies on release
+  (`SetMagnitude`, `set_magnitude 5.5`), because a change restarts streaming
+  from nothing: `stream` starts a new `Backend` whenever its magnitude
+  differs (in the browser a new worker, `star-worker.js?magnitude=`, the old
+  one terminated). The starfield's upload filter, shader cutoff and rebuild
+  distance, star picking and the glow's unresolved light table all follow
+  it, so fainter stars move into the glow and the total light is unchanged.
+  Each magnitude fainter draws about four times the stars. Page-star
+  assignment (`system.rs`) stays at `VISIBLE_MAGNITUDE`. Not persisted.
+  All four text HUDs share
   `breadcrumb::HUD_PADDING` (20 logical pixels from the 3D viewport edges);
-  movement and time share `HUD_LINE_GAP` and their bottom line alignment.
+  movement, magnitude and time share `HUD_LINE_GAP` and their bottom line
+  alignment.
   `ui::pointer_captured` protects the background-layer breadcrumb/inspector and draggable text and captures
   its full drag, including outside its bounds; scene camera input and canvas
   picking both use it so time interactions never also move/select the scene.
@@ -104,19 +117,25 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   tracing events from `devtools::log_layers`, with level filter and grep; the
   tab shows errors and warnings logged while it was hidden), `terminal` (a
   command line and its output), `perf` (frame graph; star stream and star
-  draw facts: draw calls, uploaded stars, vertices and vertex memory; natively,
+  draw facts: draw calls, uploaded stars, vertices (shader runs) and vertex
+  memory; cells,
+  blocks (drawn of uploaded) and grid boxes in one section; natively,
   a GPU passes table of GPU/CPU time and vertex/fragment shader invocations
-  per render pass from Bevy's `RenderDiagnosticsPlugin`),
+  per render pass from Bevy's `RenderDiagnosticsPlugin`. Every camera runs
+  passes of the same names; the vendored `bevy_render` suffixes repeats on
+  earlier cameras `~1`, `~2`, so the glow camera's pass no longer hides the
+  main view's),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
   bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
-  open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
-  browser). New debug readouts and switches go there, not in Settings or the
+  open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (GPU test, core load test and bug report
+  natively, star-stream benchmark in the browser). New debug readouts and switches go there, not in Settings or the
   canvas. The performance switches (`render_debug::RenderDebug`, not
   `Navigation`; `set_debug <switch> <on>`) are for A/B tests and reset on
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
   but are never rasterised), compact 1.25 px points, 4x MSAA (both window
-  cameras) and bloom.
+  cameras), bloom, cull blocks outside the view (on by default) and stars
+  as points (native only, on by default natively).
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
@@ -290,7 +309,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `Sky::descend` with `place`, so sliced loading gives the same stars. Loaded
   cells drop beyond `KEEP` × reach. Stars stream as compact `StarPoint`s.
 - `crates/client/src/stream.rs` aims the loader at the camera
-  (`CameraRig::galactic_ly`, lists anchored at home) to `MAGNITUDE` 6.5: a
+  (`CameraRig::galactic_ly`, lists anchored at home) to
+  `Navigation::magnitude` (6.5 by default): a
   worker thread natively, a dedicated module Web Worker in the browser, into
   the `Starfield` resource. The worker's generation-only WASM crate is
   `crates/star-worker`, with `web/star-worker.js` as its entry point; both WASM
@@ -322,6 +342,17 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   generation speed-ups: 157 cells, 114,992,223 stars in 141.6 s. With the
   nuclear stellar disc: 145,751,381 stars. The star count is deterministic,
   so a changed count means generation changed.
+  The native **GPU test** (`tools` tab, `gpu_test.rs`) is the fixed
+  before-and-after benchmark for star rendering: it places the camera 500 ly
+  from the black hole facing it, restarts streaming the same way, waits until
+  every cell is loaded and uploaded plus `SETTLE_S` (2 s), then measures
+  `MEASURE_S` (20 s) of frame times and the main view's GPU pass times. Each
+  run is logged (`GPU test (...)`) and appended as one JSON line, with the
+  commit (`+dirty` for uncommitted changes), window size, MSAA state and
+  magnitude limit, to
+  `data/logs/gpu-test.jsonl`. The user runs the GPU test and other
+  benchmarks on their own focused window; agents read the results from the
+  logs and do not launch benchmark runs themselves.
   The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each
@@ -330,34 +361,61 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   identical route used by `SPACE_HEADFUL=1 node scripts/benchmark-star-flight.mjs
   <label>`; it writes JSON results under `data/logs/`. Headless SwiftShader is
   too slow for meaningful comparisons, so use headed Chromium on Wayland.
-- `starfield.rs` draws one oversized triangle per visible star in mesh batches
-  of up to `PACK` (65,536) uploaded stars, filled from `SLICE`-sized steps of
-  a cell's stars within the upload budget, so a large cell may take several
-  frames. Keep batches few and large: Bevy's per-mesh-entity work
-  (specialization, extraction, queueing) runs every frame, hidden or not, and
-  17k small batches cost about 30 ms of CPU at the galactic centre. A rebuilt
+- `starfield.rs` builds batches of up to `PACK` (65,536) uploaded stars,
+  filled from `SLICE`-sized steps of a cell's stars within the upload budget,
+  so a large cell may take several frames, and `starfield_render.rs` draws
+  them. Each star is one 20-byte `StarInstance` (f32 position from its
+  block's centre, luminosity, temperature) in a vertex buffer uploaded once,
+  drawn as an instance of a three-corner triangle the shader builds from
+  `vertex_index`. Bevy's material path has no per-instance data, so this is
+  a custom pipeline in `Transparent3d`, sharing Bevy's view bind groups and
+  drawing only in the `SpaceCamera` view (extracted). Batches are not
+  entities: each frame `sync` lists the draws in `StarFrame` and queues new
+  and dropped batches in `StarUploads`; both are taken at extraction, so a
+  frame's draws and buffers agree. A draw's phase item has no entity, so its
+  batch range carries the draw's index (Bevy's batching finds no mesh for
+  the placeholder and leaves it). A rebuilt
   cell's new batches wait in `Batches::fresh` and replace the old ones only
   once complete, so rebuilds never leave holes. Star positions are
   local to their grid block's centre (`StarCell::blocks`, at most `BLOCK`
   loaded stars, an aligned cube of the cell's grid; no batch spans two
-  blocks); per-frame transforms subtract the camera in f64,
-  then scale to render units. Filter points beyond 1.25 times their apparent
+  blocks); each draw's origin subtracts the camera in f64,
+  then scales to render units. Filter points beyond 1.25 times their apparent
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
-  retained cells after the camera travels 0.2 of the tier's reach. New entities
-  start hidden for one frame, avoiding Bevy's material specialization race.
-  Batch vertices are f32 offsets from their block's centre, so their error grows
-  with that offset: within `PRECISE` times it of the camera a single-star sprite
-  placed by an f64 subtraction takes over (built at `PREPARE` times the radius,
-  so its hidden frame is spent). The batch remains until a quarter of that
-  radius, and is not culled while the precise sprite is still unplaced. The
+  retained cells after the camera travels 0.2 of the tier's reach.
+  Natively, while the `point_stars` switch is on (default),
+  `starfield_points.rs` draws the same batches as single-pixel points, one
+  vertex per star instead of three: the `StarPoints` node (between
+  `MainOpaquePass` and `MainTransmissivePass`, GPU span `star_points`) draws
+  them additively into an `Rgba16Float` image at `SUPERSAMPLE` (2) times the
+  view's resolution per axis, without MSAA. `starfield_points.wgsl` applies
+  the same cutoff, near hiding, colour and knee as `starfield.wgsl` (keep them
+  in step) and depth-tests each star's centre against the opaque bodies (the
+  space camera's depth texture has `TEXTURE_BINDING` for this). One
+  full-screen draw in `Transparent3d` (`starfield_points_composite.wgsl`)
+  gives each point the 0.55 px Gaussian from the 6x6 supersampled pixels
+  around each view pixel, so points land within a quarter pixel. Under
+  points the compact-points switch does nothing. The GPU test's star pass
+  sums `main_transparent_pass_3d` and `star_points`, and records which path
+  ran. The browser always uses triangles. A compute splat with atomics
+  (`b6a078f`, reverted) was slower than triangles: 17.3 vs 14.3 ms.
+  `starfield::Sight` skips batches outside the view each frame (the
+  `cull_blocks` switch): a sphere around each batch's block, in f64 against
+  the view's four side planes, widened by the point footprint.
+  Batch positions are f32 offsets from their block's centre, so their error grows
+  with that offset: within `PRECISE` times it of the camera a star is drawn
+  instead as a precise sprite, from a per-frame buffer of offsets from the eye
+  formed in f64 (gathered at `PREPARE` times the radius). The batch point
+  remains until a quarter of that radius, so both overlap. The
   visited star is a body only while the camera is at it (`scene::body_range`,
-  where its planets show): batches hide points within that range and its
-  sprite waits hidden. Elsewhere, it
+  where its planets show): batches hide points within that range and it has
+  no sprite. Elsewhere, it
   is a galactic point under the same magnitude limit. Galactic points use
-  apparent flux, scaled by `sky::radiance_gain`. Realistic, their colour and
-  visual efficiency come from a blackbody palette by temperature (the vertex
-  corner attribute carries the corner index and temperature); which stars
-  load still follows bolometric luminosity. Every point is a
+  apparent flux, scaled by `sky::radiance_gain`. Their colour (and,
+  realistic, visual efficiency) comes from 32-entry tables by temperature in
+  the shader's uniforms: a blackbody palette, or `spectral_colour` when not
+  realistic. Which stars load still follows bolometric luminosity. Every
+  point is a
   0.55 px sigma Gaussian (2 px footprint, a uniform so the compact debug
   switch can shrink it), as in a perfect camera: brightness
   shows only in its peak, linear up to a knee and logarithmic above it, never
@@ -379,7 +437,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 - `simulation::glow` builds smooth, population-normalised Gaussian volume patches
   for the first galaxy-glow milestone, with spiral modulation averaged out only
   in the glow. A stratified, distance-indexed RGB luminosity table statistically
-  excludes magnitude-visible stars. This is approximate at finite patch/table
+  excludes stars visible at the magnitude limit (`unresolved_table`,
+  recomputed by `client::glow` when it changes). This is approximate at finite patch/table
   resolution. Patch grids reach past `FLOOR` (1e-5 of each component's
   densest patch), so profiles fade out instead of stopping at a grid edge
   (tested). The nuclear cluster is four Gaussians fitted to its Plummer
@@ -468,7 +527,15 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a star with a list page (`galaxy_nav::mapped`) opens
   that page, any other its generated system. A new snapshot moves the visit
   with its star (`follow_visited_star`). Clicks not on a planet pick from
-  loaded, visible points only, and only on click, never every frame. Click
+  loaded, visible points only, and only on click, never every frame.
+  Picking traverses `StarCell::query_blocks` with a conservative sphere/cone
+  test, then applies the original magnitude and angular tests only to leaf
+  candidates, rather than scanning every loaded star. Each click logs elapsed
+  time and stars examined as `Star picking`. `Starfield::picked` caches the
+  last ID and point so applying selection and inspector reachability avoid
+  rescanning its cell; replacement/removal of that cell or restart invalidates
+  the cache, while unrelated streaming changes retain it. Uncached typed ID
+  lookups still scan their cell once. Click
   again or Enter to visit. The only bodies drawn are
   the visited star and its planets. Shift + scroll (either Shift key) zooms
   from 20,000 km to 40,000 ly; plain scroll adjusts movement speed independently.

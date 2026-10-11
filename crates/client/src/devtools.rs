@@ -4,6 +4,7 @@
 use crate::actions::{Display, GalaxyReference, UiCommand};
 use crate::command_line::{self, Source, Typed};
 use crate::core_load::CoreLoad;
+use crate::gpu_test::GpuTest;
 use crate::presentation::PresentationMode;
 use crate::render::{Lights, exposure_caption};
 use crate::render_debug::RenderDebug;
@@ -244,6 +245,7 @@ type Rendering<'w> = (
     Res<'w, RenderDebug>,
     Option<Res<'w, DiagnosticsStore>>,
     ResMut<'w, CoreLoad>,
+    ResMut<'w, GpuTest>,
 );
 
 pub fn draw(
@@ -263,7 +265,8 @@ pub fn draw(
     let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (starfield, metrics, lights, sky, debug, diagnostics, mut core_load) = rendering;
+    let (starfield, metrics, lights, sky, debug, diagnostics, mut core_load, mut gpu_test) =
+        rendering;
     if tools.frames.len() == FRAMES {
         tools.frames.pop_front();
     }
@@ -319,7 +322,15 @@ pub fn draw(
                         ),
                         Tab::Render => render(ui, &nav, &lights, &sky, &debug, &mut out),
                         Tab::State => state(ui, &universe, &nav, &clock, &rig, &pose, &velocity),
-                        _ => report = tools_tab(ui, &tools, &mut core_load, &starfield),
+                        _ => {
+                            report = tools_tab(
+                                ui,
+                                &tools,
+                                (&mut core_load, &mut gpu_test),
+                                &starfield,
+                                &metrics,
+                            )
+                        }
                     });
             }
         }
@@ -628,6 +639,43 @@ fn perf(
             ),
         ],
     );
+    terminal::heading(ui, "cells, blocks and boxes");
+    let boxes: usize = field.cells.values().map(|cell| cell.boxes()).sum();
+    terminal::facts_with_details(
+        ui,
+        "debug-star-layout",
+        &[
+            (
+                "cells",
+                format!("{} loaded", grouped(field.cells.len())),
+                Some(
+                    "The loader's cubes, one brightness tier each, halving in size per tier; each is split into the blocks below.",
+                ),
+            ),
+            (
+                "blocks",
+                format!(
+                    "{} drawn of {} on the GPU",
+                    grouped(metrics.blocks_drawn),
+                    grouped(metrics.blocks)
+                ),
+                Some(
+                    "Cubes of a cell's grid holding up to 262,144 stars, uploaded as one to four batches; those outside the view are skipped when culling is on (render tab).",
+                ),
+            ),
+            (
+                "grid boxes",
+                format!(
+                    "{}, {:.1} stars each on average",
+                    grouped(boxes),
+                    field.stars as f64 / boxes.max(1) as f64
+                ),
+                Some(
+                    "The smallest cubes, aiming for about 8 stars each, used to find nearby stars without scanning whole cells; empty ones included.",
+                ),
+            ),
+        ],
+    );
     terminal::heading(ui, "star draw");
     let uploaded = metrics.uploaded_stars;
     terminal::facts_with_details(
@@ -636,7 +684,11 @@ fn perf(
         &[
             (
                 "draw calls",
-                grouped(metrics.batch_draws),
+                format!(
+                    "{} of {} batches",
+                    grouped(metrics.batch_draws),
+                    grouped(metrics.batches)
+                ),
                 Some(
                     "Star batches drawn each frame, up to 65,536 stars each; each costs CPU time, on screen or not.",
                 ),
@@ -654,13 +706,19 @@ fn perf(
             ),
             (
                 "vertices",
-                grouped(uploaded * 3),
-                Some("Three per uploaded star: one triangle the shader shapes into a point."),
+                format!(
+                    "{} drawn of {}",
+                    grouped(metrics.drawn_stars * 3),
+                    grouped(uploaded * 3)
+                ),
+                Some(
+                    "Vertex shader runs, three per star: one instanced triangle the shader shapes into a point.",
+                ),
             ),
             (
                 "vertex memory",
                 format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
-                Some("GPU memory holding the uploaded stars, 108 bytes each."),
+                Some("GPU memory holding the uploaded stars, 20 bytes each."),
             ),
             (
                 "precise sprites",
@@ -698,9 +756,8 @@ fn perf(
     gpu_passes(ui, diagnostics, mean);
 }
 
-/// Vertex bytes per uploaded star: three corners of position, corner and
-/// temperature, and colour with luminosity (`starfield::mesh`).
-const STAR_BYTES: usize = 3 * (12 + 8 + 16);
+/// GPU bytes per uploaded star (`starfield_render::StarInstance`).
+const STAR_BYTES: usize = size_of::<crate::starfield_render::StarInstance>();
 
 /// GPU and render-thread time, and shader invocations, per render pass, from
 /// Bevy's render diagnostics (native only: WebGL 2 has no timestamp queries).
@@ -770,7 +827,7 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
                 "passes",
                 format!("{}, slowest first", passes.len()),
                 Some(
-                    "Vertices and fragments are shader runs per frame; galactic stars draw in the transparent 3D pass.",
+                    "Vertices and fragments are shader runs per frame; galactic stars draw in the transparent 3D pass. ~1, ~2 mark the same pass on an earlier camera: the galaxy glow draws before the main view, the interface after it.",
                 ),
             ),
         ],
@@ -1041,11 +1098,13 @@ fn state(
 fn tools_tab(
     ui: &mut egui::Ui,
     tools: &DevTools,
-    core_load: &mut CoreLoad,
+    (core_load, gpu): (&mut CoreLoad, &mut GpuTest),
     field: &Starfield,
+    metrics: &StreamMetrics,
 ) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        gpu_test(ui, gpu, field, metrics);
         core_load_test(ui, core_load, field);
         terminal::heading(ui, "bug report");
         let report = terminal::button(ui, "save bug report");
@@ -1064,7 +1123,7 @@ fn tools_tab(
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (tools, core_load, field);
+        let _ = (tools, core_load, gpu, field, metrics);
         terminal::heading(ui, "benchmark");
         if terminal::button(ui, "run star-stream benchmark") {
             crate::benchmark::restart();
@@ -1075,6 +1134,111 @@ fn tools_tab(
         );
         false
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &StreamMetrics) {
+    use crate::gpu_test::{MEASURE_S, SETTLE_S};
+    terminal::heading(ui, "gpu test");
+    if terminal::button(ui, "measure the galactic centre view") {
+        *test = GpuTest::Requested;
+    }
+    terminal::note(
+        ui,
+        "Loads the view 500 ly from the centre, facing it, from nothing; once every star is uploaded, measures 20 s. Keep still with the window focused.",
+    );
+    let status = match test {
+        GpuTest::Idle => return,
+        GpuTest::Requested => "starting".to_string(),
+        GpuTest::Loading(started) => format!(
+            "loading, {:.0} s: {} cells pending, {} uploading",
+            started.elapsed().as_secs_f64(),
+            grouped(field.pending),
+            grouped(metrics.mesh_queue)
+        ),
+        GpuTest::Settling { since, .. } => format!(
+            "settling, {:.0} s left",
+            (SETTLE_S - since.elapsed().as_secs_f64()).max(0.0)
+        ),
+        GpuTest::Measuring { since, .. } => format!(
+            "measuring, {:.0} s left",
+            (MEASURE_S - since.elapsed().as_secs_f64()).max(0.0)
+        ),
+        GpuTest::Done(r) => {
+            terminal::facts_with_details(
+                ui,
+                "debug-gpu-test",
+                &[
+                    (
+                        "commit",
+                        r.commit.clone(),
+                        Some("Build measured; +dirty means uncommitted changes."),
+                    ),
+                    (
+                        "fps",
+                        format!("{:.1}", r.fps),
+                        Some("Frames over the 20 s measured."),
+                    ),
+                    (
+                        "frame",
+                        format!(
+                            "{:.2} ms, p95 {:.2}, p99 {:.2}",
+                            r.frame_mean_ms, r.frame_p95_ms, r.frame_p99_ms
+                        ),
+                        Some("Mean and slowest frame times."),
+                    ),
+                    (
+                        "star pass",
+                        format!("{:.2} ms", r.star_pass_ms),
+                        Some(
+                            "Mean GPU time of the main view's transparent pass and, for points, the star points pass.",
+                        ),
+                    ),
+                    (
+                        "gpu total",
+                        format!("{:.2} ms", r.gpu_total_ms),
+                        Some("Mean GPU time of every pass, as in the perf tab."),
+                    ),
+                    (
+                        "stars",
+                        format!(
+                            "{} drawn of {}",
+                            grouped(r.drawn_stars),
+                            grouped(r.uploaded_stars)
+                        ),
+                        Some("Stars in batches inside the view, of all uploaded."),
+                    ),
+                    (
+                        "star memory",
+                        format!("{:.0} MB", r.star_memory_mb),
+                        Some("GPU memory holding the uploaded stars."),
+                    ),
+                    (
+                        "view",
+                        format!(
+                            "{} x {}, MSAA {}, magnitude {:.1}, {}",
+                            r.size[0],
+                            r.size[1],
+                            if r.msaa { "on" } else { "off" },
+                            r.magnitude,
+                            if r.points { "points" } else { "triangles" }
+                        ),
+                        Some(
+                            "Window size in physical pixels, the 4x MSAA switch, the magnitude limit and whether stars were points or triangles.",
+                        ),
+                    ),
+                    (
+                        "load",
+                        format!("{:.1} s", r.load_s),
+                        Some("From the click until every star was uploaded."),
+                    ),
+                ],
+            );
+            terminal::note(ui, "Each run is appended to data/logs/gpu-test.jsonl.");
+            return;
+        }
+    };
+    terminal::facts_with_details(ui, "debug-gpu-test", &[("status", status, None)]);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

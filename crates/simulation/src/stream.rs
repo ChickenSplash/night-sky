@@ -261,6 +261,60 @@ impl StarCell {
         self.within(block.origin, block.size, p, radius_pc, &mut f);
     }
 
+    /// Visits only grid blocks intersecting `intersects`, then their stars.
+    /// The predicate must conservatively accept cubes touching the query.
+    pub fn query_blocks(
+        &self,
+        intersects: impl Fn([f64; 3], f64) -> bool,
+        mut visit: impl FnMut(&StarPoint),
+    ) {
+        self.query_block([0; 3], self.grid.per_axis, &intersects, &mut visit);
+    }
+
+    fn query_block(
+        &self,
+        origin: [usize; 3],
+        size: usize,
+        intersects: &impl Fn([f64; 3], f64) -> bool,
+        visit: &mut impl FnMut(&StarPoint),
+    ) {
+        let stars = self.grid.block(origin, size);
+        if stars.is_empty() {
+            return;
+        }
+        let half = size as f64 * self.grid.box_pc / 2.0;
+        let centre = std::array::from_fn(|axis| {
+            self.grid.min_pc[axis] + origin[axis] as f64 * self.grid.box_pc + half
+        });
+        if !intersects(centre, half * 3f64.sqrt()) {
+            return;
+        }
+        if size == 1 || stars.len() <= LEAF_STARS as usize {
+            for star in &self.stars[stars] {
+                visit(star);
+            }
+            return;
+        }
+        let half = size / 2;
+        for i in 0..8 {
+            self.query_block(
+                [
+                    origin[0] + half * (i >> 2 & 1),
+                    origin[1] + half * (i >> 1 & 1),
+                    origin[2] + half * (i & 1),
+                ],
+                half,
+                intersects,
+                visit,
+            );
+        }
+    }
+
+    /// Boxes in the grid, empty ones included.
+    pub fn boxes(&self) -> usize {
+        self.grid.starts.len() - 1
+    }
+
     /// Non-empty aligned cubes of the grid holding at most `most` stars each,
     /// unless a single box holds more, in star order: together they cover
     /// `stars` from start to end. Each is a compact region with its own centre.
@@ -475,6 +529,11 @@ pub struct Loader {
 const GRIDDING: usize = 2;
 
 impl Loader {
+    /// The faintest apparent magnitude it loads.
+    pub fn magnitude(&self) -> f64 {
+        self.magnitude
+    }
+
     pub fn new(sky: Sky, magnitude: f64) -> Self {
         Self {
             sky,

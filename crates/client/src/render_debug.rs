@@ -21,6 +21,12 @@ pub enum DebugSwitch {
     /// 4x MSAA on the 3D and egui cameras.
     Msaa,
     Bloom,
+    /// Hide star batches whose grid block lies outside the view.
+    CullBlocks,
+    /// Natively, draw galactic stars as single-pixel points shaped by a
+    /// composite pass, rather than as triangles (`starfield_points.rs`).
+    /// No effect in the browser.
+    PointStars,
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -31,6 +37,8 @@ pub struct RenderDebug {
     pub compact_points: bool,
     pub msaa: bool,
     pub bloom: bool,
+    pub cull_blocks: bool,
+    pub point_stars: bool,
 }
 
 impl Default for RenderDebug {
@@ -42,18 +50,22 @@ impl Default for RenderDebug {
             compact_points: false,
             msaa: true,
             bloom: true,
+            cull_blocks: true,
+            point_stars: cfg!(not(target_arch = "wasm32")),
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 6] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 8] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
         (DebugSwitch::CompactPoints, "Compact 1.25 px points"),
         (DebugSwitch::Msaa, "4x MSAA"),
         (DebugSwitch::Bloom, "Bloom"),
+        (DebugSwitch::CullBlocks, "Cull blocks outside the view"),
+        (DebugSwitch::PointStars, "Stars as points"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -64,6 +76,8 @@ impl RenderDebug {
             DebugSwitch::CompactPoints => self.compact_points,
             DebugSwitch::Msaa => self.msaa,
             DebugSwitch::Bloom => self.bloom,
+            DebugSwitch::CullBlocks => self.cull_blocks,
+            DebugSwitch::PointStars => self.point_stars,
         }
     }
 
@@ -75,6 +89,8 @@ impl RenderDebug {
             DebugSwitch::CompactPoints => &mut self.compact_points,
             DebugSwitch::Msaa => &mut self.msaa,
             DebugSwitch::Bloom => &mut self.bloom,
+            DebugSwitch::CullBlocks => &mut self.cull_blocks,
+            DebugSwitch::PointStars => &mut self.point_stars,
         } = on;
     }
 

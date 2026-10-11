@@ -8,12 +8,15 @@ pub struct StarWorker(Loader);
 
 #[wasm_bindgen]
 impl StarWorker {
+    /// Loads stars down to `magnitude`, the naked-eye limit if not a number.
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self(Loader::new(
-            Sky::default(),
-            space_simulation::population::VISIBLE_MAGNITUDE,
-        ))
+    pub fn new(magnitude: f64) -> Self {
+        let magnitude = if magnitude.is_finite() {
+            magnitude
+        } else {
+            space_simulation::population::VISIBLE_MAGNITUDE
+        };
+        Self(Loader::new(Sky::default(), magnitude))
     }
 
     pub fn aim(&mut self, x: f64, y: f64, z: f64) {
@@ -41,6 +44,6 @@ impl StarWorker {
 
 impl Default for StarWorker {
     fn default() -> Self {
-        Self::new()
+        Self::new(f64::NAN)
     }
 }

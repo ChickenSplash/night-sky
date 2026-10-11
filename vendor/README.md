@@ -12,7 +12,13 @@ every change.
   the timeout only on AMD and Intel, and still did on `main` in September 2026.
 - **Change:** `Timeout` and `Other` skip the frame, and `Lost` recreates the
   surface, with a rate-limited warning. `OutOfMemory` still panics.
-  Only `src/view/window/mod.rs` differs from the crates.io release.
+  `src/view/window/mod.rs` and `src/diagnostic/internal.rs` differ from the
+  crates.io release.
+- **Second change, render diagnostics:** every camera records its passes under
+  the same path, and only the first measurement per frame moves a diagnostic's
+  smoothed value, so the galaxy glow camera's `main_transparent_pass_3d` hid the
+  main camera's. `number_repeats` in `src/diagnostic/internal.rs` gives earlier
+  repeats in a frame a `~n` suffix; the last camera keeps the plain name.
 - **Regression check:** `./scripts/test-hidden-window.sh` (Hyprland only).
 - **Upgrading Bevy:** copy the new `bevy_render` release here and re-apply the
   patch, or delete this copy and the `[patch.crates-io]` entry once upstream

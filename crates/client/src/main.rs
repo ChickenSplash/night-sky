@@ -13,6 +13,7 @@ mod diagnostics;
 mod flight;
 mod galaxy_nav;
 mod glow;
+mod gpu_test;
 mod inspector;
 mod network;
 mod objects;
@@ -24,6 +25,9 @@ mod sky;
 #[cfg(not(target_arch = "wasm32"))]
 mod smoke;
 mod starfield;
+#[cfg(not(target_arch = "wasm32"))]
+mod starfield_points;
+mod starfield_render;
 mod stream;
 mod tasks;
 mod terminal;
@@ -108,6 +112,9 @@ pub struct Navigation {
     pub rotation: Quat,
     /// Vertical field of view in degrees, within `FOV_DEG`.
     pub fov_deg: f32,
+    /// Faintest apparent magnitude drawn as a star point, within
+    /// `MAGNITUDE`. Fainter stars are part of the galaxy glow.
+    pub magnitude: f64,
     pub exaggerate: bool,
     pub labels: bool,
     pub orbits: bool,
@@ -145,6 +152,7 @@ impl Default for Navigation {
             move_speed: 42.0 * LY_METRES,
             rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
             fov_deg: 50.0,
+            magnitude: space_simulation::population::VISIBLE_MAGNITUDE,
             exaggerate: false,
             labels: true,
             orbits: true,
@@ -164,7 +172,19 @@ impl Default for Navigation {
 /// Selectable vertical field of view, in degrees.
 pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
 
+/// Selectable star point magnitude limits. Each magnitude fainter draws
+/// about four times the stars.
+pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=8.5;
+
 impl Navigation {
+    /// Clamped to `MAGNITUDE`, to a tenth.
+    pub fn set_magnitude(&mut self, magnitude: f64) {
+        if magnitude.is_finite() {
+            self.magnitude =
+                (magnitude.clamp(*MAGNITUDE.start(), *MAGNITUDE.end()) * 10.0).round() / 10.0;
+        }
+    }
+
     pub fn set_fov(&mut self, degrees: f32) {
         if degrees.is_finite() {
             self.fov_deg = degrees.clamp(*FOV_DEG.start(), *FOV_DEG.end());
@@ -343,6 +363,7 @@ fn main() {
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
     .init_resource::<core_load::CoreLoad>()
+    .init_resource::<gpu_test::GpuTest>()
     .insert_resource(initial_nav)
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
@@ -355,6 +376,8 @@ fn main() {
             scene::controls,
             #[cfg(not(target_arch = "wasm32"))]
             core_load::run,
+            #[cfg(not(target_arch = "wasm32"))]
+            gpu_test::run,
             #[cfg(target_arch = "wasm32")]
             benchmark::advance,
             scene::locate,
