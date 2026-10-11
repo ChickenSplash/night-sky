@@ -13,7 +13,7 @@
 //! - Everything follows from cell codes, so any cell gives the same stars in any
 //!   order, on any machine. `Sky` only caches what it has worked out.
 
-use crate::galaxy::{Component, GalaxyModel};
+use crate::galaxy::{COMPONENTS, Component, GalaxyModel};
 use crate::population::{TIERS, tiered_formation, tiered_light};
 use crate::stream::StarPoint;
 use crate::system::{Body, Rng, system_around};
@@ -152,7 +152,7 @@ impl Cell {
 
 /// Stars of each component (in `Component::ALL` order) and tier within a cell.
 /// Tiers brighter than the cell's level belong to its ancestors and count zero.
-pub type Counts = [[u64; TIERS]; 6];
+pub type Counts = [[u64; TIERS]; COMPONENTS];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CellStar {
@@ -337,6 +337,7 @@ fn resolution(model: &GalaxyModel, component: Component, min: [f64; 3], size: f6
         // Arms are about a tenth of their radius across.
         Component::ThinDisc | Component::Arms => (0.05 * radius()).clamp(250.0, 1_000.0),
         Component::ThickDisc => (0.1 * radius()).clamp(500.0, 1_000.0),
+        Component::NuclearDisc => (0.3 * radius()).max(0.5 * model.nuclear.scale_length_pc),
     }
 }
 
@@ -439,7 +440,7 @@ impl Sky {
     /// Exact counts at the root: each component's stars, shared among tiers by
     /// largest remainder so nothing is lost to rounding.
     fn root(&self) -> Counts {
-        let mut counts = [[0; TIERS]; 6];
+        let mut counts = [[0; TIERS]; COMPONENTS];
         for component in Component::ALL {
             let total = self.model.stars_in(component).round() as u64;
             let shares = crate::population::tier_shares(component);
@@ -509,7 +510,7 @@ impl Sky {
         };
         let above = self.counts(parent);
         let level = cell.level();
-        let mut children = [[[0; TIERS]; 6]; 8];
+        let mut children = [[[0; TIERS]; COMPONENTS]; 8];
         let finer = above.iter().any(|row| row[level..].iter().any(|&n| n > 0));
         if finer {
             for component in Component::ALL {
@@ -959,7 +960,7 @@ mod tests {
                 let cell = Cell::containing(level, p).unwrap();
                 let counts = sky.counts(cell);
                 let children: Vec<Counts> = cell.children().map(|c| sky.counts(c)).to_vec();
-                for c in 0..6 {
+                for c in 0..COMPONENTS {
                     for tier in 0..TIERS {
                         let below: u64 = children.iter().map(|k| k[c][tier]).sum();
                         let wanted = if tier > level { counts[c][tier] } else { 0 };

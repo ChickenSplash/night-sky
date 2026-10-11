@@ -10,7 +10,7 @@
 //!   `galactic_star`, restricted to the tier. The mix over all tiers matches it.
 
 use crate::cells::StarKey;
-use crate::galaxy::Component;
+use crate::galaxy::{COMPONENTS, Component};
 use crate::star::{
     self, Branch, Formation, GIANT_SHARE, IMF_RANGE, SUN_TEMPERATURE_K, WHITE_DWARF_LIGHTEST,
     WHITE_DWARF_LIMIT, imf_cumulative, imf_density, imf_inverse, lifetime_gyr,
@@ -279,7 +279,7 @@ fn dwarf_weight(c: Component, m: f64, cooling: (f64, f64)) -> f64 {
 }
 
 fn census(component: Component) -> &'static Census {
-    static CENSUS: [OnceLock<Census>; 6] = [const { OnceLock::new() }; 6];
+    static CENSUS: [OnceLock<Census>; COMPONENTS] = [const { OnceLock::new() }; COMPONENTS];
     CENSUS[component.index()].get_or_init(|| build(component))
 }
 

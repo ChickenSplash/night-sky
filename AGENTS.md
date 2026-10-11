@@ -230,7 +230,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 - `space_simulation::galaxy::GalaxyModel` (parameterised, `milky_way()` by
   default) gives stars per cubic parsec at any point, per `Component`: nuclear
-  cluster, bar and bulge, thin disc, young arm stars, thick disc and halo. Axes
+  cluster, bar and bulge, thin disc, young arm stars, thick disc, halo and
+  nuclear stellar disc (an exponential `Disc`, 75 pc by 45 pc, last in
+  `Component::ALL` so the others keep their star ID indices). Axes
   are parsecs from the central black hole, disc in XZ, Y to the north pole;
   home is 8.2 kpc out on +X, between arms.
 - Every profile has a closed-form integral, so components hold exactly their
@@ -317,8 +319,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   jumps 1 pc from the black hole, restarts streaming from nothing
   (`StreamRestart`: a new loader thread with an empty `Sky` cache, every
   cell dropped) and times until no cells are pending. Baseline before any
-  generation speed-ups: 157 cells, 114,992,223 stars in 141.6 s. The star
-  count is deterministic, so a changed count means generation changed.
+  generation speed-ups: 157 cells, 114,992,223 stars in 141.6 s. With the
+  nuclear stellar disc: 145,751,381 stars. The star count is deterministic,
+  so a changed count means generation changed.
   The browser debug window's **run star-stream benchmark** (`tools` tab) reloads into a fresh,
   empty starfield at home, then follows -X (towards the galactic centre) at
   1,000 ly/s for 15 s without auto-visits. `benchmark.rs` records each

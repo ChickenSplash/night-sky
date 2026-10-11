@@ -6,8 +6,9 @@
 //!   points to the north galactic pole, as in the orbital planes.
 //! - Components, after Bland-Hawthorn & Gerhard (2016): a nuclear star cluster, a
 //!   triaxial bar and bulge (Wegg & Gerhard 2013), an exponential thin disc with
-//!   spiral arms, young stars concentrated in the arms, a thick disc and a
-//!   flattened halo.
+//!   spiral arms, young stars concentrated in the arms, a thick disc, a
+//!   flattened halo and a nuclear stellar disc (Launhardt et al. 2002, Sormani
+//!   et al. 2022) between the nuclear cluster and the bar.
 //! - Every profile has a closed-form integral, so each component holds exactly
 //!   its share of `GalaxyModel::stars`. Arms only move stars around their circle.
 
@@ -29,16 +30,23 @@ pub enum Component {
     Arms,
     ThickDisc,
     Halo,
+    /// A flat, dense disc of mostly old stars within about 200 pc of the
+    /// centre. Last, so the other components keep their indices in star IDs.
+    NuclearDisc,
 }
 
+/// Galactic components, the length of `Component::ALL`.
+pub const COMPONENTS: usize = 7;
+
 impl Component {
-    pub const ALL: [Component; 6] = [
+    pub const ALL: [Component; COMPONENTS] = [
         Component::Nucleus,
         Component::Bulge,
         Component::ThinDisc,
         Component::Arms,
         Component::ThickDisc,
         Component::Halo,
+        Component::NuclearDisc,
     ];
 
     pub fn name(self) -> &'static str {
@@ -49,6 +57,7 @@ impl Component {
             Component::Arms => "Spiral arm",
             Component::ThickDisc => "Thick disc",
             Component::Halo => "Halo",
+            Component::NuclearDisc => "Nuclear stellar disc",
         }
     }
 
@@ -67,6 +76,9 @@ impl Component {
             Component::Arms => &[(1.0, 0.0, 0.2)],
             Component::ThickDisc => &[(1.0, 8.0, 12.0)],
             Component::Halo => &[(1.0, 11.0, 13.0)],
+            // Mostly older than 8 billion years, with recent bursts (Nogueras-Lara
+            // et al. 2020).
+            Component::NuclearDisc => &[(0.8, 8.0, 12.0), (0.15, 0.5, 8.0), (0.05, 0.002, 0.5)],
         }
     }
 
@@ -218,7 +230,7 @@ pub struct GalaxyModel {
     /// stellar black holes.
     pub stars: f64,
     /// Share of the stars in each component, in `Component::ALL` order.
-    pub shares: [f64; 6],
+    pub shares: [f64; COMPONENTS],
     pub black_hole_solar: f64,
     /// Where the program starts: a Sun-like spot in the disc.
     pub home_pc: [f64; 3],
@@ -233,6 +245,7 @@ pub struct GalaxyModel {
     pub thin: Disc,
     pub arms: Disc,
     pub thick: Disc,
+    pub nuclear: Disc,
     pub spiral: Spiral,
     pub halo_core_pc: f64,
     /// Vertical axis of the halo relative to its radial ones.
@@ -260,7 +273,8 @@ impl GalaxyModel {
         };
         Self {
             stars: 2.0e11,
-            shares: [0.0005, 0.24, 0.6365, 0.013, 0.09, 0.02],
+            // The nuclear disc's billion solar masses is about 6% of the bar's.
+            shares: [0.0005, 0.225, 0.6365, 0.013, 0.09, 0.02, 0.015],
             black_hole_solar: 4.3e6,
             home_pc: [home, 20.8, 0.0],
             radius_pc: 50_000.0,
@@ -285,6 +299,12 @@ impl GalaxyModel {
                 ring: false,
                 arm_strength: 0.0,
             },
+            nuclear: Disc {
+                scale_length_pc: 75.0,
+                scale_height_pc: 45.0,
+                ring: false,
+                arm_strength: 0.0,
+            },
             spiral,
             halo_core_pc: 2_500.0,
             halo_flattening: 0.7,
@@ -301,6 +321,7 @@ impl GalaxyModel {
             Component::ThinDisc => Some(&self.thin),
             Component::Arms => Some(&self.arms),
             Component::ThickDisc => Some(&self.thick),
+            Component::NuclearDisc => Some(&self.nuclear),
             _ => None,
         }
     }
@@ -340,12 +361,11 @@ impl GalaxyModel {
                 let scaled = (along * along + side * side + (y / high).powi(2)).sqrt();
                 stars / (8.0 * PI * long * high * across) * (-scaled).exp()
             }
-            Component::ThinDisc | Component::Arms | Component::ThickDisc => {
-                let disc = match component {
-                    Component::ThinDisc => &self.thin,
-                    Component::Arms => &self.arms,
-                    _ => &self.thick,
-                };
+            Component::ThinDisc
+            | Component::Arms
+            | Component::ThickDisc
+            | Component::NuclearDisc => {
+                let disc = self.disc(component).expect("a disc component");
                 disc.density(stars, radius(), y) * self.spiral.modulation(disc.arm_strength, x, z)
             }
             Component::Halo => {
@@ -375,11 +395,11 @@ impl GalaxyModel {
     }
 
     /// Share of the stars at a point in each component, in `Component::ALL` order.
-    pub fn shares_at(&self, p: [f64; 3]) -> [f64; 6] {
+    pub fn shares_at(&self, p: [f64; 3]) -> [f64; COMPONENTS] {
         let densities = Component::ALL.map(|c| self.component_density(c, p));
         let total: f64 = densities.iter().sum();
         if total <= 0.0 {
-            return [0.0; 6];
+            return [0.0; COMPONENTS];
         }
         densities.map(|d| d / total)
     }
@@ -413,7 +433,7 @@ mod tests {
     /// Stars in each component, integrated over all space in cylindrical
     /// coordinates with log-spaced radius and height, so both the parsec-wide
     /// nucleus and the 50 kpc halo resolve.
-    fn integrate(galaxy: &GalaxyModel) -> [f64; 6] {
+    fn integrate(galaxy: &GalaxyModel) -> [f64; COMPONENTS] {
         let f = |p| Component::ALL.map(|c| galaxy.component_density(c, p));
         let (low, high) = (1e-2_f64.ln(), 5e4_f64.ln());
         let steps = 240;
@@ -425,7 +445,7 @@ mod tests {
             i if i % 2 == 1 => 4.0,
             _ => 2.0,
         };
-        let mut sum = [0.0; 6];
+        let mut sum = [0.0; COMPONENTS];
         for i in 0..=steps {
             let radius = (low + i as f64 * ds).exp();
             for j in 0..=steps {
@@ -436,7 +456,7 @@ mod tests {
                     let (s, c) = phi.sin_cos();
                     let [x, z] = [radius * c, radius * s];
                     let (above, below) = (f([x, height, z]), f([x, -height, z]));
-                    for c in 0..6 {
+                    for c in 0..COMPONENTS {
                         sum[c] += weight * (above[c] + below[c]);
                     }
                 }
@@ -531,9 +551,17 @@ mod tests {
         assert!(galaxy.shares_at([0.0, 20_000.0, 0.0])[5] > 0.9);
         let halo = galaxy.shares_at(galaxy.home_pc)[5];
         assert!((1e-4..1e-2).contains(&halo), "{halo}");
-        // The nucleus owns the centre; the bulge the inner kiloparsec.
+        // The nucleus owns the centre, the nuclear disc the plane out to about
+        // 200 pc, and the bulge the inner kiloparsec beyond.
         assert!(galaxy.shares_at([1.0, 0.0, 0.0])[0] > 0.9);
+        for r in [30.0, 100.0, 200.0] {
+            assert!(galaxy.shares_at([r, 0.0, 0.0])[6] > 0.5, "{r} pc");
+        }
+        assert!(galaxy.shares_at([0.0, 300.0, 0.0])[6] < 0.1);
         assert!(galaxy.shares_at([500.0, 0.0, 0.0])[1] > 0.5);
+        // The nuclear disc packs several hundred stars per pc³ 100 pc out.
+        let disc = galaxy.density([100.0, 0.0, 0.0]);
+        assert!((150.0..1_000.0).contains(&disc), "{disc}");
     }
 
     fn census(galaxy: &GalaxyModel, p: [f64; 3], count: u32) -> Vec<Star> {

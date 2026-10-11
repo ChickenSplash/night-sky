@@ -9,7 +9,7 @@
 //!   beyond their reach.
 
 use crate::cells::{Cell, ROOT_PC, Sky, cell_star_id};
-use crate::galaxy::Component;
+use crate::galaxy::{COMPONENTS, Component};
 use crate::population::{TIERS, reach_pc};
 use std::collections::{HashSet, VecDeque};
 use std::thread::JoinHandle;
@@ -423,7 +423,7 @@ pub fn wanted(camera: [f64; 3], magnitude: f64) -> Vec<Cell> {
 struct Job {
     cell: Cell,
     /// Its own stars of each component, once worked out.
-    counts: Option<[u64; 6]>,
+    counts: Option<[u64; COMPONENTS]>,
     component: usize,
     /// The next star of `component` to try.
     index: u64,
@@ -658,14 +658,17 @@ impl Loader {
                 Some((cell, component)) => self.sky.integrate(cell, component),
                 None => {
                     let counts = self.sky.counts(cell);
-                    let own: [u64; 6] = std::array::from_fn(|c| counts[c][cell.level()]);
+                    let own: [u64; COMPONENTS] = std::array::from_fn(|c| counts[c][cell.level()]);
                     job.stars.reserve_exact(own.iter().sum::<u64>() as usize);
                     job.counts = Some(own);
                 }
             }
             return false;
         };
-        while job.component < 6 && job.index >= counts[job.component] && job.holes.is_empty() {
+        while job.component < COMPONENTS
+            && job.index >= counts[job.component]
+            && job.holes.is_empty()
+        {
             job.component += 1;
             job.index = 0;
         }
