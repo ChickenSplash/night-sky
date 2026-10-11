@@ -1,5 +1,5 @@
 //! Natively, galactic stars are drawn as single-pixel points while
-//! `RenderDebug::point_stars` is on, instead of `starfield_render`'s
+//! `RenderDebug::point_stars` is on, instead of `stars::render`'s
 //! three-corner triangles: at the galactic centre the cost is per vertex, and
 //! a point is one vertex where a triangle is three.
 //!
@@ -10,10 +10,10 @@
 //! full-screen draw in the transparent pass (`starfield_points_composite.wgsl`)
 //! then gives each point the raster path's Gaussian and adds it to the frame.
 //! It reads the same batch buffers, globals and draw uniforms as
-//! `starfield_render`.
+//! `stars::render`.
 use crate::{
     scene::SpaceCamera,
-    starfield_render::{DrawUniform, Globals, StarBuffers, StarInstance},
+    stars::render::{DrawUniform, Globals, StarBuffers, StarInstance},
 };
 use bevy::{
     asset::{load_internal_asset, uuid_handle},

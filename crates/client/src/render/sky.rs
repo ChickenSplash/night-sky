@@ -22,7 +22,7 @@ pub fn reference_radiance() -> f64 {
 /// Shared manual gain for points and glow; the wireframe calibration is unchanged.
 pub fn radiance_gain(nav: &Navigation, pixel_sr: f64) -> f64 {
     if nav.realistic {
-        irradiance_per_ratio() * crate::exposure::gain(nav.exposure)
+        irradiance_per_ratio() * crate::render::exposure::gain(nav.exposure)
     } else {
         POINT_LIGHT * flux_per_luminosity() * pixel_sr
     }
@@ -35,7 +35,10 @@ mod tests {
     fn galaxy_and_bodies_share_manual_exposure_without_view_metering() {
         let mut nav = Navigation::default();
         let gain = radiance_gain(&nav, 1e-6);
-        assert_eq!(gain, irradiance_per_ratio() * crate::exposure::gain(0.0));
+        assert_eq!(
+            gain,
+            irradiance_per_ratio() * crate::render::exposure::gain(0.0)
+        );
         assert_eq!(gain, radiance_gain(&nav, 1e-8));
         nav.set_exposure(1.0);
         assert_eq!(radiance_gain(&nav, 1e-6), 2.0 * gain);

@@ -6,7 +6,7 @@
 use crate::Navigation;
 use crate::presentation::PresentationMode;
 use crate::scene::CameraRig;
-use crate::stream::{Starfield, StreamRestart};
+use crate::stars::stream::{Starfield, StreamRestart};
 use bevy::{math::DVec3, platform::time::Instant, prelude::*};
 use space_simulation::galaxy::{GalaxyModel, PC_METRES};
 

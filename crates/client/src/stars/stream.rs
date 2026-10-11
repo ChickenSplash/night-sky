@@ -350,7 +350,7 @@ fn stream(
     mut metrics: ResMut<StreamMetrics>,
     (rig, pose): (Res<CameraRig>, Res<CameraPose>),
     (debug, nav): (
-        Res<crate::render_debug::RenderDebug>,
+        Res<crate::render::debug::RenderDebug>,
         Res<crate::Navigation>,
     ),
     mut restart: ResMut<StreamRestart>,

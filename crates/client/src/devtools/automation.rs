@@ -41,24 +41,24 @@ fn publish(
     universe: Res<Universe>,
     nav: Res<Navigation>,
     clock: Res<crate::Clock>,
-    metrics: Res<crate::stream::StreamMetrics>,
-    starfield: Res<crate::stream::Starfield>,
-    benchmark: Option<Res<crate::benchmark::BenchmarkFlight>>,
+    metrics: Res<crate::stars::stream::StreamMetrics>,
+    starfield: Res<crate::stars::stream::Starfield>,
+    benchmark: Option<Res<crate::devtools::benchmark::BenchmarkFlight>>,
 ) {
     let state = serde_json::json!({
         "lists": universe.0.systems.len(),
         "list": nav.list().and_then(|i| Some(universe.0.systems.get(i)?.id.as_str())),
-        "trail": crate::breadcrumb::trail(&nav, &universe.0)
+        "trail": crate::ui::breadcrumb::trail(&nav, &universe.0)
             .into_iter()
             .map(|crumb| crumb.label)
             .collect::<Vec<_>>(),
-        "selection_trail": crate::breadcrumb::selection_trail(&nav, &universe.0)
+        "selection_trail": crate::ui::breadcrumb::selection_trail(&nav, &universe.0)
             .into_iter().map(|crumb| crumb.label).collect::<Vec<_>>(),
         "selection": nav.selection.as_ref().map(crate::Selection::object),
         "location_planet": nav.location_planet,
-        "inspection": crate::breadcrumb::active_inspection(&nav, &universe.0,
-            &crate::breadcrumb::trail(&nav, &universe.0),
-            &crate::breadcrumb::selection_trail(&nav, &universe.0)),
+        "inspection": crate::ui::breadcrumb::active_inspection(&nav, &universe.0,
+            &crate::ui::breadcrumb::trail(&nav, &universe.0),
+            &crate::ui::breadcrumb::selection_trail(&nav, &universe.0)),
         "page": nav.page,
         "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,

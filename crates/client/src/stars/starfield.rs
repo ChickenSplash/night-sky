@@ -1,17 +1,17 @@
 //! Batched, camera-relative galactic points. A batch holds many stars, not
 //! one entity or material per star, uploaded in bounded chunks and drawn by
-//! `starfield_render` as one instance per star.
+//! `stars::render` as one instance per star.
 
 use crate::{
     Navigation, Universe,
     render::Photometry,
-    render_debug::RenderDebug,
+    render::debug::RenderDebug,
+    render::sky::radiance_gain,
     scene::{CameraPose, CameraRig, SpaceCamera},
-    sky::radiance_gain,
-    starfield_render::{
+    stars::render::{
         Globals, PALETTE, SHADER, StarDraw, StarFrame, StarInstance, StarRenderPlugin, StarUploads,
     },
-    stream::{Starfield, StreamMetrics},
+    stars::stream::{Starfield, StreamMetrics},
 };
 use bevy::{asset::load_internal_asset, math::DVec3, prelude::*};
 use space_simulation::{
@@ -165,7 +165,7 @@ impl Plugin for StarfieldRenderPlugin {
             .init_resource::<Precise>()
             .add_systems(PostUpdate, sync.after(crate::scene::draw));
         #[cfg(not(target_arch = "wasm32"))]
-        app.add_plugins(crate::starfield_points::StarPointsPlugin);
+        app.add_plugins(crate::stars::points::StarPointsPlugin);
     }
 }
 

@@ -4,8 +4,8 @@
 //! has changed. A full-view quad then scales that image up into the 3D view.
 use crate::{
     Navigation,
+    render::sky::radiance_gain,
     scene::{CameraPose, CameraRig, SpaceCamera},
-    sky::radiance_gain,
 };
 use bevy::{
     asset::{RenderAssetUsages, load_internal_asset, uuid_handle},

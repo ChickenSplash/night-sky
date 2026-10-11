@@ -1,37 +1,14 @@
 mod actions;
-#[cfg(target_arch = "wasm32")]
-mod automation;
-#[cfg(target_arch = "wasm32")]
-mod benchmark;
-mod black_hole;
-mod breadcrumb;
 mod command_line;
-mod core_load;
 mod devtools;
-#[cfg(not(target_arch = "wasm32"))]
-mod diagnostics;
-mod exposure;
 mod flight;
 mod galaxy_nav;
-mod glow;
-mod gpu_test;
-mod inspector;
 mod network;
 mod objects;
 mod presentation;
 mod render;
-mod render_debug;
 mod scene;
-mod sky;
-#[cfg(not(target_arch = "wasm32"))]
-mod smoke;
-mod starfield;
-#[cfg(not(target_arch = "wasm32"))]
-mod starfield_points;
-mod starfield_render;
-mod stream;
-mod tasks;
-mod terminal;
+mod stars;
 mod ui;
 
 use bevy::{math::DVec3, prelude::*};
@@ -97,7 +74,7 @@ pub struct Navigation {
     /// visiting a star or following a planet does.
     pub selection: Option<Selection>,
     /// Which trail and object currently drive the floating inspector.
-    pub inspection: Option<breadcrumb::Inspection>,
+    pub inspection: Option<ui::breadcrumb::Inspection>,
     /// Physical planet neighbourhood, unrelated to selection or following.
     pub location_planet: Option<String>,
     pub following: bool,
@@ -184,7 +161,10 @@ pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=8.5;
 impl Navigation {
     pub fn set_exposure(&mut self, stops: f64) {
         if stops.is_finite() {
-            self.exposure = stops.clamp(*exposure::STOPS.start(), *exposure::STOPS.end());
+            self.exposure = stops.clamp(
+                *render::exposure::STOPS.start(),
+                *render::exposure::STOPS.end(),
+            );
         }
     }
 
@@ -247,8 +227,8 @@ impl Navigation {
         self.inspection = self
             .selection
             .as_ref()
-            .map(|selection| breadcrumb::Inspection {
-                source: breadcrumb::TrailSource::Selection,
+            .map(|selection| ui::breadcrumb::Inspection {
+                source: ui::breadcrumb::TrailSource::Selection,
                 object: selection.object(),
             });
     }
@@ -314,14 +294,14 @@ struct Inbox(Mutex<mpsc::Receiver<network::Update>>);
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
-    diagnostics::install_crash_reports();
+    devtools::diagnostics::install_crash_reports();
     let smoke_test = std::env::args().any(|arg| arg == "--smoke-test");
     let mut initial_nav = Navigation::default();
     #[cfg(target_arch = "wasm32")]
-    let benchmark = benchmark::requested();
+    let benchmark = devtools::benchmark::requested();
     #[cfg(target_arch = "wasm32")]
     if benchmark {
-        benchmark::at_home(&mut initial_nav);
+        devtools::benchmark::at_home(&mut initial_nav);
     }
     if smoke_test {
         // Its captures start in the first list's first system.
@@ -363,11 +343,11 @@ fn main() {
         BigSpaceDefaultPlugins,
         EguiPlugin::default(),
         render::RenderPlugin,
-        render_debug::RenderDebugPlugin,
-        stream::StreamPlugin,
-        starfield::StarfieldRenderPlugin,
-        glow::GlowPlugin,
-        black_hole::BlackHolePlugin,
+        render::debug::RenderDebugPlugin,
+        stars::stream::StreamPlugin,
+        stars::starfield::StarfieldRenderPlugin,
+        render::glow::GlowPlugin,
+        render::black_hole::BlackHolePlugin,
         command_line::CommandLinePlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
@@ -379,8 +359,8 @@ fn main() {
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
-    .init_resource::<core_load::CoreLoad>()
-    .init_resource::<gpu_test::GpuTest>()
+    .init_resource::<devtools::core_load::CoreLoad>()
+    .init_resource::<devtools::gpu_test::GpuTest>()
     .insert_resource(initial_nav)
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
@@ -392,11 +372,11 @@ fn main() {
             tick,
             scene::controls,
             #[cfg(not(target_arch = "wasm32"))]
-            core_load::run,
+            devtools::core_load::run,
             #[cfg(not(target_arch = "wasm32"))]
-            gpu_test::run,
+            devtools::gpu_test::run,
             #[cfg(target_arch = "wasm32")]
-            benchmark::advance,
+            devtools::benchmark::advance,
             scene::locate,
             scene::place_camera,
             scene::locate_planet,
@@ -417,18 +397,18 @@ fn main() {
         (ui::draw_ui, devtools::draw.after(ui::draw_ui)),
     );
     #[cfg(not(target_arch = "wasm32"))]
-    app.add_systems(Update, smoke::exercise);
+    app.add_systems(Update, devtools::smoke::exercise);
     #[cfg(target_arch = "wasm32")]
     if benchmark {
-        app.insert_resource(benchmark::BenchmarkFlight::default())
-            .add_systems(Last, benchmark::record)
+        app.insert_resource(devtools::benchmark::BenchmarkFlight::default())
+            .add_systems(Last, devtools::benchmark::record)
             .add_systems(
                 EguiPrimaryContextPass,
-                benchmark::results_window.after(ui::draw_ui),
+                devtools::benchmark::results_window.after(ui::draw_ui),
             );
     }
     #[cfg(target_arch = "wasm32")]
-    automation::install(&mut app);
+    devtools::automation::install(&mut app);
     app.run();
 }
 

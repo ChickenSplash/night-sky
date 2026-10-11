@@ -30,7 +30,7 @@ const HDR_SHADER: Handle<Shader> = uuid_handle!("b3f1c0a2-5d7e-4a96-8e21-4c6f9d0
 /// Fixed reference sensitivity, independent of location, selection and time.
 /// Zero stops keeps the former dark-space calibration for magnitude-0 points.
 pub fn gain(stops: f64) -> f64 {
-    stops.exp2() / crate::sky::reference_radiance()
+    stops.exp2() / crate::render::sky::reference_radiance()
 }
 
 pub fn facts(nav: &Navigation) -> Vec<(&'static str, String, Option<&'static str>)> {

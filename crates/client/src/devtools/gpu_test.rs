@@ -6,10 +6,10 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use crate::Navigation;
-use crate::render_debug::RenderDebug;
+use crate::render::debug::RenderDebug;
 use crate::scene::CameraRig;
-use crate::starfield_render::StarInstance;
-use crate::stream::{Starfield, StreamMetrics, StreamRestart};
+use crate::stars::render::StarInstance;
+use crate::stars::stream::{Starfield, StreamMetrics, StreamRestart};
 use bevy::{
     diagnostic::DiagnosticsStore, platform::time::Instant, prelude::*, window::PrimaryWindow,
 };
@@ -21,7 +21,7 @@ const FROM_CENTRE_LY: f64 = 500.0;
 pub const SETTLE_S: f64 = 2.0;
 pub const MEASURE_S: f64 = 20.0;
 /// Passes drawing stars: the transparent pass, and the points pass when
-/// stars are points (`starfield_points.rs`).
+/// stars are points (`stars/points.rs`).
 const STAR_PASSES: [&str; 2] = ["main_transparent_pass_3d", "star_points"];
 
 #[derive(Resource, Default)]
@@ -127,15 +127,16 @@ fn commit() -> String {
 #[cfg(not(target_arch = "wasm32"))]
 fn save(results: &GpuResults) {
     use std::io::Write;
-    let path = crate::diagnostics::logs_dir().join("gpu-test.jsonl");
+    let path = crate::devtools::diagnostics::logs_dir().join("gpu-test.jsonl");
     let line = serde_json::to_string(results).unwrap_or_default();
-    let written = std::fs::create_dir_all(crate::diagnostics::logs_dir()).and_then(|()| {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .and_then(|mut file| writeln!(file, "{line}"))
-    });
+    let written =
+        std::fs::create_dir_all(crate::devtools::diagnostics::logs_dir()).and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .and_then(|mut file| writeln!(file, "{line}"))
+        });
     if let Err(error) = written {
         warn!("GPU test: could not write {}: {error}", path.display());
     }
@@ -155,7 +156,10 @@ pub fn run(
     let (time, diagnostics, debug) = measure;
     match &mut *test {
         GpuTest::Requested => {
-            crate::core_load::facing_centre(&mut nav, FROM_CENTRE_LY * LY_METRES / PC_METRES);
+            crate::devtools::core_load::facing_centre(
+                &mut nav,
+                FROM_CENTRE_LY * LY_METRES / PC_METRES,
+            );
             rig.land();
             restart.0 = true;
             *test = GpuTest::Loading(Instant::now());

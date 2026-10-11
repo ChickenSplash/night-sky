@@ -1,4 +1,4 @@
-// Galactic stars, one instance each (`starfield_render.rs`). Each is an
+// Galactic stars, one instance each (`stars/render.rs`). Each is an
 // oversized triangle expanded around its projected centre; the fragment
 // shader cuts out a small Gaussian. Every star has the same one- to two-pixel
 // profile, as in a perfect camera: brightness shows in its peak and, above
@@ -14,7 +14,7 @@ struct Globals {
     // realistic colour and visual brightness from the palette.
     settings: vec4<f32>,
     // x: one to skip rasterising every point, y: footprint radius in physical
-    // pixels (debug switches, `render_debug.rs`).
+    // pixels (debug switches, `render/debug.rs`).
     debug: vec4<f32>,
     // Unit-luminance colour, then visual efficiency, log-spaced in
     // temperature from 1,000 to 50,000 K (`starfield.rs`).

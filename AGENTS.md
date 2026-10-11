@@ -28,7 +28,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   visual bugs without a panic.
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
 - The browser is the main target; native is a dev fallback. Both use the same
-  egui interface (`ui.rs`), drawn in the same frame as the scene, which fills
+  egui interface (`ui/mod.rs`), drawn in the same frame as the scene, which fills
   the whole window: there is no sidebar. Two free-floating halo icons at the
   top right (`ui::icons`, ⚙ above ✔, `breadcrumb::halo_glyph`, hover blue,
   white while open) toggle two plain egui windows that first open just below
@@ -76,7 +76,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `ObjectRef`, hierarchy builders and inspector resolution (moons do not yet
   exist). `UiCommand::Up` is separate keyboard navigation: reframe tracking,
   else clear selection, else move up physically; no crumb contains travel code.
-- Time controls (`ui.rs`) are two free-floating, centred lines at the bottom
+- Time controls (`ui/mod.rs`) are two free-floating, centred lines at the bottom
   of the 3D viewport, using the breadcrumb font, colours and `halo_text`.
   Elapsed simulation time sits above the actual rate (two decimal places,
   seconds/minutes/hours/days/years per real second). Click the rate to toggle
@@ -117,7 +117,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   While a mouse button is held, the HUD hit test uses its press origin, not
   hover position, so camera drags that begin outside the rate text continue
   uninterrupted when crossing it.
-- Debug tooling stays out of the product UI, in `devtools.rs`: a floating,
+- Debug tooling stays out of the product UI, in `devtools/mod.rs`: a floating,
   movable, resizable window toggled by ` or F3 on both clients (the public
   site included), with tabs `log` (an in-memory console of the last 2,000
   tracing events from `devtools::log_layers`, with level filter and grep; the
@@ -135,7 +135,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
   open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (GPU test, core load test and bug report
   natively, star-stream benchmark in the browser). New debug readouts and switches go there, not in Settings or the
-  canvas. The performance switches (`render_debug::RenderDebug`, not
+  canvas. The performance switches (`render::debug::RenderDebug`, not
   `Navigation`; `set_debug <switch> <on>`) are for A/B tests and reset on
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
@@ -314,7 +314,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `counts_need`/`place_need` report the masses a step still needs; they share
   `Sky::descend` with `place`, so sliced loading gives the same stars. Loaded
   cells drop beyond `KEEP` × reach. Stars stream as compact `StarPoint`s.
-- `crates/client/src/stream.rs` aims the loader at the camera
+- `crates/client/src/stars/stream.rs` aims the loader at the camera
   (`CameraRig::galactic_ly`, lists anchored at home) to
   `Navigation::magnitude` (6.5 by default): a
   worker thread natively, a dedicated module Web Worker in the browser, into
@@ -369,7 +369,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   too slow for meaningful comparisons, so use headed Chromium on Wayland.
 - `starfield.rs` builds batches of up to `PACK` (65,536) uploaded stars,
   filled from `SLICE`-sized steps of a cell's stars within the upload budget,
-  so a large cell may take several frames, and `starfield_render.rs` draws
+  so a large cell may take several frames, and `stars/render.rs` draws
   them. Each star is one 20-byte `StarInstance` (f32 position from its
   block's centre, luminosity, temperature) in a vertex buffer uploaded once,
   drawn as an instance of a three-corner triangle the shader builds from
@@ -390,7 +390,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
   retained cells after the camera travels 0.2 of the tier's reach.
   Natively, while the `point_stars` switch is on (default),
-  `starfield_points.rs` draws the same batches as single-pixel points, one
+  `stars/points.rs` draws the same batches as single-pixel points, one
   vertex per star instead of three: the `StarPoints` node (between
   `MainOpaquePass` and `MainTransmissivePass`, GPU span `star_points`) draws
   them additively into an `Rgba16Float` image at `SUPERSAMPLE` (2) times the
@@ -556,7 +556,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   in stops and compression as a percentage, with expandable explanations.
   No physical/assisted checkbox, metering, target key or adaptation remains.
   Photometry lives in `space_simulation::light`;
-  exposure, the pools and the HDR camera in `crates/client/src/render.rs`,
+  exposure, the pools and the HDR camera in `crates/client/src/render/mod.rs`,
   with the shaders in `body.wgsl` and `point.wgsl`.
 - Bodies are plain spheres under the wireframes. `scene::draw` gathers `Lights`
   while drawing gizmos; `render::sync_bodies`/`sync_points` place pooled mesh

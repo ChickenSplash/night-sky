@@ -2,10 +2,12 @@
 use crate::{
     Navigation,
     actions::{GalaxyReference, UiCommand},
-    breadcrumb::{CURRENT, HOVER, HUD_LINE_GAP, Inspection, LINK, halo_text, halo_wrapped_text},
     objects::{self, ObjectRef},
     presentation::PresentationMode,
-    stream::Starfield,
+    stars::stream::Starfield,
+    ui::breadcrumb::{
+        CURRENT, HOVER, HUD_LINE_GAP, Inspection, LINK, halo_text, halo_wrapped_text,
+    },
 };
 use bevy_egui::egui;
 use space_shared::Galaxy;

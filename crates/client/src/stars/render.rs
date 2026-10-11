@@ -94,7 +94,7 @@ pub struct StarFrame {
     pub draws: Vec<StarDraw>,
     /// Precise sprites, placed relative to the eye each frame.
     pub precise: Vec<StarInstance>,
-    /// Draw as single-pixel points (`starfield_points.rs`), not triangles.
+    /// Draw as single-pixel points (`stars/points.rs`), not triangles.
     pub points: bool,
 }
 

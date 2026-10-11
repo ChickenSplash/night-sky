@@ -1,15 +1,26 @@
 //! The debug window, kept apart from the product UI: the client log, frame and
 //! star-stream timings, rendering switches, internal state and tools. ` or F3
 //! toggles it on both clients. Drawn in the terminal look (`terminal.rs`).
+#[cfg(target_arch = "wasm32")]
+pub mod automation;
+#[cfg(target_arch = "wasm32")]
+pub mod benchmark;
+pub mod core_load;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod diagnostics;
+pub mod gpu_test;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod smoke;
+
 use crate::actions::{Display, GalaxyReference, UiCommand};
 use crate::command_line::{self, Source, Typed};
-use crate::core_load::CoreLoad;
-use crate::gpu_test::GpuTest;
+use crate::devtools::core_load::CoreLoad;
+use crate::devtools::gpu_test::GpuTest;
 use crate::presentation::PresentationMode;
-use crate::render_debug::RenderDebug;
+use crate::render::debug::RenderDebug;
 use crate::scene::{CameraPose, CameraRig, CameraVelocity, speed_label};
-use crate::stream::{Starfield, StreamMetrics};
-use crate::terminal::{self, DIM, TEXT};
+use crate::stars::stream::{Starfield, StreamMetrics};
+use crate::ui::terminal::{self, DIM, TEXT};
 use crate::{Clock, Navigation, Selection, Universe, Visit};
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::log::tracing::{
@@ -59,7 +70,7 @@ pub fn log_layers(app: &mut App) -> Option<BoxedLayer> {
     START.get_or_init(Instant::now);
     let console: BoxedLayer = Box::new(Console);
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(file) = crate::diagnostics::file_layer(app) {
+    if let Some(file) = crate::devtools::diagnostics::file_layer(app) {
         return Some(Box::new(vec![file, console]));
     }
     let _ = app;
@@ -752,8 +763,8 @@ fn perf(
     gpu_passes(ui, diagnostics, mean);
 }
 
-/// GPU bytes per uploaded star (`starfield_render::StarInstance`).
-const STAR_BYTES: usize = size_of::<crate::starfield_render::StarInstance>();
+/// GPU bytes per uploaded star (`stars::render::StarInstance`).
+const STAR_BYTES: usize = size_of::<crate::stars::render::StarInstance>();
 
 /// GPU and render-thread time, and shader invocations, per render pass, from
 /// Bevy's render diagnostics (native only: WebGL 2 has no timestamp queries).
@@ -911,7 +922,7 @@ fn frame_graph(ui: &mut egui::Ui, frames: &VecDeque<f32>) {
 
 fn render(ui: &mut egui::Ui, nav: &Navigation, debug: &RenderDebug, out: &mut Vec<UiCommand>) {
     terminal::heading(ui, "exposure");
-    terminal::facts_with_details(ui, "debug-exposure", &crate::exposure::facts(nav));
+    terminal::facts_with_details(ui, "debug-exposure", &crate::render::exposure::facts(nav));
     terminal::heading(ui, "realistic rendering");
     for (option, on, label) in [
         (
@@ -1016,7 +1027,7 @@ fn state(
         &[
             (
                 "trail",
-                crate::breadcrumb::text(&crate::breadcrumb::trail(nav, galaxy)),
+                crate::ui::breadcrumb::text(&crate::ui::breadcrumb::trail(nav, galaxy)),
             ),
             (
                 "location",
@@ -1114,7 +1125,7 @@ fn tools_tab(
         let _ = (tools, core_load, gpu, field, metrics);
         terminal::heading(ui, "benchmark");
         if terminal::button(ui, "run star-stream benchmark") {
-            crate::benchmark::restart();
+            crate::devtools::benchmark::restart();
         }
         terminal::note(
             ui,
@@ -1126,7 +1137,7 @@ fn tools_tab(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &StreamMetrics) {
-    use crate::gpu_test::{MEASURE_S, SETTLE_S};
+    use crate::devtools::gpu_test::{MEASURE_S, SETTLE_S};
     terminal::heading(ui, "gpu test");
     if terminal::button(ui, "measure the galactic centre view") {
         *test = GpuTest::Requested;
@@ -1312,7 +1323,7 @@ fn save_bug_report(
         rig.progress(),
         starfield.summary(),
     );
-    match crate::diagnostics::save_bug_report(&state) {
+    match crate::devtools::diagnostics::save_bug_report(&state) {
         Ok(path) => {
             info!("Bug report saved to {}", path.display());
             commands

@@ -1,4 +1,4 @@
-// Galactic stars as single-pixel points (`starfield_points.rs`), native only.
+// Galactic stars as single-pixel points (`stars/points.rs`), native only.
 // Each star is one vertex, drawn additively into an image at `SUPERSAMPLE`
 // times the view's resolution per axis; `starfield_points_composite.wgsl`
 // turns each point into the raster path's Gaussian. Cutoff, near hiding,

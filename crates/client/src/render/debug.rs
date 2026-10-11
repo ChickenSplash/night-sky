@@ -24,7 +24,7 @@ pub enum DebugSwitch {
     /// Hide star batches whose grid block lies outside the view.
     CullBlocks,
     /// Natively, draw galactic stars as single-pixel points shaped by a
-    /// composite pass, rather than as triangles (`starfield_points.rs`).
+    /// composite pass, rather than as triangles (`stars/points.rs`).
     /// No effect in the browser.
     PointStars,
 }

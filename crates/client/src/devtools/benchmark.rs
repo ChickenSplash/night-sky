@@ -3,7 +3,7 @@
 //! toward the galactic centre, independent of keyboard focus or frame rate.
 
 use crate::Navigation;
-use crate::stream::{Starfield, StreamMetrics, StreamSample};
+use crate::stars::stream::{Starfield, StreamMetrics, StreamSample};
 use bevy::{math::DVec3, platform::time::Instant, prelude::*};
 use bevy_egui::{EguiContexts, egui};
 use serde::Serialize;
