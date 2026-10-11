@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 const root = resolve(import.meta.dirname, '..');
-const base = process.env.SPACE_URL || 'http://192.168.1.90:4321';
+const base = process.env.SPACE_URL || 'http://127.0.0.1:4321';
 const cache = resolve(homedir(), '.cache/ms-playwright');
 const cachedChrome = existsSync(cache) ? readdirSync(cache)
   .filter(name => name.startsWith('chromium-')).sort().reverse()

@@ -6,4 +6,5 @@
 *.log
 /web/dist/
 /tools/
-/deploy/bundle/
+/deploy/
+/scripts/deploy-homelab.sh
