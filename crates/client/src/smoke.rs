@@ -139,7 +139,8 @@ pub fn exercise(
         20 => {
             // Bodies alone, so the points are not hidden under their outlines.
             nav.realistic = true;
-            nav.set_exposure(-20.0);
+            // Galaxy exposure: compression must expose the system for itself.
+            nav.set_exposure(0.0);
             nav.set_compression(1.0);
             nav.wireframe = false;
             nav.markers = false;

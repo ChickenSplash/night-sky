@@ -41,6 +41,11 @@ pub const POINT_PIXELS: f32 = 1.5;
 const CORE_SIGMA: f32 = 0.8;
 const HALO_SIGMA: f32 = 3.0;
 const HALO_SHARE: f32 = 0.12;
+/// Display values a body's key shows at when exposed for itself: a planet's
+/// sub-stellar point just under white, so its shading shows, and a star's
+/// surface a little over, so its disc reads as white with darkened limbs.
+const PLANET_KEY: f64 = 0.8;
+const STAR_KEY: f64 = 2.0;
 /// Corona brightness just outside the limb, relative to the disc: the real
 /// inner corona is about a millionth.
 const CORONA_SHARE: f64 = 1e-6;
@@ -191,6 +196,18 @@ impl Exposure {
     }
 }
 
+/// Gain that moves a body from the shared exposure towards its own, where its
+/// `key` (display value at the shared exposure) shows as `target`. `amount` is
+/// the share of the stops between them removed: zero is one physical exposure,
+/// one exposes every body for itself. Bodies are only ever dimmed, never
+/// brightened beyond physical.
+fn balance(key: f64, target: f64, amount: f64) -> f64 {
+    if key <= target {
+        return 1.0;
+    }
+    (target / key).powf(amount.clamp(0.0, 1.0))
+}
+
 /// Exposed colour for f32 uniforms, preserving hue at the safety limit.
 fn hdr_colour(colour: DVec3, value: f64) -> Vec3 {
     (colour * value.min(MAX_VALUE / colour.max_element().max(1.0))).as_vec3()
@@ -330,17 +347,22 @@ pub struct Frame {
     pub coronas: Vec<Point>,
 }
 
-/// Exposes every body with the same fixed manual gain. Compression is applied
-/// to the composed scene, not separately to bodies or points.
-pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64) -> Frame {
+/// Exposes every body with the shared manual gain, then moves each towards its
+/// own exposure by `compression` (see `balance`). Galactic points and glow
+/// never balance: Exposure alone sets the galaxy.
+pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression: f64) -> Frame {
     let exposure = Exposure {
         gain: crate::exposure::gain(stops),
     };
     let mut frame = Frame::default();
     for star in &lights.stars {
         let colour = DVec3::from_array(photometry.colour(star.kelvin));
+        // A point is keyed by its light spread over a point-sized disc, which
+        // matches the disc's surface at the switch.
+        let key = exposure.value(spread(star.radiance, star.pixels.min(POINT_PIXELS)));
+        let balance = balance(key, STAR_KEY, compression);
         if star.pixels < POINT_PIXELS {
-            let light = exposure.point(star.radiance, star.pixels);
+            let light = exposure.point(star.radiance, star.pixels) * balance;
             frame.points.push(Point::new(
                 star.centre,
                 star.pixels,
@@ -350,7 +372,7 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64) -> Frame {
             ));
             continue;
         }
-        let value = exposure.value(star.radiance);
+        let value = exposure.value(star.radiance) * balance;
         frame.bodies.push(Shaded {
             centre: star.centre,
             radius: star.radius,
@@ -371,17 +393,20 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64) -> Frame {
             star.centre,
             star.pixels,
             star.per_pixel,
-            pearl * exposure.value(star.radiance * CORONA_SHARE) * fade,
+            pearl * exposure.value(star.radiance * CORONA_SHARE) * balance * fade,
         ));
     }
     let tint = DVec3::from_array(photometry.colour(lights.kelvin));
     for planet in &lights.planets {
         let radiance = light::reflected_radiance(planet.surface.albedo, planet.flux);
         let colour = tint * DVec3::from_array(planet.surface.tint);
+        // Keyed by the sub-stellar point, never by phase, so crescents stay dim.
+        let key = exposure.value(spread(radiance, planet.pixels.min(POINT_PIXELS)));
+        let balance = balance(key, PLANET_KEY, compression);
         if planet.pixels < POINT_PIXELS {
             let towards_eye = (lights.eye - planet.centre).normalize_or_zero();
             let angle = planet.towards_star.angle_between(towards_eye);
-            let light = exposure.point(radiance * phase(angle), planet.pixels);
+            let light = exposure.point(radiance * phase(angle), planet.pixels) * balance;
             frame.points.push(Point::new(
                 planet.centre,
                 planet.pixels,
@@ -391,7 +416,7 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64) -> Frame {
             ));
             continue;
         }
-        let value = exposure.value(radiance);
+        let value = exposure.value(radiance) * balance;
         frame.bodies.push(Shaded {
             centre: planet.centre,
             radius: planet.radius,
@@ -485,7 +510,7 @@ fn shade(
     mut frame: ResMut<Frame>,
 ) {
     *frame = if nav.realistic {
-        resolve(&lights, &photometry, nav.exposure)
+        resolve(&lights, &photometry, nav.exposure, nav.compression)
     } else {
         Frame::default()
     };
@@ -729,7 +754,7 @@ mod tests {
     #[test]
     fn manual_exposure_preserves_physical_brightness_ratios() {
         let photometry = Photometry::default();
-        let physical = resolve(&lights(), &photometry, -30.0);
+        let physical = resolve(&lights(), &photometry, -30.0, 0.0);
         // Earth at 1 AU against a planet at 10 AU: 100 times dimmer,
         // as discs and as points alike, before shared display compression.
         let discs = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
@@ -752,7 +777,7 @@ mod tests {
         let mut dim = lights();
         dim.planets[2].flux = 0.0;
         dim.planets[0].flux = 0.0;
-        let dim = resolve(&dim, &photometry, -30.0);
+        let dim = resolve(&dim, &photometry, -30.0, 0.0);
         assert_eq!(dim.points[2].light(), 0.0);
         assert_eq!(brightness(&dim.bodies[1]), 0.0);
         assert_eq!(dim.bodies[1].light.w, 0.0);
@@ -774,8 +799,8 @@ mod tests {
         let photometry = Photometry::default();
         let mut near = lights();
         near.stars[0].pixels = 400.0;
-        let close = resolve(&near, &photometry, -40.0);
-        let far = resolve(&lights(), &photometry, -40.0);
+        let close = resolve(&near, &photometry, -40.0, 0.0);
+        let far = resolve(&lights(), &photometry, -40.0, 0.0);
         assert_eq!(close.bodies[0].colour, far.bodies[0].colour);
         assert_eq!(close.bodies[1].colour, far.bodies[1].colour);
         let corona = |f: &Frame| f.coronas[0].colour.max_element() / brightness(&f.bodies[0]);
@@ -783,15 +808,15 @@ mod tests {
         // Only discs have coronas, and they fade in from a point.
         assert_eq!(close.coronas.len(), 1);
         near.stars[0].pixels = POINT_PIXELS;
-        let edge = resolve(&near, &photometry, -40.0);
+        let edge = resolve(&near, &photometry, -40.0, 0.0);
         assert!(edge.coronas[0].colour.max_element() < 1e-6);
     }
 
     #[test]
     fn one_stop_doubles_bodies_points_and_coronas() {
         let photometry = Photometry::default();
-        let a = resolve(&lights(), &photometry, -40.0);
-        let b = resolve(&lights(), &photometry, -39.0);
+        let a = resolve(&lights(), &photometry, -40.0, 0.0);
+        let b = resolve(&lights(), &photometry, -39.0, 0.0);
         for (a, b) in a.bodies.iter().zip(&b.bodies) {
             assert_eq!(b.colour, a.colour * 2.0);
         }
@@ -803,6 +828,39 @@ mod tests {
         {
             assert_eq!(b.colour, a.colour * 2.0);
         }
+    }
+
+    #[test]
+    fn compression_moves_each_body_towards_its_own_exposure() {
+        let photometry = Photometry::default();
+        let ratio = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
+        // At galaxy exposure both planets are far over white: half compression
+        // keeps half their 100x (6.6 stops) difference, full keeps none.
+        let half = resolve(&lights(), &photometry, 0.0, 0.5);
+        assert!((ratio(&half) - 10.0).abs() < 0.01);
+        let full = resolve(&lights(), &photometry, 0.0, 1.0);
+        assert!((ratio(&full) - 1.0).abs() < 1e-4);
+        // Each shows at its key: the Sun's surface and Earth's sub-stellar point.
+        let sun = DVec3::from_array(photometry.colour(5772.0)).max_element();
+        assert!((f64::from(brightness(&full.bodies[0])) / sun - STAR_KEY).abs() < 1e-4);
+        let earth = lights().planets[0].surface.tint;
+        let earth =
+            (DVec3::from_array(photometry.colour(5772.0)) * DVec3::from_array(earth)).max_element();
+        assert!((f64::from(brightness(&full.bodies[1])) / earth - PLANET_KEY).abs() < 1e-4);
+        // Points balance alike, and the corona keeps its share of the disc.
+        assert!((full.points[2].light() / full.points[3].light() - 1.0).abs() < 1e-4);
+        let corona = full.coronas[0].colour.max_element() / brightness(&full.bodies[0]);
+        assert!((corona - CORONA_SHARE as f32).abs() < 1e-8);
+    }
+
+    #[test]
+    fn compression_never_brightens_dim_bodies() {
+        let photometry = Photometry::default();
+        let dim = resolve(&lights(), &photometry, -60.0, 0.0);
+        let full = resolve(&lights(), &photometry, -60.0, 1.0);
+        assert_eq!(dim.bodies, full.bodies);
+        assert_eq!(dim.points, full.points);
+        assert_eq!(balance(0.0, PLANET_KEY, 1.0), 1.0);
     }
 
     #[test]
@@ -830,7 +888,7 @@ mod tests {
     fn hdr_safety_cap_keeps_extreme_manual_values_finite() {
         let mut lights = lights();
         lights.stars[0].kelvin = 50000.0;
-        let frame = resolve(&lights, &Photometry::default(), 16.0);
+        let frame = resolve(&lights, &Photometry::default(), 16.0, 0.0);
         assert!(
             frame
                 .bodies

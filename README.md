@@ -92,14 +92,14 @@ rewinds or jumps the orbit phase.
 
 Exposure and compression share the Magnitude limit's free-floating halo-text
 style. Exposure ranges from -64 to +16 stops relative to a fixed dark-space
-reference, with no automatic adaptation. Compression uses one display curve
-for planets, stars and galaxy glow, per pixel after bloom. Zero clips at white,
-small values look the same, and higher values fit up to 30 stops of highlights
-below white without changing faint light. Set Exposure for the galaxy first,
-then raise Compression until bright planets show their shading. Neither
-control is persisted; defaults are 0 stops and 50% compression. The debug
-Render tab explains both. Very large brightness gaps still lose contrast: a
-planet's day/night line looks hard when 24 stops are squeezed into the screen.
+reference, with no automatic adaptation, and sets the galaxy. Compression
+exposes each star (with its corona) and planet towards its own exposure,
+keyed by how strongly it is lit: 0% is one physical exposure for everything,
+50% keeps half of each body's excess stops, and 100% shows every body
+correctly exposed, with soft terminators, while the galaxy stays at your
+Exposure. Bodies are never brightened beyond physical. Neither control is
+persisted; defaults are 0 stops and 50% compression. The debug Render tab
+explains both.
 
 Presentation mode controls the scene layout, not whether the camera is tracking
 or navigating freely: **Simulation** uses simulated orbital positions,

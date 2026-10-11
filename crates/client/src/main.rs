@@ -127,7 +127,8 @@ pub struct Navigation {
     pub galaxy_glow: bool,
     /// Manual exposure in stops relative to the fixed reference sensitivity.
     pub exposure: f64,
-    /// Shared display compression, zero (linear clipping) to one (strong).
+    /// How far each body is exposed for itself: zero is one physical exposure,
+    /// one shows every body correctly exposed (`render::resolve`).
     pub compression: f64,
     /// Wireframes over the realistic bodies. Always drawn otherwise.
     pub wireframe: bool,

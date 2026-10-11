@@ -19,7 +19,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
-- `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures (compressed, linear, lit planet close-up, constellation, star close-up with both compression settings).
+- `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures at galaxy exposure (0 stops: system at 100% and 0% compression, lit planet close-up, constellation, star close-up at both compression settings).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
   run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
   documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
@@ -572,35 +572,42 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   glow keep their own 20,000 caps and are not encoded.
 - Corona and body point sprites size themselves until their light falls below
   `CORONA_FLOOR` (1/1024), capped at `CORONA_MAX_PIXELS`, so the fade-out at
-  the sprite edge is never visible. Close to a star at galaxy exposure the
-  corona (a millionth of the disc at the limb, falling as r⁻³) is many stops
-  above white and fills the view; that is the camera model, not a bug.
+  the sprite edge is never visible. Close to a star at galaxy exposure and 0%
+  compression the corona (a millionth of the disc at the limb, falling as
+  r⁻³) is many stops above white and fills the view; that is the camera
+  model, not a bug. Compression balances it with its star.
 - Star colours are blackbody spectra white-balanced to the Sun. Red dwarfs
   look orange; there is no assisted saturation. Brightness is visual, not bolometric.
 - One manual linear exposure applies to bodies, galactic points and glow.
-  No subject metering, brightness floors, artificial night-side ambient or
-  per-object contrast compression. `exposure.rs`/`exposure.wgsl` apply one
-  per-pixel, per-channel highlight curve after bloom, before the egui overlay
-  (`exposure::Shoulder`, mirrored on the CPU for tests). Never apply it per
-  object or per point before drawing: that removed bright stars' clipped size
-  and bloom. Linear below a knee that falls from white to 0.4 as compression
-  rises, then a logarithmic shoulder (slope one at the knee) reaching white
-  at 2^(30 × compression). Zero is exact clipping and 1% is within 1% of it.
-  It never changes faint light. Fitting many stops gives each a small share
-  of the output, so bright surfaces get subtle contrast and terminators look
-  hard at 100%; only local tone mapping would fix that. The pass also applies
-  Bevy's deband dither, since Bevy's tone-mapping pass is disabled.
+  No subject metering, brightness floors, artificial night-side ambient,
+  adaptation or display curve. Dynamic Range Compression is per-body
+  balance (`render::balance`, in `resolve`): each star (with its corona) and
+  planet is moved from the shared exposure towards its own, by that share of
+  the stops between them. A body's key is how strongly it is lit, never phase
+  or screen coverage: a planet's sub-stellar radiance (shown at `PLANET_KEY`,
+  0.8) and a star's surface (`STAR_KEY`, 2.0). Points use their light spread
+  over a point-sized disc, which matches the disc at the switch. Bodies are
+  only dimmed, never brightened beyond physical. 0% is one physical
+  exposure; 100% exposes every body for itself, so they look equally bright.
+  Shading within a body is untouched, so terminators stay soft. Galactic
+  points and glow never balance: Exposure alone sets the galaxy. A former
+  scene-wide highlight curve (`af68625`) could not do this: squeezing ~24
+  stops into the display washed out and kept terminators hard. Do not bring
+  one back. `exposure.wgsl` only decodes stored headroom, clips at white
+  and applies Bevy's deband dither (Bevy's tone-mapping pass is disabled).
+  The visited star balances only while it is a body; leaving `body_range`
+  it becomes an unbalanced galactic point, a jump at high compression.
   `set_exposure <stops>` and `set_compression <0..1>` use the same path as
   the HUD. Future auto-exposure should supply stops, separately from rendering.
-  `node scripts/test-exposure.mjs` checks WebGL shaders, that 1% matches 0%,
-  that faint light never changes, planet shading and immediate HUD text drags
+  `node scripts/test-exposure.mjs` checks WebGL shaders, that compression
+  never changes the galaxy, planet shading at 100% and immediate HUD text drags
   headlessly, after a web build with a server running (`SPACE_URL` for
   another port; it waits for streaming to finish before comparing).
 - Bodies below `POINT_PIXELS` on screen are camera-facing point sprites, added
   over the frame (`AlphaMode::Add` needs zero alpha from the shader). A point's
   spread integrates to its whole light, exposed as if spread over a point-sized
-  disc (`Exposure::point`), so it matches the sphere it replaces and stays
-  linear before display compression. Point planets dim with phase (`render::phase`).
+  disc (`Exposure::point`), so it matches the sphere it replaces, and is
+  balanced like it. Point planets dim with phase (`render::phase`).
 - Close star discs have per-channel limb darkening and procedural granulation
   in `body.wgsl`, fixed to the star's spin. Granule size follows the pressure
   scale height (`render::granules`); patterns fade out before their cells reach

@@ -209,7 +209,7 @@ pub const USAGE: [Usage; 21] = [
     Usage {
         name: "set_compression",
         fields: &["amount"],
-        about: "Shared dynamic range compression, 0 (linear clipping) to 1 (strong)",
+        about: "How far bodies are exposed for themselves, 0 (one physical exposure) to 1 (each correctly exposed)",
     },
     Usage {
         name: "galaxy_reference",

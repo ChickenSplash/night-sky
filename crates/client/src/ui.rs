@@ -655,7 +655,7 @@ fn exposure_controls(
     let height = ctx.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(SIZE)));
     for (index, (id, value, text, help)) in [
         ("exposure", nav.exposure, format!("Exposure {:+.2} stops", nav.exposure), "Drag left/right: 20 pixels per stop. +1 stop doubles light, -1 halves it. Applies immediately, with no automatic adaptation."),
-        ("compression", nav.compression, format!("Dynamic Range Compression {:.0}%", nav.compression * 100.0), "Drag left/right: 400 pixels covers 0 to 100%. Fits bright highlights into the display without changing faint light such as the galaxy. Set Exposure for the galaxy first. Applies immediately."),
+        ("compression", nav.compression, format!("Dynamic Range Compression {:.0}%", nav.compression * 100.0), "Drag left/right: 400 pixels covers 0 to 100%. Exposes each star, corona and planet for itself: 0% is one physical exposure, 100% shows every body correctly exposed. The galaxy always follows Exposure. Applies immediately."),
     ].into_iter().enumerate() {
         egui::Area::new(egui::Id::new(("manual-control", id)))
             .order(egui::Order::Background)

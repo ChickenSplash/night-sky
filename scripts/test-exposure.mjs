@@ -52,8 +52,8 @@ try {
     return path;
   };
   // Compares a reference capture with another: mean brightness, mean change
-  // where the reference is faint (below the 100% knee), white pixels (bright
-  // stars' size) and the spread of a lit patch.
+  // where the reference is faint (the galaxy, which only Exposure sets), white
+  // pixels (bright stars' size) and the spread of a lit patch.
   const compare = (reference, other, lit) => JSON.parse(execFileSync('python', ['-c', `
 import json, sys
 from PIL import Image, ImageStat
@@ -76,10 +76,11 @@ print(json.dumps(dict(
   const dim = compare(linear, await capture('dim', -6, 0));
   assert(dim.mean[0] > dim.mean[1], 'Lower exposure did not darken the scene');
   const slight = compare(linear, await capture('slight', 0, 0.01));
-  assert(slight.faintChange < 0.5, '1% compression changed faint light');
+  assert(slight.faintChange < 0.5, 'Compression changed the galaxy');
   assert(slight.white[1] >= 0.8 * slight.white[0], '1% compression shrank bright stars');
   const full = compare(linear, await capture('compressed', 0, 1));
-  assert(full.faintChange < 0.5, 'Full compression changed light below its knee');
+  assert(full.faintChange < 0.5, 'Full compression changed the galaxy');
+  assert(full.white[1] >= 0.8 * full.white[0], 'Full compression shrank galactic stars');
   results.sky = { dim, slight, full };
 
   const planet = await page.evaluate(async () => {
@@ -93,7 +94,7 @@ print(json.dumps(dict(
   const planetLinear = await capture('planet-linear', 0, 0);
   results.planet = compare(planetLinear, await capture('planet-compressed', 0, 1), lit);
   assert(results.planet.faintChange < 0.5, 'Planet compression changed the faint galaxy');
-  assert(results.planet.litSpread[1] > results.planet.litSpread[0] + 1, 'Compression did not reveal the lit surface\'s shading');
+  assert(results.planet.litSpread[1] > results.planet.litSpread[0] + 5, 'Exposing the planet for itself did not show its shading');
 
   // These are the free-floating text drags, not slider tracks. A press alone
   // does nothing; moving while held applies before release.
