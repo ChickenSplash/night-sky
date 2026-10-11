@@ -1,27 +1,13 @@
-//! Realistic rendering: an HDR camera with bloom, exposure worked out from the
-//! photometry, and plain shaded spheres under the wireframes.
-//!
-//! - Physical exposure, the default, is one linear exposure for everything in
-//!   the frame, bodies and galaxy alike, as a camera would take it: planets all
-//!   but vanish beside their star, and the galaxy beside a sunlit planet. Its
-//!   key adapts like an eye to the brightest of the subject, the view's average
-//!   radiance and a star disc filling the view (`sky::expose`).
-//! - Assisted exposure compresses brightness around the subject, exposes the
-//!   star field on its own, keeps faint points above a floor and shows star
-//!   colours more saturated.
+//! Realistic bodies: physical photometry and one manual linear exposure.
+//! The shared display curve lives in `exposure`, after scene composition and bloom.
 //! - Bodies smaller than a point on screen are drawn as point sprites: a sharp
 //!   core and a faint halo carrying the body's whole light, so distant stars
 //!   keep their true relative brightness.
 //! - Close up, a star is a disc with limb darkening, granulation and a corona.
-//!   Assisted exposure eases large discs down so their surface stays readable.
 //! - Colours reach the GPU already exposed, so half-float HDR targets never see
 //!   raw radiance.
 
-use crate::{
-    Navigation,
-    scene::SpaceCamera,
-    sky::{self, Sky},
-};
+use crate::{Navigation, scene::SpaceCamera};
 use bevy::{
     asset::{load_internal_asset, uuid_handle},
     camera::visibility::{NoFrustumCulling, VisibilitySystems},
@@ -34,11 +20,8 @@ use bevy::{
     shader::ShaderRef,
 };
 use big_space::prelude::*;
-use space_shared::{Star, StarSystem};
-use space_simulation::{
-    AU_METRES,
-    light::{self, Surface},
-};
+use space_shared::Star;
+use space_simulation::light::{self, Surface};
 use std::{collections::HashMap, f32::consts::PI, sync::Mutex};
 
 const BODY_SHADER: Handle<Shader> = uuid_handle!("6f1f3c47-2a8e-4d61-9b53-4f8e0d7a91c2");
@@ -47,25 +30,8 @@ const POINT_SHADER: Handle<Shader> = uuid_handle!("0c9b5d2e-7a41-4e8f-a3d6-5b2f8
 /// Deep navy behind the wireframes; realistic space is black.
 pub const SPACE_BLUE: Color = Color::srgb(0.015, 0.035, 0.09);
 
-/// Display value of the subject's key: a lit planet at the reference distance.
-pub(crate) const KEY: f64 = 1.0;
-/// Display value of the brightest star in the sky when it is exposed alone,
-/// spread over a point-sized disc.
-const SKY_KEY: f64 = 1.5;
 /// Keeps HDR values well inside half-float range.
 const MAX_VALUE: f64 = 20_000.0;
-/// Albedo of the reference surface the subject exposure is metered on.
-const REFERENCE_ALBEDO: f64 = 0.3;
-/// Assisted exposure raises brightness ratios to this power: 0.5 halves stops.
-const ASSISTED_CONTRAST: f64 = 0.5;
-const ASSISTED_SATURATION: f64 = 2.5;
-const ASSISTED_PLANET_FLOOR: f64 = 0.08;
-const ASSISTED_STAR_FLOOR: f64 = 0.05;
-const ASSISTED_AMBIENT: f32 = 0.03;
-/// Least light of an assisted point, in display value × square pixels, so faint
-/// stars stay findable and faint planets visible.
-const ASSISTED_STAR_POINT_FLOOR: f64 = 1.0;
-const ASSISTED_PLANET_POINT_FLOOR: f64 = 1.5;
 /// Bodies below this on-screen radius, in logical pixels, are drawn as points.
 pub const POINT_PIXELS: f32 = 1.5;
 /// Point spread in logical pixels: a sharp core and a faint halo. Bloom adds the
@@ -73,19 +39,9 @@ pub const POINT_PIXELS: f32 = 1.5;
 const CORE_SIGMA: f32 = 0.8;
 const HALO_SIGMA: f32 = 3.0;
 const HALO_SHARE: f32 = 0.12;
-/// Assisted exposure eases star discs between these on-screen radii down to
-/// `DISC_KEY`, so their limb and granulation are not lost to white. Physical
-/// exposure adapts the whole frame over the same range instead, as a camera
-/// metering on the disc would.
-const DISC_NEAR: f32 = 12.0;
-const DISC_FAR: f32 = 160.0;
-const DISC_KEY: f64 = 0.8;
 /// Corona brightness just outside the limb, relative to the disc: the real
-/// inner corona is about a millionth, so a physical camera shows only bloom.
-/// Assisted, it is relative to the disc eased to `DISC_KEY`, however far away,
-/// or a glaring disc would blow it out to its whole sprite.
-const CORONA_SHARE: f64 = 0.2;
-const PHYSICAL_CORONA_SHARE: f64 = 1e-6;
+/// inner corona is about a millionth.
+const CORONA_SHARE: f64 = 1e-6;
 /// Corona sprite half side and falloff, in disc radii.
 const CORONA_EXTENT: f32 = 4.0;
 const CORONA_FALLOFF: f32 = 3.0;
@@ -99,18 +55,18 @@ impl Plugin for RenderPlugin {
         app.add_plugins((
             MaterialPlugin::<BodyMaterial>::default(),
             MaterialPlugin::<PointMaterial>::default(),
+            crate::exposure::ExposurePlugin,
         ))
         .init_resource::<Lights>()
         .init_resource::<Photometry>()
         .init_resource::<Frame>()
-        .init_resource::<Sky>()
         .init_resource::<Pool<BodyMaterial>>()
         .init_resource::<Pool<PointMaterial>>()
         .add_systems(Startup, setup)
         .add_systems(Update, switch_camera)
         .add_systems(
             PostUpdate,
-            (sky::expose, shade, sync_bodies, sync_points)
+            (shade, sync_bodies, sync_points)
                 .chain()
                 .after(crate::scene::draw)
                 .before(VisibilitySystems::VisibilityPropagate),
@@ -172,8 +128,6 @@ pub struct StarLight {
     /// Surface radiance of the drawn disc.
     pub radiance: f64,
     pub kelvin: f64,
-    /// The current page's star while its planets are on screen.
-    pub subject: bool,
     /// Orientation of the surface, in world axes.
     pub spin: Quat,
     /// Granules per disc radius (`granules`).
@@ -199,11 +153,6 @@ pub struct Lights {
     pub planets: Vec<PlanetLight>,
     /// Render position of the camera.
     pub eye: Vec3,
-    /// Radiance metered for the planets, when they are on screen.
-    pub subject_key: Option<f64>,
-    /// Distance from the star the planets are metered at, and whether it is the
-    /// followed planet's.
-    pub metered: Option<(f64, bool)>,
     /// Temperature of the star lighting the planets.
     pub kelvin: f64,
 }
@@ -212,153 +161,32 @@ impl Lights {
     pub fn clear(&mut self) {
         self.stars.clear();
         self.planets.clear();
-        self.subject_key = None;
-        self.metered = None;
     }
-}
-
-/// Exposure readouts and expandable explanations for the debug render tab.
-pub fn exposure_facts(
-    nav: &Navigation,
-    lights: &Lights,
-    sky: &Sky,
-) -> Vec<(&'static str, String, Option<&'static str>)> {
-    let mut rows = vec![(
-        "mode",
-        if !nav.realistic {
-            "off (wireframe)"
-        } else if nav.physical {
-            "physical"
-        } else {
-            "assisted"
-        }
-        .into(),
-        Some(
-            "Physical uses one linear exposure for bodies, star points and galaxy glow. Assisted compresses contrast and exposes the galaxy separately to keep faint objects readable. These readouts do not change the exposure.",
-        ),
-    )];
-    if !nav.realistic {
-        return rows;
-    }
-    let metering = match lights.metered {
-        Some((metres, true)) => format!("followed planet at {:.3} AU", metres / AU_METRES),
-        Some((metres, false)) => format!("typical orbit at {:.3} AU", metres / AU_METRES),
-        None => "brightest star".into(),
-    };
-    if !nav.physical {
-        let metering = if lights.subject_key.is_some() {
-            metering
-        } else {
-            "brightest star".into()
-        };
-        rows.extend([
-            ("metered on", metering, Some("The followed planet's orbit, or a typical orbit in the visited system, sets the subject brightness. Without a subject, assisted rendering uses the brightest star.")),
-            ("galaxy gain", format!("×{:.3}", sky.exposure), Some("A separate, eased multiplier for galactic light in assisted mode, capped at one. It reduces the brightness of dense galaxy views without changing the bodies' exposure.")),
-        ]);
-        return rows;
-    }
-    // Adding zero turns -0.0 into 0.0 when fully dark-adapted.
-    let stops = |key: f64| -(key / sky::dark_key()).log2() + 0.0;
-    let drift = (sky.target / sky.key).log2();
-    let status = if drift.abs() < 0.05 {
-        "steady".to_string()
-    } else {
-        let way = if drift > 0.0 {
-            "stopping down"
-        } else {
-            "opening up"
-        };
-        way.into()
-    };
-    let base = lights
-        .subject_key
-        .map_or(sky.sky_key, |k| k.max(sky.sky_key));
-    let disc = sky.target > base * 1.0001;
-    let winner = if disc {
-        "star disc"
-    } else if lights.subject_key.is_some_and(|k| k >= sky.sky_key) {
-        "subject"
-    } else {
-        "view"
-    };
-    let subject = lights
-        .subject_key
-        .map_or("none".into(), |k| format!("{k:.2e} W/m²/sr"));
-    let disc = if disc {
-        format!("{:.2e} W/m²/sr", sky.target)
-    } else {
-        "not dominant".into()
-    };
-    let galaxy = 100.0 * sky.galaxy_share;
-    rows.extend([
-        ("current key", format!("{:.2e} W/m²/sr", sky.key), Some("Visual radiance mapped to the reference display brightness. A larger key means less exposure, so the whole scene becomes darker. This value eases towards the target rather than jumping instantly.")),
-        ("exposure offset", format!("{:+.1} stops", stops(sky.key)), Some("Relative to the dark-adapted exposure. Zero is maximum sensitivity; -1 stop admits half as much light, -2 a quarter. This is a relative offset, not an absolute camera EV.")),
-        ("adaptation", status, Some("Steady means current and target exposure are within 0.05 stops. Stopping down reduces sensitivity; opening up increases it. Adaptation is faster towards bright views (about 0.1 s) than dark ones (about 0.5 s).")),
-        ("target key", format!("{:.2e} W/m²/sr ({:+.1} stops)", sky.target, stops(sky.target)), Some("The exposure requested before temporal easing. The brightest requirement wins: the subject, the view average (with a dark-adapted floor), or a large star disc.")),
-        ("set by", winner.into(), Some("Which requirement sets the target right now. Subject protects the system's reference surface, view responds to average light in the camera, and star disc stops down to reveal a large star's surface.")),
-        ("subject key", subject, Some("The reference surface brightness at the followed planet's orbit, or a typical orbit in the visited system. It can set exposure even if the subject is not in view. No subject is available in open space.")),
-        ("metered on", if lights.subject_key.is_some() { metering } else { "no subject".into() }, Some("The orbital distance used to compute the subject key. Following a planet meters its orbit; otherwise the visited system uses a typical orbit. This is not the camera's distance from the star.")),
-        ("view key", format!("{:.2e} W/m²/sr", sky.sky_key), Some("The average visual radiance in the camera's view, converted to an exposure key and floored at dark-adapted sensitivity. Includes the smooth galaxy model and visited-system star discs in view. The galaxy contribution does not depend on streaming progress.")),
-        ("star disc key", disc, Some("Shown only when the large-disc requirement outranks both subject and view. It reduces exposure as a visited star's apparent disc grows, keeping its surface readable. Not dominant does not mean no star is visible.")),
-        ("view light", format!("galaxy {galaxy:.0}% · system stars {:.0}%", 100.0 - galaxy), Some("Contributions to the average view radiance, before the dark-adapted floor. Galaxy is the smooth model, including resolved and unresolved stars; system stars are the visited system's discs in view. These percentages are not object counts or final screen brightness.")),
-    ]);
-    rows
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Exposure {
-    pub key: f64,
-    pub target: f64,
-    pub physical: bool,
+    pub gain: f64,
 }
 
 impl Exposure {
     /// Display value of a surface.
     pub fn value(&self, radiance: f64) -> f64 {
-        let ratio = (radiance / self.key).max(0.0);
-        let ratio = if self.physical {
-            ratio
-        } else {
-            ratio.powf(ASSISTED_CONTRAST)
-        };
-        (self.target * ratio).min(MAX_VALUE)
-    }
-
-    /// Physical exposure stopped down as a star disc fills the view, until the
-    /// disc shows at `DISC_KEY`. It stays one linear exposure for the frame.
-    fn adapt(self, stars: &[StarLight]) -> Self {
-        let key = stars
-            .iter()
-            .map(|s| {
-                let close = closeness(s.pixels);
-                let disc = s.radiance * self.target / DISC_KEY;
-                (self.key.ln() * (1.0 - close) + disc.ln() * close).exp()
-            })
-            .fold(self.key, f64::max);
-        Self { key, ..self }
+        (radiance.max(0.0) * self.gain).min(MAX_VALUE)
     }
 
     /// Light of a point, in display value × square pixels, exposed as if spread
     /// over a point-sized disc. It matches the disc it replaces at the switch,
-    /// and a physical exposure stays linear.
+    /// and stays linear below the HDR safety cap.
     pub fn point(&self, radiance: f64, pixels: f32) -> f64 {
         let switch = disc_area(POINT_PIXELS);
         self.value(spread(radiance, pixels)) * switch
     }
 }
 
-/// The physical key the frame asks for, before adaptation: the brighter of
-/// the subject's and the view's average (`sky_key`), adapted to any star disc
-/// filling the view.
-pub fn physical_key(lights: &Lights, sky_key: f64) -> f64 {
-    let key = lights.subject_key.map_or(sky_key, |k| k.max(sky_key));
-    Exposure {
-        key,
-        target: KEY,
-        physical: true,
-    }
-    .adapt(&lights.stars)
-    .key
+/// Keep every colour channel within the HDR budget, preserving hue.
+fn hdr_colour(colour: DVec3, value: f64) -> Vec3 {
+    (colour * value.min(MAX_VALUE / colour.max_element().max(1.0))).as_vec3()
 }
 
 fn disc_area(pixels: f32) -> f64 {
@@ -408,13 +236,8 @@ impl Photometry {
         })
     }
 
-    pub fn colour(&self, kelvin: f64, physical: bool) -> [f64; 3] {
-        let colour = self.lookup(kelvin).0;
-        if physical {
-            colour
-        } else {
-            light::saturate(colour, ASSISTED_SATURATION)
-        }
+    pub fn colour(&self, kelvin: f64) -> [f64; 3] {
+        self.lookup(kelvin).0
     }
 
     /// Visual luminosity in solar units.
@@ -426,35 +249,6 @@ impl Photometry {
         let radius = star.radius_solar * space_simulation::SUN_RADIUS_METRES;
         light::flux(self.visual_luminosity(star), radius) / std::f64::consts::PI
     }
-}
-
-/// Distance the planets are metered at: the followed planet, else the typical
-/// orbit on the page, else where the star gives Earth's sunlight.
-pub fn reference_distance(
-    system: &StarSystem,
-    page: u32,
-    followed: Option<f64>,
-    visual_luminosity: f64,
-) -> f64 {
-    if let Some(distance) = followed {
-        return distance;
-    }
-    let orbits: Vec<f64> = system
-        .on_page(page)
-        .map(|p| p.orbit.semi_major_au.max(1e-3).ln())
-        .collect();
-    if orbits.is_empty() {
-        visual_luminosity.sqrt() * AU_METRES
-    } else {
-        (orbits.iter().sum::<f64>() / orbits.len() as f64).exp() * AU_METRES
-    }
-}
-
-pub fn subject_key(visual_luminosity: f64, reference_metres: f64) -> f64 {
-    light::reflected_radiance(
-        REFERENCE_ALBEDO,
-        light::flux(visual_luminosity, reference_metres),
-    )
 }
 
 /// A shaded sphere ready for the GPU.
@@ -492,7 +286,7 @@ impl Point {
         Self {
             centre,
             half: half * per_pixel,
-            colour: (colour * light.min(MAX_VALUE)).as_vec3(),
+            colour: hdr_colour(colour, light),
             shape: Vec4::new(half, core, HALO_SIGMA, HALO_SHARE),
             corona: Vec4::ZERO,
         }
@@ -504,27 +298,10 @@ impl Point {
         Self {
             centre,
             half: half * per_pixel,
-            colour: colour.min(DVec3::splat(MAX_VALUE)).as_vec3(),
+            colour: hdr_colour(colour, 1.0),
             shape: Vec4::new(half, 0.0, 0.0, 0.0),
             corona: Vec4::new(pixels, CORONA_FALLOFF, 0.0, 0.0),
         }
-    }
-}
-
-/// How far a disc of this on-screen radius has grown from `DISC_NEAR` to
-/// `DISC_FAR`, eased.
-fn closeness(pixels: f32) -> f64 {
-    let t = ((pixels - DISC_NEAR) / (DISC_FAR - DISC_NEAR)).clamp(0.0, 1.0);
-    f64::from(t * t * (3.0 - 2.0 * t))
-}
-
-/// Assisted display value of a star disc, eased down as it grows on screen.
-fn ease_disc(value: f64, pixels: f32) -> f64 {
-    let close = closeness(pixels);
-    if value > DISC_KEY {
-        (value.ln() * (1.0 - close) + DISC_KEY.ln() * close).exp()
-    } else {
-        value
     }
 }
 
@@ -535,55 +312,17 @@ pub struct Frame {
     pub coronas: Vec<Point>,
 }
 
-/// Exposes the frame's bodies. A physical frame has one exposure, at `key`;
-/// otherwise the sky gets its own, keyed on its brightest point.
-pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool, key: f64) -> Frame {
-    let sky = if physical {
-        0.0
-    } else {
-        lights
-            .stars
-            .iter()
-            .filter(|s| !s.subject)
-            .map(|s| {
-                if s.pixels < POINT_PIXELS {
-                    spread(s.radiance, s.pixels)
-                } else {
-                    s.radiance
-                }
-            })
-            .fold(0.0, f64::max)
-    };
-    let subject = if physical {
-        Some(Exposure {
-            key,
-            target: KEY,
-            physical,
-        })
-    } else {
-        lights.subject_key.map(|key| Exposure {
-            key,
-            target: KEY,
-            physical,
-        })
-    };
-    let sky = Exposure {
-        key: if sky > 0.0 { sky } else { 1.0 },
-        target: SKY_KEY,
-        physical,
+/// Exposes every body with the same fixed manual gain. Compression is applied
+/// to the composed scene, not separately to bodies or points.
+pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64) -> Frame {
+    let exposure = Exposure {
+        gain: crate::exposure::gain(stops),
     };
     let mut frame = Frame::default();
     for star in &lights.stars {
-        let exposure = match subject {
-            Some(subject) if star.subject || physical => subject,
-            _ => sky,
-        };
-        let colour = DVec3::from_array(photometry.colour(star.kelvin, physical));
+        let colour = DVec3::from_array(photometry.colour(star.kelvin));
         if star.pixels < POINT_PIXELS {
-            let mut light = exposure.point(star.radiance, star.pixels);
-            if !physical {
-                light = light.max(ASSISTED_STAR_POINT_FLOOR);
-            }
+            let light = exposure.point(star.radiance, star.pixels);
             frame.points.push(Point::new(
                 star.centre,
                 star.pixels,
@@ -593,14 +332,11 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool, key: f6
             ));
             continue;
         }
-        let mut value = exposure.value(star.radiance);
-        if !physical {
-            value = ease_disc(value.max(ASSISTED_STAR_FLOOR), star.pixels);
-        }
+        let value = exposure.value(star.radiance);
         frame.bodies.push(Shaded {
             centre: star.centre,
             radius: star.radius,
-            colour: (colour * value).as_vec3(),
+            colour: hdr_colour(colour, value),
             light: Vec4::new(0.0, 0.0, 0.0, -1.0),
             rotation: star.spin,
             surface: Vec4::new(
@@ -611,34 +347,23 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool, key: f6
             ),
         });
         // The corona grows in from a point, and is whiter than the surface.
-        let share = if physical {
-            PHYSICAL_CORONA_SHARE
-        } else {
-            CORONA_SHARE
-        };
         let fade = f64::from(((star.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0));
         let pearl = (colour + DVec3::splat(colour.max_element())) * 0.5;
         frame.coronas.push(Point::corona(
             star.centre,
             star.pixels,
             star.per_pixel,
-            pearl * if physical { value } else { value.min(DISC_KEY) } * share * fade,
+            pearl * exposure.value(star.radiance * CORONA_SHARE) * fade,
         ));
     }
-    let Some(subject) = subject else {
-        return frame;
-    };
-    let tint = DVec3::from_array(photometry.colour(lights.kelvin, physical));
+    let tint = DVec3::from_array(photometry.colour(lights.kelvin));
     for planet in &lights.planets {
         let radiance = light::reflected_radiance(planet.surface.albedo, planet.flux);
         let colour = tint * DVec3::from_array(planet.surface.tint);
         if planet.pixels < POINT_PIXELS {
             let towards_eye = (lights.eye - planet.centre).normalize_or_zero();
             let angle = planet.towards_star.angle_between(towards_eye);
-            let mut light = subject.point(radiance * phase(angle), planet.pixels);
-            if !physical {
-                light = light.max(ASSISTED_PLANET_POINT_FLOOR);
-            }
+            let light = exposure.point(radiance * phase(angle), planet.pixels);
             frame.points.push(Point::new(
                 planet.centre,
                 planet.pixels,
@@ -648,17 +373,12 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, physical: bool, key: f6
             ));
             continue;
         }
-        let mut value = subject.value(radiance);
-        if !physical {
-            value = value.max(ASSISTED_PLANET_FLOOR);
-        }
+        let value = exposure.value(radiance);
         frame.bodies.push(Shaded {
             centre: planet.centre,
             radius: planet.radius,
-            colour: (colour * value).as_vec3(),
-            light: planet
-                .towards_star
-                .extend(if physical { 0.0 } else { ASSISTED_AMBIENT }),
+            colour: hdr_colour(colour, value),
+            light: planet.towards_star.extend(0.0),
             rotation: Quat::IDENTITY,
             surface: Vec4::ZERO,
         });
@@ -734,7 +454,7 @@ fn switch_camera(
         }
     }
     if nav.realistic {
-        commands.entity(entity).insert(Hdr);
+        commands.entity(entity).insert((Hdr, Tonemapping::None));
     } else {
         commands.entity(entity).remove::<Hdr>();
     }
@@ -744,11 +464,10 @@ fn shade(
     nav: Res<Navigation>,
     lights: Res<Lights>,
     photometry: Res<Photometry>,
-    sky: Res<Sky>,
     mut frame: ResMut<Frame>,
 ) {
     *frame = if nav.realistic {
-        resolve(&lights, &photometry, nav.physical, sky.key)
+        resolve(&lights, &photometry, nav.exposure)
     } else {
         Frame::default()
     };
@@ -934,8 +653,9 @@ fn sync_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use space_simulation::AU_METRES;
 
-    fn star(radiance: f64, pixels: f32, subject: bool) -> StarLight {
+    fn star(radiance: f64, pixels: f32) -> StarLight {
         StarLight {
             centre: Vec3::ZERO,
             radius: 1.0,
@@ -943,7 +663,6 @@ mod tests {
             per_pixel: 1.0,
             radiance,
             kelvin: 5772.0,
-            subject,
             spin: Quat::IDENTITY,
             granules: 700.0,
         }
@@ -966,11 +685,7 @@ mod tests {
     fn lights() -> Lights {
         let sun = light::flux(1.0, AU_METRES);
         Lights {
-            stars: vec![
-                star(2.0e7, 20.0, true),
-                star(1e7, 1e-6, false),
-                star(1e5, 1e-6, false),
-            ],
+            stars: vec![star(2.0e7, 20.0), star(1e7, 1e-6), star(1e5, 1e-6)],
             planets: vec![
                 planet(sun, 10.0),
                 planet(sun / 100.0, 10.0),
@@ -978,8 +693,6 @@ mod tests {
                 planet(sun / 10.0, 1.4),
             ],
             eye: Vec3::ZERO,
-            subject_key: Some(subject_key(1.0, AU_METRES)),
-            metered: Some((AU_METRES, false)),
             kelvin: 5772.0,
         }
     }
@@ -996,21 +709,17 @@ mod tests {
     }
 
     #[test]
-    fn physical_exposure_is_linear_and_assisted_compresses() {
+    fn manual_exposure_preserves_physical_brightness_ratios() {
         let photometry = Photometry::default();
-        let physical = resolve(&lights(), &photometry, true, physical_key(&lights(), 0.0));
-        let assisted = resolve(&lights(), &photometry, false, physical_key(&lights(), 0.0));
-        // Earth at 1 AU against a planet at 10 AU: 100 times dimmer, or 10 assisted,
-        // as discs and as points alike.
+        let physical = resolve(&lights(), &photometry, -30.0);
+        // Earth at 1 AU against a planet at 10 AU: 100 times dimmer,
+        // as discs and as points alike, before shared display compression.
         let discs = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
         let points = |f: &Frame| f.points[2].light() / f.points[3].light();
         assert!((discs(&physical) - 100.0).abs() < 0.1);
-        assert!((discs(&assisted) - 10.0).abs() < 0.01);
         assert!((points(&physical) - 100.0).abs() < 0.1);
-        assert!((points(&assisted) - 10.0).abs() < 0.01);
         // The Sun is far brighter than its planets either way, and stays in range.
         assert!(brightness(&physical.bodies[0]) > 1_000.0 * brightness(&physical.bodies[1]));
-        assert!(brightness(&assisted.bodies[0]) > 50.0 * brightness(&assisted.bodies[1]));
         assert!(
             physical
                 .bodies
@@ -1020,168 +729,81 @@ mod tests {
     }
 
     #[test]
-    fn assisted_exposure_keeps_the_sky_and_faint_points_visible() {
+    fn manual_exposure_has_no_brightness_floors() {
         let photometry = Photometry::default();
-        let physical = resolve(&lights(), &photometry, true, physical_key(&lights(), 0.0));
-        let assisted = resolve(&lights(), &photometry, false, physical_key(&lights(), 0.0));
-        // A physical camera exposed for sunlit planets cannot see other stars:
-        // their light is far below one step of an 8-bit display.
-        assert!(physical.points[0].light() < 1e-3);
-        // Assisted exposes the sky alone: the brightest star sits at the sky key,
-        // and one five magnitudes fainter is still visible.
-        let key = (SKY_KEY * disc_area(POINT_PIXELS)) as f32;
-        assert!((assisted.points[0].light() - key).abs() < key * 1e-3);
-        assert!(assisted.points[1].light() > ASSISTED_STAR_POINT_FLOOR as f32);
         let mut dim = lights();
-        dim.planets[2].flux *= 1e-9;
-        let dim = resolve(&dim, &photometry, false, physical_key(&dim, 0.0));
-        assert!(dim.points[2].light() >= ASSISTED_PLANET_POINT_FLOOR as f32 * 0.99);
-        assert!(
-            physical
-                .points
-                .iter()
-                .all(|p| p.light() <= MAX_VALUE as f32)
-        );
+        dim.planets[2].flux = 0.0;
+        dim.planets[0].flux = 0.0;
+        let dim = resolve(&dim, &photometry, -30.0);
+        assert_eq!(dim.points[2].light(), 0.0);
+        assert_eq!(brightness(&dim.bodies[1]), 0.0);
+        assert_eq!(dim.bodies[1].light.w, 0.0);
     }
 
     #[test]
     fn a_point_carries_the_light_of_the_disc_it_replaces() {
-        for physical in [true, false] {
-            let exposure = Exposure {
-                key: 3.0,
-                target: 1.0,
-                physical,
-            };
-            let disc = exposure.value(5.0) * disc_area(POINT_PIXELS);
-            assert!((exposure.point(5.0, POINT_PIXELS) - disc).abs() < 1e-9);
-        }
+        let exposure = Exposure { gain: 1.0 / 3.0 };
+        let disc = exposure.value(5.0) * disc_area(POINT_PIXELS);
+        assert!((exposure.point(5.0, POINT_PIXELS) - disc).abs() < 1e-9);
         // Physical points stay linear in their area, down to a speck.
-        let physical = Exposure {
-            key: 1.0,
-            target: 1.0,
-            physical: true,
-        };
+        let physical = Exposure { gain: 1.0 };
         let ratio = physical.point(1.0, 0.1) / physical.point(1.0, 0.01);
         assert!((ratio - 100.0).abs() < 1e-3);
     }
 
     #[test]
-    fn close_star_discs_stay_readable_with_a_corona() {
+    fn close_star_discs_do_not_change_exposure() {
         let photometry = Photometry::default();
         let mut near = lights();
         near.stars[0].pixels = 400.0;
-        let assisted = resolve(&near, &photometry, false, physical_key(&near, 0.0));
-        let physical = resolve(&near, &photometry, true, physical_key(&near, 0.0));
-        // Assisted eases a large disc down to the disc key; physical exposure
-        // adapts to it instead.
-        let disc = brightness(&assisted.bodies[0]);
-        assert!(disc <= DISC_KEY as f32 * 1.01 && disc > 0.5);
-        let disc = brightness(&physical.bodies[0]);
-        assert!(disc <= DISC_KEY as f32 * 1.01 && disc > 0.5);
-        // A small disc keeps its exposure.
-        assert!((ease_disc(300.0, DISC_NEAR) - 300.0).abs() < 1e-9);
-        // The corona is visible assisted, and all but invisible physically.
+        let close = resolve(&near, &photometry, -40.0);
+        let far = resolve(&lights(), &photometry, -40.0);
+        assert_eq!(close.bodies[0].colour, far.bodies[0].colour);
+        assert_eq!(close.bodies[1].colour, far.bodies[1].colour);
         let corona = |f: &Frame| f.coronas[0].colour.max_element() / brightness(&f.bodies[0]);
-        assert!((corona(&assisted) - CORONA_SHARE as f32).abs() < 0.05);
-        assert!(corona(&physical) < 1e-5);
-        // A glaring distant disc does not blow the corona out.
-        near.stars[0].pixels = 30.0;
-        let mid = resolve(&near, &photometry, false, physical_key(&near, 0.0));
-        assert!(mid.coronas[0].colour.max_element() <= (DISC_KEY * CORONA_SHARE) as f32 * 1.01);
+        assert!((corona(&close) - CORONA_SHARE as f32).abs() < 1e-8);
         // Only discs have coronas, and they fade in from a point.
-        assert_eq!(assisted.coronas.len(), 1);
+        assert_eq!(close.coronas.len(), 1);
         near.stars[0].pixels = POINT_PIXELS;
-        let edge = resolve(&near, &photometry, false, physical_key(&near, 0.0));
+        let edge = resolve(&near, &photometry, -40.0);
         assert!(edge.coronas[0].colour.max_element() < 1e-6);
     }
 
     #[test]
-    fn physical_exposure_adapts_to_a_close_star_disc() {
+    fn one_stop_doubles_bodies_points_and_coronas() {
         let photometry = Photometry::default();
-        let mut near = lights();
-        let far = resolve(&near, &photometry, true, physical_key(&near, 0.0));
-        near.stars[0].pixels = DISC_FAR;
-        let close = resolve(&near, &photometry, true, physical_key(&near, 0.0));
-        // The disc shows its surface, and the frame stays one linear exposure.
-        let disc = brightness(&close.bodies[0]);
-        assert!((disc - DISC_KEY as f32).abs() < 0.01);
-        let ratio = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
-        assert!((ratio(&close) / ratio(&far) - 1.0).abs() < 1e-3);
-        assert!(brightness(&close.bodies[1]) < brightness(&far.bodies[1]) * 1e-3);
-        // The galaxy shares the frame's key, so it stops down as far.
-        assert!(physical_key(&near, 0.0) > 1e3 * physical_key(&lights(), 0.0));
-        // A bright view's average outranks a dim subject.
-        assert_eq!(physical_key(&lights(), 1e9), 1e9);
-        // A dim disc is never brightened.
-        near.stars[0].radiance = 1e-9;
-        let dim = resolve(&near, &photometry, true, physical_key(&near, 0.0));
-        assert!(brightness(&dim.bodies[1]) >= brightness(&far.bodies[1]) * 0.999);
+        let a = resolve(&lights(), &photometry, -40.0);
+        let b = resolve(&lights(), &photometry, -39.0);
+        for (a, b) in a.bodies.iter().zip(&b.bodies) {
+            assert_eq!(b.colour, a.colour * 2.0);
+        }
+        for (a, b) in a
+            .points
+            .iter()
+            .chain(&a.coronas)
+            .zip(b.points.iter().chain(&b.coronas))
+        {
+            assert_eq!(b.colour, a.colour * 2.0);
+        }
     }
 
     #[test]
-    fn exposure_readouts_name_the_driver_and_adaptation() {
-        let nav = Navigation::default();
-        let lit = lights();
-        let subject = lit.subject_key.unwrap();
-        let mut sky = Sky::default();
-        sky.sky_key = subject / 10.0;
-        sky.target = subject;
-        sky.key = subject;
-        let value = |sky: &Sky, label: &str| {
-            exposure_facts(&nav, &lit, sky)
-                .into_iter()
-                .find(|row| row.0 == label)
-                .unwrap()
-                .1
-        };
-        assert_eq!(value(&sky, "set by"), "subject");
-        assert_eq!(value(&sky, "adaptation"), "steady");
+    fn hdr_safety_cap_keeps_extreme_manual_values_finite() {
+        let mut lights = lights();
+        lights.stars[0].kelvin = 50000.0;
+        let frame = resolve(&lights, &Photometry::default(), 16.0);
         assert!(
-            exposure_facts(&nav, &lit, &sky)
+            frame
+                .bodies
                 .iter()
-                .all(|row| row.2.is_some())
+                .all(|b| b.colour.is_finite() && b.colour.max_element() <= MAX_VALUE as f32)
         );
-        // Ten times brighter than dark-adapted is about 3.3 stops down.
-        sky.key = 10.0 * sky::dark_key();
-        sky.target = sky.key;
-        assert_eq!(value(&sky, "exposure offset"), "-3.3 stops");
-        // A bright view outranks the subject; a filling disc outranks both.
-        sky.sky_key = subject * 10.0;
-        sky.target = sky.sky_key;
-        assert_eq!(value(&sky, "set by"), "view");
-        sky.target = subject * 1e3;
-        assert_eq!(value(&sky, "set by"), "star disc");
-        assert_eq!(value(&sky, "adaptation"), "stopping down");
-        sky.key = sky.target * 2.0;
-        assert_eq!(value(&sky, "adaptation"), "opening up");
-    }
-
-    #[test]
-    fn exposure_readouts_only_show_relevant_mode_facts() {
-        let mut nav = Navigation::default();
-        let mut lit = lights();
-        let sky = Sky::default();
-        nav.realistic = false;
-        let rows = exposure_facts(&nav, &lit, &sky);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].1, "off (wireframe)");
-        nav.realistic = true;
-        nav.physical = false;
-        let rows = exposure_facts(&nav, &lit, &sky);
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].1, "assisted");
-        assert!(rows.iter().all(|row| row.2.is_some()));
-        lit.subject_key = None;
-        assert_eq!(exposure_facts(&nav, &lit, &sky)[1].1, "brightest star");
-        nav.physical = true;
-        let rows = exposure_facts(&nav, &lit, &sky);
-        assert_eq!(
-            rows.iter().find(|row| row.0 == "subject key").unwrap().1,
-            "none"
-        );
-        assert_eq!(
-            rows.iter().find(|row| row.0 == "metered on").unwrap().1,
-            "no subject"
+        assert!(
+            frame
+                .points
+                .iter()
+                .chain(&frame.coronas)
+                .all(|p| p.colour.is_finite() && p.colour.max_element() <= MAX_VALUE as f32)
         );
     }
 
@@ -1207,20 +829,5 @@ mod tests {
         assert!((phase(0.0) - 2.0 / 3.0).abs() < 1e-9);
         assert!(phase(PI / 2.0) < phase(0.0) / 2.0);
         assert!(phase(PI).abs() < 1e-9);
-    }
-
-    #[test]
-    fn metering_follows_the_page_or_the_followed_planet() {
-        let system = &space_simulation::demo_galaxy().systems[0];
-        let page = system.first_page();
-        let typical = reference_distance(system, page, None, 1.0);
-        let inner = system
-            .on_page(page)
-            .map(|p| p.orbit.semi_major_au)
-            .fold(f64::MAX, f64::min);
-        assert!(typical >= inner * AU_METRES);
-        assert_eq!(reference_distance(system, page, Some(5.0), 1.0), 5.0);
-        let far = subject_key(1.0, 2.0 * AU_METRES);
-        assert!((subject_key(1.0, AU_METRES) / far - 4.0).abs() < 1e-9);
     }
 }

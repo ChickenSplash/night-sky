@@ -2,14 +2,14 @@
 // Each star is one vertex, drawn additively into an image at `SUPERSAMPLE`
 // times the view's resolution per axis; `starfield_points_composite.wgsl`
 // turns each point into the raster path's Gaussian. Cutoff, near hiding,
-// colour and the knee follow `starfield.wgsl`: keep them in step.
+// colour and HDR safety cap follow `starfield.wgsl`: keep them in step.
 #import bevy_render::view::View
 
 struct Globals {
     settings: vec4<f32>,
     debug: vec4<f32>,
     palette: array<vec4<f32>, 32>,
-    assisted: array<vec4<f32>, 32>,
+    wireframe: array<vec4<f32>, 32>,
 }
 
 struct Draw {
@@ -28,12 +28,6 @@ struct Draw {
 
 const PI: f32 = 3.14159265;
 const SIGMA_PX: f32 = 0.55;
-const KNEE: f32 = 1.0;
-
-fn compress(peak: f32) -> f32 {
-    if peak <= KNEE { return peak; }
-    return KNEE * (1.0 + log(peak / KNEE));
-}
 
 struct Star {
     @location(0) position: vec3<f32>,
@@ -74,10 +68,15 @@ fn vertex(star: Star) -> Output {
         colour = entry.rgb;
         shown *= entry.w;
     } else {
-        colour = mix(globals.assisted[i], globals.assisted[i + 1u], x - f32(i)).rgb;
+        colour = mix(globals.wireframe[i], globals.wireframe[i + 1u], x - f32(i)).rgb;
     }
     let area = 2.0 * PI * SIGMA_PX * SIGMA_PX;
-    out.light = colour * compress(shown / area) * area;
+    let peak = shown / area;
+    var bounded = min(peak, 20000.0 / max(max(colour.r, colour.g), max(colour.b, 1.0)));
+    if globals.settings.w < 0.5 {
+        bounded = select(1.0 + log(max(peak, 1.0)), peak, peak <= 1.0);
+    }
+    out.light = colour * bounded * area;
     out.position = clip;
     return out;
 }

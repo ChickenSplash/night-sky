@@ -63,8 +63,8 @@ pub struct Globals {
     /// Each temperature's realistic colour with unit luminance, then its
     /// visual efficiency: light per bolometric luminosity.
     pub palette: [Vec4; PALETTE],
-    /// Each temperature's assisted colour (`spectral_colour`), linear.
-    pub assisted: [Vec4; PALETTE],
+    /// Each temperature's wireframe colour (`spectral_colour`), linear.
+    pub wireframe: [Vec4; PALETTE],
 }
 
 /// One draw: a batch, or this frame's precise sprites.

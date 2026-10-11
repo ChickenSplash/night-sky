@@ -17,8 +17,8 @@ struct Globals {
     // Unit-luminance colour, then visual efficiency, log-spaced in
     // temperature from 1,000 to 50,000 K (`starfield.rs`).
     palette: array<vec4<f32>, 32>,
-    // Assisted colours at the same temperatures, linear.
-    assisted: array<vec4<f32>, 32>,
+    // Wireframe colours at the same temperatures, linear.
+    wireframe: array<vec4<f32>, 32>,
 }
 @group(2) @binding(0) var<uniform> globals: Globals;
 
@@ -36,15 +36,6 @@ struct Draw {
 const PI: f32 = 3.14159265;
 // A point's Gaussian sigma in physical pixels. Its footprint radius is debug.y.
 const SIGMA_PX: f32 = 0.55;
-// Point peaks up to this are linear; beyond, they grow logarithmically.
-const KNEE: f32 = 1.0;
-
-// Smooth, unbounded compression with a continuous slope at the knee, so faint
-// stars stay linear and a bright giant cannot flood its footprint or the bloom.
-fn compress(peak: f32) -> f32 {
-    if peak <= KNEE { return peak; }
-    return KNEE * (1.0 + log(peak / KNEE));
-}
 
 struct Star {
     // Parsecs from the draw's origin.
@@ -75,7 +66,7 @@ fn vertex(star: Star) -> Output {
         || ratio < globals.settings.y || globals.debug.x > 0.5 {
         clip = vec4(2.0, 2.0, 0.0, 1.0);
     }
-    // Linear in apparent flux, up to the knee. Exposure and bloom operate on
+    // Linear in apparent flux, up to the HDR safety cap. Exposure and bloom operate on
     // this HDR colour; in the wireframe view it is tone-mapped by the normal
     // SDR target.
     let x = clamp(log(star.temperature / 1000.0) / log(50.0) * 31.0, 0.0, 31.0);
@@ -87,9 +78,15 @@ fn vertex(star: Star) -> Output {
         colour = entry.rgb;
         light *= entry.w;
     } else {
-        colour = mix(globals.assisted[i], globals.assisted[i + 1u], x - f32(i)).rgb;
+        colour = mix(globals.wireframe[i], globals.wireframe[i + 1u], x - f32(i)).rgb;
     }
-    out.peak = compress(light / (2.0 * PI * SIGMA_PX * SIGMA_PX));
+    let peak = light / (2.0 * PI * SIGMA_PX * SIGMA_PX);
+    if globals.settings.w > 0.5 {
+        out.peak = min(peak, 20000.0 / max(max(colour.r, colour.g), max(colour.b, 1.0)));
+    } else {
+        // Preserve the old wireframe point rendering only.
+        out.peak = select(1.0 + log(max(peak, 1.0)), peak, peak <= 1.0);
+    }
     let width = max(view.viewport.zw, vec2(1.0, 1.0));
     // Clip space spans two units per viewport width.
     var corner = vec2(-1.0, -1.0);

@@ -36,6 +36,7 @@ pub struct Hud {
     speed_drag_start: Option<f64>,
     /// The limit when a magnitude drag began, and where it is now.
     magnitude_drag: Option<(f64, f64)>,
+    exposure_drags: [Option<f64>; 2],
     inspector: crate::inspector::Cache,
 }
 
@@ -123,6 +124,7 @@ pub fn draw_ui(
         &mut out,
     );
     magnitude_control(ctx, rect, nav.magnitude, &mut hud.magnitude_drag, &mut out);
+    exposure_controls(ctx, rect, &nav, &mut hud.exposure_drags, &mut out);
     canvas_overlay(
         ctx,
         rect,
@@ -280,6 +282,8 @@ pub(crate) fn pointer_captured(ctx: &egui::Context) -> bool {
             "time-pointer-capture",
             "speed-pointer-capture",
             "magnitude-pointer-capture",
+            "exposure-pointer-capture",
+            "compression-pointer-capture",
             "breadcrumb-pointer-capture",
             "icons-pointer-capture",
         ]
@@ -637,6 +641,46 @@ fn magnitude_control(
                 out.push(UiCommand::SetMagnitude { magnitude: now });
             }
         });
+}
+
+/// Two immediate draggable text controls, aligned above the magnitude limit.
+fn exposure_controls(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    nav: &Navigation,
+    drags: &mut [Option<f64>; 2],
+    out: &mut Vec<UiCommand>,
+) {
+    use crate::breadcrumb::{HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, SIZE, halo_text};
+    let height = ctx.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(SIZE)));
+    for (index, (id, value, text, help)) in [
+        ("exposure", nav.exposure, format!("Exposure {:+.2} stops", nav.exposure), "Drag left/right: 20 pixels per stop. +1 stop doubles light, -1 halves it. Applies immediately, with no automatic adaptation."),
+        ("compression", nav.compression, format!("Dynamic Range Compression {:.0}%", nav.compression * 100.0), "Drag left/right: 400 pixels covers 0 to 100%. More compression lifts shadows and rolls off highlights across the whole scene. Applies immediately."),
+    ].into_iter().enumerate() {
+        egui::Area::new(egui::Id::new(("manual-control", id)))
+            .order(egui::Order::Background)
+            .movable(false)
+            .pivot(egui::Align2::RIGHT_BOTTOM)
+            .fixed_pos(rect.right_bottom() + egui::vec2(-HUD_PADDING, -HUD_PADDING - (2 - index) as f32 * (height + HUD_LINE_GAP)))
+            .show(ctx, |ui| {
+                let response = halo_text(ui, &text, egui::Sense::click_and_drag(), |r| {
+                    if nav.realistic && (r.hovered() || r.dragged() || r.has_focus()) { HOVER } else { LINK }
+                }).on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(
+                    if nav.realistic { help } else { "Turn on realistic lighting in Settings to adjust this." });
+                ctx.data_mut(|data| data.insert_temp(egui::Id::new(format!("{id}-pointer-capture")),
+                    (response.rect, response.dragged() || response.is_pointer_button_down_on())));
+                if response.drag_started() && nav.realistic { drags[index] = Some(value); }
+                if nav.realistic && response.dragged() && let Some(start) = drags[index] {
+                    let delta = f64::from(response.total_drag_delta().unwrap_or_default().x);
+                    out.push(if index == 0 {
+                        UiCommand::SetExposure { stops: (start + delta / 20.0).clamp(*crate::exposure::STOPS.start(), *crate::exposure::STOPS.end()) }
+                    } else {
+                        UiCommand::SetCompression { amount: (start + delta / HUD_DRAG_SPAN).clamp(0.0, 1.0) }
+                    });
+                }
+                if response.drag_stopped() || !nav.realistic { drags[index] = None; }
+            });
+    }
 }
 
 /// Captions, labels, hover rings and clicks on the 3D view itself.
@@ -1066,6 +1110,118 @@ mod tests {
                 < 1e-5
         );
         assert!(frame(vec![button(end, false)]).0.is_empty());
+    }
+
+    #[test]
+    fn manual_sliders_apply_immediately_and_capture_drags() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let mut nav = Navigation::default();
+        let mut drags = [None; 2];
+        let mut frame = |events| {
+            let mut commands = Vec::new();
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| exposure_controls(ctx, rect, &nav, &mut drags, &mut commands),
+            );
+            for command in &commands {
+                assert!(pointer_captured(&ctx));
+                match command {
+                    UiCommand::SetExposure { stops } => nav.set_exposure(*stops),
+                    UiCommand::SetCompression { amount } => nav.set_compression(*amount),
+                    _ => panic!("manual sliders must not change camera, clock or selection"),
+                }
+            }
+            let hits = ctx.data(|data| {
+                let hit = |id| {
+                    data.get_temp::<(egui::Rect, bool)>(egui::Id::new(id))
+                        .unwrap()
+                        .0
+                };
+                (
+                    hit("exposure-pointer-capture"),
+                    hit("compression-pointer-capture"),
+                )
+            });
+            (commands, hits)
+        };
+        frame(vec![]);
+        let (_, (exposure, compression)) = frame(vec![]);
+        assert!(exposure.bottom() < compression.top());
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for (hit, is_exposure) in [(exposure, true), (compression, false)] {
+            let start = hit.left_center() + egui::vec2(hit.width() * 0.25, 0.0);
+            frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
+            assert!(frame(vec![button(start, false)]).0.is_empty());
+            frame(vec![button(start, true)]);
+            let (commands, _) = frame(vec![egui::Event::PointerMoved(hit.center())]);
+            assert!(commands.iter().any(|c| matches!(
+                (c, is_exposure),
+                (UiCommand::SetExposure { .. }, true) | (UiCommand::SetCompression { .. }, false)
+            )));
+            frame(vec![egui::Event::PointerMoved(egui::pos2(200.0, 200.0))]);
+            assert!(pointer_captured(&ctx));
+            frame(vec![button(egui::pos2(200.0, 200.0), false)]);
+        }
+    }
+
+    #[test]
+    fn manual_controls_are_inactive_in_wireframe_mode() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let nav = Navigation {
+            realistic: false,
+            ..Default::default()
+        };
+        let mut drags = [None; 2];
+        let mut commands = Vec::new();
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ctx| exposure_controls(ctx, rect, &nav, &mut drags, &mut commands),
+        );
+        let hit = ctx
+            .data(|data| {
+                data.get_temp::<(egui::Rect, bool)>(egui::Id::new("exposure-pointer-capture"))
+            })
+            .unwrap()
+            .0;
+        for events in [
+            vec![
+                egui::Event::PointerMoved(hit.center()),
+                egui::Event::PointerButton {
+                    pos: hit.center(),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            vec![egui::Event::PointerMoved(
+                hit.center() + egui::vec2(40.0, 0.0),
+            )],
+        ] {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| exposure_controls(ctx, rect, &nav, &mut drags, &mut commands),
+            );
+        }
+        assert!(commands.is_empty());
+        assert_eq!(drags, [None; 2]);
     }
 
     #[test]

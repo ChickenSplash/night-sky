@@ -76,5 +76,7 @@ fn erf(x: f32) -> f32 {
     let i = min(i32(x), 30); let base = i32(in.data.w) * 32 + i;
     let luminosity = mix(settings.light[base].rgb, settings.light[base+1].rgb, x-f32(i));
     // Radiance, so independent of pixel size, at the frame's exposure.
-    return vec4(luminosity * density * integral * settings.values.z, 0.0);
+    let rgb = luminosity * density * integral * settings.values.z;
+    let scale = min(1.0, 20000.0 / max(max(rgb.r, rgb.g), max(rgb.b, 1e-30)));
+    return vec4(rgb * scale, 0.0);
 }

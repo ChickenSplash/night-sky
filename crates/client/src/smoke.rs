@@ -139,16 +139,17 @@ pub fn exercise(
         20 => {
             // Bodies alone, so the points are not hidden under their outlines.
             nav.realistic = true;
-            nav.physical = false;
+            nav.set_exposure(-20.0);
+            nav.set_compression(1.0);
             nav.wireframe = false;
             nav.markers = false;
             jump(&mut nav, &universe.0, 0);
         }
         21 => capture(&mut commands, "realistic"),
-        22 => nav.physical = true,
-        23 => capture(&mut commands, "realistic-physical"),
+        22 => nav.set_compression(0.0),
+        23 => capture(&mut commands, "realistic-linear"),
         24 => {
-            nav.physical = false;
+            nav.set_compression(1.0);
             nav.wireframe = true;
             nav.exaggerate = true;
             if let Some(selection) = nav
@@ -167,6 +168,7 @@ pub fn exercise(
         }
         27 => capture(&mut commands, "realistic-constellation"),
         28 => {
+            nav.set_exposure(-36.0);
             jump(&mut nav, &universe.0, 0);
             let radius = universe.0.systems[0]
                 .star(nav.page)
@@ -175,8 +177,8 @@ pub fn exercise(
             nav.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.2);
         }
         29 => capture(&mut commands, "realistic-star"),
-        30 => nav.physical = true,
-        31 => capture(&mut commands, "realistic-star-physical"),
+        30 => nav.set_compression(0.0),
+        31 => capture(&mut commands, "realistic-star-linear"),
         _ => {
             exit.write(AppExit::Success);
         }

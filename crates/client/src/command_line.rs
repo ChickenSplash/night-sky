@@ -115,7 +115,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 19] = [
+pub const USAGE: [Usage; 21] = [
     Usage {
         name: "pick_star",
         fields: &["id"],
@@ -189,7 +189,7 @@ pub const USAGE: [Usage; 19] = [
     Usage {
         name: "set_display",
         fields: &["option", "on"],
-        about: "exaggerate, orbits, labels, markers, velocity_marker, realistic, galaxy_glow, physical or wireframe; true or false",
+        about: "exaggerate, orbits, labels, markers, velocity_marker, realistic, galaxy_glow or wireframe; true or false",
     },
     Usage {
         name: "set_fov",
@@ -200,6 +200,16 @@ pub const USAGE: [Usage; 19] = [
         name: "set_magnitude",
         fields: &["magnitude"],
         about: "Faintest star magnitude drawn as a point, 3 to 8.5; reloads the stars",
+    },
+    Usage {
+        name: "set_exposure",
+        fields: &["stops"],
+        about: "Manual exposure, -64 to +16 stops; +1 doubles light, -1 halves it",
+    },
+    Usage {
+        name: "set_compression",
+        fields: &["amount"],
+        about: "Shared dynamic range compression, 0 (linear clipping) to 1 (strong)",
     },
     Usage {
         name: "galaxy_reference",
@@ -352,7 +362,8 @@ mod tests {
                 .iter()
                 .map(|field| match *field {
                     "page" => "1",
-                    "rate" | "degrees" | "speed" | "magnitude" => "60",
+                    "rate" | "degrees" | "speed" | "magnitude" | "stops" => "60",
+                    "amount" => "0.5",
                     "paused" | "on" => "true",
                     "option" => "orbits",
                     "switch" => "bloom",

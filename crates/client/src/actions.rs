@@ -70,6 +70,12 @@ pub enum UiCommand {
     SetMagnitude {
         magnitude: f64,
     },
+    SetExposure {
+        stops: f64,
+    },
+    SetCompression {
+        amount: f64,
+    },
     /// Repeatable views for evaluating the smooth galaxy prototype.
     GalaxyReference {
         view: GalaxyReference,
@@ -91,7 +97,6 @@ pub enum Display {
     VelocityMarker,
     Realistic,
     GalaxyGlow,
-    Physical,
     Wireframe,
 }
 
@@ -251,11 +256,12 @@ pub fn apply(
                 Display::VelocityMarker => nav.velocity_marker = *on,
                 Display::Realistic => nav.realistic = *on,
                 Display::GalaxyGlow => nav.galaxy_glow = *on,
-                Display::Physical => nav.physical = *on,
                 Display::Wireframe => nav.wireframe = *on,
             },
             UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
             UiCommand::SetMagnitude { magnitude } => nav.set_magnitude(*magnitude),
+            UiCommand::SetExposure { stops } => nav.set_exposure(*stops),
+            UiCommand::SetCompression { amount } => nav.set_compression(*amount),
             UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
             UiCommand::SetDebug { switch, on } => debug.set(*switch, *on),
         }
