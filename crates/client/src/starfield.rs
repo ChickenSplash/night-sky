@@ -277,7 +277,7 @@ fn sync(
             gain,
             realistic,
         ),
-        debug: Vec4::new(skip_pixels, radius_px, nav.compression as f32, 0.0),
+        debug: Vec4::new(skip_pixels, radius_px, 0.0, 0.0),
         palette,
         wireframe,
     });

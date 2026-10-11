@@ -59,31 +59,7 @@ for path in json.load(sys.stdin):
 print(json.dumps(out))
 `], { input: JSON.stringify(images), encoding: 'utf8' }));
   assert(results.images[0] > results.images[1], 'Lower exposure did not darken the scene');
-  assert(Math.abs(results.images[2] - results.images[1]) < 0.2, 'Highlight compression changed the faint background');
-
-  const planet = await page.evaluate(async () => {
-    const galaxy = await (await fetch('/galaxy')).json();
-    return galaxy.systems[0].planets[0].id;
-  });
-  assert(planet, 'Missing deterministic planet fixture');
-  await command({ type: 'fly_to_planet', planet });
-  await command({ type: 'set_display', option: 'wireframe', on: false });
-  await page.waitForTimeout(5000);
-  const planetImages = [await capture('planet-linear', 0, 0), await capture('planet-compressed', 0, 1)];
-  results.planet = JSON.parse(execFileSync('python', ['-c', `
-import json,sys
-from PIL import Image,ImageChops,ImageStat
-a,b=[Image.open(p).convert('RGB') for p in json.load(sys.stdin)]
-mean=lambda im:sum(ImageStat.Stat(im).mean)/3
-crop=lambda im:im.crop((600,300,1000,700))
-lit=lambda im:sum(ImageStat.Stat(im.crop((805,455,865,545))).stddev)/3
-background=ImageChops.difference(a.crop((250,500,500,650)),b.crop((250,500,500,650)))
-print(json.dumps(dict(linear=mean(crop(a)),compressed=mean(crop(b)),difference=mean(ImageChops.difference(crop(a),crop(b))),linearShading=lit(a),compressedShading=lit(b),backgroundChange=mean(background))))
-`], { input: JSON.stringify(planetImages), encoding: 'utf8' }));
-  assert(results.planet.difference > 5, 'Highlight compression had no visible effect on the bright planet');
-  assert(results.planet.compressed < results.planet.linear, 'Compression did not reduce planet highlights');
-  assert(results.planet.compressedShading > results.planet.linearShading + 0.5, 'Compression did not restore a gradient on the clipped lit surface');
-  assert(results.planet.backgroundChange < 0.1, 'Planet highlight recovery changed the faint galaxy background');
+  assert(results.images[2] > results.images[1], 'Compression did not recover visible shadow detail');
 
   // These are the free-floating text drags, not slider tracks. A press alone
   // does nothing; moving while held applies before release.

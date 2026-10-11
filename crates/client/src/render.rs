@@ -1,10 +1,11 @@
-//! Physical photometry and manual exposure, kept unclipped until fragment lighting.
-//! The shared highlight shoulder runs before half-float storage.
+//! Realistic bodies: physical photometry and one manual linear exposure.
+//! The shared display curve lives in `exposure`, after scene composition and bloom.
 //! - Bodies smaller than a point on screen are drawn as point sprites: a sharp
 //!   core and a faint halo carrying the body's whole light, so distant stars
 //!   keep their true relative brightness.
 //! - Close up, a star is a disc with limb darkening, granulation and a corona.
-//! - Exposed radiance is carried in f32 uniforms, not written directly to HDR.
+//! - Colours reach the GPU already exposed, so half-float HDR targets never see
+//!   raw radiance.
 
 use crate::{Navigation, scene::SpaceCamera};
 use bevy::{
@@ -29,9 +30,8 @@ const POINT_SHADER: Handle<Shader> = uuid_handle!("0c9b5d2e-7a41-4e8f-a3d6-5b2f8
 /// Deep navy behind the wireframes; realistic space is black.
 pub const SPACE_BLUE: Color = Color::srgb(0.015, 0.035, 0.09);
 
-/// Uniform arithmetic safety, far above any generated exposed radiance. Not an
-/// HDR cap: fragment lighting and compression happen before half-float storage.
-const MAX_VALUE: f64 = 1e30;
+/// Keeps HDR values well inside half-float range.
+const MAX_VALUE: f64 = 20_000.0;
 /// Bodies below this on-screen radius, in logical pixels, are drawn as points.
 pub const POINT_PIXELS: f32 = 1.5;
 /// Point spread in logical pixels: a sharp core and a faint halo. Bloom adds the
@@ -84,7 +84,7 @@ pub struct BodyMaterial {
     #[uniform(0)]
     spin: Vec4,
     /// Granules per disc radius, on-screen radius in pixels and granulation
-    /// contrast and shared compression; the first three are zero for planets.
+    /// contrast; zero for planets.
     #[uniform(0)]
     surface: Vec4,
 }
@@ -101,7 +101,7 @@ pub struct PointMaterial {
     colour: Vec4,
     #[uniform(0)]
     shape: Vec4,
-    /// Disc radius and falloff for a corona (zero for a point), unused, compression.
+    /// Disc radius in pixels and falloff for a corona; zero for a point.
     #[uniform(0)]
     corona: Vec4,
 }
@@ -177,14 +177,14 @@ impl Exposure {
 
     /// Light of a point, in display value × square pixels, exposed as if spread
     /// over a point-sized disc. It matches the disc it replaces at the switch,
-    /// and stays linear until the fragment's highlight shoulder.
+    /// and stays linear below the HDR safety cap.
     pub fn point(&self, radiance: f64, pixels: f32) -> f64 {
         let switch = disc_area(POINT_PIXELS);
         self.value(spread(radiance, pixels)) * switch
     }
 }
 
-/// Exposed colour for f32 uniforms, preserving values far beyond half-float range.
+/// Keep every colour channel within the HDR budget, preserving hue.
 fn hdr_colour(colour: DVec3, value: f64) -> Vec3 {
     (colour * value.min(MAX_VALUE / colour.max_element().max(1.0))).as_vec3()
 }
@@ -260,7 +260,7 @@ pub struct Shaded {
     /// Direction to the star and night-side ambient; negative ambient for stars.
     pub light: Vec4,
     pub rotation: Quat,
-    /// Granules per radius, on-screen radius, contrast and compression.
+    /// Granules per radius, on-screen radius and contrast; zero for planets.
     pub surface: Vec4,
 }
 
@@ -279,14 +279,7 @@ pub struct Point {
 }
 
 impl Point {
-    fn new(
-        centre: Vec3,
-        pixels: f32,
-        per_pixel: f32,
-        colour: DVec3,
-        light: f64,
-        compression: f32,
-    ) -> Self {
+    fn new(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3, light: f64) -> Self {
         // A point about to become a disc spreads as wide as the disc.
         let core = CORE_SIGMA.max(0.7 * pixels);
         let half = 4.0 * core.max(HALO_SIGMA);
@@ -295,19 +288,19 @@ impl Point {
             half: half * per_pixel,
             colour: hdr_colour(colour, light),
             shape: Vec4::new(half, core, HALO_SIGMA, HALO_SHARE),
-            corona: Vec4::new(0.0, 0.0, 0.0, compression),
+            corona: Vec4::ZERO,
         }
     }
 
     /// A glow around a star's disc, `colour` its brightness just outside the limb.
-    fn corona(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3, compression: f32) -> Self {
+    fn corona(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3) -> Self {
         let half = CORONA_EXTENT * pixels;
         Self {
             centre,
             half: half * per_pixel,
             colour: hdr_colour(colour, 1.0),
             shape: Vec4::new(half, 0.0, 0.0, 0.0),
-            corona: Vec4::new(pixels, CORONA_FALLOFF, 0.0, compression),
+            corona: Vec4::new(pixels, CORONA_FALLOFF, 0.0, 0.0),
         }
     }
 }
@@ -319,9 +312,9 @@ pub struct Frame {
     pub coronas: Vec<Point>,
 }
 
-/// Preserve exposed radiance in uniforms. The same shoulder is evaluated after
-/// surface lighting in every shader, before half-float storage.
-pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression: f64) -> Frame {
+/// Exposes every body with the same fixed manual gain. Compression is applied
+/// to the composed scene, not separately to bodies or points.
+pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64) -> Frame {
     let exposure = Exposure {
         gain: crate::exposure::gain(stops),
     };
@@ -336,7 +329,6 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
                 star.per_pixel,
                 colour,
                 light,
-                compression as f32,
             ));
             continue;
         }
@@ -351,7 +343,7 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
                 star.granules as f32,
                 star.pixels,
                 granulation_contrast(star.kelvin),
-                compression as f32,
+                0.0,
             ),
         });
         // The corona grows in from a point, and is whiter than the surface.
@@ -362,7 +354,6 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
             star.pixels,
             star.per_pixel,
             pearl * exposure.value(star.radiance * CORONA_SHARE) * fade,
-            compression as f32,
         ));
     }
     let tint = DVec3::from_array(photometry.colour(lights.kelvin));
@@ -379,7 +370,6 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
                 planet.per_pixel,
                 colour,
                 light,
-                compression as f32,
             ));
             continue;
         }
@@ -390,7 +380,7 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
             colour: hdr_colour(colour, value),
             light: planet.towards_star.extend(0.0),
             rotation: Quat::IDENTITY,
-            surface: Vec4::new(0.0, 0.0, 0.0, compression as f32),
+            surface: Vec4::ZERO,
         });
     }
     frame
@@ -477,7 +467,7 @@ fn shade(
     mut frame: ResMut<Frame>,
 ) {
     *frame = if nav.realistic {
-        resolve(&lights, &photometry, nav.exposure, nav.compression)
+        resolve(&lights, &photometry, nav.exposure)
     } else {
         Frame::default()
     };
@@ -721,7 +711,7 @@ mod tests {
     #[test]
     fn manual_exposure_preserves_physical_brightness_ratios() {
         let photometry = Photometry::default();
-        let physical = resolve(&lights(), &photometry, -30.0, 0.5);
+        let physical = resolve(&lights(), &photometry, -30.0);
         // Earth at 1 AU against a planet at 10 AU: 100 times dimmer,
         // as discs and as points alike, before shared display compression.
         let discs = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
@@ -744,7 +734,7 @@ mod tests {
         let mut dim = lights();
         dim.planets[2].flux = 0.0;
         dim.planets[0].flux = 0.0;
-        let dim = resolve(&dim, &photometry, -30.0, 0.5);
+        let dim = resolve(&dim, &photometry, -30.0);
         assert_eq!(dim.points[2].light(), 0.0);
         assert_eq!(brightness(&dim.bodies[1]), 0.0);
         assert_eq!(dim.bodies[1].light.w, 0.0);
@@ -766,8 +756,8 @@ mod tests {
         let photometry = Photometry::default();
         let mut near = lights();
         near.stars[0].pixels = 400.0;
-        let close = resolve(&near, &photometry, -40.0, 0.5);
-        let far = resolve(&lights(), &photometry, -40.0, 0.5);
+        let close = resolve(&near, &photometry, -40.0);
+        let far = resolve(&lights(), &photometry, -40.0);
         assert_eq!(close.bodies[0].colour, far.bodies[0].colour);
         assert_eq!(close.bodies[1].colour, far.bodies[1].colour);
         let corona = |f: &Frame| f.coronas[0].colour.max_element() / brightness(&f.bodies[0]);
@@ -775,15 +765,15 @@ mod tests {
         // Only discs have coronas, and they fade in from a point.
         assert_eq!(close.coronas.len(), 1);
         near.stars[0].pixels = POINT_PIXELS;
-        let edge = resolve(&near, &photometry, -40.0, 0.5);
+        let edge = resolve(&near, &photometry, -40.0);
         assert!(edge.coronas[0].colour.max_element() < 1e-6);
     }
 
     #[test]
     fn one_stop_doubles_bodies_points_and_coronas() {
         let photometry = Photometry::default();
-        let a = resolve(&lights(), &photometry, -40.0, 0.5);
-        let b = resolve(&lights(), &photometry, -39.0, 0.5);
+        let a = resolve(&lights(), &photometry, -40.0);
+        let b = resolve(&lights(), &photometry, -39.0);
         for (a, b) in a.bodies.iter().zip(&b.bodies) {
             assert_eq!(b.colour, a.colour * 2.0);
         }
@@ -798,21 +788,16 @@ mod tests {
     }
 
     #[test]
-    fn uniforms_preserve_bright_radiance_until_fragment_lighting() {
+    fn hdr_safety_cap_keeps_extreme_manual_values_finite() {
         let mut lights = lights();
         lights.stars[0].kelvin = 50000.0;
-        let frame = resolve(&lights, &Photometry::default(), 16.0, 1.0);
+        let frame = resolve(&lights, &Photometry::default(), 16.0);
         assert!(
             frame
                 .bodies
                 .iter()
                 .all(|b| b.colour.is_finite() && b.colour.max_element() <= MAX_VALUE as f32)
         );
-        assert!(frame.bodies[0].colour.max_element() > 20_000.0);
-        assert!(frame.bodies[1].colour.max_element() > 20_000.0);
-        assert_eq!(frame.bodies[1].surface.w, 1.0);
-        let dimmer = resolve(&lights, &Photometry::default(), 15.0, 1.0);
-        assert_eq!(frame.bodies[1].colour, dimmer.bodies[1].colour * 2.0);
         assert!(
             frame
                 .points

@@ -1,24 +1,39 @@
-//! Manual exposure and a shared highlight shoulder. Apply the shoulder after
-//! fragment lighting, before half-float storage can discard bright detail.
-//! Faint light remains linear. Bloom/additive overlaps combine mapped light,
-//! an intentional approximation, not a fully scene-linear HDR compositor.
-use crate::Navigation;
+//! Manual camera pipeline: linear exposure in the scene, then one display curve
+//! after bloom. No metering or adaptation. Future automatic exposure can supply
+//! the same stop value without changing the rendering paths.
+use crate::{Navigation, scene::SpaceCamera};
 use bevy::{
     asset::{load_internal_asset, uuid_handle},
+    core_pipeline::{
+        FullscreenShader,
+        core_3d::graph::{Core3d, Node3d},
+    },
+    ecs::query::QueryItem,
     prelude::*,
+    render::{
+        RenderApp, RenderStartup,
+        diagnostic::RecordDiagnostics,
+        extract_component::{
+            ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
+            UniformComponentPlugin,
+        },
+        render_graph::{
+            NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
+        },
+        render_resource::{
+            binding_types::{texture_2d, uniform_buffer},
+            *,
+        },
+        renderer::RenderContext,
+        view::ViewTarget,
+    },
 };
 
 pub const STOPS: std::ops::RangeInclusive<f64> = -64.0..=16.0;
 const SHADER: Handle<Shader> = uuid_handle!("37845990-7da2-4e71-85f7-61115fe77e33");
 
-pub struct ExposurePlugin;
-impl Plugin for ExposurePlugin {
-    fn build(&self, app: &mut App) {
-        load_internal_asset!(app, SHADER, "exposure.wgsl", Shader::from_wgsl);
-    }
-}
-
-/// Zero stops retains the fixed dark-space calibration, never a view meter.
+/// Fixed reference sensitivity, independent of location, selection and time.
+/// Zero stops keeps the former dark-space calibration for magnitude-0 points.
 pub fn gain(stops: f64) -> f64 {
     stops.exp2() / crate::sky::reference_radiance()
 }
@@ -29,35 +44,175 @@ pub fn facts(nav: &Navigation) -> Vec<(&'static str, String, Option<&'static str
             "exposure",
             format!("{:+.2} stops", nav.exposure),
             Some(
-                "Manual sensitivity relative to a fixed dark-space reference. +1 stop doubles incoming scene light, -1 halves it. Set this for the galaxy/background first, then use compression to fit bright surfaces. No automatic adjustment on moving, selecting or entering a system.",
+                "Manual sensitivity relative to a fixed dark-space reference. +1 stop doubles light everywhere; -1 halves it. No automatic adjustment on moving, selecting, following or entering a system. The bottom-right slider applies immediately.",
             ),
         ),
         (
             "compression",
             format!("{:.0}%", nav.compression * 100.0),
             Some(
-                "A shared highlight-only shoulder, not a shadow lift. Faint light stays unchanged; stronger compression starts the shoulder lower and fits a wider highlight range below white. Applied after surface lighting, before HDR storage, so bright planets retain their shading instead of being capped on the CPU. Bloom and additive overlaps combine already-mapped light, an approximation. Extreme highlights still have reduced contrast; compression cannot preserve every real brightness difference.",
+                "One scene-wide display curve, after exposure and bloom. Zero clips linearly at the display's limits. Increasing it lifts shadows and rolls off highlights, compressing brightness differences while preserving their order. Black stays black and middle grey stays fixed. It cannot recover light already lost to the HDR buffer's finite precision or safety cap.",
             ),
         ),
     ]
+}
+
+pub struct ExposurePlugin;
+
+impl Plugin for ExposurePlugin {
+    fn build(&self, app: &mut App) {
+        load_internal_asset!(app, SHADER, "exposure.wgsl", Shader::from_wgsl);
+        app.add_plugins((
+            ExtractComponentPlugin::<DisplayCurve>::default(),
+            UniformComponentPlugin::<DisplayCurve>::default(),
+        ))
+        .add_systems(Update, sync);
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        render_app
+            .add_systems(RenderStartup, init_pipeline)
+            .add_render_graph_node::<ViewNodeRunner<CurveNode>>(Core3d, ManualDisplay)
+            .add_render_graph_edges(
+                Core3d,
+                (
+                    Node3d::Tonemapping,
+                    ManualDisplay,
+                    Node3d::EndMainPassPostProcessing,
+                ),
+            );
+    }
+}
+
+#[derive(Component, Clone, Copy, ExtractComponent, ShaderType)]
+struct DisplayCurve {
+    /// x: compression; a vec4 keeps WebGL uniform alignment at 16 bytes.
+    settings: Vec4,
+}
+
+fn sync(mut commands: Commands, nav: Res<Navigation>, cameras: Query<Entity, With<SpaceCamera>>) {
+    for camera in &cameras {
+        if nav.realistic {
+            commands.entity(camera).insert(DisplayCurve {
+                settings: Vec4::new(nav.compression as f32, 0.0, 0.0, 0.0),
+            });
+        } else {
+            commands.entity(camera).remove::<DisplayCurve>();
+        }
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
+struct ManualDisplay;
+
+#[derive(Default)]
+struct CurveNode;
+
+impl ViewNode for CurveNode {
+    type ViewQuery = (
+        &'static ViewTarget,
+        &'static DynamicUniformIndex<DisplayCurve>,
+    );
+
+    fn run(
+        &self,
+        _graph: &mut RenderGraphContext,
+        context: &mut RenderContext,
+        (target, index): QueryItem<Self::ViewQuery>,
+        world: &World,
+    ) -> Result<(), NodeRunError> {
+        let curve = world.resource::<CurvePipeline>();
+        let cache = world.resource::<PipelineCache>();
+        let Some(pipeline) = cache.get_render_pipeline(curve.pipeline) else {
+            return Ok(());
+        };
+        let uniforms = world.resource::<ComponentUniforms<DisplayCurve>>();
+        let Some(binding) = uniforms.uniforms().binding() else {
+            return Ok(());
+        };
+        if !target.is_hdr() {
+            return Ok(());
+        }
+        // Flip only once the pipeline and uniforms are ready.
+        let write = target.post_process_write();
+        let group = context.render_device().create_bind_group(
+            "manual_display",
+            &cache.get_bind_group_layout(&curve.layout),
+            &BindGroupEntries::sequential((write.source, binding)),
+        );
+        let diagnostics = context.diagnostic_recorder();
+        let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("manual_display"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: write.destination,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        let span = diagnostics.pass_span(&mut pass, "manual_display");
+        pass.set_render_pipeline(pipeline);
+        pass.set_bind_group(0, &group, &[index.index()]);
+        pass.draw(0..3, 0..1);
+        span.end(&mut pass);
+        Ok(())
+    }
+}
+
+#[derive(Resource)]
+struct CurvePipeline {
+    layout: BindGroupLayoutDescriptor,
+    pipeline: CachedRenderPipelineId,
+}
+
+fn init_pipeline(
+    mut commands: Commands,
+    fullscreen: Res<FullscreenShader>,
+    cache: Res<PipelineCache>,
+) {
+    let layout = BindGroupLayoutDescriptor::new(
+        "manual_display",
+        &BindGroupLayoutEntries::sequential(
+            ShaderStages::FRAGMENT,
+            (
+                texture_2d(TextureSampleType::Float { filterable: false }),
+                uniform_buffer::<DisplayCurve>(true),
+            ),
+        ),
+    );
+    let pipeline = cache.queue_render_pipeline(RenderPipelineDescriptor {
+        label: Some("manual_display".into()),
+        layout: vec![layout.clone()],
+        vertex: fullscreen.to_vertex_state(),
+        fragment: Some(FragmentState {
+            shader: SHADER,
+            targets: vec![Some(ColorTargetState {
+                format: ViewTarget::TEXTURE_FORMAT_HDR,
+                blend: None,
+                write_mask: ColorWrites::ALL,
+            })],
+            ..default()
+        }),
+        ..default()
+    });
+    commands.insert_resource(CurvePipeline { layout, pipeline });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// CPU mirror of the shared shoulder, including final display clipping at zero.
+    /// CPU mirror of exposure.wgsl, for the display curve's invariants.
     fn curve(light: f64, amount: f64) -> f64 {
-        if amount <= 0.0 {
-            return light.clamp(0.0, 1.0);
+        if light <= 0.0 {
+            return 0.0;
         }
-        let knee = 1.0 - 0.82 * amount;
-        if light <= knee {
-            return light.max(0.0);
-        }
-        let room = 1.0 - knee;
-        let range = (5.0 * amount).exp2();
-        knee + room * -(-((light - knee) * range / room).ln_1p() / range).exp_m1()
+        let power = (-3.0 * amount).exp2();
+        let t = (light / 0.18).powf(power) * (0.18 / 0.82);
+        light.clamp(0.0, 1.0) * (1.0 - amount) + t / (1.0 + t) * amount
     }
 
     #[test]
@@ -70,46 +225,22 @@ mod tests {
     }
 
     #[test]
-    fn shoulder_preserves_faint_light_and_orders_extreme_highlights() {
+    fn compression_preserves_black_middle_grey_and_brightness_order() {
         for amount in [0.0, 0.25, 0.5, 1.0] {
-            for light in [0.0, 1e-8, 0.001, 0.01, 0.1, 0.18] {
-                assert!((curve(light, amount) - light).abs() < 1e-12);
-            }
+            assert_eq!(curve(0.0, amount), 0.0);
+            assert!((curve(0.18, amount) - 0.18).abs() < 1e-12);
             let mut previous = -1.0;
-            for i in -80..=100 {
+            for i in -80..=60 {
                 let value = curve((f64::from(i) / 2.0).exp2(), amount);
                 assert!((0.0..=1.0).contains(&value));
                 assert!(value >= previous);
                 previous = value;
             }
         }
-        // The old 20,000 safety cap made these identical before display mapping.
-        assert!(curve(2e5, 1.0) < curve(2e6, 1.0));
-        assert!(curve(2e6, 1.0) < curve(2e7, 1.0));
-        assert!(curve(1e20, 1.0) < 1.0);
-        assert!(curve(2e6, 1.0) - curve(2e5, 1.0) > 0.02);
-        assert!(curve(100.0, 1.0) < curve(100.0, 0.5));
-    }
-
-    #[test]
-    fn shoulder_joins_linear_light_without_a_slope_jump() {
-        for amount in [0.01, 0.25, 0.5, 1.0] {
-            let knee = 1.0 - 0.82 * amount;
-            let delta = 1e-8;
-            assert!(((curve(knee + delta, amount) - knee) / delta - 1.0).abs() < 1e-4);
-        }
-    }
-
-    #[test]
-    fn stronger_compression_never_lifts_shadows_or_highlights() {
-        for light in [0.0, 0.01, 0.18, 0.5, 1.0, 100.0, 2e7] {
-            let mut previous = curve(light, 0.0);
-            for step in 1..=100 {
-                let mapped = curve(light, f64::from(step) / 100.0);
-                assert!(mapped <= previous + 1e-12);
-                previous = mapped;
-            }
-        }
+        assert_eq!(curve(2.0, 0.0), 1.0);
+        assert!(curve(1e-5, 1.0) > curve(1e-5, 0.0));
+        assert!(curve(10.0, 1.0) < curve(100.0, 1.0));
+        assert!(curve(100.0, 1.0) < 1.0);
     }
 
     #[test]

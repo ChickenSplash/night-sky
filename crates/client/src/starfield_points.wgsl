@@ -2,9 +2,8 @@
 // Each star is one vertex, drawn additively into an image at `SUPERSAMPLE`
 // times the view's resolution per axis; `starfield_points_composite.wgsl`
 // turns each point into the raster path's Gaussian. Cutoff, near hiding,
-// colour and highlight shoulder follow `starfield.wgsl`: keep them in step.
+// colour and HDR safety cap follow `starfield.wgsl`: keep them in step.
 #import bevy_render::view::View
-#import night_sky::exposure::highlight
 
 struct Globals {
     settings: vec4<f32>,
@@ -73,10 +72,7 @@ fn vertex(star: Star) -> Output {
     }
     let area = 2.0 * PI * SIGMA_PX * SIGMA_PX;
     let peak = shown / area;
-    var bounded = 1.0;
-    if globals.settings.w > 0.5 {
-        colour = highlight(colour * peak, globals.debug.z);
-    }
+    var bounded = min(peak, 20000.0 / max(max(colour.r, colour.g), max(colour.b, 1.0)));
     if globals.settings.w < 0.5 {
         bounded = select(1.0 + log(max(peak, 1.0)), peak, peak <= 1.0);
     }
