@@ -1,22 +1,17 @@
 #define_import_path night_sky::hdr
 
-// Half floats stop at 65504, but a sunlit planet at a galaxy-friendly
-// exposure is about 2^24 display units. Bodies, sprites and coronas store
-// light above `KNEE` logarithmically; `exposure.wgsl` decodes it before the
-// display curve. Below `KNEE` storage is linear, so bloom, additive points and
-// the galaxy glow are unchanged. Keep in step with `exposure.rs`.
-const KNEE: f32 = 8192.0;
-// Stored units per e-fold above the knee: 2^30 stores as about 31,000.
-const SLOPE: f32 = 4.0;
+// Camera glare. Every realistic shader stores light above `KNEE` on a
+// logarithmic curve: the display clips at white either way, so only bloom
+// sees the difference, and an overexposed source's glow grows with its stops
+// over white instead of with its raw light. Bright galactic stars, a few
+// stops over, bloom almost as before; a star disc 2^30 over white stores
+// about 43, not a billion, so its glow stays compact. Slope one at the knee.
+// Keep in step with `exposure.rs`.
+const KNEE: f32 = 4.0;
+const GLARE: f32 = 2.0;
 
 fn encode(light: vec3<f32>) -> vec3<f32> {
     let x = max(light, vec3(0.0));
-    let above = KNEE * (1.0 + log(max(x, vec3(KNEE)) / KNEE) / SLOPE);
+    let above = KNEE + GLARE * log(1.0 + (max(x, vec3(KNEE)) - KNEE) / GLARE);
     return select(x, above, x > vec3(KNEE));
-}
-
-fn decode(stored: vec3<f32>) -> vec3<f32> {
-    let s = max(stored, vec3(0.0));
-    let above = KNEE * exp(min((s / KNEE - 1.0) * SLOPE, vec3(70.0)));
-    return select(s, above, s > vec3(KNEE));
 }

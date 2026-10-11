@@ -185,37 +185,38 @@ mod tests {
     use super::*;
 
     /// CPU mirror of hdr.wgsl.
-    const KNEE: f64 = 8192.0;
-    const SLOPE: f64 = 4.0;
+    const KNEE: f64 = 4.0;
+    const GLARE: f64 = 2.0;
     fn encode(x: f64) -> f64 {
         if x <= KNEE {
             x.max(0.0)
         } else {
-            KNEE * (1.0 + (x / KNEE).ln() / SLOPE)
-        }
-    }
-    fn decode(s: f64) -> f64 {
-        if s <= KNEE {
-            s.max(0.0)
-        } else {
-            KNEE * ((s / KNEE - 1.0) * SLOPE).min(70.0).exp()
+            KNEE + GLARE * ((x - KNEE) / GLARE).ln_1p()
         }
     }
 
     #[test]
-    fn hdr_encoding_is_linear_below_its_knee_and_fits_half_floats() {
-        for x in [0.0, 1e-4, 0.5, 1.0, 20_000.0f64.min(KNEE)] {
+    fn glare_keeps_light_below_white_and_grows_with_stops_above_it() {
+        for x in [0.0, 1e-4, 0.5, 1.0, KNEE] {
             assert_eq!(encode(x), x);
         }
-        for stops in [14, 20, 24, 30, 40] {
-            let x = f64::from(stops).exp2();
-            assert!(encode(x) < 60_000.0, "2^{stops} overflows half floats");
-            assert!((decode(encode(x)) / x - 1.0).abs() < 1e-9);
+        // Slope one at the knee; bright galactic stars, a few stops over
+        // white, keep most of their bloom.
+        let d = 1e-6;
+        assert!(((encode(KNEE + d) - KNEE) / d - 1.0).abs() < 1e-3);
+        assert!(encode(16.0) > 0.45 * 16.0);
+        // Each stop far over white adds about the same: bloom grows with
+        // stops, not light, and never leaves half-float range.
+        let step = |stops: i32| encode(2f64.powi(stops + 1)) - encode(2f64.powi(stops));
+        assert!((step(20) - step(30)).abs() < 0.01 * step(20));
+        assert!(encode(2f64.powi(30)) < 50.0);
+        assert!(encode(1e38) < 1_000.0);
+        let mut previous = -1.0;
+        for i in -40..=200 {
+            let value = encode((f64::from(i) / 2.0).exp2());
+            assert!(value > previous);
+            previous = value;
         }
-        // Half-float storage keeps 11 significant bits: under 1% error decoded.
-        let stored = encode(2f64.powi(24));
-        let step = 2f64.powi(stored.log2().floor() as i32 - 10);
-        assert!(decode(stored + step) / decode(stored) < 1.01);
     }
 
     #[test]

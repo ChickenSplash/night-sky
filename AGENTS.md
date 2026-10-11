@@ -19,7 +19,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
-- `./scripts/run.sh --smoke-test`: desktop rendering check with seventeen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and six realistic-rendering captures at galaxy exposure (0 stops: system at 100% and 0% compression, lit planet close-up, constellation, star close-up at both compression settings).
+- `./scripts/run.sh --smoke-test`: desktop rendering check with eighteen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and seven realistic-rendering captures (0 stops: system at 100% and 0% compression, lit planet close-up, constellation, star close-up at both compression settings; then the corona's structure at -16 stops, 0%).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
   run and `crash-*.log` for panics. The renderer's local surface-timeout patch is
   documented in `vendor/README.md`. Keep it in step with Bevy upgrades.
@@ -395,7 +395,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   `MainOpaquePass` and `MainTransmissivePass`, GPU span `star_points`) draws
   them additively into an `Rgba16Float` image at `SUPERSAMPLE` (2) times the
   view's resolution per axis, without MSAA. `starfield_points.wgsl` applies
-  the same cutoff, near hiding, colour and HDR cap as `starfield.wgsl` (keep them
+  the same cutoff, near hiding, colour and glare storage as `starfield.wgsl` (keep them
   in step) and depth-tests each star's centre against the opaque bodies (the
   space camera's depth texture has `TEXTURE_BINDING` natively for this;
   never enable that usage on WebGL's multisampled depth texture, which
@@ -424,9 +424,11 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   the shader's uniforms: a blackbody palette, or `spectral_colour` when not
   realistic. Which stars load still follows bolometric luminosity. Every
   point is a
-  0.55 px sigma Gaussian (2 px footprint, a uniform so the compact debug
-  switch can shrink it), as in a perfect camera: brightness
-  shows only in its peak, linear up to the HDR safety cap, never in its size.
+  0.55 px sigma Gaussian, the camera's point spread shared with body sprites
+  (`render::PSF_SIGMA_PX`) (2 px footprint, a uniform so the compact debug
+  switch can shrink it, widened up to 12 px for a star whose Gaussian shows
+  beyond it), as in a perfect camera: brightness shows in its peak, linear,
+  and above white in its glare (`hdr.wgsl`).
   The former logarithmic point knee remains only in wireframe mode. Crowds
   are never widened or blurred.
 - `sky.rs` now contains only fixed unit conversions and a fixed zero-stop
@@ -562,20 +564,39 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   they run after propagation.
 - Body colours reach the GPU pre-exposed on the CPU, in f32 uniforms (only an
   arithmetic safety limit, `MAX_VALUE` 1e30). Never send raw radiance: star
-  surfaces reach 1e10 W m⁻² sr⁻¹. HDR targets are half-float (max 65504), but a
-  sunlit planet at galaxy exposure is about 2^24, so `body.wgsl` and
-  `point.wgsl` store light above 8192 logarithmically (`hdr.wgsl` `encode`),
-  after lighting, and the display pass decodes it. Below 8192 storage is
-  linear, so bloom, additive points and glow are unaffected; only MSAA edges
-  and bloom of light above 8192 mix encoded values (an approximation). Do not
-  reinstate a CPU half-float cap: it erases shading. Galactic star points and
-  glow keep their own 20,000 caps and are not encoded.
-- Corona and body point sprites size themselves until their light falls below
-  `CORONA_FLOOR` (1/1024), capped at `CORONA_MAX_PIXELS`, so the fade-out at
-  the sprite edge is never visible. Close to a star at galaxy exposure and 0%
-  compression the corona (a millionth of the disc at the limb, falling as
-  r⁻³) is many stops above white and fills the view; that is the camera
-  model, not a bug. Compression balances it with its star.
+  surfaces reach 1e10 W m⁻² sr⁻¹. Every realistic shader that writes the HDR
+  target (bodies, sprites, galactic points on both paths, glow composite)
+  stores light above `KNEE` (4) logarithmically (`hdr.wgsl` `encode`, slope
+  one at the knee, `GLARE` 2). The display clips at white either way, so this
+  only shapes bloom: glare grows with stops over white, not raw light. A star
+  disc 2^30 over white stores about 43, so its glow stays compact instead of
+  swallowing the inner orbits; galactic stars a few stops over keep most of
+  their bloom. There is no decoding and no half-float cap: never reinstate one.
+- One point spread for everything: `render::PSF_SIGMA_PX` (0.55 physical px)
+  is the galactic stars' Gaussian. A body point sprite uses it widened by its
+  disc (variance plus a quarter of the squared disc radius), and every disc
+  gets a rim sprite (`Frame::rims`, `Point::rim`) with its limb blurred by the
+  same spread (erfc; a planet's only on its lit side), so a point and the disc
+  replacing it are white over the same radius (tested). This fixed overexposed
+  stars shrinking suddenly where points became discs, 100 to 200 AU from a
+  giant.
+- Eye-like streaks (`point.wgsl` `streaks`, `render::streaks`) mark light too
+  bright for the camera: many fine rays of uneven length and strength, fixed
+  to the screen, from points and lit limbs more than `STREAK_START` (3) stops
+  over white, longer per stop up to `STREAK_MAX_PX`, whiter than the source.
+  Not diffraction spikes. `Lights::streaks` fades them in from zero where the
+  camera arrives (where galactic points become bodies) to full at half that
+  distance, so they never pop. Galactic points have none.
+- Coronas follow Baumbach's K and F profile (in millionths of the disc,
+  `CORONA_SHARE`): helmet streamers near the star's equator (from its spin
+  axis, narrowing outwards; a ring when seen pole-on), polar plumes and faint
+  rays, all seeded per star and turning with it. `CORONA_*_MAX` bound the
+  structure for sprite sizing; keep them in step with the shader.
+- Sprites size themselves until their light falls below `SPRITE_FLOOR`
+  (1/1024), capped at `SPRITE_MAX_PIXELS`, so the fade-out at the sprite edge
+  is never visible. Close to a star at galaxy exposure and 0% compression its
+  corona is far over white and fills the view; that is the camera model, not
+  a bug. Compression balances it with its star.
 - Star colours are blackbody spectra white-balanced to the Sun. Red dwarfs
   look orange; there is no assisted saturation. Brightness is visual, not bolometric.
 - One manual linear exposure applies to bodies, galactic points and glow.
@@ -593,8 +614,8 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   points and glow never balance: Exposure alone sets the galaxy. A former
   scene-wide highlight curve (`af68625`) could not do this: squeezing ~24
   stops into the display washed out and kept terminators hard. Do not bring
-  one back. `exposure.wgsl` only decodes stored headroom, clips at white
-  and applies Bevy's deband dither (Bevy's tone-mapping pass is disabled).
+  one back. `exposure.wgsl` only clips at white and applies Bevy's deband
+  dither (Bevy's tone-mapping pass is disabled).
   The visited star balances only while it is a body; leaving `body_range`
   it becomes an unbalanced galactic point, a jump at high compression.
   `set_exposure <stops>` and `set_compression <0..1>` use the same path as
@@ -612,9 +633,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   in `body.wgsl`, fixed to the star's spin. Granule size follows the pressure
   scale height (`render::granules`); patterns fade out before their cells reach
   a pixel, and hot stars have none. Manual exposure never changes with apparent
-  disc size. Coronas are additive sprites (`Frame::coronas`, `point.wgsl`) at
-  a millionth of the physical disc radiance. Coronas come first in the sprite
-  pool so they keep their entity.
+  disc size. Rims (blurred limbs, coronas, streaks) are additive sprites
+  (`Frame::rims`, `point.wgsl`) and come first in the sprite pool so they
+  keep their entity.
 - Cameras sharing the window must agree on `Hdr`: the egui overlay camera switches
   with the 3D camera (without tone mapping), or it presents a stale frame.
 - The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh

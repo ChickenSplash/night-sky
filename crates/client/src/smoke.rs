@@ -181,6 +181,9 @@ pub fn exercise(
         29 => capture(&mut commands, "realistic-star"),
         30 => nav.set_compression(0.0),
         31 => capture(&mut commands, "realistic-star-linear"),
+        // Low enough for the corona to show its structure.
+        32 => nav.set_exposure(-16.0),
+        33 => capture(&mut commands, "realistic-corona"),
         _ => {
             exit.write(AppExit::Success);
         }

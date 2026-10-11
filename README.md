@@ -277,9 +277,9 @@ node scripts/test-star-worker.mjs
 The graphical smoke test requires a working desktop session. It exercises the
 system view, close tracking, a zoomed-out galaxy, interstellar jumps (one captured mid-flight),
 a 50-task table fixture, its last page, constellation framing, restored orbits
-and a second orbital page (one captured mid-flight), then realistic rendering in
-compressed and linear display curves, a lit planet close-up, a constellation and a
-star close-up with both curves. Each capture waits for camera flights to finish. It saves seventeen
+and a second orbital page (one captured mid-flight), then realistic rendering at
+100% and 0% compression, a lit planet close-up, a constellation, a star close-up at
+both settings and the corona's structure. Each capture waits for camera flights to finish. It saves eighteen
 screenshots under `data/`
 and exits automatically. Unit tests cover physical orbit invariants, clock
 continuity, the galaxy's star count, profile and regional star mix, cell counts

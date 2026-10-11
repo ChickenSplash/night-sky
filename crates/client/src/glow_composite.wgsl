@@ -1,4 +1,6 @@
-// Scales the low-resolution galaxy glow up over the 3D view.
+// Scales the low-resolution galaxy glow up over the 3D view. Light above
+// white is stored as glare (`hdr.wgsl`).
+#import night_sky::hdr::encode
 struct Settings { viewport: vec4<f32>, scale: vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> settings: Settings;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var glow: texture_2d<f32>;
@@ -28,5 +30,5 @@ struct Vertex { @location(0) position: vec3<f32> }
             + g1.x * textureSampleLevel(glow, glow_sampler, vec2(h1.x, h0.y), 0.0).rgb)
         + g1.y * (g0.x * textureSampleLevel(glow, glow_sampler, vec2(h0.x, h1.y), 0.0).rgb
             + g1.x * textureSampleLevel(glow, glow_sampler, h1, 0.0).rgb);
-    return vec4(colour * settings.scale.x, 0.0);
+    return vec4(encode(colour * settings.scale.x), 0.0);
 }

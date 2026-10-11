@@ -1,9 +1,13 @@
-//! Realistic bodies: physical photometry and one manual linear exposure.
-//! The shared display curve lives in `exposure`, after scene composition and bloom.
-//! - Bodies smaller than a point on screen are drawn as point sprites: a sharp
-//!   core and a faint halo carrying the body's whole light, so distant stars
-//!   keep their true relative brightness.
-//! - Close up, a star is a disc with limb darkening, granulation and a corona.
+//! Realistic bodies: physical photometry, one manual linear exposure and
+//! per-body balance (`resolve`). The display pass lives in `exposure`.
+//! - Every body shares the camera's point spread with the galactic stars
+//!   (`PSF_SIGMA_PX`). Bodies smaller than a point on screen are point sprites
+//!   carrying the body's whole light; a disc's limb is blurred by the same
+//!   spread in a sprite around it, so nothing jumps at the switch.
+//! - Close up, a star is a disc with limb darkening, granulation and a
+//!   structured corona.
+//! - Far over white, every body shows eye-like streaks, and light above white
+//!   is stored as glare (`hdr.wgsl`), so bloom grows with stops, not light.
 //! - Colours reach the GPU already exposed, so half-float HDR targets never see
 //!   raw radiance.
 
@@ -31,32 +35,44 @@ const POINT_SHADER: Handle<Shader> = uuid_handle!("0c9b5d2e-7a41-4e8f-a3d6-5b2f8
 pub const SPACE_BLUE: Color = Color::srgb(0.015, 0.035, 0.09);
 
 /// Arithmetic safety for f32 uniforms only, not an HDR cap: the shaders store
-/// light above half-float range encoded (`hdr.wgsl`), so lit surfaces keep
-/// their shading at any exposure.
+/// light above white as glare (`hdr.wgsl`).
 const MAX_VALUE: f64 = 1e30;
 /// Bodies below this on-screen radius, in logical pixels, are drawn as points.
 pub const POINT_PIXELS: f32 = 1.5;
-/// Point spread in logical pixels: a sharp core and a faint halo. Bloom adds the
-/// wide glow of bright points.
-const CORE_SIGMA: f32 = 0.8;
-const HALO_SIGMA: f32 = 3.0;
-const HALO_SHARE: f32 = 0.12;
+/// The camera's point spread: a Gaussian of this sigma in physical pixels, as
+/// for galactic stars (`starfield.wgsl` `SIGMA_PX`). Bloom adds the wide glow.
+pub const PSF_SIGMA_PX: f32 = 0.55;
 /// Display values a body's key shows at when exposed for itself: a planet's
 /// sub-stellar point just under white, so its shading shows, and a star's
 /// surface a little over, so its disc reads as white with darkened limbs.
 const PLANET_KEY: f64 = 0.8;
 const STAR_KEY: f64 = 2.0;
-/// Corona brightness just outside the limb, relative to the disc: the real
-/// inner corona is about a millionth.
+/// Corona scale relative to the disc: `point.wgsl` gives Baumbach's profile
+/// in millionths, about 4 just outside the limb.
 const CORONA_SHARE: f64 = 1e-6;
-/// Corona falloff power, and its smallest sprite half side in disc radii.
-const CORONA_FALLOFF: f32 = 3.0;
+/// Bounds of `point.wgsl`'s corona structure: the outer corona's streamers
+/// and rays, the inner corona's plumes and rays, and the rays alone.
+const CORONA_OUTER_MAX: f32 = 5.5;
+const CORONA_INNER_MAX: f32 = 2.2;
+const CORONA_RAYS_MAX: f32 = 1.25;
+/// A star's smallest rim sprite half side, in disc radii.
 const CORONA_EXTENT: f32 = 4.0;
-/// The sprite reaches until the corona is fainter than this display value, so
-/// its edge fade is never visible.
-const CORONA_FLOOR: f32 = 1.0 / 1024.0;
-/// Largest corona sprite half side, in pixels. Only extreme exposures reach it.
-const CORONA_MAX_PIXELS: f32 = 16_384.0;
+/// Limb brightness relative to the disc's mean, per channel (`body.wgsl`
+/// `LIMB` at the very edge).
+const LIMB_EDGE: DVec3 = DVec3::new(0.6, 0.5, 1.0 / 3.0);
+/// Sprites reach until their light is fainter than this display value, so
+/// their edge fade is never visible.
+const SPRITE_FLOOR: f32 = 1.0 / 1024.0;
+/// Largest sprite half side, in pixels. Only extreme exposures reach it.
+const SPRITE_MAX_PIXELS: f32 = 16_384.0;
+/// Eye-like streaks start this many stops over white, growing this many
+/// pixels per stop up to a limit, and reach full strength (relative to white)
+/// over `STREAK_RAMP` stops. They mark light too bright for the camera.
+const STREAK_START: f32 = 3.0;
+const STREAK_PX_PER_STOP: f32 = 3.5;
+const STREAK_MAX_PX: f32 = 160.0;
+const STREAK_GAIN: f32 = 0.4;
+const STREAK_RAMP: f32 = 6.0;
 
 pub struct RenderPlugin;
 
@@ -107,15 +123,19 @@ impl Material for BodyMaterial {
     }
 }
 
-#[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
+/// Fields as `Point` (`point.wgsl`), with `axis` projected onto the sprite.
+#[derive(Asset, TypePath, AsBindGroup, Clone, Default, PartialEq)]
 pub struct PointMaterial {
     #[uniform(0)]
     colour: Vec4,
     #[uniform(0)]
     shape: Vec4,
-    /// Disc radius in pixels and falloff for a corona; zero for a point.
     #[uniform(0)]
-    corona: Vec4,
+    edge: Vec4,
+    #[uniform(0)]
+    streaks: Vec4,
+    #[uniform(0)]
+    axis: Vec4,
 }
 
 impl Material for PointMaterial {
@@ -167,12 +187,16 @@ pub struct Lights {
     pub eye: Vec3,
     /// Temperature of the star lighting the planets.
     pub kelvin: f64,
+    /// Streak visibility, from zero at the edge of the body range to one well
+    /// inside it, so streaks never appear suddenly as bodies take over.
+    pub streaks: f32,
 }
 
 impl Lights {
     pub fn clear(&mut self) {
         self.stars.clear();
         self.planets.clear();
+        self.streaks = 0.0;
     }
 }
 
@@ -288,54 +312,164 @@ pub struct Shaded {
     pub surface: Vec4,
 }
 
-/// A point sprite ready for the GPU.
+/// A camera-facing sprite ready for the GPU (`point.wgsl`): a point, or the
+/// rim around a disc.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
     pub centre: Vec3,
     /// Half the sprite's side, in render units.
     pub half: f32,
-    /// Colour times the point's whole light, in display value × square pixels.
+    /// A point's whole light, in display value × square pixels, or a corona's
+    /// scale: the disc's brightness times `CORONA_SHARE`.
     pub colour: Vec3,
-    /// Half side in pixels, core and halo spread in pixels, and the halo's share.
+    /// Half side in pixels, a point's Gaussian sigma in pixels, the disc radius
+    /// in pixels (zero for a point) and a corona's seed.
     pub shape: Vec4,
-    /// Disc radius in pixels and falloff for a corona; zero for a point.
-    pub corona: Vec4,
+    /// The disc's brightness at its limb, and the point spread's sigma in pixels.
+    pub edge: Vec4,
+    /// Streak colour, and the longest streak's length in pixels.
+    pub streaks: Vec4,
+    /// A star's pole or a planet's direction to its star, in world axes.
+    pub axis: Vec3,
+    /// A star's whole limb shines; a planet's only on its lit side.
+    pub star: bool,
+}
+
+/// Streaks for light peaking at `peak` (display value), tinted towards white
+/// like the eye's glare.
+fn streaks(colour: DVec3, peak: f64, visible: f32) -> Vec4 {
+    let stops = peak.max(f64::MIN_POSITIVE).log2() as f32 - STREAK_START;
+    if stops <= 0.0 || visible <= 0.0 {
+        return Vec4::ZERO;
+    }
+    let strength = STREAK_GAIN * (stops / STREAK_RAMP).min(1.0) * visible;
+    let tint = (colour / colour.max_element().max(1e-12) + DVec3::ONE) * 0.5;
+    let length = (stops * STREAK_PX_PER_STOP).min(STREAK_MAX_PX) * visible;
+    (tint.as_vec3() * strength).extend(length)
+}
+
+/// Pixels beyond which a Gaussian of `sigma` peaking at `peak` is invisible.
+fn gaussian_reach(peak: f32, sigma: f32) -> f32 {
+    sigma * (2.0 * (peak / SPRITE_FLOOR).max(1.0).ln()).sqrt()
+}
+
+/// Disc radii beyond which a corona of `scale` (`point.wgsl` `corona`) is
+/// invisible.
+fn corona_reach(scale: f32) -> f32 {
+    let bound = |x: f32| {
+        scale
+            * (0.0532 * CORONA_OUTER_MAX * x.powf(-2.5)
+                + 1.425 * CORONA_INNER_MAX * x.powi(-7)
+                + 2.565 * CORONA_RAYS_MAX * x.powi(-17))
+    };
+    if bound(1.0) <= SPRITE_FLOOR {
+        return 1.0;
+    }
+    let (mut low, mut high) = (1.0f32, 1e7f32);
+    for _ in 0..60 {
+        let mid = (low * high).sqrt();
+        if bound(mid) > SPRITE_FLOOR {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    high
+}
+
+/// Sprite half side for light reaching `reach` pixels: the fade-out starts at
+/// 0.6 of the half side.
+fn sprite_half(reach: f32, least: f32) -> f32 {
+    (reach / 0.6).max(least).min(SPRITE_MAX_PIXELS.max(least))
 }
 
 impl Point {
-    fn new(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3, light: f64) -> Self {
-        // A point about to become a disc spreads as wide as the disc.
-        let core = CORE_SIGMA.max(0.7 * pixels);
+    /// A body below `POINT_PIXELS`: its light spread by the point spread,
+    /// widened by its disc (a uniform disc's variance is a quarter of its
+    /// squared radius), so it matches the blurred disc it becomes.
+    fn new(
+        centre: Vec3,
+        pixels: f32,
+        per_pixel: f32,
+        colour: DVec3,
+        light: f64,
+        psf: f32,
+        visible: f32,
+    ) -> Self {
+        let sigma = (psf * psf + pixels * pixels / 4.0).sqrt();
+        let peak = light / (std::f64::consts::TAU * f64::from(sigma).powi(2));
+        let streaks = streaks(colour, peak * colour.max_element(), visible);
         let colour = hdr_colour(colour, light);
-        // Reach until the halo is fainter than `CORONA_FLOOR`, so very bright
-        // points never show the sprite's square edge.
-        let halo =
-            colour.max_element() * HALO_SHARE / (std::f32::consts::TAU * HALO_SIGMA * HALO_SIGMA);
-        let faint = HALO_SIGMA * (2.0 * (halo / CORONA_FLOOR).max(1.0).ln()).sqrt();
-        let half = (4.0 * core.max(HALO_SIGMA)).max(faint.min(CORONA_MAX_PIXELS));
+        let peak = colour.max_element() / (std::f32::consts::TAU * sigma * sigma);
+        let reach = gaussian_reach(peak, sigma).max(1.5 * sigma + streaks.w);
+        let half = sprite_half(reach, 4.0 * sigma);
         Self {
             centre,
             half: half * per_pixel,
             colour,
-            shape: Vec4::new(half, core, HALO_SIGMA, HALO_SHARE),
-            corona: Vec4::ZERO,
+            shape: Vec4::new(half, sigma, 0.0, 0.0),
+            edge: Vec4::ZERO,
+            streaks,
+            axis: Vec3::ZERO,
+            star: false,
         }
     }
 
-    /// A glow around a star's disc, `colour` its brightness just outside the limb.
-    fn corona(centre: Vec3, pixels: f32, per_pixel: f32, colour: DVec3) -> Self {
-        let colour = hdr_colour(colour, 1.0);
-        // `point.wgsl` fades out from 0.6 of the half side, so put that where
-        // the corona has already fallen below `CORONA_FLOOR`.
-        let reach = (colour.max_element() / CORONA_FLOOR).powf(1.0 / CORONA_FALLOFF) / 0.6;
-        let half =
-            (reach.max(CORONA_EXTENT) * pixels).min(CORONA_MAX_PIXELS.max(CORONA_EXTENT * pixels));
+    /// The rim of a disc `pixels` in radius: its limb (`limb`, display value)
+    /// blurred by the point spread, and for a star its corona (`corona`, the
+    /// scale).
+    #[allow(clippy::too_many_arguments)]
+    fn rim(
+        centre: Vec3,
+        pixels: f32,
+        per_pixel: f32,
+        psf: f32,
+        limb: DVec3,
+        corona: DVec3,
+        streaks: Vec4,
+        axis: Vec3,
+        star: bool,
+        seed: f32,
+    ) -> Self {
+        let limb = hdr_colour(limb, 1.0);
+        let corona = hdr_colour(corona, 1.0);
+        // erfc(z) < exp(-z²), so the blurred limb is within a Gaussian's reach.
+        let mut reach = pixels + gaussian_reach(limb.max_element(), psf);
+        reach = reach.max(pixels + streaks.w);
+        let mut least = 0.0;
+        if star {
+            reach = reach.max(corona_reach(corona.max_element()) * pixels);
+            least = CORONA_EXTENT * pixels;
+        }
+        let half = sprite_half(reach, least);
         Self {
             centre,
             half: half * per_pixel,
-            colour,
-            shape: Vec4::new(half, 0.0, 0.0, 0.0),
-            corona: Vec4::new(pixels, CORONA_FALLOFF, 0.0, 0.0),
+            colour: corona,
+            shape: Vec4::new(half, 0.0, pixels, seed),
+            edge: limb.extend(psf),
+            streaks,
+            axis,
+            star,
+        }
+    }
+
+    /// The material, with `axis` projected onto a sprite facing `facing`
+    /// (local +y is down on the sprite).
+    fn material(&self, facing: Quat) -> PointMaterial {
+        let right = facing * Vec3::X;
+        let up = facing * Vec3::Y;
+        PointMaterial {
+            colour: self.colour.extend(1.0),
+            shape: self.shape,
+            edge: self.edge,
+            streaks: self.streaks,
+            axis: Vec4::new(
+                self.axis.dot(right),
+                -self.axis.dot(up),
+                if self.star { 1.0 } else { 0.0 },
+                0.0,
+            ),
         }
     }
 }
@@ -344,13 +478,21 @@ impl Point {
 pub struct Frame {
     pub bodies: Vec<Shaded>,
     pub points: Vec<Point>,
-    pub coronas: Vec<Point>,
+    /// Sprites around discs: blurred limbs, coronas and streaks.
+    pub rims: Vec<Point>,
 }
 
 /// Exposes every body with the shared manual gain, then moves each towards its
 /// own exposure by `compression` (see `balance`). Galactic points and glow
-/// never balance: Exposure alone sets the galaxy.
-pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression: f64) -> Frame {
+/// never balance: Exposure alone sets the galaxy. `psf` is the point spread's
+/// sigma in logical pixels.
+pub fn resolve(
+    lights: &Lights,
+    photometry: &Photometry,
+    stops: f64,
+    compression: f64,
+    psf: f32,
+) -> Frame {
     let exposure = Exposure {
         gain: crate::exposure::gain(stops),
     };
@@ -369,6 +511,8 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
                 star.per_pixel,
                 colour,
                 light,
+                psf,
+                lights.streaks,
             ));
             continue;
         }
@@ -389,11 +533,17 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
         // The corona grows in from a point, and is whiter than the surface.
         let fade = f64::from(((star.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0));
         let pearl = (colour + DVec3::splat(colour.max_element())) * 0.5;
-        frame.coronas.push(Point::corona(
+        frame.rims.push(Point::rim(
             star.centre,
             star.pixels,
             star.per_pixel,
-            pearl * exposure.value(star.radiance * CORONA_SHARE) * balance * fade,
+            psf,
+            colour * LIMB_EDGE * value,
+            pearl * value * CORONA_SHARE * fade,
+            streaks(colour, colour.max_element() * value, lights.streaks),
+            star.spin * Vec3::Y,
+            true,
+            (star.kelvin * 0.618_034).fract() as f32,
         ));
     }
     let tint = DVec3::from_array(photometry.colour(lights.kelvin));
@@ -413,6 +563,8 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
                 planet.per_pixel,
                 colour,
                 light,
+                psf,
+                lights.streaks,
             ));
             continue;
         }
@@ -425,6 +577,18 @@ pub fn resolve(lights: &Lights, photometry: &Photometry, stops: f64, compression
             rotation: Quat::IDENTITY,
             surface: Vec4::ZERO,
         });
+        frame.rims.push(Point::rim(
+            planet.centre,
+            planet.pixels,
+            planet.per_pixel,
+            psf,
+            colour * value,
+            DVec3::ZERO,
+            streaks(colour, colour.max_element() * value, lights.streaks),
+            planet.towards_star,
+            false,
+            0.0,
+        ));
     }
     frame
 }
@@ -508,9 +672,23 @@ fn shade(
     lights: Res<Lights>,
     photometry: Res<Photometry>,
     mut frame: ResMut<Frame>,
+    camera: Query<&Camera, With<SpaceCamera>>,
 ) {
+    // Physical pixels per logical pixel: the point spread is set in physical ones.
+    let scale = camera
+        .single()
+        .ok()
+        .and_then(|c| Some(c.physical_viewport_size()?.x as f32 / c.logical_viewport_size()?.x))
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0);
     *frame = if nav.realistic {
-        resolve(&lights, &photometry, nav.exposure, nav.compression)
+        resolve(
+            &lights,
+            &photometry,
+            nav.exposure,
+            nav.compression,
+            PSF_SIGMA_PX / scale,
+        )
     } else {
         Frame::default()
     };
@@ -651,7 +829,7 @@ fn sync_points(
     let Ok((cell, parent, view)) = camera.single() else {
         return;
     };
-    let count = frame.coronas.len() + frame.points.len();
+    let count = frame.rims.len() + frame.points.len();
     grow(
         &mut commands,
         &mut pool,
@@ -667,9 +845,9 @@ fn sync_points(
         let Ok((transform, global, point_cell, visibility)) = points.get_mut(*entity) else {
             continue;
         };
-        // Coronas first: points come and go as bodies cross `POINT_PIXELS`, and a
+        // Rims first: points come and go as bodies cross `POINT_PIXELS`, and a
         // sprite moved to another pooled entity shows its old material for a frame.
-        let Some(point) = frame.coronas.iter().chain(&frame.points).nth(index) else {
+        let Some(point) = frame.rims.iter().chain(&frame.points).nth(index) else {
             hide(visibility);
             continue;
         };
@@ -680,15 +858,11 @@ fn sync_points(
                 .with_rotation(facing)
                 .with_scale(Vec3::splat(point.half)),
         );
-        let colour = point.colour.extend(1.0);
-        if materials
-            .get(material)
-            .is_some_and(|m| (m.colour, m.shape, m.corona) != (colour, point.shape, point.corona))
+        let changed = point.material(facing);
+        if materials.get(material).is_some_and(|m| *m != changed)
             && let Some(m) = materials.get_mut(material)
         {
-            m.colour = colour;
-            m.shape = point.shape;
-            m.corona = point.corona;
+            *m = changed;
         }
     }
 }
@@ -737,6 +911,7 @@ mod tests {
             ],
             eye: Vec3::ZERO,
             kelvin: 5772.0,
+            streaks: 1.0,
         }
     }
 
@@ -754,7 +929,7 @@ mod tests {
     #[test]
     fn manual_exposure_preserves_physical_brightness_ratios() {
         let photometry = Photometry::default();
-        let physical = resolve(&lights(), &photometry, -30.0, 0.0);
+        let physical = resolve(&lights(), &photometry, -30.0, 0.0, PSF_SIGMA_PX);
         // Earth at 1 AU against a planet at 10 AU: 100 times dimmer,
         // as discs and as points alike, before shared display compression.
         let discs = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
@@ -777,7 +952,7 @@ mod tests {
         let mut dim = lights();
         dim.planets[2].flux = 0.0;
         dim.planets[0].flux = 0.0;
-        let dim = resolve(&dim, &photometry, -30.0, 0.0);
+        let dim = resolve(&dim, &photometry, -30.0, 0.0, PSF_SIGMA_PX);
         assert_eq!(dim.points[2].light(), 0.0);
         assert_eq!(brightness(&dim.bodies[1]), 0.0);
         assert_eq!(dim.bodies[1].light.w, 0.0);
@@ -799,32 +974,35 @@ mod tests {
         let photometry = Photometry::default();
         let mut near = lights();
         near.stars[0].pixels = 400.0;
-        let close = resolve(&near, &photometry, -40.0, 0.0);
-        let far = resolve(&lights(), &photometry, -40.0, 0.0);
+        let close = resolve(&near, &photometry, -40.0, 0.0, PSF_SIGMA_PX);
+        let far = resolve(&lights(), &photometry, -40.0, 0.0, PSF_SIGMA_PX);
         assert_eq!(close.bodies[0].colour, far.bodies[0].colour);
         assert_eq!(close.bodies[1].colour, far.bodies[1].colour);
-        let corona = |f: &Frame| f.coronas[0].colour.max_element() / brightness(&f.bodies[0]);
+        let corona = |f: &Frame| f.rims[0].colour.max_element() / brightness(&f.bodies[0]);
         assert!((corona(&close) - CORONA_SHARE as f32).abs() < 1e-8);
-        // Only discs have coronas, and they fade in from a point.
-        assert_eq!(close.coronas.len(), 1);
+        // Every disc has a blurred rim, but only stars have coronas, which
+        // fade in from a point; the blurred limb is there from the start.
+        assert_eq!(close.rims.len(), 3);
+        assert!(close.rims.iter().skip(1).all(|r| r.colour == Vec3::ZERO));
         near.stars[0].pixels = POINT_PIXELS;
-        let edge = resolve(&near, &photometry, -40.0, 0.0);
-        assert!(edge.coronas[0].colour.max_element() < 1e-6);
+        let edge = resolve(&near, &photometry, -40.0, 0.0, PSF_SIGMA_PX);
+        assert!(edge.rims[0].colour.max_element() < 1e-6);
+        assert!(edge.rims[0].edge.x > 0.0);
     }
 
     #[test]
     fn one_stop_doubles_bodies_points_and_coronas() {
         let photometry = Photometry::default();
-        let a = resolve(&lights(), &photometry, -40.0, 0.0);
-        let b = resolve(&lights(), &photometry, -39.0, 0.0);
+        let a = resolve(&lights(), &photometry, -40.0, 0.0, PSF_SIGMA_PX);
+        let b = resolve(&lights(), &photometry, -39.0, 0.0, PSF_SIGMA_PX);
         for (a, b) in a.bodies.iter().zip(&b.bodies) {
             assert_eq!(b.colour, a.colour * 2.0);
         }
         for (a, b) in a
             .points
             .iter()
-            .chain(&a.coronas)
-            .zip(b.points.iter().chain(&b.coronas))
+            .chain(&a.rims)
+            .zip(b.points.iter().chain(&b.rims))
         {
             assert_eq!(b.colour, a.colour * 2.0);
         }
@@ -836,9 +1014,9 @@ mod tests {
         let ratio = |f: &Frame| brightness(&f.bodies[1]) / brightness(&f.bodies[2]);
         // At galaxy exposure both planets are far over white: half compression
         // keeps half their 100x (6.6 stops) difference, full keeps none.
-        let half = resolve(&lights(), &photometry, 0.0, 0.5);
+        let half = resolve(&lights(), &photometry, 0.0, 0.5, PSF_SIGMA_PX);
         assert!((ratio(&half) - 10.0).abs() < 0.01);
-        let full = resolve(&lights(), &photometry, 0.0, 1.0);
+        let full = resolve(&lights(), &photometry, 0.0, 1.0, PSF_SIGMA_PX);
         assert!((ratio(&full) - 1.0).abs() < 1e-4);
         // Each shows at its key: the Sun's surface and Earth's sub-stellar point.
         let sun = DVec3::from_array(photometry.colour(5772.0)).max_element();
@@ -849,46 +1027,135 @@ mod tests {
         assert!((f64::from(brightness(&full.bodies[1])) / earth - PLANET_KEY).abs() < 1e-4);
         // Points balance alike, and the corona keeps its share of the disc.
         assert!((full.points[2].light() / full.points[3].light() - 1.0).abs() < 1e-4);
-        let corona = full.coronas[0].colour.max_element() / brightness(&full.bodies[0]);
+        let corona = full.rims[0].colour.max_element() / brightness(&full.bodies[0]);
         assert!((corona - CORONA_SHARE as f32).abs() < 1e-8);
     }
 
     #[test]
     fn compression_never_brightens_dim_bodies() {
         let photometry = Photometry::default();
-        let dim = resolve(&lights(), &photometry, -60.0, 0.0);
-        let full = resolve(&lights(), &photometry, -60.0, 1.0);
+        let dim = resolve(&lights(), &photometry, -60.0, 0.0, PSF_SIGMA_PX);
+        let full = resolve(&lights(), &photometry, -60.0, 1.0, PSF_SIGMA_PX);
         assert_eq!(dim.bodies, full.bodies);
         assert_eq!(dim.points, full.points);
         assert_eq!(balance(0.0, PLANET_KEY, 1.0), 1.0);
     }
 
+    /// Complementary error function, as `point.wgsl`.
+    fn erfc(x: f32) -> f32 {
+        let t = 1.0 / (1.0 + 0.327_591_1 * x);
+        let poly = t
+            * (0.254_829_6
+                + t * (-0.284_496_7 + t * (1.421_413_7 + t * (-1.453_152 + t * 1.061_405_4))));
+        poly * (-x * x).exp()
+    }
+
+    /// Radius in pixels out to which a sprite shows white, by bisection.
+    fn white_radius(light: impl Fn(f32) -> f32) -> f32 {
+        let (mut low, mut high) = (0.0f32, 1000.0f32);
+        for _ in 0..60 {
+            let mid = 0.5 * (low + high);
+            if light(mid) >= 1.0 {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        low
+    }
+
+    #[test]
+    fn an_overexposed_point_matches_the_blurred_disc_it_becomes() {
+        // A star 2^12 over white at the switch: before, its point spread white
+        // to about 9 pixels, then the disc showed only its 1.5.
+        let value = 2f64.powi(12);
+        let colour = DVec3::ONE;
+        let psf = PSF_SIGMA_PX;
+        let pixels = POINT_PIXELS;
+        let point = Point::new(
+            Vec3::ZERO,
+            pixels - 1e-3,
+            1.0,
+            colour,
+            value * f64::from(PI * pixels * pixels),
+            psf,
+            0.0,
+        );
+        let sigma = point.shape.y;
+        let as_point = white_radius(|r| {
+            point.colour.x * (-r * r / (2.0 * sigma * sigma)).exp()
+                / (std::f32::consts::TAU * sigma * sigma)
+        });
+        // The disc is white inside its limb; its blurred limb continues outside.
+        let limb = (value * LIMB_EDGE.max_element()) as f32;
+        let as_disc = pixels.max(white_radius(|r| {
+            limb * 0.5 * erfc((r - pixels).max(0.0) / (psf * std::f32::consts::SQRT_2))
+        }));
+        assert!((as_point - as_disc).abs() < 1.0, "{as_point} vs {as_disc}");
+    }
+
     #[test]
     fn sprites_reach_until_their_light_is_invisible() {
+        let rim = |pixels: f32, value: f64, corona: f64| {
+            Point::rim(
+                Vec3::ZERO,
+                pixels,
+                1.0,
+                PSF_SIGMA_PX,
+                DVec3::splat(value),
+                DVec3::splat(corona),
+                Vec4::ZERO,
+                Vec3::Y,
+                true,
+                0.0,
+            )
+        };
         // At extreme brightness the cap applies, its fade far off-screen.
-        let capped = Point::corona(Vec3::ZERO, 50.0, 1.0, DVec3::splat(1e8));
-        assert_eq!(capped.shape.x, CORONA_MAX_PIXELS);
-        for value in [1e-3, 1.0, 1e2, 3e3] {
-            let corona = Point::corona(Vec3::ZERO, 50.0, 1.0, DVec3::splat(value));
-            let edge = corona.colour.x * (50.0 / (0.6 * corona.shape.x)).powf(CORONA_FALLOFF);
-            assert!(edge <= CORONA_FLOOR * 1.001, "{value}: {edge}");
-            assert!(corona.shape.x >= CORONA_EXTENT * 50.0);
+        assert_eq!(rim(50.0, 1e12, 1e6).shape.x, SPRITE_MAX_PIXELS);
+        for corona in [1e-3, 1.0, 1e2] {
+            let sprite = rim(50.0, corona * 1e6, corona);
+            let x = 0.6 * sprite.shape.x / 50.0;
+            let bound = corona as f32
+                * (0.0532 * CORONA_OUTER_MAX * x.powf(-2.5)
+                    + 1.425 * CORONA_INNER_MAX * x.powi(-7)
+                    + 2.565 * CORONA_RAYS_MAX * x.powi(-17));
+            assert!(bound <= SPRITE_FLOOR * 1.01, "{corona}: {bound}");
+            assert!(sprite.shape.x >= CORONA_EXTENT * 50.0);
         }
         for light in [1.0, 1e4, 1e9] {
-            let point = Point::new(Vec3::ZERO, 1.0, 1.0, DVec3::ONE, light);
-            let r = point.shape.x;
-            let halo =
-                point.colour.x * HALO_SHARE * (-r * r / (2.0 * HALO_SIGMA * HALO_SIGMA)).exp()
-                    / (std::f32::consts::TAU * HALO_SIGMA * HALO_SIGMA);
-            assert!(halo <= CORONA_FLOOR * 1.001, "{light}: {halo}");
+            let point = Point::new(Vec3::ZERO, 1.0, 1.0, DVec3::ONE, light, PSF_SIGMA_PX, 0.0);
+            let (r, sigma) = (0.6 * point.shape.x, point.shape.y);
+            let edge = point.colour.x * (-r * r / (2.0 * sigma * sigma)).exp()
+                / (std::f32::consts::TAU * sigma * sigma);
+            assert!(edge <= SPRITE_FLOOR * 1.001, "{light}: {edge}");
         }
+    }
+
+    #[test]
+    fn streaks_grow_with_stops_over_white_and_fade_with_visibility() {
+        let colour = DVec3::new(1.0, 0.5, 0.2);
+        assert_eq!(
+            streaks(colour, 2f64.powf(f64::from(STREAK_START)), 1.0),
+            Vec4::ZERO
+        );
+        let short = streaks(colour, 2f64.powi(8), 1.0);
+        let long = streaks(colour, 2f64.powi(20), 1.0);
+        assert!(short.w > 0.0 && long.w > short.w);
+        assert!(long.w <= STREAK_MAX_PX);
+        assert!(streaks(colour, 2f64.powi(200), 1.0).w <= STREAK_MAX_PX);
+        // Whiter than the source, never brighter than full strength.
+        assert!(long.z / long.x > 0.2 && long.x <= STREAK_GAIN);
+        assert_eq!(streaks(colour, 2f64.powi(20), 0.0), Vec4::ZERO);
+        // Sprites reach past their streaks.
+        let point = Point::new(Vec3::ZERO, 0.5, 1.0, colour, 1e9, PSF_SIGMA_PX, 1.0);
+        assert!(0.6 * point.shape.x >= point.streaks.w);
     }
 
     #[test]
     fn hdr_safety_cap_keeps_extreme_manual_values_finite() {
         let mut lights = lights();
         lights.stars[0].kelvin = 50000.0;
-        let frame = resolve(&lights, &Photometry::default(), 16.0, 0.0);
+        let frame = resolve(&lights, &Photometry::default(), 16.0, 0.0, PSF_SIGMA_PX);
         assert!(
             frame
                 .bodies
@@ -899,7 +1166,7 @@ mod tests {
             frame
                 .points
                 .iter()
-                .chain(&frame.coronas)
+                .chain(&frame.rims)
                 .all(|p| p.colour.is_finite() && p.colour.max_element() <= MAX_VALUE as f32)
         );
     }

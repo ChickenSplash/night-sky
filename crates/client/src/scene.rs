@@ -1209,6 +1209,12 @@ pub fn draw(
     if nav.presentation_mode == PresentationMode::Constellation {
         canvas.constellation(&mut gizmos);
     }
+    if let Some(range) = body_range(&nav, system, &pose) {
+        // Zero where the camera arrives, and so where galactic points become
+        // bodies, full at half that distance.
+        let arrive = range / LEAVE_FACTOR;
+        lights.streaks = ((arrive - pose.eye.length()) / (0.5 * arrive)).clamp(0.0, 1.0) as f32;
+    }
     if planets_shown {
         canvas.star(&mut gizmos, &mut lights);
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
