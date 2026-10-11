@@ -391,7 +391,9 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   view's resolution per axis, without MSAA. `starfield_points.wgsl` applies
   the same cutoff, near hiding, colour and knee as `starfield.wgsl` (keep them
   in step) and depth-tests each star's centre against the opaque bodies (the
-  space camera's depth texture has `TEXTURE_BINDING` for this). One
+  space camera's depth texture has `TEXTURE_BINDING` natively for this;
+  never enable that usage on WebGL's multisampled depth texture, which
+  panics with "Tex storage 2D multisample is not supported"). One
   full-screen draw in `Transparent3d` (`starfield_points_composite.wgsl`)
   gives each point the 0.55 px Gaussian from the 6x6 supersampled pixels
   around each view pixel, so points land within a quarter pixel. Under
