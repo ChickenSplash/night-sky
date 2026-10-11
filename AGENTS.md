@@ -104,9 +104,13 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   tracing events from `devtools::log_layers`, with level filter and grep; the
   tab shows errors and warnings logged while it was hidden), `terminal` (a
   command line and its output), `perf` (frame graph; star stream and star
-  draw facts: draw calls, uploaded stars, vertices and vertex memory; natively,
+  draw facts: draw calls, uploaded stars, vertices and vertex memory; cells,
+  blocks (drawn of uploaded) and grid boxes in one section; natively,
   a GPU passes table of GPU/CPU time and vertex/fragment shader invocations
-  per render pass from Bevy's `RenderDiagnosticsPlugin`),
+  per render pass from Bevy's `RenderDiagnosticsPlugin`. Every camera runs
+  passes of the same names; the vendored `bevy_render` suffixes repeats on
+  earlier cameras `~1`, `~2`, so the glow camera's pass no longer hides the
+  main view's),
   `render` (exposure readout, galaxy glow, physical exposure, wireframes over
   bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
   open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (bug report natively, star-stream benchmark in the
@@ -116,7 +120,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
   but are never rasterised), compact 1.25 px points, 4x MSAA (both window
-  cameras) and bloom.
+  cameras), bloom and cull blocks outside the view (on by default).
 - Typed commands live in `command_line.rs`. The terminal tab and, natively,
   standard input (the terminal that ran `./scripts/run.sh`, or a pipe) send
   `Typed` messages; `command_line::run` parses them with `parse`
@@ -345,6 +349,11 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`, the project folder
   magnitude reach before upload; the shader applies the exact cutoff. Rebuild
   retained cells after the camera travels 0.2 of the tier's reach. New entities
   start hidden for one frame, avoiding Bevy's material specialization race.
+  Batches carry `NoFrustumCulling`, so `starfield::Sight` culls them itself
+  each frame (the `cull_blocks` switch): a sphere around
+  each batch's block, in f64 against the view's four side planes, widened by
+  the point footprint. Hidden batches save GPU work, not Bevy's per-entity
+  CPU cost.
   Batch vertices are f32 offsets from their block's centre, so their error grows
   with that offset: within `PRECISE` times it of the camera a single-star sprite
   placed by an f64 subtraction takes over (built at `PREPARE` times the radius,

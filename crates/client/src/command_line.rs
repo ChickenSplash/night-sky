@@ -204,7 +204,7 @@ pub const USAGE: [Usage; 18] = [
     Usage {
         name: "set_debug",
         fields: &["switch", "on"],
-        about: "freeze_stream, galactic_points, point_pixels, compact_points, msaa or bloom; true or false",
+        about: "freeze_stream, galactic_points, point_pixels, compact_points, msaa, bloom or cull_blocks; true or false",
     },
 ];
 

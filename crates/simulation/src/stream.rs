@@ -261,6 +261,11 @@ impl StarCell {
         self.within(block.origin, block.size, p, radius_pc, &mut f);
     }
 
+    /// Boxes in the grid, empty ones included.
+    pub fn boxes(&self) -> usize {
+        self.grid.starts.len() - 1
+    }
+
     /// Non-empty aligned cubes of the grid holding at most `most` stars each,
     /// unless a single box holds more, in star order: together they cover
     /// `stars` from start to end. Each is a compact region with its own centre.

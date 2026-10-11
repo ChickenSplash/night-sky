@@ -628,6 +628,43 @@ fn perf(
             ),
         ],
     );
+    terminal::heading(ui, "cells, blocks and boxes");
+    let boxes: usize = field.cells.values().map(|cell| cell.boxes()).sum();
+    terminal::facts_with_details(
+        ui,
+        "debug-star-layout",
+        &[
+            (
+                "cells",
+                format!("{} loaded", grouped(field.cells.len())),
+                Some(
+                    "The loader's cubes, one brightness tier each, halving in size per tier; each is split into the blocks below.",
+                ),
+            ),
+            (
+                "blocks",
+                format!(
+                    "{} drawn of {} on the GPU",
+                    grouped(metrics.blocks_drawn),
+                    grouped(metrics.blocks)
+                ),
+                Some(
+                    "Cubes of a cell's grid holding up to 262,144 stars, uploaded as one to four batches; those outside the view are skipped when culling is on (render tab).",
+                ),
+            ),
+            (
+                "grid boxes",
+                format!(
+                    "{}, {:.1} stars each on average",
+                    grouped(boxes),
+                    field.stars as f64 / boxes.max(1) as f64
+                ),
+                Some(
+                    "The smallest cubes, aiming for about 8 stars each, used to find nearby stars without scanning whole cells; empty ones included.",
+                ),
+            ),
+        ],
+    );
     terminal::heading(ui, "star draw");
     let uploaded = metrics.uploaded_stars;
     terminal::facts_with_details(
@@ -636,7 +673,11 @@ fn perf(
         &[
             (
                 "draw calls",
-                grouped(metrics.batch_draws),
+                format!(
+                    "{} of {} batches",
+                    grouped(metrics.batch_draws),
+                    grouped(metrics.batches)
+                ),
                 Some(
                     "Star batches drawn each frame, up to 65,536 stars each; each costs CPU time, on screen or not.",
                 ),
@@ -654,8 +695,12 @@ fn perf(
             ),
             (
                 "vertices",
-                grouped(uploaded * 3),
-                Some("Three per uploaded star: one triangle the shader shapes into a point."),
+                format!(
+                    "{} drawn of {}",
+                    grouped(metrics.drawn_stars * 3),
+                    grouped(uploaded * 3)
+                ),
+                Some("Three per star: one triangle the shader shapes into a point."),
             ),
             (
                 "vertex memory",
@@ -770,7 +815,7 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
                 "passes",
                 format!("{}, slowest first", passes.len()),
                 Some(
-                    "Vertices and fragments are shader runs per frame; galactic stars draw in the transparent 3D pass.",
+                    "Vertices and fragments are shader runs per frame; galactic stars draw in the transparent 3D pass. ~1, ~2 mark the same pass on an earlier camera: the galaxy glow draws before the main view, the interface after it.",
                 ),
             ),
         ],

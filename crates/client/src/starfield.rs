@@ -137,6 +137,8 @@ struct Batch {
     stars: usize,
     /// Its block's centre, from which its vertices are offsets.
     centre_pc: [f64; 3],
+    /// Half its block's edge.
+    half_pc: f64,
 }
 
 /// Visible stars filtered out of a cell, waiting to fill a mesh.
@@ -283,6 +285,40 @@ fn mesh(points: &[StarPoint], centre: [f64; 3], eye: DVec3) -> (Mesh, usize) {
     packing.add(points, centre, eye);
     let visible = packing.stars;
     (packing.into_mesh(), visible)
+}
+
+/// The view's four side planes in f64, for culling blocks: a sphere outside
+/// any of them cannot reach the screen. Planes widen by a margin in pixels, so
+/// a star at a block's edge keeps its whole footprint.
+struct Sight {
+    right: DVec3,
+    up: DVec3,
+    forward: DVec3,
+    tan_x: f64,
+    tan_y: f64,
+}
+
+impl Sight {
+    fn new(camera: &GlobalTransform, tan_half_fov: f64, size: UVec2, margin_px: f64) -> Self {
+        let pad = margin_px * 2.0 * tan_half_fov / f64::from(size.y);
+        Self {
+            right: camera.right().as_dvec3(),
+            up: camera.up().as_dvec3(),
+            forward: camera.forward().as_dvec3(),
+            tan_x: tan_half_fov * f64::from(size.x) / f64::from(size.y) + pad,
+            tan_y: tan_half_fov + pad,
+        }
+    }
+
+    /// Whether a sphere `offset` from the eye can show. Conservative: a few
+    /// spheres just off screen, or just behind the camera, pass.
+    fn sees(&self, offset: DVec3, radius: f64) -> bool {
+        let depth = offset.dot(self.forward);
+        let inside = |lateral: f64, tan: f64| {
+            (lateral.abs() - depth * tan) / (1.0 + tan * tan).sqrt() <= radius
+        };
+        inside(offset.dot(self.right), self.tan_x) && inside(offset.dot(self.up), self.tan_y)
+    }
 }
 
 fn despawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, batches: Vec<Batch>) {
@@ -500,6 +536,7 @@ fn sync(
                     mesh: handle,
                     stars: visible,
                     centre_pc: block.centre_pc,
+                    half_pc: block.half_pc,
                 };
                 if replacing {
                     batches.fresh.entry(owner).or_default().push(batch);
@@ -531,17 +568,33 @@ fn sync(
     } else {
         Visibility::Hidden
     };
-    let (mut draws, mut uploaded) = (0, 0);
+    let sight = Sight::new(
+        camera_transform,
+        nav.tan_half_fov(),
+        size,
+        f64::from(radius_px) + 2.0,
+    );
+    let (mut draws, mut uploaded, mut drawn_stars) = (0, 0, 0);
+    let (mut blocks, mut blocks_drawn) = (0, 0);
     for entities in batches.active.values() {
+        let mut block = None;
         for &Batch {
             entity,
             stars,
             centre_pc,
+            half_pc,
             ..
         } in entities
         {
-            let delta = (DVec3::from_array(centre_pc) - eye) * factor;
-            let centre = camera_transform.translation() + delta.as_vec3();
+            let offset = DVec3::from_array(centre_pc) - eye;
+            let seen = !debug.cull_blocks || sight.sees(offset, half_pc * 3f64.sqrt());
+            // A block's batches are consecutive and share its centre.
+            if block != Some(centre_pc) {
+                block = Some(centre_pc);
+                blocks += 1;
+                blocks_drawn += usize::from(seen && debug.galactic_points);
+            }
+            let centre = camera_transform.translation() + (offset * factor).as_vec3();
             if let Ok((mut transform, mut global, mut grid_cell, mut visibility)) =
                 placements.get_mut(entity)
             {
@@ -549,13 +602,20 @@ fn sync(
                 *transform =
                     Transform::from_translation(centre).with_scale(Vec3::splat(factor as f32));
                 *global = GlobalTransform::from(*transform);
-                *visibility = shown;
-                draws += 1;
+                *visibility = if seen { shown } else { Visibility::Hidden };
                 uploaded += stars;
+                if seen && debug.galactic_points {
+                    draws += 1;
+                    drawn_stars += stars;
+                }
             }
         }
     }
-    metrics.batch_draws = if debug.galactic_points { draws } else { 0 };
+    metrics.batch_draws = draws;
+    metrics.batches = batches.active.values().map(Vec::len).sum();
+    metrics.blocks = blocks;
+    metrics.blocks_drawn = blocks_drawn;
+    metrics.drawn_stars = drawn_stars;
     metrics.uploaded_stars = uploaded;
     // Close up, each star is placed alone by an f64 subtraction. The visited
     // star's sprite waits, hidden, while its body is drawn at the exact position.
@@ -655,6 +715,21 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocks_outside_the_view_are_culled() {
+        // Looking down -Z with a 90° vertical field, twice as wide as high.
+        let camera = GlobalTransform::IDENTITY;
+        let sight = Sight::new(&camera, 1.0, UVec2::new(2000, 1000), 0.0);
+        assert!(sight.sees(DVec3::new(0.0, 0.0, -100.0), 1.0));
+        assert!(sight.sees(DVec3::new(190.0, 0.0, -100.0), 1.0));
+        assert!(!sight.sees(DVec3::new(0.0, 0.0, 100.0), 1.0));
+        assert!(!sight.sees(DVec3::new(0.0, 150.0, -100.0), 1.0));
+        assert!(!sight.sees(DVec3::new(250.0, 0.0, -100.0), 1.0));
+        // A block reaching into the view from outside it, or around the eye.
+        assert!(sight.sees(DVec3::new(0.0, 150.0, -100.0), 40.0));
+        assert!(sight.sees(DVec3::new(0.0, 0.0, 5.0), 10.0));
+    }
 
     #[test]
     fn batches_only_upload_stars_near_enough_to_see() {

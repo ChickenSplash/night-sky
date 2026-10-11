@@ -57,8 +57,14 @@ pub struct StreamMetrics {
     pub loaded_at: HashMap<Cell, Instant>,
     pub mesh_queue: usize,
     pub oldest_mesh_ms: f64,
-    /// Star batches drawn this frame, one draw call each.
+    /// Star batches drawn this frame, one draw call each, of `batches`.
     pub batch_draws: usize,
+    pub batches: usize,
+    /// Grid blocks with uploaded batches, and those drawn this frame.
+    pub blocks: usize,
+    pub blocks_drawn: usize,
+    /// Stars in the batches drawn this frame.
+    pub drawn_stars: usize,
     /// Stars in uploaded batches, after the CPU magnitude filter.
     pub uploaded_stars: usize,
     pub precise_sprites: usize,
@@ -91,6 +97,10 @@ impl Default for StreamMetrics {
             mesh_queue: 0,
             oldest_mesh_ms: 0.0,
             batch_draws: 0,
+            batches: 0,
+            blocks: 0,
+            blocks_drawn: 0,
+            drawn_stars: 0,
             uploaded_stars: 0,
             precise_sprites: 0,
             built_batches: 0,
