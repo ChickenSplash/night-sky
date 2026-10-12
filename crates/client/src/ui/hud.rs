@@ -313,7 +313,7 @@ pub(super) fn exposure_controls(
                 let response = halo_text(ui, &text, egui::Sense::click_and_drag(), |r| {
                     if nav.realistic && (r.hovered() || r.dragged() || r.has_focus()) { HOVER } else { LINK }
                 }).on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(
-                    if nav.realistic { help } else { "Turn on realistic lighting in Settings to adjust this." });
+                    if nav.realistic { help } else { "Turn on realistic lighting in the debug console's render tab to adjust this." });
                 ctx.data_mut(|data| data.insert_temp(egui::Id::new(format!("{id}-pointer-capture")),
                     (response.rect, response.dragged() || response.is_pointer_button_down_on())));
                 if response.drag_started() && nav.realistic { drags[index] = Some(value); }

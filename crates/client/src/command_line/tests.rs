@@ -2,6 +2,12 @@ use super::*;
 use crate::actions::{Display, GalaxyReference};
 use crate::presentation::PresentationMode;
 
+#[test]
+fn removed_readable_sizes_option_is_rejected() {
+    assert!(parse("set_display exaggerate true").is_err());
+    assert!(parse(r#"{"type":"set_display","option":"exaggerate","on":true}"#).is_err());
+}
+
 /// Every `UiCommand` name, as serde lists them when it meets an unknown one.
 fn variants() -> Vec<String> {
     let err = serde_json::from_str::<UiCommand>(r#"{"type":"?"}"#).unwrap_err();
@@ -156,7 +162,10 @@ fn out_of_range_values_are_refused_not_clamped() {
     for (line, message) in [
         ("set_fov 500", "degrees must be 30 to 130, not 500"),
         ("set_fov 29.9", "degrees must be 30 to 130"),
-        ("set_magnitude 9", "magnitude must be 3 to 8.5, not 9"),
+        (
+            "set_magnitude 10.6",
+            "magnitude must be 3 to 10.5, not 10.6",
+        ),
         ("set_exposure 17", "stops must be -64 to 16, not 17"),
         ("set_compression -0.1", "amount must be 0 to 1, not -0.1"),
         ("set_rate 0", "rate must be 1 to"),
@@ -173,6 +182,8 @@ fn out_of_range_values_are_refused_not_clamped() {
         "set_fov 30",
         "set_fov 130",
         "set_magnitude 8.5",
+        "set_magnitude 9",
+        "set_magnitude 10.5",
         "set_exposure -64",
         "set_compression 1",
         "set_rate 1",

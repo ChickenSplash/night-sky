@@ -9,7 +9,7 @@ Formerly Task Space. The repo is `ChickenSplash/night-sky`.
 - Lists are constellations of system pages (7 to 14 slots per star or close
   pair, more in a multiple system, fewer where a companion cuts it short);
   tasks are planets. Deep navy background (black with realistic lighting) and line-based
-  wireframe bodies. Preserve real distances, with explicit visual size exaggeration.
+  wireframe bodies. Preserve real distances and physical planet radii.
 - A space simulator first. Lists, pages and tasks stay as a general way of
   tracking information; the ClickUp integration was removed and will be
   re-approached later. The backend serves only the built-in demo galaxy.
@@ -50,9 +50,9 @@ design notes into every session:
   egui interface (`crates/client/src/ui/mod.rs`), drawn in the same frame as the scene, which fills
   the whole window: there is no sidebar. Two free-floating halo icons at the
   top right (`ui::icons`, ⚙ above ✔, `breadcrumb::halo_glyph`, hover blue,
-  white while open) toggle two plain egui windows that first open just below
-  them, right-aligned: Settings, and Tasks (`ui/tasks.rs`, 01 lists and 02 task
-  index, with the data-source note). Lists and tasks are kept apart there as
+  white while open) toggle the debug console and Tasks window, which first open just below
+  them, right-aligned. Tasks (`ui/tasks.rs`, 01 lists and 02 task
+  index, with the data-source note) keeps lists and tasks apart as
   the future integration point; the rest reaches them through `UiCommand`s.
   Both start closed. The debug window opens below the icons
   (`terminal::below_icons`). Body facts, presentation modes and system paging
@@ -119,7 +119,7 @@ design notes into every session:
   captures input like the time rate, and a single click does nothing.
   The bottom-right **Magnitude limit** (`ui::hud::magnitude_control`, one line)
   is `Navigation::magnitude`, the faintest apparent magnitude drawn as a
-  star point (default `VISIBLE_MAGNITUDE`, 6.5; `MAGNITUDE` range 3 to 8.5, in
+  star point (default `VISIBLE_MAGNITUDE`, 6.5; `MAGNITUDE` range 3 to 10.5, in
   tenths). Dragging shows the new value; it applies on release
   (`SetMagnitude`, `set_magnitude 5.5`), because a change restarts streaming
   from nothing: `stars/stream/mod.rs` starts a new `Backend` whenever its magnitude
@@ -145,8 +145,8 @@ design notes into every session:
   While a mouse button is held, the HUD hit test uses its press origin, not
   hover position, so camera drags that begin outside the rate text continue
   uninterrupted when crossing it.
-- Debug tooling stays out of the product UI, in `devtools/mod.rs`: a floating,
-  movable, resizable window toggled by ` or F3 on both clients (the public
+- Settings and debug tooling are unified in `devtools/mod.rs`: a floating,
+  movable, resizable window toggled by the cog, ` or F3 on both clients (the public
   site included), with tabs `log` (an in-memory console of the last 2,000
   tracing events from `devtools::log_layers`, with level filter and grep; the
   tab shows errors and warnings logged while it was hidden), `terminal` (a
@@ -159,10 +159,11 @@ design notes into every session:
   passes of the same names; the vendored `bevy_render` suffixes repeats on
   earlier cameras `~1`, `~2`, so the glow camera's pass no longer hides the
   main view's),
-  `render` (manual exposure/compression readouts, galaxy glow, wireframes over
-  bodies and galaxy reference views), `state` (camera; navigation: location,
+  `render` (display options, field of view, realistic lighting, manual exposure/compression
+  readouts, galaxy glow, wireframes over bodies and galaxy reference views),
+  `controls` (shortcut help), `state` (camera; navigation: location,
   open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (GPU test, core load test and bug report
-  natively, star-stream benchmark in the browser). New debug readouts and switches go there, not in Settings or the
+  natively, star-stream benchmark in the browser). New debug readouts and switches go there, not in a separate settings window or the
   canvas. Performance sections are collapsible, skipping UI work while closed;
   counts are live and timings use trailing-second averages refreshed every frame.
   Logging and benchmarks retain their independent one-second reports.
@@ -189,7 +190,20 @@ design notes into every session:
   mismatch).
 - The debug window uses the terminal look (`ui/terminal.rs`): a translucent
   black, Hyprland-like window with a light grey border and text-mode
-  checkboxes and buttons. Headings, sections, checkboxes and facts are all
+  checkboxes and buttons. Only its full padded header drags the window, with a four-way arrow cursor;
+  content presses retain their hover highlight and never move the window.
+  Checkbox rows are split by a vertical divider: the left toggles the setting,
+  the flush square `+` / `-` button at the right expands or collapses its description.
+  Each half highlights independently, with square hover edges against the divider.
+  All terminal controls, headings and fact readouts share one hover/held-press
+  state and blue highlight painter. Whole elements have bright edges on both
+  sides; checkbox halves keep their single outer edge independently. Holds keep
+  the highlight visible. Interactive controls share click-and-drag sense to
+  retain egui's long presses, but never move anything on a drag. Debug scroll
+  areas share wheel/scrollbar sources, never content dragging, so they cannot
+  steal control presses.
+  Disabled switches still allow description clicks. There is no hold gesture or shortcut tooltip.
+  Headings, sections, checkboxes and facts are all
   full-width `ROW`s with text at `INSET` and the same hover light; facts put
   values flush right after a dotted leader. A fact's explanation goes behind
   its label with `terminal::facts_with_details` (`label +`, click the row to
@@ -366,7 +380,7 @@ design notes into every session:
   `CameraMotion::thrust` (camera-axis travel as a fraction of `move_speed`,
   roll in `w`) over about 0.15 s; speed changes and mouse turns stay instant.
   The vertical field of view is `Navigation::fov_deg` (30° to 130°, default
-  50°), set from settings (`UiCommand::SetFov`) or Shift + left-drag (up
+  50°), set from the debug console's `render` tab (`UiCommand::SetFov`) or Shift + left-drag (up
   narrows). Hand projections (picking, overlays, table framing) use
   `Navigation::tan_half_fov`, never a fixed 50°.
   `Navigation` and orbital positions use the page's plane axes;

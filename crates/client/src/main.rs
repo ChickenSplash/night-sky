@@ -101,6 +101,7 @@ fn main() {
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
+    .init_resource::<devtools::DevTools>()
     .init_resource::<devtools::core_load::CoreLoad>()
     .init_resource::<devtools::gpu_test::GpuTest>()
     .insert_resource(initial_nav)

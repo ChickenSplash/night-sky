@@ -87,24 +87,22 @@ try {
   await page.waitForTimeout(2500);
   assert.equal((await state()).presentation_mode, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-constellation.png') });
-  // ⚙ opens Settings below the icons; its first row is a checkbox.
-  const exaggerate = (await state()).display.exaggerate;
-  await page.mouse.click(1570, 31);
-  await page.waitForTimeout(3000); // Its fade-in is slow under SwiftShader.
-  await page.mouse.click(1241, 155); // Readable planet sizes.
-  await page.waitForFunction(on => window.space.state().display.exaggerate === on, !exaggerate, { timeout: 5000 });
-  await page.screenshot({ path: resolve(root, 'data/web-settings.png') });
-  await page.mouse.click(1564, 99); // Close.
-  await page.waitForTimeout(1500);
-  // ` opens the debug window at the top right, below the icons; its render tab has the glow switch.
-  const glow = (await state()).display.galaxy_glow;
-  await page.keyboard.press('Backquote');
-  await page.waitForTimeout(1500);
-  await page.mouse.click(1188, 148); // render tab.
-  await page.waitForTimeout(1500);
-  await page.mouse.click(1060, 275); // Smooth galaxy glow (prototype).
-  await page.waitForFunction(on => window.space.state().display.galaxy_glow === on, !glow, { timeout: 5000 });
-  await page.screenshot({ path: resolve(root, 'data/web-debug.png') });
+   // ⚙ opens the unified debug console below the icons.
+   assert.equal('exaggerate' in (await state()).display, false);
+   const orbits = (await state()).display.orbits;
+   await page.mouse.click(1570, 31);
+   await page.waitForTimeout(3000); // Its fade-in is slow under SwiftShader.
+   await page.mouse.click(1188, 148); // render tab.
+   await page.waitForTimeout(1500);
+   await page.mouse.click(1060, 218); // Orbital paths.
+   await page.waitForFunction(on => window.space.state().display.orbits === on, !orbits, { timeout: 5000 });
+   const realistic = (await state()).display.realistic;
+   await page.mouse.click(1060, 330); // Realistic lighting.
+   await page.waitForFunction(on => window.space.state().display.realistic === on, !realistic, { timeout: 5000 });
+   await page.screenshot({ path: resolve(root, 'data/web-debug.png') });
+   await page.mouse.click(1260, 148); // controls tab.
+   await page.waitForTimeout(1500);
+   await page.screenshot({ path: resolve(root, 'data/web-controls.png') });
   // The terminal tab focuses its command line, which runs typed commands.
   await page.mouse.click(1040, 148); // terminal tab.
   await page.waitForTimeout(1500);

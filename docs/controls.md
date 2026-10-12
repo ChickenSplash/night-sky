@@ -1,6 +1,6 @@
 # Controls and interface
 
-Both clients use the same egui interface over a full-window 3D view. Settings
+Both clients use the same egui interface over a full-window 3D view. Debug console
 (⚙) and Tasks (✔) open from the top right. The top-left **Location** and
 **Selected** trails distinguish physical location from selection. Clicking a
 breadcrumb inspects it without changing selection or moving the camera.
@@ -16,12 +16,12 @@ breadcrumb inspects it without changing selection or moving the camera.
 | Move faster | Left Shift |
 | Zoom | Shift + mouse wheel |
 | Adjust movement speed | Mouse wheel or drag bottom-left set speed |
-| Adjust field of view | Settings or Shift + left drag |
+| Adjust field of view | Debug console's `render` tab or Shift + left drag |
 | Pause/resume simulation | Space or click bottom-centre time rate |
 | Adjust simulation speed | Drag time rate, real time to 100 years/s |
 | Adjust exposure | Drag Exposure at bottom right, +1 stop doubles light |
 | Adjust compression | Drag Dynamic Range Compression, 0 to 100% |
-| Adjust visible-star magnitude limit | Drag Magnitude limit; applies on release |
+| Adjust visible-star magnitude limit | Drag Magnitude limit, 3 to 10.5; applies on release |
 
 Simulation time is integrated continuously; rate changes never jump orbit phase.
 Task deadlines use wall-clock time independently of the simulation clock.
@@ -60,14 +60,21 @@ The underlying simulation continues in every mode.
 
 ## Debug tools
 
-Toggle the debug window with F3 or the backtick key on either client.
+Toggle the debug console with the cog, F3 or the backtick key on either client.
+There is no separate Settings window. Display options and realistic lighting
+live in `render`; shortcut help lives in `controls`.
+Click the left side of a checkbox row to toggle it. The square `+` / `-` button
+on the right expands or collapses its explanation without changing the switch.
+Only the console header (including its padding) moves the window, indicated by
+a four-way arrow cursor.
 
 | Tab | Contents |
 | --- | --- |
 | `log` | Recent client events, level filter and grep |
 | `terminal` | Commands, history and output |
 | `perf` | Frame times, generation, streaming and GPU metrics |
-| `render` | Exposure facts, rendering switches and reference views |
+| `render` | Display options, field of view, realistic lighting, exposure facts and reference views |
+| `controls` | Camera, selection, time and console shortcuts |
 | `state` | Camera, navigation, selection and clock |
 | `tools` | Native bug reports and performance benchmarks |
 

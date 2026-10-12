@@ -489,7 +489,7 @@ pub fn perf(
     if terminal::section(ui, "performance switches") {
         for (switch, label) in RenderDebug::SWITCHES {
             let on = debug.get(switch);
-            if terminal::check(ui, on, label, true) {
+            if terminal::check(ui, on, label, true, switch.detail()) {
                 out.push(UiCommand::SetDebug { switch, on: !on });
             }
         }

@@ -1,6 +1,6 @@
 //! The debug window, kept apart from the product UI: the client log, frame and
-//! star-stream timings, rendering switches, internal state and tools. ` or F3
-//! toggles it on both clients. Drawn in the terminal look (`terminal.rs`).
+//! star-stream timings, display settings, controls, internal state and tools.
+//! The cog, ` or F3 toggles it on both clients. Drawn in the terminal look.
 #[cfg(target_arch = "wasm32")]
 pub mod automation;
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +38,7 @@ pub use http::install as install_http;
 #[cfg(not(target_arch = "wasm32"))]
 use tabs::tools::save_bug_report;
 use tabs::{
+    controls::controls,
     log::{log, unseen_badges},
     perf::perf,
     render::render,
@@ -55,23 +56,26 @@ enum Tab {
     Terminal,
     Perf,
     Render,
+    Controls,
     State,
     Tools,
 }
 
 impl Tab {
-    const ALL: [(Self, &str); 6] = [
+    const ALL: [(Self, &str); 7] = [
         (Self::Log, "log"),
         (Self::Terminal, "terminal"),
         (Self::Perf, "perf"),
         (Self::Render, "render"),
+        (Self::Controls, "controls"),
         (Self::State, "state"),
         (Self::Tools, "tools"),
     ];
 }
 
+#[derive(Resource)]
 pub struct DevTools {
-    open: bool,
+    pub(crate) open: bool,
     tab: Tab,
     lines: VecDeque<Line>,
     seen: u64,
@@ -146,7 +150,7 @@ pub fn draw(
     scene: Scene,
     camera: Camera,
     rendering: Rendering,
-    mut tools: Local<DevTools>,
+    mut tools: ResMut<DevTools>,
 ) {
     let (mut contexts, mut writer, mut typed, mut commands) = interaction;
     #[cfg(target_arch = "wasm32")]
@@ -178,7 +182,7 @@ pub fn draw(
     let mut open = true;
     let window_start = bevy::platform::time::Instant::now();
     terminal::window(ctx, "debug", &mut open, |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (tab, label) in Tab::ALL {
                 if terminal::tab(ui, label, tools.tab == tab) {
                     tools.focus = tab == Tab::Terminal && tools.tab != tab;
@@ -199,6 +203,7 @@ pub fn draw(
             Tab::Terminal => terminal_tab(ui, &mut tools, &mut lines),
             tab => {
                 egui::ScrollArea::vertical()
+                    .scroll_source(terminal::SCROLL_SOURCE)
                     .id_salt("debug-tab")
                     .auto_shrink(false)
                     .show(ui, |ui| match tab {
@@ -212,6 +217,7 @@ pub fn draw(
                             &mut out,
                         ),
                         Tab::Render => render(ui, &nav, &mut out),
+                        Tab::Controls => controls(ui),
                         Tab::State => state(ui, &universe, &nav, &clock, &rig, &pose, &velocity),
                         _ => {
                             report = tools_tab(

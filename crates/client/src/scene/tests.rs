@@ -290,28 +290,17 @@ fn close_body_is_visible_without_zooming_camera_range() {
 }
 
 #[test]
-fn close_star_exaggeration_does_not_depend_on_maximum_camera_range() {
-    let eye = DVec3::X * (APPROACH_METRES * 0.5);
-    let close = CameraPose {
-        eye,
-        distance: 100.0 * LY_METRES,
-        ..default()
-    };
-    let maximum = CameraPose {
-        distance: 40_000.0 * LY_METRES,
-        ..close
-    };
+fn star_sizes_are_physical_except_in_wide_views() {
     let physical = SUN_RADIUS_METRES;
-    let away = eye.length();
-    let radius = star_display_radius(&maximum, physical, away, (true, false, false));
+    let away = APPROACH_METRES * 0.5;
     assert_eq!(
-        radius,
-        star_display_radius(&close, physical, away, (true, false, false))
-    );
-    assert!(radius < eye.length());
-    assert_eq!(
-        star_display_radius(&maximum, physical, away, (false, false, false)),
+        star_display_radius(physical, away, (false, false)),
         physical
+    );
+    assert_eq!(star_display_radius(physical, away, (true, true)), physical);
+    assert_eq!(
+        star_display_radius(physical, away, (false, true)),
+        (away * 0.004).max(physical)
     );
 }
 

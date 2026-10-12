@@ -49,22 +49,12 @@ const ORBIT: Color = Color::srgb(0.075, 0.17, 0.25);
 const RING_PIXELS: f32 = 6.0;
 const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
 
-/// Exaggeration is a screen-space aid, not an orbit-sized shell tied to zoom.
-/// Once the camera is close, even a 40,000 ly range must not put the camera
-/// inside a star inflated to hundreds of light years across. `away` is the
-/// camera's distance from the star.
-pub(super) fn star_display_radius(
-    pose: &CameraPose,
-    physical: f64,
-    away: f64,
-    (exaggerate, table, wide): (bool, bool, bool),
-) -> f64 {
+/// Wide-view star sizes follow eye distance, never the camera's zoom range.
+pub(super) fn star_display_radius(physical: f64, away: f64, (table, wide): (bool, bool)) -> f64 {
     if table {
         physical
     } else if wide {
         (away * 0.004).max(physical)
-    } else if exaggerate {
-        (pose.distance.min(away) * 0.008).max(physical)
     } else {
         physical
     }
@@ -306,7 +296,7 @@ impl Canvas<'_> {
             None => self.frame,
         };
         let away = (galactic - pose.eye).length();
-        let radius = star_display_radius(pose, physical, away, (nav.exaggerate, table, wide));
+        let radius = star_display_radius(physical, away, (table, wide));
         if nav.realistic
             && let Some(body) = body
             && let Some(per_pixel) = self.per_pixel(centre)
@@ -421,16 +411,7 @@ impl Canvas<'_> {
             let local = orbital.lerp(layout.position(planet), pose.layout);
             let galactic = place(local);
             let centre = self.world(galactic);
-            let physical = planet.radius_km * 1000.0;
-            // Exaggerated sizes keep the cube root of the real ratio, so giants still
-            // dwarf rocky planets without hiding their neighbours.
-            let orbital_radius = if nav.exaggerate {
-                let size = (planet.radius_km / space_simulation::EARTH_RADIUS_KM).cbrt();
-                physical.max((galactic - pose.eye).length() * 0.012 * size)
-            } else {
-                physical
-            };
-            let radius = orbital_radius + (physical - orbital_radius) * pose.layout;
+            let radius = planet.radius_km * 1000.0;
             let tint = colour(planet.colour());
             let basis = spin_basis(self.frame, &planet.spin, seconds);
             if nav.realistic

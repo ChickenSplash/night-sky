@@ -53,7 +53,7 @@ pub(super) fn canvas_overlay(
         );
     }
 
-    // Windows such as Settings float over the view; clicks there are theirs.
+    // Floating windows own their clicks, not the view beneath them.
     let pointer = ctx
         .input(|i| i.pointer.interact_pos())
         .filter(|_| !pointer_captured(ctx));

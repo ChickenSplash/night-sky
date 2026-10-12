@@ -136,7 +136,7 @@ pub(super) fn publish(
         "page": nav.page, "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,
         "display": {
-            "exaggerate": nav.exaggerate, "orbits": nav.orbits, "labels": nav.labels,
+            "orbits": nav.orbits, "labels": nav.labels,
             "markers": nav.markers, "velocity_marker": nav.velocity_marker,
             "realistic": nav.realistic, "galaxy_glow": nav.galaxy_glow,
             "exposure": nav.exposure, "compression": nav.compression, "wireframe": nav.wireframe,

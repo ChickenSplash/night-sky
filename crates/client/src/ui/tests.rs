@@ -5,6 +5,51 @@ use crate::format::civil_date;
 use space_simulation::SimulationClock;
 
 #[test]
+fn cog_toggles_console_without_opening_tasks() {
+    let ctx = egui::Context::default();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let mut tools = crate::devtools::DevTools::default();
+    let mut tasks = false;
+    let mut frame = |events| {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                events,
+                ..default()
+            },
+            |ctx| {
+                icons(ctx, rect, &mut tools.open, &mut tasks);
+            },
+        )
+    };
+    frame(vec![]);
+    let output = frame(vec![]);
+    let pos = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) if text.galley.job.text == "⚙" => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .expect("cog is painted");
+    let button = |pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for _ in 0..3 {
+        frame(vec![egui::Event::PointerMoved(pos), button(true)]);
+        frame(vec![button(false)]);
+    }
+    assert!(tools.open);
+    assert!(!tasks);
+    assert!(pointer_captured(&ctx));
+}
+
+#[test]
 fn travel_directions_project_through_the_camera_perspective() {
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1600.0, 900.0));
     let half = |degrees: f32| (degrees.to_radians() / 2.0).tan();
@@ -371,8 +416,8 @@ fn magnitude_drag_applies_once_on_release() {
             magnitude: dragged_magnitude(6.5, -100.0)
         }]
     );
-    assert_eq!(dragged_magnitude(6.5, -100.0), 5.1);
-    assert_eq!(dragged_magnitude(6.5, 1000.0), 8.5);
+    assert_eq!(dragged_magnitude(6.5, -100.0), 4.6);
+    assert_eq!(dragged_magnitude(6.5, 1000.0), 10.5);
 }
 
 #[test]

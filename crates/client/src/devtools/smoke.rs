@@ -152,7 +152,6 @@ pub fn exercise(
         24 => {
             nav.set_compression(1.0);
             nav.wireframe = true;
-            nav.exaggerate = true;
             if let Some(selection) = nav
                 .system(&universe.0)
                 .map(|system| crate::Selection::planet(system, 0))
@@ -163,7 +162,6 @@ pub fn exercise(
         }
         25 => capture(&mut commands, "realistic-planet"),
         26 => {
-            nav.exaggerate = false;
             nav.wireframe = false;
             nav.preset(PresentationMode::Constellation, &universe.0);
         }

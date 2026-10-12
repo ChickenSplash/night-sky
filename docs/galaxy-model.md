@@ -84,8 +84,7 @@ Paths below are relative to the repository root, or to the named crate's
   the camera in double precision before conversion to GPU floats. Bevy's
   reverse-Z perspective depth and a distance-adjusted near plane support the
   changing scale; this is not a logarithmic depth buffer.
-- Bodies retain physical radii by default. **Readable planet sizes** exaggerates
-  displayed planet radii, not positions or periods. Wireframes use procedural
+- Planets retain physical radii in every presentation mode. Wireframes use procedural
   latitude/longitude lines rather than native polygon wireframe mode.
 - This is not an N-body simulation. Collisions, relativistic effects and
   physical warp travel are not implemented. Camera flights are navigation aids,

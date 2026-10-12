@@ -29,6 +29,37 @@ pub enum DebugSwitch {
     SplitMultiples,
 }
 
+impl DebugSwitch {
+    pub fn detail(self) -> &'static str {
+        match self {
+            Self::FreezeStream => {
+                "Stop aiming star streaming at the camera. The loader keeps its last aim; pending work can finish. Useful for A/B tests with a stable star population."
+            }
+            Self::GalacticPoints => {
+                "Draw galactic star points. Turn off to isolate other rendering costs; generated systems and the diffuse galaxy glow are separate."
+            }
+            Self::PointPixels => {
+                "Rasterise and shade star-point pixels. When off, points still run the vertex shader, separating vertex cost from pixel fill cost."
+            }
+            Self::Msaa => {
+                "Enable 4x multisample anti-aliasing on both window cameras. Turn off to compare its GPU cost and edge quality."
+            }
+            Self::Bloom => {
+                "Spread bright light into a soft glow around stars and bodies. Turn off to compare the post-processing cost."
+            }
+            Self::CullBlocks => {
+                "Skip drawing star grid blocks outside the camera view. Disabling this draws all uploaded blocks for a culling-cost comparison."
+            }
+            Self::PointStars => {
+                "Use single-pixel points and a composite pass instead of triangles for galactic stars. Native only; has no effect in the browser."
+            }
+            Self::SplitMultiples => {
+                "Resolve nearby multiple-star systems into individual stars once their separation is visible, rather than drawing one combined point until arrival."
+            }
+        }
+    }
+}
+
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct RenderDebug {
     pub freeze_stream: bool,

@@ -1,5 +1,6 @@
 //! One module per debug window tab, drawn by `devtools::draw`.
 
+pub mod controls;
 pub mod log;
 pub mod perf;
 pub mod render;

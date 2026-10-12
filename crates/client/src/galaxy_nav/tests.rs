@@ -116,7 +116,7 @@ fn grid_picking_matches_full_scan_and_caches_the_winner() {
         -DVec3::Z,
         DVec3::new(1.0, 0.2, -0.5).normalize(),
     ] {
-        for magnitude in [6.5, 8.5] {
+        for magnitude in [6.5, 8.5, 10.5] {
             let threshold = 1.0 / (1.0 + 0.01f64.powi(2)).sqrt();
             let reach = reach_sq_per_luminosity(magnitude) / pc_per_ly.powi(2);
             let mut expected: Option<(f64, String)> = None;

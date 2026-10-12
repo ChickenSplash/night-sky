@@ -329,7 +329,9 @@ fn magnitude_is_clamped_to_its_range_in_tenths() {
     send(&mut app, vec![set(1.0)]);
     assert_eq!(nav(&app).magnitude, 3.0);
     send(&mut app, vec![set(9.0), set(f64::NAN)]);
-    assert_eq!(nav(&app).magnitude, 8.5);
+    assert_eq!(nav(&app).magnitude, 9.0);
+    send(&mut app, vec![set(11.0), set(f64::NAN)]);
+    assert_eq!(nav(&app).magnitude, 10.5);
 }
 
 #[test]

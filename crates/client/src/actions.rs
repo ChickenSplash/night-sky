@@ -90,7 +90,6 @@ pub enum UiCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Display {
-    Exaggerate,
     Orbits,
     Labels,
     Markers,
@@ -386,7 +385,6 @@ pub fn apply(
                 }
             }
             UiCommand::SetDisplay { option, on } => match option {
-                Display::Exaggerate => nav.exaggerate = *on,
                 Display::Orbits => nav.orbits = *on,
                 Display::Labels => nav.labels = *on,
                 Display::Markers => nav.markers = *on,

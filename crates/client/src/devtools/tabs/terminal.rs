@@ -17,6 +17,7 @@ pub fn terminal_tab(ui: &mut egui::Ui, tools: &mut DevTools, lines: &mut Vec<Str
         );
     }
     egui::ScrollArea::both()
+        .scroll_source(terminal::SCROLL_SOURCE)
         .id_salt("debug-terminal")
         .auto_shrink(false)
         .max_height((ui.available_height() - prompt).max(height))

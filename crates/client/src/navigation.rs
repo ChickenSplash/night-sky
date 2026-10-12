@@ -74,7 +74,6 @@ pub struct Navigation {
     /// Faintest apparent magnitude drawn as a star point, within
     /// `MAGNITUDE`. Fainter stars are part of the galaxy glow.
     pub magnitude: f64,
-    pub exaggerate: bool,
     pub labels: bool,
     pub orbits: bool,
     /// Rings marking bodies too small to see. Hover and selection rings stay.
@@ -115,7 +114,6 @@ impl Default for Navigation {
             rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
             fov_deg: 50.0,
             magnitude: space_simulation::population::VISIBLE_MAGNITUDE,
-            exaggerate: false,
             labels: true,
             orbits: true,
             markers: true,
@@ -137,7 +135,7 @@ pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
 
 /// Selectable star point magnitude limits. Each magnitude fainter draws
 /// about four times the stars.
-pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=8.5;
+pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=10.5;
 
 impl Navigation {
     pub fn set_exposure(&mut self, stops: f64) {

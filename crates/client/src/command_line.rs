@@ -218,7 +218,7 @@ pub const USAGE: [Usage; 21] = [
     Usage {
         name: "set_display",
         fields: &["option", "on"],
-        about: "exaggerate, orbits, labels, markers, velocity_marker, realistic, galaxy_glow or wireframe; true or false",
+        about: "orbits, labels, markers, velocity_marker, realistic, galaxy_glow or wireframe; true or false",
     },
     Usage {
         name: "set_fov",
@@ -228,7 +228,7 @@ pub const USAGE: [Usage; 21] = [
     Usage {
         name: "set_magnitude",
         fields: &["magnitude"],
-        about: "Faintest star magnitude drawn as a point, 3 to 8.5; reloads the stars",
+        about: "Faintest star magnitude drawn as a point, 3 to 10.5; reloads the stars",
     },
     Usage {
         name: "set_exposure",

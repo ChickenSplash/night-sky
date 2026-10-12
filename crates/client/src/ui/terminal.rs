@@ -16,6 +16,15 @@ const GREY: Color32 = Color32::from_rgb(0xc8, 0xcc, 0xd0);
 pub const TEXT: Color32 = Color32::from_rgb(214, 228, 244);
 pub const DIM: Color32 = Color32::from_rgb(110, 125, 140);
 const FILL: Color32 = Color32::from_black_alpha(205);
+/// Content never owns drags: only scrollbars and the wheel scroll the console.
+pub const SCROLL_SOURCE: egui::scroll_area::ScrollSource = egui::scroll_area::ScrollSource {
+    scroll_bar: true,
+    drag: false,
+    mouse_wheel: true,
+};
+fn border_colour() -> Color32 {
+    GREY.gamma_multiply(0.93)
+}
 
 pub fn font() -> FontId {
     FontId::monospace(13.0)
@@ -40,13 +49,15 @@ pub fn window(ctx: &egui::Context, title: &str, open: &mut bool, add: impl FnOnc
         (screen.height() * 0.6).clamp(320.0, 680.0),
     );
     let mut close = false;
-    egui::Window::new(title)
+    let position_id = egui::Id::new(("terminal-position", title));
+    let mut movement = egui::Vec2::ZERO;
+    let mut window = egui::Window::new(title)
         .id(egui::Id::new(("terminal", title)))
         .title_bar(false)
         .frame(
             egui::Frame::new()
                 .fill(FILL)
-                .stroke((BORDER, GREY.gamma_multiply(0.93)))
+                .stroke((BORDER, border_colour()))
                 .corner_radius(RADIUS)
                 .inner_margin(16)
                 .shadow(epaint::Shadow {
@@ -64,22 +75,64 @@ pub fn window(ctx: &egui::Context, title: &str, open: &mut bool, add: impl FnOnc
             size,
         ))
         .min_size(vec2(320.0, 200.0))
+        .movable(false)
         .resizable(true)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            ui.style_mut().spacing.item_spacing = vec2(8.0, 4.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("night-sky:~$ ").font(font()).color(DIM));
-                ui.label(egui::RichText::new(title).font(font()).color(CYAN));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close = button(ui, "×");
-                });
+        .order(egui::Order::Foreground);
+    if let Some(position) = ctx.data(|data| data.get_temp::<egui::Pos2>(position_id)) {
+        window = window.current_pos(position);
+    }
+    let shown = window.show(ctx, |ui| {
+        ui.style_mut().spacing.item_spacing = vec2(8.0, 4.0);
+        let mut close_rect = Rect::NOTHING;
+        let header = ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("night-sky:~$ ").font(font()).color(DIM));
+            ui.label(egui::RichText::new(title).font(font()).color(CYAN));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let response = chip_response(ui, "[ × ]".into(), TEXT);
+                close = response.clicked();
+                close_rect = response.rect;
             });
-            ui.add_space(4.0);
-            rule(ui);
-            ui.add_space(4.0);
-            add(ui);
         });
+        ui.add_space(4.0);
+        // The whole header, including frame padding down to the rule, is a
+        // handle. Cut out only the actual close button, not its whole column.
+        let handle = Rect::from_min_max(
+            header.response.rect.min - vec2(16.0, 16.0),
+            pos2(ui.max_rect().right() + 16.0, ui.cursor().top()),
+        );
+        let content_clip = ui.clip_rect();
+        ui.set_clip_rect(content_clip.union(handle));
+        for (index, rect) in [
+            Rect::from_min_max(handle.min, pos2(close_rect.left(), handle.bottom())),
+            Rect::from_min_max(pos2(close_rect.right(), handle.top()), handle.max),
+            Rect::from_min_max(
+                pos2(close_rect.left(), handle.top()),
+                close_rect.right_top(),
+            ),
+            Rect::from_min_max(
+                close_rect.left_bottom(),
+                pos2(close_rect.right(), handle.bottom()),
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let response = ui
+                .interact(rect, ui.id().with(("move-header", index)), Sense::drag())
+                .on_hover_cursor(egui::CursorIcon::AllScroll);
+            if response.dragged() {
+                ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
+                movement = response.drag_delta();
+            }
+        }
+        ui.set_clip_rect(content_clip);
+        rule(ui);
+        ui.add_space(4.0);
+        add(ui);
+    });
+    if let Some(shown) = shown {
+        ctx.data_mut(|data| data.insert_temp(position_id, shown.response.rect.min + movement));
+    }
     if close {
         *open = false;
     }
@@ -96,31 +149,90 @@ pub fn rule(ui: &mut Ui) {
     ui.add_space(1.0);
 }
 
-/// The hover light shared by every row: a faint bar with a bright left edge.
-fn highlight(ui: &Ui, rect: Rect, hover: f32) {
-    if hover > 0.0 {
-        let painter = ui.painter();
-        painter.rect_filled(rect, 4, CYAN.gamma_multiply(0.12 * hover));
-        painter.rect_filled(
-            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
-            0,
-            CYAN.gamma_multiply(hover),
-        );
+/// One hover/press state for every terminal control. A held press remains lit
+/// even when egui no longer calls the active widget hovered.
+fn hover_amount(ui: &Ui, response: &egui::Response, enabled: bool) -> f32 {
+    // Read-only facts have hover sense, so egui never gives them an active
+    // button press. Keep their highlight while pressing inside them too.
+    let readout_pressed = response.sense == Sense::hover()
+        && response.contains_pointer()
+        && ui.input(|input| {
+            input.pointer.any_down()
+                && input
+                    .pointer
+                    .press_origin()
+                    .is_some_and(|pos| response.rect.contains(pos))
+        });
+    ui.ctx().animate_bool_with_time(
+        response.id,
+        enabled && (response.hovered() || response.is_pointer_button_down_on() || readout_pressed),
+        0.1,
+    )
+}
+
+/// egui promotes a long press to a drag. Claim that press so it stays with
+/// the control, without using the drag to move anything or trigger actions.
+fn control_sense(interactive: bool) -> Sense {
+    if interactive {
+        Sense::click_and_drag()
+    } else {
+        Sense::hover()
     }
 }
 
-fn row(ui: &mut Ui, sense: Sense) -> (Rect, egui::Response, f32) {
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), sense);
-    let hover = ui.ctx().animate_bool_with_time(
-        response.id,
-        response.hovered() && sense != Sense::hover(),
-        0.1,
-    );
-    highlight(ui, rect, hover);
-    let response = if sense == Sense::hover() {
-        response
-    } else {
+#[derive(Clone, Copy)]
+enum Highlight {
+    Whole,
+    Left,
+    Right,
+}
+
+/// Shared faint blue bar. Whole elements have two bright edges; split checkbox
+/// halves retain their single outer edge and square corners at the divider.
+fn highlight(ui: &Ui, rect: Rect, hover: f32, part: Highlight) {
+    if hover > 0.0 {
+        let painter = ui.painter();
+        let corners = match part {
+            Highlight::Whole => egui::CornerRadius::same(4),
+            Highlight::Left => egui::CornerRadius {
+                nw: 4,
+                sw: 4,
+                ne: 0,
+                se: 0,
+            },
+            Highlight::Right => egui::CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: 4,
+                se: 4,
+            },
+        };
+        painter.rect_filled(rect, corners, CYAN.gamma_multiply(0.12 * hover));
+        let edges = [rect.min, pos2(rect.right() - 2.0, rect.top())];
+        let edges = match part {
+            Highlight::Whole => &edges[..],
+            Highlight::Left => &edges[..1],
+            Highlight::Right => &edges[1..],
+        };
+        for &edge in edges {
+            painter.rect_filled(
+                Rect::from_min_size(edge, vec2(2.0, rect.height())),
+                0,
+                CYAN.gamma_multiply(hover),
+            );
+        }
+    }
+}
+
+fn row(ui: &mut Ui, interactive: bool) -> (Rect, egui::Response, f32) {
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), ROW), control_sense(interactive));
+    let hover = hover_amount(ui, &response, true);
+    highlight(ui, rect, hover, Highlight::Whole);
+    let response = if interactive {
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
     };
     (rect, response, hover)
 }
@@ -128,7 +240,7 @@ fn row(ui: &mut Ui, sense: Sense) -> (Rect, egui::Response, f32) {
 /// A fixed heading, laid out like a `section` row.
 pub fn heading(ui: &mut Ui, text: &str) {
     ui.add_space(6.0);
-    let (rect, _, _) = row(ui, Sense::hover());
+    let (rect, _, _) = row(ui, false);
     ui.painter().text(
         pos2(rect.left() + INSET, rect.center().y),
         Align2::LEFT_CENTER,
@@ -143,7 +255,7 @@ pub fn section(ui: &mut Ui, text: &str) -> bool {
     let id = ui.make_persistent_id(("section", text));
     let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(true));
     ui.add_space(6.0);
-    let (rect, response, _) = row(ui, Sense::click());
+    let (rect, response, _) = row(ui, true);
     ui.painter().text(
         pos2(rect.left() + INSET, rect.center().y),
         Align2::LEFT_CENTER,
@@ -175,16 +287,42 @@ pub fn note(ui: &mut Ui, text: &str) {
         });
 }
 
-/// `[x] label`, clicked to toggle. Disabled rows are dimmed and ignore clicks.
-pub fn check(ui: &mut Ui, on: bool, label: &str, enabled: bool) -> bool {
-    let (rect, response, hover) = row(
-        ui,
-        if enabled {
-            Sense::click()
-        } else {
-            Sense::hover()
-        },
-    );
+/// Split row: toggle on the left, square description button on the right.
+/// Disabled switches can still explain themselves, but never toggle.
+pub fn check(ui: &mut Ui, on: bool, label: &str, enabled: bool, detail: &str) -> bool {
+    let id = ui.make_persistent_id(("check-detail", label));
+    let mut open = ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
+    let mut height = ROW;
+    let label = loop {
+        let galley = ui.painter().layout(
+            label.to_owned(),
+            font(),
+            TEXT,
+            (ui.available_width() - 2.0 * INSET - 40.0 - height).max(40.0),
+        );
+        let needed = ROW.max(galley.size().y + 8.0);
+        if needed <= height {
+            break galley;
+        }
+        height = needed;
+    };
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    let divider = rect.right() - height;
+    let toggle_rect = Rect::from_min_max(rect.min, pos2(divider, rect.bottom()));
+    let detail_rect = Rect::from_min_max(pos2(divider, rect.top()), rect.max);
+    let response = ui.interact(toggle_rect, id.with("toggle"), control_sense(enabled));
+    let expand = ui
+        .interact(detail_rect, id.with("expand"), control_sense(true))
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let hover = hover_amount(ui, &response, enabled);
+    let detail_hover = hover_amount(ui, &expand, true);
+    highlight(ui, toggle_rect, hover, Highlight::Left);
+    highlight(ui, detail_rect, detail_hover, Highlight::Right);
+    ui.painter()
+        .vline(divider, rect.y_range(), (1.0, DIM.gamma_multiply(0.4)));
+    if expand.clicked() {
+        open = !open;
+    }
     let painter = ui.painter();
     let text = if enabled {
         TEXT.lerp_to_gamma(CYAN, hover)
@@ -204,29 +342,47 @@ pub fn check(ui: &mut Ui, on: bool, label: &str, enabled: bool) -> bool {
         galley,
         mark,
     );
-    painter.text(
-        pos2(left + width + 8.0, rect.center().y),
-        Align2::LEFT_CENTER,
+    painter.galley_with_override_text_color(
+        pos2(left + width + 8.0, rect.center().y - label.size().y / 2.0),
         label,
-        font(),
         text,
     );
-    enabled && response.clicked()
+    painter.text(
+        detail_rect.center(),
+        Align2::CENTER_CENTER,
+        if open { "-" } else { "+" },
+        font(),
+        TEXT.lerp_to_gamma(CYAN, detail_hover),
+    );
+    let toggled = enabled && response.clicked();
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+    ui.data_mut(|data| data.insert_temp(id, open));
+    if open {
+        note(ui, detail);
+    }
+    toggled
 }
+
+#[cfg(test)]
+mod tests;
 
 /// Text sized to itself that lights up on hover. Returns whether it was clicked.
 fn chip(ui: &mut Ui, text: String, colour: Color32) -> bool {
+    chip_response(ui, text, colour).clicked()
+}
+
+fn chip_response(ui: &mut Ui, text: String, colour: Color32) -> egui::Response {
     let size = ui
         .painter()
         .layout_no_wrap(text.clone(), font(), colour)
         .size()
         + vec2(8.0, 6.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.1);
+    let (rect, response) = ui.allocate_exact_size(size, control_sense(true));
+    let hover = hover_amount(ui, &response, true);
+    highlight(ui, rect, hover, Highlight::Whole);
     let painter = ui.painter();
-    painter.rect_filled(rect, 4, CYAN.gamma_multiply(0.15 * hover));
     painter.text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -234,9 +390,7 @@ fn chip(ui: &mut Ui, text: String, colour: Color32) -> bool {
         font(),
         colour.lerp_to_gamma(CYAN, hover),
     );
-    response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// `[ label ]`, sized to its text.
@@ -332,16 +486,9 @@ fn fact(ui: &mut Ui, id: egui::Id, label: &str, value: &str, expands: bool) -> b
     // Wrapped values keep a single row's padding above and below.
     let padding = (ROW - label.size().y) / 2.0;
     let height = ROW.max(value.size().y + 2.0 * padding);
-    let sense = if expands {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), sense);
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.1);
-    highlight(ui, rect, hover);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), control_sense(expands));
+    let hover = hover_amount(ui, &response, true);
+    highlight(ui, rect, hover, Highlight::Whole);
     if expands
         && response
             .on_hover_cursor(egui::CursorIcon::PointingHand)

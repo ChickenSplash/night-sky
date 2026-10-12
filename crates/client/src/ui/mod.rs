@@ -4,7 +4,6 @@ pub mod breadcrumb;
 mod canvas;
 pub(crate) mod hud;
 pub mod inspector;
-mod settings;
 pub mod tasks;
 pub mod terminal;
 
@@ -18,17 +17,12 @@ use bevy_egui::{EguiContexts, egui};
 use canvas::canvas_overlay;
 pub(crate) use hud::pointer_captured;
 use hud::{exposure_controls, magnitude_control, speed_readout, time_controls};
-use settings::settings;
 
 pub(crate) const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 144, 174);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(99, 214, 240);
 const PANEL: egui::Color32 = egui::Color32::from_rgb(7, 15, 31);
 /// The HUD icons' glyph size, larger than the HUD text so they read as icons.
 const ICON_SIZE: f32 = 20.0;
-
-fn heading(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text).size(11.0).color(MUTED).strong());
-}
 
 pub(crate) fn muted(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(egui::RichText::new(text).size(11.0).color(MUTED));
@@ -40,7 +34,6 @@ type Overlay<'w> = (Res<'w, Markers>, Res<'w, CameraVelocity>);
 #[derive(Default)]
 pub struct Hud {
     styled: bool,
-    settings: bool,
     tasks_open: bool,
     tasks: crate::ui::tasks::Tasks,
     time_drag_start: Option<f64>,
@@ -52,7 +45,11 @@ pub struct Hud {
 }
 
 pub fn draw_ui(
-    interaction: (EguiContexts, MessageWriter<UiCommand>),
+    interaction: (
+        EguiContexts,
+        MessageWriter<UiCommand>,
+        ResMut<crate::devtools::DevTools>,
+    ),
     universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
@@ -64,7 +61,7 @@ pub fn draw_ui(
     ),
     mut hud: Local<Hud>,
 ) {
-    let (mut contexts, mut writer) = interaction;
+    let (mut contexts, mut writer, mut tools) = interaction;
     let (markers, velocity) = overlay;
     let (rig, pose, starfield) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
@@ -90,19 +87,7 @@ pub fn draw_ui(
         rect = egui::Rect::from_min_size(rect.min, egui::vec2(1.0, 1.0));
     }
     let hud = &mut *hud;
-    let anchor = icons(ctx, rect, &mut hud.settings, &mut hud.tasks_open);
-    let mut open = hud.settings;
-    egui::Window::new("Settings")
-        .open(&mut open)
-        .pivot(egui::Align2::RIGHT_TOP)
-        .default_pos(anchor)
-        .default_width(340.0)
-        .default_height(640.0)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| settings(ui, &nav, &mut out));
-        });
-    hud.settings = open;
+    let anchor = icons(ctx, rect, &mut tools.open, &mut hud.tasks_open);
     crate::ui::tasks::window(
         ctx,
         anchor,
@@ -163,15 +148,10 @@ pub fn draw_ui(
     writer.write_batch(out);
 }
 
-/// ⚙ Settings above ✔ Tasks, free-floating at the top right of the view.
+/// ⚙ Debug console above ✔ Tasks, free-floating at the top right of the view.
 /// Each toggles its window. Returns where those windows first open: just
 /// below the icons, aligned to their right edge.
-fn icons(
-    ctx: &egui::Context,
-    rect: egui::Rect,
-    settings: &mut bool,
-    tasks: &mut bool,
-) -> egui::Pos2 {
+fn icons(ctx: &egui::Context, rect: egui::Rect, debug: &mut bool, tasks: &mut bool) -> egui::Pos2 {
     use crate::ui::breadcrumb::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_glyph};
     let id = egui::Id::new("hud-icons");
     let area = egui::Area::new(id)
@@ -182,7 +162,7 @@ fn icons(
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
             ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-                for (glyph, hint, open) in [("⚙", "Settings", settings), ("✔", "Tasks", tasks)]
+                for (glyph, hint, open) in [("⚙", "Debug console", debug), ("✔", "Tasks", tasks)]
                 {
                     let response =
                         halo_glyph(ui, glyph, ICON_SIZE, egui::Sense::click(), |response| {
