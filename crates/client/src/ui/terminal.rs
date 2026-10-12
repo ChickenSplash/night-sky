@@ -8,6 +8,8 @@ const GAP: f32 = 12.0;
 const RADIUS: u8 = 10;
 const BORDER: f32 = 2.0;
 const ROW: f32 = 24.0;
+/// Where text starts inside a row, clear of the hover light's edge.
+const INSET: f32 = 8.0;
 pub const CYAN: Color32 = Color32::from_rgb(0x33, 0xcc, 0xff);
 const GREEN: Color32 = Color32::from_rgb(0x00, 0xff, 0x99);
 const GREY: Color32 = Color32::from_rgb(0xc8, 0xcc, 0xd0);
@@ -123,12 +125,16 @@ fn row(ui: &mut Ui, sense: Sense) -> (Rect, egui::Response, f32) {
     (rect, response, hover)
 }
 
+/// A fixed heading, laid out like a `section` row.
 pub fn heading(ui: &mut Ui, text: &str) {
     ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new(format!("# {text}"))
-            .font(font())
-            .color(CYAN),
+    let (rect, _, _) = row(ui, Sense::hover());
+    ui.painter().text(
+        pos2(rect.left() + INSET, rect.center().y),
+        Align2::LEFT_CENTER,
+        format!("# {text}"),
+        font(),
+        CYAN,
     );
 }
 
@@ -139,7 +145,7 @@ pub fn section(ui: &mut Ui, text: &str) -> bool {
     ui.add_space(6.0);
     let (rect, response, _) = row(ui, Sense::click());
     ui.painter().text(
-        pos2(rect.left() + 8.0, rect.center().y),
+        pos2(rect.left() + INSET, rect.center().y),
         Align2::LEFT_CENTER,
         format!("# {text} {}", if open { "-" } else { "+" }),
         font(),
@@ -152,12 +158,21 @@ pub fn section(ui: &mut Ui, text: &str) -> bool {
     open
 }
 
+/// Small dim text, inset to line up with the rows' text.
 pub fn note(ui: &mut Ui, text: &str) {
-    ui.label(
-        egui::RichText::new(text)
-            .font(FontId::monospace(11.0))
-            .color(DIM),
-    );
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: INSET as i8,
+            right: INSET as i8,
+            ..egui::Margin::ZERO
+        })
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text)
+                    .font(FontId::monospace(11.0))
+                    .color(DIM),
+            );
+        });
 }
 
 /// `[x] label`, clicked to toggle. Disabled rows are dimmed and ignore clicks.
@@ -181,7 +196,7 @@ pub fn check(ui: &mut Ui, on: bool, label: &str, enabled: bool) -> bool {
         (true, true) => GREEN,
         (true, false) => text,
     };
-    let left = rect.left() + 8.0;
+    let left = rect.left() + INSET;
     let galley = painter.layout_no_wrap(if on { "[x]" } else { "[ ]" }.into(), font(), mark);
     let width = galley.size().x;
     painter.galley(
@@ -299,8 +314,10 @@ pub fn facts_with_details(ui: &mut Ui, id: &str, rows: &[(&str, String, Option<&
 /// Space kept between a label, its leader and its value.
 const LEADER_GAP: f32 = 8.0;
 
-/// One full-width fact row. A value too wide to share the line with its
-/// label wraps, still flush right. Returns whether its detail is open.
+/// One full-width fact row, lit on hover like every other row; a row with a
+/// detail toggles it when clicked anywhere. A value too wide to share the
+/// line with its label wraps, still flush right. Returns whether its detail
+/// is open.
 fn fact(ui: &mut Ui, id: egui::Id, label: &str, value: &str, expands: bool) -> bool {
     let mut open = expands && ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
     let label = if expands {
@@ -310,55 +327,46 @@ fn fact(ui: &mut Ui, id: egui::Id, label: &str, value: &str, expands: bool) -> b
     };
     let width = ui.available_width();
     let label = ui.painter().layout_no_wrap(label, font(), DIM);
-    let wrap = (width - label.size().x - 2.0 * LEADER_GAP).max(120.0);
+    let wrap = (width - 2.0 * INSET - label.size().x - 2.0 * LEADER_GAP).max(120.0);
     let value = ui.painter().layout(value.to_owned(), font(), TEXT, wrap);
-    let height = label.size().y.max(value.size().y);
-    let (rect, row) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-
-    let label_rect = Rect::from_min_size(rect.min, label.size());
-    let hover = if expands {
-        let response = ui
-            .interact(
-                label_rect.expand2(vec2(4.0, 1.0)),
-                id.with("label"),
-                Sense::click(),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        if response.clicked() {
-            open = !open;
-            ui.data_mut(|data| data.insert_temp(id, open));
-        }
-        ui.ctx()
-            .animate_bool_with_time(response.id, response.hovered(), 0.1)
+    // Wrapped values keep a single row's padding above and below.
+    let padding = (ROW - label.size().y) / 2.0;
+    let height = ROW.max(value.size().y + 2.0 * padding);
+    let sense = if expands {
+        Sense::click()
     } else {
-        0.0
+        Sense::hover()
     };
-    let tracked = ui.ctx().animate_bool_with_time(row.id, row.hovered(), 0.1);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), sense);
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id, response.hovered(), 0.1);
+    highlight(ui, rect, hover);
+    if expands
+        && response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+    {
+        open = !open;
+        ui.data_mut(|data| data.insert_temp(id, open));
+    }
 
     let painter = ui.painter();
-    painter.rect_filled(
-        rect.expand2(vec2(4.0, 1.0)),
-        4,
-        CYAN.gamma_multiply(0.06 * tracked),
-    );
-    painter.rect_filled(
-        label_rect.expand2(vec2(4.0, 1.0)),
-        4,
-        CYAN.gamma_multiply(0.15 * hover),
-    );
-    let value_left = rect.right() - value.size().x;
-    let dots = egui::Rangef::new(label_rect.right() + LEADER_GAP, value_left - LEADER_GAP);
-    let y = rect.top() + label.size().y * 0.62;
+    let top = rect.top() + padding;
+    let label_right = rect.left() + INSET + label.size().x;
+    let value_left = rect.right() - INSET - value.size().x;
+    let dots = egui::Rangef::new(label_right + LEADER_GAP, value_left - LEADER_GAP);
+    let y = top + label.size().y * 0.62;
     let mut x = (dots.min / 6.0).ceil() * 6.0;
     while x <= dots.max {
-        painter.circle_filled(pos2(x, y), 0.75, DIM.gamma_multiply(0.45 + 0.4 * tracked));
+        painter.circle_filled(pos2(x, y), 0.75, DIM.gamma_multiply(0.45 + 0.4 * hover));
         x += 6.0;
     }
     painter.galley_with_override_text_color(
-        label_rect.min,
+        pos2(rect.left() + INSET, top),
         label,
-        DIM.lerp_to_gamma(CYAN, hover.max(0.5 * tracked)),
+        DIM.lerp_to_gamma(CYAN, hover),
     );
-    painter.galley(pos2(value_left, rect.top()), value, TEXT);
+    painter.galley(pos2(value_left, top), value, TEXT);
     open
 }

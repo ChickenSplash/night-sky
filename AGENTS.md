@@ -189,9 +189,11 @@ design notes into every session:
   mismatch).
 - The debug window uses the terminal look (`ui/terminal.rs`): a translucent
   black, Hyprland-like window with a light grey border and text-mode
-  checkboxes and buttons. A fact's explanation goes behind its label with
-  `terminal::facts_with_details` (`label +`, click to show it below, `label -`
-  to hide), not as an always-visible note.
+  checkboxes and buttons. Headings, sections, checkboxes and facts are all
+  full-width `ROW`s with text at `INSET` and the same hover light; facts put
+  values flush right after a dotted leader. A fact's explanation goes behind
+  its label with `terminal::facts_with_details` (`label +`, click the row to
+  show it below, `label -` to hide), not as an always-visible note.
 - There is no HTML UI; the HTML/CEF prototypes were abandoned (branch
   `prototype-cef-overlay`). Every panel action is an ID-based `UiCommand`
   (`actions.rs`). Panel-only choices (list/task sort, status groups) live in

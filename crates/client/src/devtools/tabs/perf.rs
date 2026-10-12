@@ -519,7 +519,7 @@ fn frame_graph(ui: &mut egui::Ui, frames: &VecDeque<f32>) {
     for (ms, label) in [(1000.0 / 60.0, "60 fps"), (1000.0 / 30.0, "30 fps")] {
         painter.hline(rect.x_range(), y(ms), (1.0, DIM.gamma_multiply(0.4)));
         painter.text(
-            egui::pos2(rect.left() + 4.0, y(ms) - 2.0),
+            egui::pos2(rect.left() + 8.0, y(ms) - 2.0),
             egui::Align2::LEFT_BOTTOM,
             label,
             egui::FontId::monospace(10.0),
