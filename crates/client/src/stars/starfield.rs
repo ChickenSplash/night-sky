@@ -11,7 +11,7 @@ use crate::{
     stars::render::{
         Globals, PALETTE, SHADER, StarDraw, StarFrame, StarInstance, StarRenderPlugin, StarUploads,
     },
-    stars::stream::{Starfield, StreamMetrics},
+    stars::stream::{Starfield, StreamMetrics, SyncFrame},
 };
 use bevy::{asset::load_internal_asset, math::DVec3, prelude::*};
 use space_simulation::{
@@ -99,12 +99,16 @@ struct Batch {
     half_pc: f64,
 }
 
-/// Whether a star is bright enough to upload, seen from `eye` with the
-/// `magnitude` limit.
-fn bright_enough(star: &StarPoint, eye: DVec3, magnitude: f64) -> bool {
-    let reach = MARGIN * MARGIN * reach_sq_per_luminosity(magnitude);
-    let squared = (DVec3::from_array(star.position_pc) - eye).length_squared();
-    squared <= f64::from(star.luminosity_solar) * reach
+/// Squared parsecs per solar luminosity within which a star is bright enough
+/// to upload under the `magnitude` limit, for `bright_enough`.
+fn visible_reach_sq(magnitude: f64) -> f64 {
+    MARGIN * MARGIN * reach_sq_per_luminosity(magnitude)
+}
+
+/// Whether a star is bright enough to upload, `distance_pc` away, with
+/// `reach_sq` from `visible_reach_sq`.
+fn bright_enough(star: &StarPoint, distance_pc: f64, reach_sq: f64) -> bool {
+    distance_pc * distance_pc <= f64::from(star.luminosity_solar) * reach_sq
 }
 
 /// A star's GPU record, `origin_pc` being where its draw is placed from.
@@ -125,10 +129,17 @@ fn pack(
     eye: DVec3,
     magnitude: f64,
 ) {
+    let reach_sq = visible_reach_sq(magnitude);
     stars.extend(
         points
             .iter()
-            .filter(|star| bright_enough(star, eye, magnitude))
+            .filter(|star| {
+                bright_enough(
+                    star,
+                    DVec3::from_array(star.position_pc).distance(eye),
+                    reach_sq,
+                )
+            })
             .map(|star| instance(star, centre)),
     );
 }
@@ -160,18 +171,46 @@ struct Batches {
 
 /// A star that may come close enough to need a precise sprite.
 struct Candidate {
-    id: String,
+    cell: Cell,
     star: StarPoint,
     /// Parsecs from its block's centre.
     offset_pc: f64,
 }
 
+impl Candidate {
+    fn is(&self, (cell, component, index): StarRef) -> bool {
+        self.cell == cell && self.star.component == component && u64::from(self.star.index) == index
+    }
+}
+
+/// A cell star by its ID's parts, without the string.
+type StarRef = (Cell, space_simulation::galaxy::Component, u64);
+
 /// Stars near the camera, each placed by an f64 subtraction every frame.
 #[derive(Resource, Default)]
 struct Precise {
     scanned_at: Option<DVec3>,
-    scanned_body: f64,
+    scanned_magnitude: f64,
     candidates: Vec<Candidate>,
+    /// The visited star and, once its cell has loaded, its position, so
+    /// batches can hide its point while its body is drawn.
+    visited: Option<(StarRef, Option<[f64; 3]>)>,
+}
+
+/// `StarDraw::hide` for the star at `at` in a batch from `centre_pc`: packed
+/// as `instance` packs it, so the shader's comparison is exact.
+fn hide(at: [f64; 3], centre_pc: [f64; 3]) -> Vec4 {
+    Vec3::from_array(std::array::from_fn(|axis| {
+        (at[axis] - centre_pc[axis]) as f32
+    }))
+    .extend(1.0)
+}
+
+/// Where a cell star is, if its cell is loaded.
+fn star_position(field: &Starfield, (cell, component, index): StarRef) -> Option<[f64; 3]> {
+    field.cells.get(&cell)?.stars.iter().find_map(|star| {
+        (star.component == component && u64::from(star.index) == index).then_some(star.position_pc)
+    })
 }
 
 /// Multiple systems that may show their stars apart, gathered now and then,
@@ -360,26 +399,30 @@ impl Plugin for StarfieldRenderPlugin {
     }
 }
 
-/// Stars that could need a precise sprite before the camera moves `RESCAN_PC`.
-/// `body_pc` is the visited star's body range, within which batches hide points.
-fn candidates(field: &Starfield, eye: DVec3, body_pc: f64) -> Vec<Candidate> {
+/// Stars that could need a precise sprite before the camera moves
+/// `RESCAN_PC`: those that could be bright enough under the `magnitude`
+/// limit from anywhere that close.
+fn candidates(field: &Starfield, eye: DVec3, magnitude: f64) -> Vec<Candidate> {
+    let reach_sq = visible_reach_sq(magnitude);
     let mut out = Vec::new();
     for (&cell, stars) in &field.cells {
         let half_diagonal = cell.size_pc() * 0.5 * 3.0_f64.sqrt();
-        let reach = PREPARE * (PRECISE * half_diagonal).max(body_pc) + RESCAN_PC;
+        let reach = PREPARE * PRECISE * half_diagonal + RESCAN_PC;
         if gap_pc(cell, eye.to_array()) > reach {
             continue;
         }
         for block in stars.blocks(BLOCK) {
-            let reach = PREPARE * (PRECISE * block.half_diagonal_pc()).max(body_pc) + RESCAN_PC;
+            let reach = PREPARE * PRECISE * block.half_diagonal_pc() + RESCAN_PC;
             let centre = DVec3::from_array(block.centre_pc);
             stars.near_in(&block, eye.to_array(), reach, |_, star| {
                 let position = DVec3::from_array(star.position_pc);
                 let offset_pc = position.distance(centre);
-                let reach = PREPARE * (PRECISE * offset_pc).max(body_pc) + RESCAN_PC;
-                if position.distance(eye) < reach {
+                let distance = position.distance(eye);
+                if distance < PREPARE * PRECISE * offset_pc + RESCAN_PC
+                    && bright_enough(star, (distance - RESCAN_PC).max(0.0), reach_sq)
+                {
                     out.push(Candidate {
-                        id: star.id(cell),
+                        cell,
                         star: *star,
                         offset_pc,
                     });
@@ -451,6 +494,12 @@ fn sync(
     let (universe, nav, debug, clock) = view;
     let sync_start = bevy::platform::time::Instant::now();
     metrics.split_latest = Default::default();
+    let (render_extract_ms, render_prepare_ms) = uploads.render_timings();
+    metrics.sync_latest = SyncFrame {
+        render_extract_ms,
+        render_prepare_ms,
+        ..Default::default()
+    };
     let Ok((camera_transform, view)) = camera.single() else {
         return;
     };
@@ -482,16 +531,17 @@ fn sync(
     frame.precise.clear();
     frame.points = debug.point_stars && cfg!(not(target_arch = "wasm32"));
     // Within its body range the visited star is drawn as a body, so the batches
-    // hide its point there, and it has no sprite.
-    let body = nav.system(&universe.0).and_then(|system| {
-        let range = crate::scene::body_range(&nav, system, &pose)?;
-        Some((system.page_star(pose.page)?.id.as_str(), range / PC_METRES))
+    // hide its point, and it has no sprite. Other stars there are unaffected.
+    let visited = nav.system(&universe.0).and_then(|system| {
+        crate::scene::body_range(&nav, system, &pose)?;
+        Some(system.page_star(pose.page)?.id.as_str())
     });
-    let body_pc = body.map_or(0.0, |(_, range)| range);
+    let body = visited.and_then(space_simulation::cells::parse_cell_star);
     let origin = rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
     let eye = origin + DVec3::from_array(home);
     let changed = !field.added.is_empty() || !field.removed.is_empty();
+    let upload_start = bevy::platform::time::Instant::now();
     for dropped in field.removed.drain(..) {
         metrics.loaded_at.remove(&dropped);
         batches.built_at.remove(&dropped);
@@ -619,6 +669,7 @@ fn sync(
             break;
         }
     }
+    metrics.sync_latest.upload_ms = upload_start.elapsed().as_secs_f64() * 1000.0;
     // Camera-relative subtraction in f64 *before* conversion to GPU floats.
     let factor = PC_METRES / pose.render_scale();
     let camera_at = camera_transform.translation().as_dvec3();
@@ -650,9 +701,18 @@ fn sync(
         metrics.split_searches += 1;
         metrics.split_checked += metrics.split_examined;
     }
+    let draws_start = bevy::platform::time::Instant::now();
+    // Found once per visit; retried while its cell has not loaded.
+    if precise
+        .visited
+        .is_none_or(|(key, at)| Some(key) != body || (at.is_none() && changed))
+    {
+        precise.visited = body.map(|key| (key, star_position(&field, key)));
+    }
+    let hidden = precise.visited.and_then(|(_, at)| at);
     let batch_near = Vec4::new(
         BATCH_HIDE as f32,
-        body_pc as f32,
+        0.0,
         if debug.split_multiples {
             angle as f32
         } else {
@@ -662,7 +722,7 @@ fn sync(
     );
     let (mut uploaded, mut drawn_stars) = (0, 0);
     let (mut blocks, mut blocks_drawn) = (0, 0);
-    for entities in batches.active.values() {
+    for (&owner, entities) in &batches.active {
         let mut block = None;
         for &Batch {
             id,
@@ -689,6 +749,9 @@ fn sync(
                         .as_vec3()
                         .extend(factor as f32),
                     near: batch_near,
+                    hide: hidden
+                        .filter(|_| body.is_some_and(|(cell, _, _)| cell == owner))
+                        .map_or(Vec4::ZERO, |at| hide(at, centre_pc)),
                 });
             }
         }
@@ -699,18 +762,23 @@ fn sync(
     metrics.blocks_drawn = blocks_drawn;
     metrics.drawn_stars = drawn_stars;
     metrics.uploaded_stars = uploaded;
+    metrics.sync_latest.draws_ms = draws_start.elapsed().as_secs_f64() * 1000.0;
     // Close up, each star is placed alone by an f64 subtraction. The visited
     // star has no sprite while its body is drawn at the exact position.
     if changed
-        || precise.scanned_body != body_pc
+        || precise.scanned_magnitude != nav.magnitude
         || precise
             .scanned_at
             .is_none_or(|at| at.distance(eye) > RESCAN_PC)
     {
-        precise.candidates = candidates(&field, eye, body_pc);
+        let scan_start = bevy::platform::time::Instant::now();
+        precise.candidates = candidates(&field, eye, nav.magnitude);
         precise.scanned_at = Some(eye);
-        precise.scanned_body = body_pc;
+        precise.scanned_magnitude = nav.magnitude;
+        metrics.sync_latest.precise_scan_ms = scan_start.elapsed().as_secs_f64() * 1000.0;
+        metrics.sync_latest.precise_rescans = 1;
     }
+    metrics.sync_latest.precise_candidates = precise.candidates.len();
     // Each multiple system the batches hide as a point, star by star, where
     // its orbits have them now. The visited system is drawn as bodies.
     let split_start = bevy::platform::time::Instant::now();
@@ -730,7 +798,7 @@ fn sync(
             || !debug.split_multiples
             || distance >= split.reach_pc
             || separation <= angle * distance
-            || body.is_some_and(|(visited, _)| visited == id)
+            || visited == Some(id.as_str())
         {
             continue;
         }
@@ -771,29 +839,38 @@ fn sync(
     let preparation_time = split_start.elapsed();
     metrics.split_preparation += preparation_time;
     metrics.split_latest.preparation_ms = preparation_time.as_secs_f64() * 1000.0;
+    let precise_start = bevy::platform::time::Instant::now();
+    let split_sprites = frame.precise.len();
+    let reach_sq = visible_reach_sq(nav.magnitude);
     for candidate in &precise.candidates {
-        if shown_apart.contains(candidate.id.as_str()) {
+        let distance = DVec3::from_array(candidate.star.position_pc).distance(eye);
+        if !debug.galactic_points
+            || distance >= PRECISE * candidate.offset_pc
+            || body.is_some_and(|key| candidate.is(key))
+            || !bright_enough(&candidate.star, distance, reach_sq)
+        {
             continue;
         }
-        let position = DVec3::from_array(candidate.star.position_pc);
-        let radius = (PRECISE * candidate.offset_pc).max(body_pc);
-        let drawn = body.is_some_and(|(id, _)| id == candidate.id);
-        if position.distance(eye) < radius
-            && !drawn
-            && debug.galactic_points
-            && bright_enough(&candidate.star, eye, nav.magnitude)
+        // Only multiple systems are split, so only they need their ID.
+        if candidate.star.separation_au > 0.0
+            && !shown_apart.is_empty()
+            && shown_apart.contains(candidate.star.id(candidate.cell).as_str())
         {
-            frame
-                .precise
-                .push(instance(&candidate.star, eye.to_array()));
+            continue;
         }
+        frame
+            .precise
+            .push(instance(&candidate.star, eye.to_array()));
     }
     metrics.precise_sprites = frame.precise.len();
+    metrics.sync_latest.precise_sprites = frame.precise.len() - split_sprites;
+    metrics.sync_latest.precise_ms = precise_start.elapsed().as_secs_f64() * 1000.0;
     if !frame.precise.is_empty() {
         frame.draws.push(StarDraw {
             batch: None,
             origin: camera_at.as_vec3().extend(factor as f32),
             near: Vec4::ZERO,
+            hide: Vec4::ZERO,
         });
     }
     metrics.mesh_queue = batches.queued.len();
@@ -803,7 +880,9 @@ fn sync(
         .filter_map(|(cell, _)| metrics.loaded_at.get(cell))
         .map(|at| at.elapsed().as_secs_f64() * 1000.0)
         .fold(0.0, f64::max);
-    metrics.rendering += sync_start.elapsed();
+    let sync_time = sync_start.elapsed();
+    metrics.rendering += sync_time;
+    metrics.sync_latest.total_ms = sync_time.as_secs_f64() * 1000.0;
 }
 
 #[cfg(test)]
@@ -904,15 +983,65 @@ mod tests {
             cell,
             space_simulation::stream::StarCell::new(cell, vec![point(star, 0), point(centre, 1)]),
         );
-        let near = candidates(&field, star + DVec3::new(0.0, 0.05, 0.0), 0.0);
+        let magnitude = VISIBLE_MAGNITUDE;
+        let near = candidates(&field, star + DVec3::new(0.0, 0.05, 0.0), magnitude);
         assert_eq!(near.len(), 1);
-        assert_eq!(near[0].id, point(star, 0).id(cell));
+        assert!(near[0].is((cell, point(star, 0).component, 0)));
         assert!((near[0].offset_pc - 40.0).abs() < 1e-9);
         // Beyond the prepared radius and the rescan margin, nothing is gathered.
         let far = star + DVec3::new(0.0, PREPARE * PRECISE * 40.0 + RESCAN_PC + 0.01, 0.0);
-        assert!(candidates(&field, far, 0.0).is_empty());
-        // A visited star's body range reaches farther.
-        assert_eq!(candidates(&field, far, 1.0).len(), 1);
+        assert!(candidates(&field, far, magnitude).is_empty());
+        // Nor a star too faint to show from anywhere within the rescan margin.
+        let faint = StarPoint {
+            luminosity_solar: 1e-8,
+            ..point(star, 0)
+        };
+        field.cells.insert(
+            cell,
+            space_simulation::stream::StarCell::new(cell, vec![faint]),
+        );
+        let eye = star + DVec3::new(0.0, RESCAN_PC + 0.05, 0.0);
+        assert!(candidates(&field, eye, magnitude).is_empty());
+    }
+
+    #[test]
+    fn only_the_visited_star_is_hidden_from_its_batch() {
+        let cell = Cell::containing(10, [8200.0, 20.0, 0.0]).unwrap();
+        let centre = cell.centre_pc();
+        let star = |offset: f64, index| StarPoint {
+            position_pc: [
+                centre[0] + offset,
+                centre[1] - offset / 3.0,
+                centre[2] + 0.1,
+            ],
+            luminosity_solar: 1.0,
+            temperature_k: 5772.0,
+            radius_solar: 1.0,
+            separation_au: 0.0,
+            component: space_simulation::galaxy::Component::ThinDisc,
+            index,
+        };
+        let (visited, neighbour) = (star(37.123_456_789, 0), star(37.2, 1));
+        let mut field = Starfield::default();
+        field.cells.insert(
+            cell,
+            space_simulation::stream::StarCell::new(cell, vec![visited, neighbour]),
+        );
+        let key = (cell, visited.component, 0);
+        let at = star_position(&field, key).unwrap();
+        assert_eq!(at, visited.position_pc);
+        let hidden = hide(at, centre);
+        // The shader compares exactly what the batch uploaded.
+        assert_eq!(
+            Vec3::from_array(instance(&visited, centre).position),
+            hidden.truncate()
+        );
+        assert_ne!(
+            Vec3::from_array(instance(&neighbour, centre).position),
+            hidden.truncate()
+        );
+        assert!(hidden.w > 0.0);
+        assert!(star_position(&field, (cell, visited.component, 9)).is_none());
     }
 
     #[test]
@@ -937,7 +1066,7 @@ mod tests {
             space_simulation::stream::StarCell::new(cell, vec![point]),
         );
         let eye = position + DVec3::Z * (6.0 * space_simulation::LY_METRES / PC_METRES);
-        let candidate = candidates(&field, eye, 0.0);
+        let candidate = candidates(&field, eye, VISIBLE_MAGNITUDE);
         assert_eq!(candidate.len(), 1);
         let radius = PRECISE * candidate[0].offset_pc;
         let distance = eye.distance(position);

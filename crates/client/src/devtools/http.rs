@@ -1,6 +1,6 @@
 //! Opt-in, loopback-only native developer transport. Never touches the ECS
 //! from its listener thread; commands and captures are queued to PreUpdate.
-use super::snapshot::Snapshot;
+use super::snapshot::{Published, Snapshot};
 use crate::command_line::{Source, Typed};
 use crate::scene::{CameraPose, CameraRig};
 use crate::stars::stream::Starfield;
@@ -16,7 +16,7 @@ use std::sync::{
 use std::time::Duration;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
-pub(super) type SharedState = Arc<Mutex<Option<Arc<Value>>>>;
+pub(super) type SharedState = Arc<Mutex<Option<Published>>>;
 // tiny_http prebuffers non-Expect bodies up to 1024 bytes before handing
 // requests to the listener, so accepted commands cannot block on body reads.
 const BODY_LIMIT: usize = 1024;
@@ -199,14 +199,20 @@ fn handle(
             Err((status, error)) => respond(request, status, json!({"error": error})),
         },
         (&Method::Get, _) if snapshot_route(&url) => {
-            let state = shared.lock().ok().and_then(|cached| cached.clone());
-            let Some(state) = state else {
+            let published = shared.lock().ok().and_then(|cached| cached.clone());
+            let Some(published) = published else {
                 respond(
                     request,
                     503,
                     json!({"error": "Waiting for the first app snapshot"}),
                 );
                 return;
+            };
+            // Only requests that may need the history pay for encoding it.
+            let state = if url.contains("history") {
+                Arc::new(published.full())
+            } else {
+                published.state
             };
             match select_snapshot(&state, &url) {
                 Ok(body) => respond(request, 200, body),
@@ -671,10 +677,21 @@ mod tests {
     fn localhost_api_reads_snapshots_validates_commands_and_rejects_browser_requests() {
         let server = Server::http((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
-        let shared = Arc::new(Mutex::new(Some(Arc::new(json!({
-            "schema_version": 1, "magnitude": 6.5,
-            "performance": {"latest": {"sequence": 42}, "history": [1, 2]},
-        })))));
+        let frame = |sequence| crate::stars::stream::FrameSample {
+            sequence,
+            elapsed_seconds: 0.0,
+            frame_interval_ms: 0.0,
+            split: Default::default(),
+            sync: Default::default(),
+            instrumentation: Default::default(),
+        };
+        let shared = Arc::new(Mutex::new(Some(Published {
+            state: Arc::new(json!({
+                "schema_version": 1, "magnitude": 6.5,
+                "performance": {"latest": {"sequence": 42}, "history": []},
+            })),
+            history: Arc::from([frame(1), frame(2)]),
+        })));
         let api = Arc::new(start(server, shared, REPLY_WAIT).unwrap());
         // Stands in for the main thread: refuses `jump missing`, runs the rest.
         let done = Arc::new(AtomicBool::new(false));
@@ -722,11 +739,11 @@ mod tests {
         assert_eq!(state["magnitude"], 6.5);
         assert!(state["performance"].get("history").is_none());
         let perf: Value = get("/perf?history=1").json().unwrap();
-        assert_eq!(perf["performance"]["history"], json!([1, 2]));
+        assert_eq!(perf["performance"]["history"][1]["sequence"], 2);
         assert_eq!(get("/missing").status(), 404);
         assert_eq!(get("/state/magnitude").json::<Value>().unwrap(), 6.5);
         assert_eq!(get("/perf/latest/sequence").json::<Value>().unwrap(), 42);
-        assert_eq!(get("/perf/history/0").json::<Value>().unwrap(), 1);
+        assert_eq!(get("/perf/history/0/sequence").json::<Value>().unwrap(), 1);
         assert_eq!(get("/perf/unknown").status(), 404);
         assert_eq!(get("/perf/history?seconds=20").status(), 400);
         assert_eq!(

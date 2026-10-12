@@ -102,17 +102,22 @@ pub struct StarDraw {
     /// parsec. Formed from f64 camera-relative offsets.
     pub origin: Vec4,
     /// Points closer than this times their distance from the origin are
-    /// hidden, as are those within the body range in parsecs; then multiple
-    /// systems whose separation would span more than this angle, in radians,
-    /// within this many parsecs (`starfield.rs`), drawn star by star as
-    /// precise sprites instead. All zero for precise sprites.
+    /// hidden (y unused); then multiple systems whose separation would span
+    /// more than this angle, in radians, within this many parsecs
+    /// (`starfield.rs`), drawn star by star as precise sprites instead. All
+    /// zero for precise sprites.
     pub near: Vec4,
+    /// With w above zero, the point at exactly this offset from the origin
+    /// is hidden: the visited star, drawn as a body. Packed as its batch
+    /// packs it, so the comparison is exact.
+    pub hide: Vec4,
 }
 
 #[derive(Clone, Copy, ShaderType)]
 pub(crate) struct DrawUniform {
     origin: Vec4,
     near: Vec4,
+    hide: Vec4,
 }
 
 /// What to draw this frame, rebuilt by `starfield::sync`.
@@ -134,9 +139,16 @@ pub struct StarUploads(Mutex<Uploads>);
 struct Uploads {
     added: Vec<(u64, Vec<StarInstance>)>,
     removed: Vec<u64>,
+    /// The render world's last extract and prepare, in milliseconds.
+    timings: (f64, f64),
 }
 
 impl StarUploads {
+    /// The render world's last `extract` and `prepare` times, in milliseconds.
+    pub fn render_timings(&self) -> (f64, f64) {
+        self.lock().timings
+    }
+
     pub fn add(&self, id: u64, stars: Vec<StarInstance>) {
         self.lock().added.push((id, stars));
     }
@@ -285,6 +297,7 @@ pub(crate) struct StarBuffers {
     /// Each draw's dynamic offset into `draws`.
     pub(crate) offsets: Vec<u32>,
     bind_group: Option<BindGroup>,
+    prepare_ms: f64,
 }
 
 impl Default for StarBuffers {
@@ -297,6 +310,7 @@ impl Default for StarBuffers {
             draws: DynamicUniformBuffer::default(),
             offsets: Vec::new(),
             bind_group: None,
+            prepare_ms: 0.0,
         }
     }
 }
@@ -307,6 +321,7 @@ fn extract(
     device: Res<RenderDevice>,
     mut buffers: ResMut<StarBuffers>,
 ) {
+    let start = bevy::platform::time::Instant::now();
     let mut queue = uploads.lock();
     // Added first: a batch made and dropped before extraction is then freed.
     for (id, stars) in queue.added.drain(..) {
@@ -321,6 +336,7 @@ fn extract(
         buffers.batches.remove(&id);
     }
     buffers.frame = frame.clone();
+    queue.timings = (start.elapsed().as_secs_f64() * 1000.0, buffers.prepare_ms);
 }
 
 fn queue(
@@ -360,6 +376,7 @@ fn queue(
 }
 
 fn prepare(device: Res<RenderDevice>, queue: Res<RenderQueue>, mut buffers: ResMut<StarBuffers>) {
+    let start = bevy::platform::time::Instant::now();
     let buffers = &mut *buffers;
     let Some(globals) = buffers.frame.globals.clone() else {
         return;
@@ -375,6 +392,7 @@ fn prepare(device: Res<RenderDevice>, queue: Res<RenderQueue>, mut buffers: ResM
             buffers.draws.push(&DrawUniform {
                 origin: draw.origin,
                 near: draw.near,
+                hide: draw.hide,
             })
         })
         .collect();
@@ -384,6 +402,7 @@ fn prepare(device: Res<RenderDevice>, queue: Res<RenderQueue>, mut buffers: ResM
         buffers.precise.push(star);
     }
     buffers.precise.write_buffer(&device, &queue);
+    buffers.prepare_ms = start.elapsed().as_secs_f64() * 1000.0;
 }
 
 fn bind(

@@ -1,10 +1,11 @@
 //! Shared read-only developer snapshot. No transport commands or HTTP server.
 use crate::render::debug::RenderDebug;
 use crate::scene::{CameraPose, CameraRig};
-use crate::stars::stream::{Starfield, StreamMetrics};
+use crate::stars::stream::{FrameSample, Starfield, StreamMetrics};
 use crate::{Clock, Navigation, Universe};
 use bevy::{diagnostic::DiagnosticsStore, platform::time::Instant, prelude::*};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Resource, Default)]
@@ -15,9 +16,33 @@ pub struct Snapshot {
     published_at: Option<Instant>,
     inspector: crate::ui::inspector::Cache,
     #[cfg(not(target_arch = "wasm32"))]
-    writer: Option<std::sync::mpsc::SyncSender<Value>>,
+    writer: Option<std::sync::mpsc::SyncSender<Published>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) http: Option<super::http::SharedState>,
+}
+
+/// A published snapshot whose `performance.history` is an empty placeholder,
+/// and the history as recorded. Turning thousands of frames into JSON is left
+/// to readers that want them, on their own thread.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+#[derive(Clone)]
+pub struct Published {
+    pub state: Arc<Value>,
+    pub history: Arc<[FrameSample]>,
+}
+
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+impl Published {
+    /// The whole snapshot, history included.
+    pub fn full(&self) -> Value {
+        let mut state = (*self.state).clone();
+        state["performance"]["history"] = history_json(&self.history);
+        state
+    }
+}
+
+fn history_json(history: &[FrameSample]) -> Value {
+    serde_json::to_value(history).unwrap_or_else(|_| json!([]))
 }
 
 pub fn install(app: &mut App) {
@@ -38,7 +63,10 @@ pub(super) fn publish(
     render: (Res<RenderDebug>, Option<Res<DiagnosticsStore>>),
     time: Res<Time>,
 ) {
+    let record_start = Instant::now();
     metrics.record_frame(time.delta_secs_f64() * 1000.0);
+    metrics.instrumentation_latest.record_ms = record_start.elapsed().as_secs_f64() * 1000.0;
+    metrics.instrumentation_latest.snapshot_ms = 0.0;
     // Invalidate even on frames when snapshot publishing is rate-limited.
     if scene.0.is_changed() {
         snapshot.inspector.invalidate();
@@ -55,6 +83,7 @@ pub(super) fn publish(
     {
         return;
     }
+    let snapshot_start = Instant::now();
     let (universe, nav, clock) = scene;
     let (pose, rig) = camera;
     let (debug, diagnostics) = render;
@@ -129,18 +158,20 @@ pub(super) fn publish(
             "averages": metrics.live(&field),
             "latest": metrics.history.back(),
             "split_peak_last_second": metrics.split_peak(),
+            "sync_peak_last_second": metrics.sync_peak(),
+            "instrumentation_peak_last_second": metrics.instrumentation_peak(),
             "frame_peak_last_second_ms": metrics.frame_peak_ms(),
             "split_systems": metrics.split_systems, "split_candidates": metrics.split_candidates,
             "split_cached": metrics.split_cached, "split_sprites": metrics.split_sprites,
             "split_offscreen_systems": metrics.split_offscreen_systems,
             "gpu_diagnostics": gpu,
-            "history": metrics.history,
+            "history": [],
             "history_limit_seconds": 10, "history_limit_frames": 4096,
-            "timing_note": "CPU elapsed timings exclude GPU uploads/rendering. Frame interval precedes the recorded CPU work; a CPU stall can lengthen the following interval. GPU diagnostics are delayed and not frame-correlated. Peaks are independent maxima.",
+            "timing_note": "CPU elapsed timings exclude GPU uploads/rendering. Frame interval precedes the recorded CPU work; a CPU stall can lengthen the following interval. GPU diagnostics are delayed and not frame-correlated. Peaks are independent maxima. Render extract/prepare and recording/snapshot instrumentation are a frame or so behind.",
         },
     });
     #[cfg(not(target_arch = "wasm32"))]
-    let state = {
+    {
         let mut state = state;
         state["process_id"] = json!(std::process::id());
         state["sampled_unix_ms"] = json!(
@@ -149,34 +180,40 @@ pub(super) fn publish(
                 .unwrap_or_default()
                 .as_millis()
         );
+        // A plain copy of the frames: readers encode them only on request.
+        let published = Published {
+            state: Arc::new(state),
+            history: metrics.history.iter().cloned().collect(),
+        };
         if let Some(shared) = &snapshot.http {
             // Never wait for HTTP readers on the app thread.
             if let Ok(mut cached) = shared.try_lock() {
-                *cached = Some(std::sync::Arc::new(state.clone()));
+                *cached = Some(published.clone());
             }
         }
-        state
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(writer) = &snapshot.writer {
-        // Bounded and nonblocking: final JSON encoding/disk writes never wait
-        // on the app thread (snapshot construction above still runs here).
-        let _ = writer.try_send(state);
+        if let Some(writer) = &snapshot.writer {
+            // Bounded and nonblocking: final JSON encoding/disk writes never wait
+            // on the app thread.
+            let _ = writer.try_send(published);
+        }
     }
     #[cfg(target_arch = "wasm32")]
     {
+        let mut state = state;
+        state["performance"]["history"] = history_json(metrics.history.make_contiguous());
         snapshot.json = state.to_string();
     }
     snapshot.published_at = Some(Instant::now());
     snapshot.revision += 1;
+    metrics.instrumentation_latest.snapshot_ms = snapshot_start.elapsed().as_secs_f64() * 1000.0;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn file_writer() -> Option<std::sync::mpsc::SyncSender<Value>> {
+fn file_writer() -> Option<std::sync::mpsc::SyncSender<Published>> {
     if std::env::var("NIGHT_SKY_SNAPSHOT").as_deref() != Ok("1") {
         return None;
     }
-    let (sender, receiver) = std::sync::mpsc::sync_channel::<Value>(1);
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<Published>(1);
     let result = std::thread::Builder::new()
         .name("developer snapshot".into())
         .spawn(move || {
@@ -187,7 +224,8 @@ fn file_writer() -> Option<std::sync::mpsc::SyncSender<Value>> {
                 warn!("Cannot create snapshot directory: {error}");
                 return;
             }
-            for mut state in receiver {
+            for published in receiver {
+                let mut state = published.full();
                 state["process_id"] = json!(std::process::id());
                 state["published_unix_ms"] = json!(
                     std::time::SystemTime::now()
@@ -238,7 +276,10 @@ mod tests {
         .insert_resource(Time::<()>::default())
         .add_systems(Last, publish);
         app.update();
-        let state = receiver.try_recv().unwrap();
+        let published = receiver.try_recv().unwrap();
+        // The history is left for readers to encode.
+        assert_eq!(published.state["performance"]["history"], json!([]));
+        let state = published.full();
         assert_eq!(state["schema_version"], 1);
         let galaxy = &app.world().resource::<Universe>().0;
         assert_eq!(state["lists"][0]["id"], galaxy.systems[0].id);
@@ -253,6 +294,11 @@ mod tests {
         assert_eq!(state["camera"]["position_pc"].as_array().unwrap().len(), 3);
         assert_eq!(state["performance"]["history"].as_array().unwrap().len(), 1);
         assert_eq!(state["performance"]["latest"]["sequence"], 1);
+        assert!(state["performance"]["latest"]["sync"]["total_ms"].is_number());
+        assert!(state["performance"]["sync_peak_last_second"]["precise_ms"].is_number());
+        assert!(
+            state["performance"]["instrumentation_peak_last_second"]["snapshot_ms"].is_number()
+        );
         assert!(state["performance"]["gpu_diagnostics"].is_array());
         assert_eq!(state["inspector"]["title"], "Milky Way");
         assert_eq!(state["inspector"]["inspection"], state["inspection"]);
@@ -282,8 +328,12 @@ mod tests {
         }
         app.update();
         let cached = shared.lock().unwrap();
-        let cached = cached.as_ref().unwrap();
+        let cached = &cached.as_ref().unwrap().state;
         assert_eq!(cached["performance"]["latest"]["sequence"], 3);
+        // The second frame carries the first snapshot's cost.
+        let history = &app.world().resource::<StreamMetrics>().history;
+        assert!(history[1].instrumentation.snapshot_ms > 0.0);
+        assert_eq!(history[2].instrumentation.snapshot_ms, 0.0);
         assert!(cached["sampled_unix_ms"].is_number());
         assert_eq!(cached["inspector"]["title"], "Milky Way");
         assert_ne!(cached["selection"], cached["inspector"]["object"]);

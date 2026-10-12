@@ -225,6 +225,103 @@ pub fn perf(
             ],
         );
     }
+    if terminal::section(ui, "star sync") {
+        let latest = &metrics.sync_latest;
+        let peak = metrics.sync_peak();
+        let ms = |latest: f64, peak: f64| format!("{latest:.2} / {peak:.2} ms");
+        terminal::facts_with_details(
+            ui,
+            "debug-star-sync",
+            &[
+                (
+                    "total latest / peak",
+                    ms(latest.total_ms, peak.total_ms),
+                    Some(
+                        "All of starfield::sync on the main thread, the rows below and split systems included. Latest is the last frame; peaks are trailing-second maxima, possibly from different frames.",
+                    ),
+                ),
+                (
+                    "uploads latest / peak",
+                    ms(latest.upload_ms, peak.upload_ms),
+                    Some(
+                        "Packing streamed stars into batches and queueing them for upload, within its per-frame budget.",
+                    ),
+                ),
+                (
+                    "draw list latest / peak",
+                    ms(latest.draws_ms, peak.draws_ms),
+                    Some("Culling uploaded batches and listing one draw per visible batch."),
+                ),
+                (
+                    "precise rescan latest / peak",
+                    ms(latest.precise_scan_ms, peak.precise_scan_ms),
+                    Some(
+                        "Gathering precise candidates again: after moving 0.1 pc, a magnitude change or streamed cells changing. Zero latest means no rescan this frame.",
+                    ),
+                ),
+                (
+                    "precise sprites latest / peak",
+                    ms(latest.precise_ms, peak.precise_ms),
+                    Some("Checking every precise candidate and placing its sprite, every frame."),
+                ),
+                (
+                    "precise",
+                    format!(
+                        "{} sprites of {} candidates",
+                        grouped(latest.precise_sprites),
+                        grouped(latest.precise_candidates)
+                    ),
+                    Some(
+                        "Stars placed one by one in f64 this frame, besides split systems' stars, and the candidates checked for them.",
+                    ),
+                ),
+                (
+                    "render extract latest / peak",
+                    ms(latest.render_extract_ms, peak.render_extract_ms),
+                    Some(
+                        "Render world, a frame or so behind: copying the star frame across and creating new batch buffers.",
+                    ),
+                ),
+                (
+                    "render prepare latest / peak",
+                    ms(latest.render_prepare_ms, peak.render_prepare_ms),
+                    Some(
+                        "Render world, a frame or so behind: filling and writing the per-frame draw and precise sprite buffers. Excludes the GPU's copy.",
+                    ),
+                ),
+            ],
+        );
+    }
+    if terminal::section(ui, "instrumentation") {
+        let latest = &metrics.instrumentation_latest;
+        let peak = metrics.instrumentation_peak();
+        let ms = |latest: f64, peak: f64| format!("{latest:.3} / {peak:.3} ms");
+        terminal::facts_with_details(
+            ui,
+            "debug-instrumentation",
+            &[
+                (
+                    "recording latest / peak",
+                    ms(latest.record_ms, peak.record_ms),
+                    Some("Appending each frame's sample to the 10-second history."),
+                ),
+                (
+                    "snapshot latest / peak",
+                    ms(latest.snapshot_ms, peak.snapshot_ms),
+                    Some(
+                        "Building the shared state snapshot on the main thread, at most every 250 ms and only with the developer API or snapshot export on; zero on other frames. Encoding the history is left to readers that ask for it.",
+                    ),
+                ),
+                (
+                    "debug window latest / peak",
+                    ms(latest.debug_window_ms, peak.debug_window_ms),
+                    Some(
+                        "Laying out this window, the open sections included; zero while it is closed. Excludes egui's tessellation and drawing.",
+                    ),
+                ),
+            ],
+        );
+    }
     if terminal::section(ui, "split systems") {
         let s = metrics.live(field);
         let latest = &metrics.split_latest;
@@ -264,7 +361,7 @@ pub fn perf(
                         latest.orbit_sprite_ms, peak.orbit_sprite_ms
                     ),
                     Some(
-                        "Orbital positions, sprite construction and off-screen counting within preparation. Remaining preparation time includes candidate checks and cache maintenance.",
+                        "Orbital positions and sprite construction within preparation. Remaining preparation time includes candidate checks, culling and cache maintenance.",
                     ),
                 ),
                 (

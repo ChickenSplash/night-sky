@@ -231,8 +231,13 @@ Paths below are relative to the repository root, or to the named crate's
   formed in f64 (gathered at `PREPARE` times the radius). The batch point
   remains until a quarter of that radius, so both overlap. The
   visited star is a body only while the camera is at it (`scene::body_range`,
-  where its planets show): batches hide points within that range and it has
-  no sprite. A multiple system is one point until its stars could appear
+  where its planets show): batches hide only its point, matching its packed
+  offset exactly, and it has no sprite. Other stars inside the body range
+  keep the normal precision handoff. Precise candidates store numeric cell,
+  component and index identity, not allocated ID strings, and exclude stars
+  too faint to show anywhere within the rescan margin. Magnitude visibility
+  constants are calculated once per scan or frame, not once per star.
+  A multiple system is one point until its stars could appear
   `SPLIT_PX` (0.5) pixels apart, inside the point spread, so the split never
   shows; from there to arrival it is drawn star by star as precise sprites,
   from `star_positions` (`member_position` for every star at once, each

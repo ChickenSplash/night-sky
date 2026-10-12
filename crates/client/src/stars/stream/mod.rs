@@ -45,9 +45,9 @@ pub struct Starfield {
 #[derive(Resource, Default)]
 pub struct StreamRestart(pub bool);
 
-pub use metrics::StreamMetrics;
 #[cfg(target_arch = "wasm32")]
 pub use metrics::StreamSample;
+pub use metrics::{FrameSample, StreamMetrics, SyncFrame};
 
 impl Starfield {
     /// The loaded star nearest `eye_pc` and closer than `cap_pc`: its

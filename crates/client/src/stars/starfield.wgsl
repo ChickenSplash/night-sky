@@ -29,11 +29,13 @@ struct Draw {
     origin: vec4<f32>,
     // x: points closer than this times their offset from the origin are
     // hidden. This is smaller than the precise sprite's visibility radius, so
-    // both overlap during the handoff (`starfield.rs`). y: body range in
-    // parsecs. z, w: multiple systems whose stars could appear more than z
-    // radians apart within w parsecs are hidden (`split`). All zero for
-    // precise sprites.
+    // both overlap during the handoff (`starfield.rs`). y: unused. z, w:
+    // multiple systems whose stars could appear more than z radians apart
+    // within w parsecs are hidden (`split`). All zero for precise sprites.
     near: vec4<f32>,
+    // With w above zero, the point at exactly xyz is hidden: the visited
+    // star, drawn as a body, packed as its batch packs it.
+    hide: vec4<f32>,
 }
 @group(2) @binding(1) var<uniform> draw: Draw;
 
@@ -64,6 +66,10 @@ fn split(star: Star, distance_pc: f32) -> bool {
         && exp2(star.shape.y) * AU_PC > draw.near.z * distance_pc;
 }
 
+fn hidden(star: Star) -> bool {
+    return draw.hide.w > 0.0 && all(star.position == draw.hide.xyz);
+}
+
 
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -84,7 +90,7 @@ fn vertex(star: Star) -> Output {
     // magnitude cutoff and brightness need no logarithm (`population.rs`).
     let ratio = star.luminosity / max(distance_pc * distance_pc, 1e-16);
     // The far plane is 1e22 render units; reject bodies behind the camera.
-    if clip.w <= 0.0 || distance_pc < max(draw.near.x * length(star.position), draw.near.y)
+    if clip.w <= 0.0 || distance_pc < draw.near.x * length(star.position) || hidden(star)
         || split(star, distance_pc) || ratio < globals.settings.y || globals.debug.x > 0.5 {
         clip = vec4(2.0, 2.0, 0.0, 1.0);
     }

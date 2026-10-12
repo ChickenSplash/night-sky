@@ -129,7 +129,7 @@ type Camera<'w> = (
 );
 type Rendering<'w> = (
     Res<'w, Starfield>,
-    Res<'w, StreamMetrics>,
+    ResMut<'w, StreamMetrics>,
     Res<'w, RenderDebug>,
     Option<Res<'w, DiagnosticsStore>>,
     ResMut<'w, CoreLoad>,
@@ -153,7 +153,8 @@ pub fn draw(
     let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (starfield, metrics, debug, diagnostics, mut core_load, mut gpu_test) = rendering;
+    let (starfield, mut metrics, debug, diagnostics, mut core_load, mut gpu_test) = rendering;
+    metrics.instrumentation_latest.debug_window_ms = 0.0;
     if tools.frames.len() == FRAMES {
         tools.frames.pop_front();
     }
@@ -175,6 +176,7 @@ pub fn draw(
     let mut lines = Vec::new();
     let mut report = false;
     let mut open = true;
+    let window_start = bevy::platform::time::Instant::now();
     terminal::window(ctx, "debug", &mut open, |ui| {
         ui.horizontal(|ui| {
             for (tab, label) in Tab::ALL {
@@ -224,6 +226,7 @@ pub fn draw(
             }
         }
     });
+    metrics.instrumentation_latest.debug_window_ms = window_start.elapsed().as_secs_f64() * 1000.0;
     tools.open = open;
     #[cfg(not(target_arch = "wasm32"))]
     if report {

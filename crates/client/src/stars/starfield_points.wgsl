@@ -15,6 +15,7 @@ struct Globals {
 struct Draw {
     origin: vec4<f32>,
     near: vec4<f32>,
+    hide: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -43,6 +44,10 @@ fn split(star: Star, distance_pc: f32) -> bool {
         && exp2(star.shape.y) * AU_PC > draw.near.z * distance_pc;
 }
 
+fn hidden(star: Star) -> bool {
+    return draw.hide.w > 0.0 && all(star.position == draw.hide.xyz);
+}
+
 
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -58,7 +63,7 @@ fn vertex(star: Star) -> Output {
     let distance_pc = length(world - view.world_position) * globals.settings.x;
     let ratio = star.luminosity / max(distance_pc * distance_pc, 1e-16);
     out.position = vec4(2.0, 2.0, 0.0, 1.0);
-    if clip.w <= 0.0 || distance_pc < max(draw.near.x * length(star.position), draw.near.y)
+    if clip.w <= 0.0 || distance_pc < draw.near.x * length(star.position) || hidden(star)
         || split(star, distance_pc) || ratio < globals.settings.y || globals.debug.x > 0.5 {
         return out;
     }

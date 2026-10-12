@@ -17,6 +17,41 @@ pub struct SplitFrame {
     pub cache_clears: usize,
 }
 
+/// Where `starfield::sync` spent one frame, and the render world's star work.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct SyncFrame {
+    /// All of `sync`, including the split work in `SplitFrame`.
+    pub total_ms: f64,
+    /// Packing stars into batches and queueing them for upload.
+    pub upload_ms: f64,
+    /// Culling uploaded batches and listing their draws.
+    pub draws_ms: f64,
+    /// Gathering precise candidates again, on rescans only.
+    pub precise_scan_ms: f64,
+    pub precise_rescans: usize,
+    /// Checking every precise candidate and placing its sprite.
+    pub precise_ms: f64,
+    pub precise_candidates: usize,
+    pub precise_sprites: usize,
+    /// Render world, a frame or so behind: copying this frame out of the main
+    /// world and creating new batch buffers, then filling and writing the
+    /// per-frame buffers (`stars::render`).
+    pub render_extract_ms: f64,
+    pub render_prepare_ms: f64,
+}
+
+/// What measuring and reporting cost, so it can be told apart from the work
+/// it measures. Recording and snapshot are the previous frame's.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct InstrumentationFrame {
+    /// Appending the frame sample and trimming history.
+    pub record_ms: f64,
+    /// Building the shared snapshot: zero on frames without one (every 250 ms).
+    pub snapshot_ms: f64,
+    /// Laying out the debug window this frame: zero while it is closed.
+    pub debug_window_ms: f64,
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct FrameSample {
     pub sequence: u64,
@@ -24,6 +59,8 @@ pub struct FrameSample {
     /// Interval since the preceding app update, not GPU duration for this frame.
     pub frame_interval_ms: f64,
     pub split: SplitFrame,
+    pub sync: SyncFrame,
+    pub instrumentation: InstrumentationFrame,
 }
 
 /// One-second measurements of generation and mesh preparation. The render
@@ -65,6 +102,8 @@ pub struct StreamMetrics {
     pub split_cached: usize,
     pub split_candidates: usize,
     pub split_latest: SplitFrame,
+    pub sync_latest: SyncFrame,
+    pub instrumentation_latest: InstrumentationFrame,
     pub history: VecDeque<FrameSample>,
     history_started: Instant,
     sequence: u64,
@@ -118,6 +157,8 @@ impl Default for StreamMetrics {
             split_cached: 0,
             split_candidates: 0,
             split_latest: SplitFrame::default(),
+            sync_latest: SyncFrame::default(),
+            instrumentation_latest: InstrumentationFrame::default(),
             history: VecDeque::new(),
             history_started: Instant::now(),
             sequence: 0,
@@ -185,6 +226,8 @@ impl StreamMetrics {
             elapsed_seconds,
             frame_interval_ms,
             split: self.split_latest.clone(),
+            sync: self.sync_latest.clone(),
+            instrumentation: self.instrumentation_latest.clone(),
         });
         while self.history.len() > 4096
             || self
@@ -213,6 +256,44 @@ impl StreamMetrics {
                 peak.cache_clears = peak.cache_clears.max(s.cache_clears);
                 peak
             })
+    }
+
+    /// Component-wise maxima over the trailing second, like `split_peak`.
+    pub fn sync_peak(&self) -> SyncFrame {
+        self.last_second()
+            .fold(SyncFrame::default(), |mut peak, frame| {
+                let s = &frame.sync;
+                peak.total_ms = peak.total_ms.max(s.total_ms);
+                peak.upload_ms = peak.upload_ms.max(s.upload_ms);
+                peak.draws_ms = peak.draws_ms.max(s.draws_ms);
+                peak.precise_scan_ms = peak.precise_scan_ms.max(s.precise_scan_ms);
+                peak.precise_rescans = peak.precise_rescans.max(s.precise_rescans);
+                peak.precise_ms = peak.precise_ms.max(s.precise_ms);
+                peak.precise_candidates = peak.precise_candidates.max(s.precise_candidates);
+                peak.precise_sprites = peak.precise_sprites.max(s.precise_sprites);
+                peak.render_extract_ms = peak.render_extract_ms.max(s.render_extract_ms);
+                peak.render_prepare_ms = peak.render_prepare_ms.max(s.render_prepare_ms);
+                peak
+            })
+    }
+
+    pub fn instrumentation_peak(&self) -> InstrumentationFrame {
+        self.last_second()
+            .fold(InstrumentationFrame::default(), |mut peak, frame| {
+                let s = &frame.instrumentation;
+                peak.record_ms = peak.record_ms.max(s.record_ms);
+                peak.snapshot_ms = peak.snapshot_ms.max(s.snapshot_ms);
+                peak.debug_window_ms = peak.debug_window_ms.max(s.debug_window_ms);
+                peak
+            })
+    }
+
+    fn last_second(&self) -> impl Iterator<Item = &FrameSample> {
+        let now = self.history_started.elapsed().as_secs_f64();
+        self.history
+            .iter()
+            .rev()
+            .take_while(move |f| now - f.elapsed_seconds <= 1.0)
     }
 
     pub fn frame_peak_ms(&self) -> f64 {

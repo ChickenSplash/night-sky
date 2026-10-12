@@ -210,6 +210,16 @@ design notes into every session:
    native export disabled. Frame intervals precede the recorded CPU work;
    GPU measurements are delayed and not matched to individual CPU frames.
    Peaks are component-wise maxima, not one correlated slow frame.
+   Each frame sample also has `sync` (where `starfield::sync` spent the
+   frame: uploads, draw list, precise rescan and per-frame precise sprites
+   with counts, plus the render world's star extract/prepare, a frame or so
+   behind) and `instrumentation` (recording, snapshot building and debug
+   window layout: what measuring itself costs). The perf tab shows them in
+   `star sync` and `instrumentation`. Record new per-frame measurements as
+   fixed-size numbers only, no strings or allocation. Natively the snapshot
+   is published without its history (an empty placeholder) plus a plain
+   copy of the frames; the HTTP thread or file writer encodes the history
+   only for requests that may need it (`snapshot::Published::full`).
    Native read-only access before an HTTP transport exists:
    `NIGHT_SKY_SNAPSHOT=1 ./scripts/run.sh` enables atomic JSON export to
    `data/logs/live-snapshot.json`, at most four snapshots per second. Final
