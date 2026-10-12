@@ -34,7 +34,9 @@ def interval(value):
 def parser():
     result = argparse.ArgumentParser(
         description="Night Sky developer CLI. Start the app with ./scripts/run.sh first.",
-        epilog="Commands return queued, not completed. Discover app commands with 'ns commands'.",
+        epilog="Commands are checked against the app's state and refused with a reason (exit 1) if they "
+        "would do nothing. Flights continue after acceptance: add --wait. Discover app commands with "
+        "'ns commands' and list IDs with 'ns lists'.",
     )
     result.add_argument("--port", type=port, default=os.environ.get("NIGHT_SKY_API_PORT", "4322"))
     result.add_argument("--json", action="store_true", help="compact JSON, including command help")
@@ -50,9 +52,13 @@ def parser():
         read.add_argument("--seconds", type=float, help="limit a history path to the last (0, 10] seconds")
     keys = sub.add_parser("keys", help="list child keys or array indices, without values")
     keys.add_argument("path", help="state, state/camera, perf/latest, etc.")
-    cmd = sub.add_parser("cmd", help="queue an app command (typed text or JSON)")
+    cmd = sub.add_parser("cmd", help="run an app command (typed text or JSON)")
     cmd.add_argument("command", help='one quoted string, e.g. "set_debug bloom false"')
-    sub.add_parser("screenshot", help="schedule screenshot and bug report, PNG saved asynchronously")
+    cmd.add_argument("--wait", action="store_true", help="wait until any camera flight has landed")
+    cmd.add_argument("--timeout", type=interval, default=30.0, help="seconds --wait may take (default 30)")
+    sub.add_parser("lists", help="list IDs, names, task counts and system stars")
+    shot = sub.add_parser("screenshot", help="save a screenshot and bug report, printing the PNG path")
+    shot.add_argument("--no-wait", action="store_true", help="return before the PNG is written")
     inspect = sub.add_parser("inspect", help="read the active top-left inspector, including facts and actions")
     inspect.add_argument("path", nargs="?", default="", help="facts, actions, title, object, or any nested path")
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
@@ -102,6 +108,33 @@ def output(value, compact=False, commands=False):
         print(json.dumps(value, indent=None if compact else 2, ensure_ascii=False), flush=True)
 
 
+def settle(api_port, after_ms, timeout):
+    """Waits for a snapshot sampled after `after_ms` in which the camera is not
+    flying. Snapshots publish at most every 250 ms."""
+    deadline = time.monotonic() + timeout
+    while True:
+        state = request(api_port, endpoint("state"))
+        if state.get("sampled_unix_ms", 0) > after_ms and not state["camera"]["flying"]:
+            return {"trail": state["trail"], "presentation_mode": state["presentation_mode"],
+                    "location_planet": state["location_planet"], "camera": state["camera"]}
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"Camera still flying after {timeout:g} s")
+        time.sleep(0.1)
+
+
+def wait_for_file(path, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while not os.path.exists(path):
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"Screenshot not written within {timeout:g} s: {path}")
+        time.sleep(0.05)
+
+
+def lists(state):
+    return [{"id": entry["id"], "name": entry["name"], "tasks": entry["tasks"],
+             "systems": [system["star"] for system in entry["systems"]]} for entry in state]
+
+
 def main(argv=None):
     cli = parser()
     args = cli.parse_args(argv)
@@ -125,6 +158,9 @@ def main(argv=None):
             if target not in ("state", "perf"):
                 cli.error("keys path must start with state or perf")
             path = endpoint(target, nested, {"keys": 1})
+        elif args.action == "lists":
+            output(lists(request(args.port, endpoint("state", "lists"))), args.json)
+            return 0
         elif args.action == "watch":
             path = endpoint(args.target, args.path)
             while True:
@@ -133,7 +169,13 @@ def main(argv=None):
         else:
             path = endpoint("command" if args.action == "cmd" else args.action)
         body = args.command.encode("utf-8") if args.action == "cmd" else b"" if args.action == "screenshot" else None
-        output(request(args.port, path, body), args.json, args.action == "commands")
+        result = request(args.port, path, body)
+        if args.action == "cmd" and args.wait and result.get("status") == "accepted":
+            result["settled"] = settle(args.port, time.time() * 1000, args.timeout)
+        if args.action == "screenshot" and result.get("png") and not args.no_wait:
+            wait_for_file(result["png"])
+            result["status"] = "saved"
+        output(result, args.json, args.action == "commands")
         return 0
     except RuntimeError as error:
         print(f"ns: {error}", file=sys.stderr)

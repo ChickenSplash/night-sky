@@ -90,7 +90,13 @@ pub(super) fn publish(
         .collect();
     let state = json!({
         "schema_version": 1,
-        "lists": universe.0.systems.len(),
+        // IDs for `jump`, `find_task` and `visit_star`; tasks via the task index.
+        "lists": universe.0.systems.iter().map(|list| json!({
+            "id": list.id, "name": list.name, "tasks": list.tasks().count(),
+            "systems": list.page_stars.iter()
+                .map(|star| json!({"page": star.page, "star": star.id}))
+                .collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
         "list": nav.list().and_then(|i| Some(universe.0.systems.get(i)?.id.as_str())),
         "trail": trail.iter().map(|c| &c.label).collect::<Vec<_>>(),
         "selection_trail": selection_trail.iter().map(|c| &c.label).collect::<Vec<_>>(),
@@ -234,7 +240,13 @@ mod tests {
         app.update();
         let state = receiver.try_recv().unwrap();
         assert_eq!(state["schema_version"], 1);
-        assert!(state["lists"].is_number());
+        let galaxy = &app.world().resource::<Universe>().0;
+        assert_eq!(state["lists"][0]["id"], galaxy.systems[0].id);
+        assert_eq!(
+            state["lists"][0]["systems"][0]["star"],
+            galaxy.systems[0].page_stars[0].id
+        );
+        assert!(state["lists"][0]["tasks"].as_u64().unwrap() > 0);
         assert!(state["trail"].is_array());
         assert!(state["display"]["realistic"].is_boolean());
         assert_eq!(state["debug"]["split_multiples"], true);

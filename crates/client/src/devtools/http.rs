@@ -1,7 +1,7 @@
 //! Opt-in, loopback-only native developer transport. Never touches the ECS
 //! from its listener thread; commands and captures are queued to PreUpdate.
 use super::snapshot::Snapshot;
-use crate::actions::UiCommand;
+use crate::command_line::{Source, Typed};
 use crate::scene::{CameraPose, CameraRig};
 use crate::stars::stream::Starfield;
 use crate::{Clock, Navigation, Universe};
@@ -22,9 +22,15 @@ pub(super) type SharedState = Arc<Mutex<Option<Arc<Value>>>>;
 const BODY_LIMIT: usize = 1024;
 const QUEUE_LIMIT: usize = 32;
 const PER_FRAME: usize = 8;
+/// How long a command or capture request waits for the main thread's reply.
+const REPLY_WAIT: Duration = Duration::from_secs(2);
+
+type Verdict = mpsc::SyncSender<Result<(), String>>;
 
 enum Job {
-    Command(UiCommand),
+    /// A parsed line, run as `Typed` so it is echoed and checked like the
+    /// terminal's, and refused with the reason if it would do nothing.
+    Command(String, Verdict),
     Capture(mpsc::SyncSender<Value>),
 }
 
@@ -62,7 +68,7 @@ pub fn install(app: &mut App) {
         }
     };
     let shared = Arc::new(Mutex::new(None));
-    match start(server, shared.clone()) {
+    match start(server, shared.clone(), REPLY_WAIT) {
         Ok(api) => {
             app.world_mut().resource_mut::<Snapshot>().http = Some(shared);
             app.insert_resource(api).add_systems(PreUpdate, receive);
@@ -74,7 +80,7 @@ pub fn install(app: &mut App) {
     }
 }
 
-fn start(server: Server, shared: SharedState) -> std::io::Result<HttpApi> {
+fn start(server: Server, shared: SharedState, wait: Duration) -> std::io::Result<HttpApi> {
     let (sender, receiver) = mpsc::sync_channel(QUEUE_LIMIT);
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = stop.clone();
@@ -84,7 +90,7 @@ fn start(server: Server, shared: SharedState) -> std::io::Result<HttpApi> {
         .spawn(move || {
             while !stopped.load(Ordering::Relaxed) {
                 match server.recv_timeout(Duration::from_millis(100)) {
-                    Ok(Some(request)) => handle(request, &shared, &sender, port),
+                    Ok(Some(request)) => handle(request, &shared, &sender, port, wait),
                     Ok(None) => {}
                     Err(error) => {
                         warn!("Developer API listener stopped: {error}");
@@ -101,7 +107,7 @@ fn start(server: Server, shared: SharedState) -> std::io::Result<HttpApi> {
 
 fn receive(
     api: Res<HttpApi>,
-    mut writer: MessageWriter<UiCommand>,
+    mut writer: MessageWriter<Typed>,
     mut commands: Commands,
     scene: (Res<Universe>, Res<Navigation>, Res<Clock>),
     camera: (Res<CameraRig>, Res<CameraPose>),
@@ -112,8 +118,12 @@ fn receive(
     };
     for job in receiver.try_iter().take(PER_FRAME) {
         match job {
-            Job::Command(command) => {
-                writer.write(command);
+            Job::Command(line, reply) => {
+                writer.write(Typed {
+                    line,
+                    source: Source::Api,
+                    reply: Some(reply),
+                });
             }
             Job::Capture(reply) => {
                 let (universe, nav, clock) = &scene;
@@ -126,11 +136,15 @@ fn receive(
                     (rig, pose),
                     &field,
                 );
-                let ok = result.starts_with("Saved ");
+                let report = result.strip_prefix("Saved ").map(|path| {
+                    let path = std::path::Path::new(path);
+                    path.canonicalize().unwrap_or_else(|_| path.to_owned())
+                });
                 let _ = reply.try_send(json!({
-                    "status": if ok { "capture_scheduled" } else { "failed" },
-                    "report": result,
-                    "note": "The report is saved synchronously; the PNG is captured asynchronously by the renderer.",
+                    "status": if report.is_some() { "capture_scheduled" } else { "failed" },
+                    "report": report.as_ref().map_or(result.clone(), |path| path.display().to_string()),
+                    "png": report.map(|path| path.with_extension("png").display().to_string()),
+                    "note": "The report is saved synchronously; the PNG is written by the renderer a frame or two later.",
                 }));
             }
         }
@@ -145,7 +159,13 @@ fn header<'a>(request: &'a Request, name: &'static str) -> Option<&'a str> {
         .map(|h| h.value.as_str())
 }
 
-fn handle(mut request: Request, shared: &SharedState, queue: &mpsc::SyncSender<Job>, port: u16) {
+fn handle(
+    mut request: Request,
+    shared: &SharedState,
+    queue: &mpsc::SyncSender<Job>,
+    port: u16,
+    wait: Duration,
+) {
     // Loopback binding alone is not sufficient protection against websites
     // or DNS rebinding. No browser origins, no CORS, and a non-simple header
     // for mutations. Local CLI processes are trusted; this is not remote auth.
@@ -201,20 +221,37 @@ fn handle(mut request: Request, shared: &SharedState, queue: &mpsc::SyncSender<J
                     return;
                 }
             };
-            match crate::command_line::parse(body.trim()) {
-                Ok(command) => match queue.try_send(Job::Command(command)) {
-                    Ok(()) => respond(
-                        request,
-                        202,
-                        json!({"status": "queued", "note": "Parsed and queued for the main thread, not proof the action succeeded. Read /state after the next snapshot."}),
-                    ),
-                    Err(_) => respond(
-                        request,
-                        503,
-                        json!({"error": "Command queue full or app unavailable"}),
-                    ),
-                },
-                Err(error) => respond(request, 400, json!({"error": error})),
+            // Syntax and ranges are checked here, so they fail fast even if
+            // the main thread is busy; the current state is checked there.
+            if let Err(error) = crate::command_line::parse(body.trim()) {
+                warn!(target: crate::command_line::TARGET, "cli> {}: {error}", body.trim());
+                respond(request, 400, json!({"error": error}));
+                return;
+            }
+            let (reply, verdict) = mpsc::sync_channel(1);
+            if queue
+                .try_send(Job::Command(body.trim().to_owned(), reply))
+                .is_err()
+            {
+                respond(
+                    request,
+                    503,
+                    json!({"error": "Command queue full or app unavailable"}),
+                );
+                return;
+            }
+            match verdict.recv_timeout(wait) {
+                Ok(Ok(())) => respond(
+                    request,
+                    202,
+                    json!({"status": "accepted", "note": "Checked against the current state and applied this frame. Flights and star loading continue afterwards; use ns cmd --wait or read /state/camera."}),
+                ),
+                Ok(Err(error)) => respond(request, 409, json!({"error": error})),
+                Err(_) => respond(
+                    request,
+                    202,
+                    json!({"status": "queued", "note": "No main-thread reply within 2 seconds. The command may still run; read /state before retrying."}),
+                ),
             }
         }
         (&Method::Post, "/screenshot") => {
@@ -237,7 +274,7 @@ fn handle(mut request: Request, shared: &SharedState, queue: &mpsc::SyncSender<J
                 );
                 return;
             }
-            match result.recv_timeout(Duration::from_secs(2)) {
+            match result.recv_timeout(wait) {
                 Ok(body) => respond(
                     request,
                     if body["status"] == "failed" { 500 } else { 202 },
@@ -593,7 +630,7 @@ mod tests {
     fn commands_are_forwarded_on_the_main_thread_with_a_per_frame_limit() {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_LIMIT);
         let mut app = App::new();
-        app.add_message::<UiCommand>()
+        app.add_message::<Typed>()
             .insert_resource(HttpApi {
                 receiver: Mutex::new(receiver),
                 stop: Arc::new(AtomicBool::new(false)),
@@ -605,25 +642,26 @@ mod tests {
             .insert_resource(CameraPose::default())
             .insert_resource(Starfield::default())
             .add_systems(PreUpdate, receive);
+        let (reply, _verdicts) = mpsc::sync_channel(10);
         for _ in 0..10 {
             sender
-                .send(Job::Command(
-                    crate::command_line::parse("set_debug bloom false").unwrap(),
-                ))
+                .send(Job::Command("set_debug bloom false".into(), reply.clone()))
                 .unwrap();
         }
-        let mut cursor = bevy::ecs::message::MessageCursor::<UiCommand>::default();
+        let mut cursor = bevy::ecs::message::MessageCursor::<Typed>::default();
         app.update();
-        assert_eq!(
-            cursor
-                .read(app.world().resource::<Messages<UiCommand>>())
-                .count(),
-            PER_FRAME
+        let typed = app.world().resource::<Messages<Typed>>();
+        let first: Vec<_> = cursor.read(typed).collect();
+        assert_eq!(first.len(), PER_FRAME);
+        assert!(
+            first
+                .iter()
+                .all(|t| t.source == Source::Api && t.reply.is_some())
         );
         app.update();
         assert_eq!(
             cursor
-                .read(app.world().resource::<Messages<UiCommand>>())
+                .read(app.world().resource::<Messages<Typed>>())
                 .count(),
             2
         );
@@ -637,7 +675,32 @@ mod tests {
             "schema_version": 1, "magnitude": 6.5,
             "performance": {"latest": {"sequence": 42}, "history": [1, 2]},
         })))));
-        let api = start(server, shared).unwrap();
+        let api = Arc::new(start(server, shared, REPLY_WAIT).unwrap());
+        // Stands in for the main thread: refuses `jump missing`, runs the rest.
+        let done = Arc::new(AtomicBool::new(false));
+        let main_thread = {
+            let (api, done) = (api.clone(), done.clone());
+            std::thread::spawn(move || {
+                let mut lines = Vec::new();
+                while !done.load(Ordering::Relaxed) {
+                    let job = api
+                        .receiver
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_millis(10));
+                    if let Ok(Job::Command(line, reply)) = job {
+                        let verdict = if line == "jump missing" {
+                            Err("Unknown list `missing`".to_owned())
+                        } else {
+                            Ok(())
+                        };
+                        reply.send(verdict).unwrap();
+                        lines.push(line);
+                    }
+                }
+                lines
+            })
+        };
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
             .timeout(Duration::from_secs(5))
@@ -683,16 +746,22 @@ mod tests {
                 .send()
                 .unwrap()
         };
-        assert_eq!(post("set_debug split_multiples false").status(), 202);
-        assert!(matches!(
-            api.receiver.lock().unwrap().try_recv(),
-            Ok(Job::Command(_))
-        ));
+        let accepted = post("set_debug split_multiples false");
+        assert_eq!(accepted.status(), 202);
+        assert_eq!(accepted.json::<Value>().unwrap()["status"], "accepted");
         assert_eq!(
             post(r#"{"type":"set_magnitude","magnitude":5.5}"#).status(),
             202
         );
+        let refused = post("jump missing");
+        assert_eq!(refused.status(), 409);
+        assert_eq!(
+            refused.json::<Value>().unwrap()["error"],
+            "Unknown list `missing`"
+        );
         assert_eq!(post("not_a_command").status(), 400);
+        // Out-of-range values never reach the main thread.
+        assert_eq!(post("set_fov 500").status(), 400);
         assert_eq!(post(&"x".repeat(BODY_LIMIT + 1)).status(), 413);
         assert_eq!(
             client
@@ -730,10 +799,44 @@ mod tests {
                 .status(),
             405
         );
-        for _ in 0..QUEUE_LIMIT - 1 {
-            assert_eq!(post("set_debug bloom false").status(), 202);
+        done.store(true, Ordering::Relaxed);
+        assert_eq!(
+            main_thread.join().unwrap(),
+            [
+                "set_debug split_multiples false",
+                r#"{"type":"set_magnitude","magnitude":5.5}"#,
+                "jump missing"
+            ]
+        );
+        drop(api);
+    }
+
+    #[test]
+    fn a_stalled_main_thread_fills_the_queue_then_refuses_commands() {
+        let server = Server::http((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let api = start(server, Arc::new(Mutex::new(None)), Duration::from_millis(1)).unwrap();
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let post = || {
+            let response = client
+                .post(format!("http://127.0.0.1:{port}/command"))
+                .header("X-Night-Sky-Client", "cli")
+                .body("set_debug bloom false")
+                .send()
+                .unwrap();
+            let status = response.status();
+            (status, response.json::<Value>().unwrap())
+        };
+        for _ in 0..QUEUE_LIMIT {
+            let (status, body) = post();
+            assert_eq!(status, 202);
+            assert_eq!(body["status"], "queued");
         }
-        assert_eq!(post("set_debug bloom false").status(), 503);
+        assert_eq!(post().0, 503);
         drop(api);
     }
 
@@ -741,7 +844,7 @@ mod tests {
     fn screenshot_endpoint_reports_scheduling_not_finished_pngs() {
         let server = Server::http((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
-        let api = start(server, Arc::new(Mutex::new(None))).unwrap();
+        let api = start(server, Arc::new(Mutex::new(None)), REPLY_WAIT).unwrap();
         let request = std::thread::spawn(move || {
             reqwest::blocking::Client::builder()
                 .no_proxy()

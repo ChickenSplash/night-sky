@@ -22,13 +22,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(200, {"synopsis": "set_debug <switch> <on>", "about": "Render switches"})
         elif self.path == "/state/missing":
             self.reply(404, {"error": "Unknown snapshot path"})
+        elif self.path == "/state/lists":
+            self.reply(200, [{"id": "demo", "name": "Demo", "tasks": 3,
+                              "systems": [{"page": 0, "star": "g1.2.3"}]}])
+        elif self.path == "/state":
+            # Flying on the first read after a command, landed on the next.
+            self.server.flights = getattr(self.server, "flights", 0) + 1
+            self.reply(200, {"sampled_unix_ms": 2 ** 53, "trail": ["Milky Way", "Demo"],
+                             "presentation_mode": "simulation", "location_planet": None,
+                             "camera": {"flying": self.server.flights == 1}})
         else:
             self.reply(200, ["split"])
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
         self.server.requests.append(("POST", self.path, body, self.headers.get("X-Night-Sky-Client")))
-        self.reply(202, {"status": "queued"})
+        if body == "jump missing":
+            self.reply(409, {"error": "Unknown list `missing`"})
+        elif self.path == "/screenshot" and getattr(self.server, "png", None):
+            self.reply(202, {"status": "capture_scheduled", "png": self.server.png})
+        else:
+            self.reply(202, {"status": "accepted" if body.startswith("jump") else "queued"})
 
     def reply(self, status, value):
         self.send_response(status)
@@ -94,6 +108,35 @@ class CliTests(unittest.TestCase):
         result = self.run_cli("screenshot")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.server.requests[-1], ("POST", "/screenshot", "", "cli"))
+
+    def test_wait_polls_until_the_flight_lands(self):
+        self.server.flights = 0
+        result = self.run_cli("cmd", "--wait", "jump demo")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        settled = json.loads(result.stdout)["settled"]
+        self.assertEqual(settled["trail"], ["Milky Way", "Demo"])
+        self.assertFalse(settled["camera"]["flying"])
+        self.assertEqual(self.server.flights, 2)
+
+    def test_refused_commands_explain_why(self):
+        result = self.run_cli("cmd", "jump missing")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("HTTP 409: Unknown list `missing`", result.stderr)
+
+    def test_lists_and_screenshot_paths(self):
+        result = self.run_cli("lists")
+        self.assertEqual(json.loads(result.stdout),
+                         [{"id": "demo", "name": "Demo", "tasks": 3, "systems": ["g1.2.3"]}])
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            self.server.png = str(Path(directory) / "shot.png")
+            Path(self.server.png).write_bytes(b"png")
+            try:
+                result = self.run_cli("screenshot")
+            finally:
+                self.server.png = None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "saved")
 
     def test_errors_are_nonzero_and_readable(self):
         result = self.run_cli("state", "missing")

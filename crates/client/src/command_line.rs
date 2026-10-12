@@ -16,6 +16,8 @@ pub const TARGET: &str = "console";
 pub struct Typed {
     pub line: String,
     pub source: Source,
+    /// Receives whether the line was run, or why not.
+    pub reply: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -25,6 +27,9 @@ pub enum Source {
     /// Standard input, natively.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Stdin,
+    /// The native developer API (`ns cmd`).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Api,
 }
 
 pub struct CommandLinePlugin;
@@ -41,27 +46,50 @@ impl Plugin for CommandLinePlugin {
 
 /// Runs typed lines as commands. The echo, help and errors are logged, so they
 /// reach the terminal tab, the log file, bug reports and the launching terminal.
-fn run(mut typed: MessageReader<Typed>, mut commands: MessageWriter<UiCommand>) {
-    for Typed { line, source } in typed.read() {
+/// Commands that would do nothing are refused with the reason, not dropped.
+fn run(
+    mut typed: MessageReader<Typed>,
+    mut commands: MessageWriter<UiCommand>,
+    universe: Res<crate::Universe>,
+    nav: Res<crate::Navigation>,
+    field: Res<crate::stars::stream::Starfield>,
+) {
+    for Typed {
+        line,
+        source,
+        reply,
+    } in typed.read()
+    {
         let line = line.trim();
-        info!(target: TARGET, "> {line}");
-        match line {
+        if *source == Source::Api {
+            info!(target: TARGET, "cli> {line}");
+        } else {
+            info!(target: TARGET, "> {line}");
+        }
+        let result = match line {
             "help" => {
                 info!(target: TARGET, "help · clear · or a UiCommand as JSON");
                 for usage in &USAGE {
                     info!(target: TARGET, "{:<27} {}", synopsis(usage), usage.about);
                 }
+                Ok(())
             }
             // The window clears its own terminal tab.
             "clear" if *source == Source::Stdin => {
                 info!(target: TARGET, "clear empties the debug window's terminal tab; Ctrl+L clears this terminal");
+                Ok(())
             }
-            line => match parse(line) {
-                Ok(command) => {
-                    commands.write(command);
-                }
-                Err(err) => warn!(target: TARGET, "{err}"),
-            },
+            line => parse(line).and_then(|command| {
+                command.check(&universe.0, &nav, &field)?;
+                commands.write(command);
+                Ok(())
+            }),
+        };
+        if let Err(err) = &result {
+            warn!(target: TARGET, "{err}");
+        }
+        if let Some(reply) = reply {
+            let _ = reply.try_send(result);
         }
     }
 }
@@ -102,6 +130,7 @@ fn forward_stdin(stdin: Res<Stdin>, mut typed: MessageWriter<Typed>) {
             .map(|line| Typed {
                 line,
                 source: Source::Stdin,
+                reply: None,
             }),
     );
 }
@@ -234,6 +263,12 @@ pub fn synopsis(usage: &Usage) -> String {
 }
 
 pub fn parse(line: &str) -> Result<UiCommand, String> {
+    let command = parse_unchecked(line)?;
+    command.check_values()?;
+    Ok(command)
+}
+
+fn parse_unchecked(line: &str) -> Result<UiCommand, String> {
     let line = line.trim();
     if line.starts_with('{') {
         return serde_json::from_str(line).map_err(|err| err.to_string());

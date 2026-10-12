@@ -434,20 +434,30 @@ fn paint_halo(
     colour: impl FnOnce(&egui::Response) -> egui::Color32,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(galley.size(), sense);
-    let painter = ui.painter();
+    halo_galley(ui.painter(), rect.min, galley, colour(&response));
+    response
+}
+
+/// Paints a galley laid out in `Color32::PLACEHOLDER` over its halo, for
+/// scene text placed by hand rather than by a `Ui`.
+pub(crate) fn halo_galley(
+    painter: &egui::Painter,
+    at: egui::Pos2,
+    galley: std::sync::Arc<egui::Galley>,
+    colour: egui::Color32,
+) {
     for (radius, alpha, steps) in [(2.0, HALO_FADE, 16), (1.0, HALO_EDGE, 8)] {
         for step in 0..steps {
             let angle = std::f32::consts::TAU * step as f32 / steps as f32;
             let offset = egui::vec2(angle.cos(), angle.sin()) * radius;
             painter.galley(
-                rect.min + offset,
+                at + offset,
                 galley.clone(),
                 egui::Color32::from_black_alpha(alpha),
             );
         }
     }
-    painter.galley(rect.min, galley, colour(&response));
-    response
+    painter.galley(at, galley, colour);
 }
 
 #[cfg(test)]

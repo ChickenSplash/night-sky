@@ -46,7 +46,9 @@ fn every_usage_parses() {
             .iter()
             .map(|field| match *field {
                 "page" => "1",
-                "rate" | "degrees" | "speed" | "magnitude" | "stops" => "60",
+                "rate" | "degrees" | "speed" => "60",
+                "magnitude" => "5.5",
+                "stops" => "-2",
                 "amount" => "0.5",
                 "paused" | "on" => "true",
                 "option" => "orbits",
@@ -147,4 +149,35 @@ fn mistakes_explain_themselves() {
             .contains("Usage: set_presentation_mode <presentation_mode>")
     );
     assert!(parse("jump \"open").unwrap_err().contains("Unclosed"));
+}
+
+#[test]
+fn out_of_range_values_are_refused_not_clamped() {
+    for (line, message) in [
+        ("set_fov 500", "degrees must be 30 to 130, not 500"),
+        ("set_fov 29.9", "degrees must be 30 to 130"),
+        ("set_magnitude 9", "magnitude must be 3 to 8.5, not 9"),
+        ("set_exposure 17", "stops must be -64 to 16, not 17"),
+        ("set_compression -0.1", "amount must be 0 to 1, not -0.1"),
+        ("set_rate 0", "rate must be 1 to"),
+        ("set_move_speed 0.5", "speed must be 1 to"),
+        (
+            r#"{"type":"set_fov","degrees":131}"#,
+            "degrees must be 30 to 130",
+        ),
+    ] {
+        let err = parse(line).unwrap_err();
+        assert!(err.contains(message), "{line}: {err}");
+    }
+    for line in [
+        "set_fov 30",
+        "set_fov 130",
+        "set_magnitude 8.5",
+        "set_exposure -64",
+        "set_compression 1",
+        "set_rate 1",
+        "set_move_speed 1",
+    ] {
+        assert!(parse(line).is_ok(), "{line}");
+    }
 }

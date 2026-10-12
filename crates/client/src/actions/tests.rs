@@ -130,6 +130,118 @@ fn inspector_tabs_preserve_tracking_and_reject_absent_crumbs() {
     assert!(nav(&app).following);
 }
 
+#[test]
+fn check_refuses_exactly_the_commands_apply_would_ignore() {
+    let galaxy = space_simulation::demo_galaxy();
+    let list = galaxy.systems[0].id.clone();
+    let star = galaxy.systems[0].page_stars[0].id.clone();
+    let planet = galaxy.systems[0].planets[0].id.clone();
+    let task = galaxy.systems[0].tasks().next().unwrap().1.id.clone();
+    let mut app = run(galaxy, vec![]);
+    let check = |app: &App, command: &UiCommand| {
+        command.check(
+            &app.world().resource::<Universe>().0,
+            nav(app),
+            app.world().resource::<crate::stars::stream::Starfield>(),
+        )
+    };
+    let state = |app: &App| {
+        let nav = nav(app);
+        format!(
+            "{:?} {:?} {} {} {:?} {:?} {} {}",
+            nav.target,
+            nav.eye,
+            nav.distance,
+            nav.page,
+            nav.selection,
+            nav.presentation_mode,
+            nav.visit.is_some(),
+            nav.following
+        )
+    };
+    let refused = [
+        (UiCommand::PickStar { id: "nope".into() }, "not loaded"),
+        (
+            UiCommand::Jump {
+                list: "nope".into(),
+            },
+            "Unknown list",
+        ),
+        (
+            UiCommand::FindTask {
+                list: list.clone(),
+                task: "nope".into(),
+            },
+            "has no task",
+        ),
+        (
+            UiCommand::Inspect {
+                planet: "nope/1".into(),
+            },
+            "Unknown planet",
+        ),
+        (
+            UiCommand::VisitStar {
+                id: "nope".into(),
+                presentation_mode: PresentationMode::Simulation,
+            },
+            "not loaded, visited",
+        ),
+        (
+            UiCommand::FlyToPlanet {
+                planet: "nope".into(),
+            },
+            "Unknown planet",
+        ),
+        (UiCommand::ShowPage { page: 0 }, "No system is visited"),
+        (
+            UiCommand::SetPresentationMode {
+                presentation_mode: PresentationMode::Table,
+            },
+            "No system is visited",
+        ),
+        (UiCommand::Follow, "Select a planet"),
+    ];
+    for (command, reason) in refused {
+        let before = state(&app);
+        let err = check(&app, &command).unwrap_err();
+        assert!(err.contains(reason), "{command:?}: {err}");
+        send(&mut app, vec![command.clone()]);
+        assert_eq!(state(&app), before, "{command:?} changed state");
+    }
+    for command in [
+        UiCommand::PickStar { id: star.clone() },
+        UiCommand::Jump { list: list.clone() },
+        UiCommand::FindTask { list, task },
+        UiCommand::Inspect {
+            planet: planet.clone(),
+        },
+        UiCommand::VisitStar {
+            id: star,
+            presentation_mode: PresentationMode::Simulation,
+        },
+        UiCommand::FlyToPlanet {
+            planet: planet.clone(),
+        },
+    ] {
+        check(&app, &command).unwrap_or_else(|err| panic!("{command:?}: {err}"));
+    }
+    // Once a system is visited, its pages, modes and planets apply.
+    send(&mut app, vec![UiCommand::FlyToPlanet { planet }]);
+    let page = nav(&app).page;
+    for command in [
+        UiCommand::ShowPage { page },
+        UiCommand::SetPresentationMode {
+            presentation_mode: PresentationMode::Table,
+        },
+        UiCommand::Follow,
+    ] {
+        check(&app, &command).unwrap_or_else(|err| panic!("{command:?}: {err}"));
+    }
+    let err = check(&app, &UiCommand::ShowPage { page: 9999 }).unwrap_err();
+    assert!(err.contains("has no page 9999"), "{err}");
+}
+
 fn run(galaxy: space_shared::Galaxy, commands: Vec<UiCommand>) -> App {
     let mut app = App::new();
     app.add_message::<UiCommand>()

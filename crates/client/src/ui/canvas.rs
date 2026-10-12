@@ -117,7 +117,7 @@ pub(super) fn canvas_overlay(
             let text = painter.layout(
                 marker.label.clone(),
                 egui::FontId::proportional(12.0),
-                tint,
+                egui::Color32::PLACEHOLDER,
                 width,
             );
             let (x, y) = if table {
@@ -137,7 +137,8 @@ pub(super) fn canvas_overlay(
                 };
                 (x, point.y - text.size().y * 0.5)
             };
-            painter.galley(egui::pos2(x, y), text, tint);
+            // Labels sit over star glare in tables and close-ups.
+            crate::ui::breadcrumb::halo_galley(&painter, egui::pos2(x, y), text, tint);
         }
         // A second click on the selected planet follows it.
         if hovered && click {

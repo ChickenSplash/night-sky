@@ -242,5 +242,6 @@ pub fn draw(
     typed.write_batch(lines.into_iter().map(|line| Typed {
         line,
         source: Source::Window,
+        reply: None,
     }));
 }

@@ -2,7 +2,7 @@
 //! draggable HUD text, the breadcrumb inspector and the canvas overlay.
 pub mod breadcrumb;
 mod canvas;
-mod hud;
+pub(crate) mod hud;
 pub mod inspector;
 mod settings;
 pub mod tasks;

@@ -20,7 +20,12 @@ While the native client runs, `./scripts/ns` is a CLI that can read and drive al
 
 ```sh
 ./scripts/ns state camera
+./scripts/ns lists
+./scripts/ns cmd --wait "jump demo-flight"
+./scripts/ns screenshot
 ```
+
+Commands that would do nothing, such as an unknown ID or an out-of-range value, are refused with the reason and a nonzero exit code.
 
 ## Run in a browser
 

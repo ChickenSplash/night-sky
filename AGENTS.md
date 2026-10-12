@@ -62,7 +62,9 @@ design notes into every session:
   the 3D view, under any window, with no container. A soft dark halo (two
   rings of translucent black copies, `HALO_EDGE` at 1 px and `HALO_FADE` at
   2 px) keeps it readable over star discs and the galaxy band; it vanishes
-  on dark space. Reuse `halo_text`/`halo_wrapped_text` for scene text.
+  on dark space. Reuse `halo_text`/`halo_wrapped_text` for scene text, or
+  `halo_galley` for text placed by hand, such as the canvas planet labels
+  (table labels sit in star glare).
   `breadcrumb::trail` is physical location: `Milky Way`, the current star's
   list if any, the star, then `Navigation::location_planet`. An open list or
   destination is not a location until arrival. `selection_trail` independently
@@ -249,10 +251,21 @@ design notes into every session:
    not the legacy response envelope. Unknown paths still return 404;
    `keys` cannot be combined with `history` or `seconds`.
    This is the native client, not the galaxy backend on port 4321.
-   `POST /command` accepts the existing typed text or UiCommand JSON and
-   returns 202 after parsing and queueing, not proof of successful action.
-   `POST /screenshot` (no body) queues the existing bug-report capture;
-   its 202 reply describes report saving and asynchronous PNG scheduling.
+   `POST /command` accepts the existing typed text or UiCommand JSON. It
+   parses on the HTTP thread (syntax and `UiCommand::check_values` ranges:
+   400, logged as `cli> line: reason`), then sends the line as `Typed`
+   (`Source::Api`, with a reply channel) so `command_line::run` echoes it
+   (`cli> line`) and runs `UiCommand::check` against the current state:
+   409 with the reason if `actions::apply` would ignore it (unknown or
+   unreachable IDs, no visited system, nothing selected), else 202
+   `accepted`, applied that frame. Flights continue afterwards. Keep
+   `check` in step with `apply`'s conditions; a test applies every refused
+   command and asserts nothing changed. Typed terminal and stdin commands
+   get the same checks as warnings. Panels and drags never go through
+   them and still clamp. With no main-thread reply in `REPLY_WAIT` (2 s)
+   the reply is 202 `queued`. `POST /screenshot` (no body) runs the existing
+   bug-report capture; its reply gives the canonical `report` and `png`
+   paths (the PNG lands a frame or two later).
    Both POST routes require `X-Night-Sky-Client: cli`. Browser Origin and
    Sec-Fetch-Site headers and non-loopback Host values are rejected, with
    no CORS support. Local processes are trusted; this is not remote auth.
@@ -275,7 +288,13 @@ design notes into every session:
    `./scripts/ns perf history --seconds 2`, full retained history is
    `./scripts/ns perf --history`. Send one quoted string with
    `./scripts/ns cmd "set_debug split_multiples false"` (text or JSON);
-   `./scripts/ns screenshot` schedules the existing bug-report capture.
+   refusals exit 1 with the reason. `ns cmd --wait` (with `--timeout`,
+   default 30 s) polls `/state` until a snapshot sampled after the reply
+   shows no flight, and adds `settled` (trail, presentation mode, location
+   planet, camera). `./scripts/ns lists` reads `/state/lists` (each list's
+   ID, name, task count and system star IDs by page) as IDs for `jump`,
+   `find_task` and `visit_star`. `./scripts/ns screenshot` waits up to 5 s
+   for the PNG and prints its path (`--no-wait` returns at once).
    `./scripts/ns watch perf latest/split --interval 0.5` repeatedly reads,
    stopping with Ctrl+C, without changing app state. Each refresh prints a
    new JSON value; it does not clear terminal output. Global `--json` gives

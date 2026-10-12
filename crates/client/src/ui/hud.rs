@@ -8,7 +8,7 @@ use bevy_egui::egui;
 use space_simulation::SimulationClock;
 
 const YEAR: f64 = 31_557_600.0;
-pub(super) const MAX_RATE: f64 = 100.0 * YEAR;
+pub(crate) const MAX_RATE: f64 = 100.0 * YEAR;
 /// A 400-point horizontal drag covers either HUD control's logarithmic range.
 const HUD_DRAG_SPAN: f64 = 400.0;
 

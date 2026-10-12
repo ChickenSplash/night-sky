@@ -108,6 +108,143 @@ pub enum GalaxyReference {
     EdgeOn,
 }
 
+impl UiCommand {
+    /// Rejects values a typed command would otherwise clamp or drop. Panels
+    /// and drags keep clamping in `Navigation`; only typed input checks.
+    pub fn check_values(&self) -> Result<(), String> {
+        fn within<T: PartialOrd + std::fmt::Display>(
+            name: &str,
+            value: T,
+            range: std::ops::RangeInclusive<T>,
+        ) -> Result<(), String> {
+            if range.contains(&value) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{name} must be {} to {}, not {value}",
+                    range.start(),
+                    range.end()
+                ))
+            }
+        }
+        match self {
+            UiCommand::SetRate { rate } => within("rate", *rate, 1.0..=crate::ui::hud::MAX_RATE),
+            UiCommand::SetMoveSpeed { speed } => within(
+                "speed",
+                *speed,
+                crate::scene::MIN_SPEED..=crate::scene::MAX_SPEED,
+            ),
+            UiCommand::SetFov { degrees } => {
+                within("degrees", *degrees, crate::navigation::FOV_DEG)
+            }
+            UiCommand::SetMagnitude { magnitude } => {
+                within("magnitude", *magnitude, crate::navigation::MAGNITUDE)
+            }
+            UiCommand::SetExposure { stops } => {
+                within("stops", *stops, crate::render::exposure::STOPS)
+            }
+            UiCommand::SetCompression { amount } => within("amount", *amount, 0.0..=1.0),
+            _ => Ok(()),
+        }
+    }
+
+    /// Why `apply` would do nothing with this command right now, so typed and
+    /// developer API commands can say so instead of being silently ignored.
+    /// Keep in step with the conditions in `apply`.
+    pub fn check(
+        &self,
+        galaxy: &space_shared::Galaxy,
+        nav: &Navigation,
+        field: &crate::stars::stream::Starfield,
+    ) -> Result<(), String> {
+        let list = |id: &str| {
+            galaxy
+                .systems
+                .iter()
+                .position(|s| s.id == id)
+                .ok_or_else(|| format!("Unknown list `{id}`. Lists are under `state lists`."))
+        };
+        let planet = |id: &str| {
+            crate::objects::planet(galaxy, id)
+                .map(|_| ())
+                .ok_or_else(|| format!("Unknown planet `{id}`. Planet IDs are `<star>/<n>`."))
+        };
+        let star = |id: &str| {
+            if crate::galaxy_nav::reachable(nav, galaxy, field, id) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Star `{id}` is not loaded, visited or a list's system"
+                ))
+            }
+        };
+        let visiting = || {
+            nav.system(galaxy)
+                .ok_or_else(|| "No system is visited. Visit a star first.".to_owned())
+        };
+        match self {
+            UiCommand::PickStar { id } => {
+                if nav.selected_star().is_some_and(|star| star.id == *id)
+                    || crate::galaxy_nav::picked_id(field, id).is_some()
+                    || crate::galaxy_nav::mapped(galaxy, id).is_some()
+                {
+                    Ok(())
+                } else {
+                    Err(format!("Star `{id}` is not loaded or a list's system"))
+                }
+            }
+            UiCommand::Jump { list: id } => list(id).map(|_| ()),
+            UiCommand::FindTask { list: id, task } => {
+                let index = list(id)?;
+                galaxy.systems[index]
+                    .task_planet(task)
+                    .map(|_| ())
+                    .ok_or_else(|| format!("List `{id}` has no task `{task}`"))
+            }
+            UiCommand::Inspect { planet: id } => planet(id),
+            UiCommand::InspectObject { inspection } => {
+                let location = crate::ui::breadcrumb::trail(nav, galaxy);
+                let selected = crate::ui::breadcrumb::selection_trail(nav, galaxy);
+                if crate::ui::breadcrumb::holds(nav, galaxy, inspection, &location, &selected) {
+                    Ok(())
+                } else {
+                    Err("That object is in neither the location nor the selection trail".into())
+                }
+            }
+            UiCommand::ShowPage { page } => {
+                let system = visiting()?;
+                if system.pages().contains(page) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "`{}` has no page {page}; it has {:?}",
+                        system.name,
+                        system.pages()
+                    ))
+                }
+            }
+            UiCommand::SetPresentationMode { .. } => visiting().map(|_| ()),
+            UiCommand::VisitStar { id, .. } => star(id),
+            UiCommand::FlyToPlanet { planet: id } => {
+                planet(id)?;
+                let local = nav
+                    .system(galaxy)
+                    .is_some_and(|system| system.planets.iter().any(|body| body.id == *id));
+                match crate::objects::parent_star(id) {
+                    _ if local => Ok(()),
+                    Some(parent) => star(parent),
+                    None => Err(format!("Planet `{id}` names no star")),
+                }
+            }
+            UiCommand::Follow => nav
+                .selected_planet(galaxy)
+                .map(|_| ())
+                .ok_or_else(|| "Select a planet in the visited system first".into()),
+            _ => self.check_values(),
+        }
+    }
+}
+
 fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
     use bevy::math::DVec3;
     use space_simulation::galaxy::{GalaxyModel, PC_METRES};
