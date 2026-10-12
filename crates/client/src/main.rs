@@ -151,6 +151,9 @@ fn main() {
     }
     #[cfg(target_arch = "wasm32")]
     devtools::automation::install(&mut app);
+    devtools::snapshot::install(&mut app);
+    #[cfg(not(target_arch = "wasm32"))]
+    devtools::install_http(&mut app);
     app.run();
 }
 

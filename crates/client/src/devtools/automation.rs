@@ -2,7 +2,6 @@
 //! `send_command` and read a small snapshot through `snapshot`; `index.html`
 //! wraps both as `window.space.command` and `window.space.state`.
 use crate::actions::UiCommand;
-use crate::{Navigation, Universe};
 use bevy::prelude::*;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
@@ -28,7 +27,7 @@ pub fn snapshot() -> String {
 
 pub fn install(app: &mut App) {
     app.add_systems(PreUpdate, receive)
-        .add_systems(Last, publish);
+        .add_systems(Last, publish.after(super::snapshot::publish));
 }
 
 fn receive(mut writer: MessageWriter<UiCommand>) {
@@ -38,47 +37,17 @@ fn receive(mut writer: MessageWriter<UiCommand>) {
 }
 
 fn publish(
-    universe: Res<Universe>,
-    nav: Res<Navigation>,
-    clock: Res<crate::Clock>,
-    metrics: Res<crate::stars::stream::StreamMetrics>,
-    starfield: Res<crate::stars::stream::Starfield>,
+    shared: Res<super::snapshot::Snapshot>,
     benchmark: Option<Res<crate::devtools::benchmark::BenchmarkFlight>>,
+    mut revision: Local<u64>,
 ) {
-    let state = serde_json::json!({
-        "lists": universe.0.systems.len(),
-        "list": nav.list().and_then(|i| Some(universe.0.systems.get(i)?.id.as_str())),
-        "trail": crate::ui::breadcrumb::trail(&nav, &universe.0)
-            .into_iter()
-            .map(|crumb| crumb.label)
-            .collect::<Vec<_>>(),
-        "selection_trail": crate::ui::breadcrumb::selection_trail(&nav, &universe.0)
-            .into_iter().map(|crumb| crumb.label).collect::<Vec<_>>(),
-        "selection": nav.selection.as_ref().map(crate::Selection::object),
-        "location_planet": nav.location_planet,
-        "inspection": crate::ui::breadcrumb::active_inspection(&nav, &universe.0,
-            &crate::ui::breadcrumb::trail(&nav, &universe.0),
-            &crate::ui::breadcrumb::selection_trail(&nav, &universe.0)),
-        "page": nav.page,
-        "presentation_mode": nav.presentation_mode,
-        "paused": clock.0.paused,
-        "display": {
-            "exaggerate": nav.exaggerate,
-            "orbits": nav.orbits,
-            "labels": nav.labels,
-            "markers": nav.markers,
-            "velocity_marker": nav.velocity_marker,
-            "realistic": nav.realistic,
-            "galaxy_glow": nav.galaxy_glow,
-            "exposure": nav.exposure,
-            "compression": nav.compression,
-            "wireframe": nav.wireframe,
-        },
-        "fov_deg": nav.fov_deg,
-        "magnitude": nav.magnitude,
-        "stream": metrics.caption,
-        "stream_stars": starfield.stars,
-        "benchmark": benchmark.and_then(|flight| flight.report.clone()),
-    });
+    if *revision == shared.revision {
+        return;
+    }
+    *revision = shared.revision;
+    let Ok(mut state) = serde_json::from_str::<serde_json::Value>(&shared.json) else {
+        return;
+    };
+    state["benchmark"] = serde_json::json!(benchmark.and_then(|flight| flight.report.clone()));
     SNAPSHOT.with_borrow_mut(|snapshot| *snapshot = state.to_string());
 }

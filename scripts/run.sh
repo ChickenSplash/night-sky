@@ -21,7 +21,8 @@ for attempt in {1..50}; do
             cat data/server.log >&2
             exit 1
         fi
-        target/debug/space-client "$@"
+        # Local dev runs expose the loopback API unless explicitly disabled.
+        NIGHT_SKY_API="${NIGHT_SKY_API:-1}" target/debug/space-client "$@"
         exit $?
     fi
     sleep 0.1

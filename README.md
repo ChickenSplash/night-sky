@@ -16,6 +16,12 @@ cd night-sky
 
 The first build downloads and compiles dependencies. Closing the application also stops its local server.
 
+While the native client runs, `./scripts/ns` is a CLI that can read and drive all of the application's state, commands and resources (`./scripts/ns help` lists them):
+
+```sh
+./scripts/ns state camera
+```
+
 ## Run in a browser
 
 The build script currently targets x86-64 Linux. It requires Rust via rustup, Clang, LLD, Python 3 (available as `python`), curl, tar and gzip.

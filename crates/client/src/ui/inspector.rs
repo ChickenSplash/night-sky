@@ -22,6 +22,14 @@ impl Cache {
     pub fn invalidate(&mut self) {
         self.key = None;
     }
+
+    fn get(&mut self, object: &ObjectRef, galaxy: &Galaxy) -> &Info {
+        if self.key.as_ref() != Some(object) {
+            self.info = describe(object, galaxy);
+            self.key = Some(object.clone());
+        }
+        &self.info
+    }
 }
 
 #[derive(Default)]
@@ -381,6 +389,62 @@ fn list_pages(id: &str, nav: &Navigation, galaxy: &Galaxy) -> Option<(Vec<Action
     Some((actions, current))
 }
 
+/// Preserve the list tab exactly as a click in the inspector does.
+fn action_commands(inspection: &Inspection, command: UiCommand) -> Vec<UiCommand> {
+    let keep = matches!(inspection.object, ObjectRef::List { .. })
+        && matches!(command, UiCommand::PickStar { .. });
+    let mut commands = vec![command];
+    if keep {
+        commands.push(UiCommand::InspectObject {
+            inspection: inspection.clone(),
+        });
+    }
+    commands
+}
+
+/// Read-only developer view of the very same facts and available UI actions.
+/// Unreachable actions remain omitted; task links are URLs, not app commands.
+pub fn readout(
+    inspection: &Inspection,
+    nav: &Navigation,
+    galaxy: &Galaxy,
+    field: &Starfield,
+    cache: &mut Cache,
+) -> serde_json::Value {
+    use serde_json::json;
+    let info = cache.get(&inspection.object, galaxy);
+    let export = |action: Action, group: &str| {
+        json!({
+            "label": action.label, "current": action.current, "available": true,
+            "group": group, "kind": "command",
+            "commands": action_commands(inspection, action.command),
+        })
+    };
+    let mut buttons = Vec::new();
+    if let Some(url) = &info.url {
+        buttons.push(
+            json!({"label": "Open task link ↗", "kind": "link", "group": "task",
+            "current": false, "available": true, "url": url, "commands": []}),
+        );
+    }
+    buttons.extend(
+        actions(&inspection.object, nav, galaxy, field)
+            .into_iter()
+            .map(|action| export(action, "navigation")),
+    );
+    if let ObjectRef::List { id } = &inspection.object
+        && let Some((systems, _)) = list_pages(id, nav, galaxy)
+    {
+        buttons.extend(systems.into_iter().map(|action| export(action, "systems")));
+    }
+    json!({
+        "inspection": inspection, "object": inspection.object,
+        "title": info.title,
+        "facts": info.rows.iter().map(|(label, value)| json!({"label": label, "value": value})).collect::<Vec<_>>(),
+        "description": info.description, "note": info.note, "actions": buttons,
+    })
+}
+
 /// Clickable halo text, white when already showing what it would do.
 fn action_text(ui: &mut egui::Ui, action: &Action) -> bool {
     halo_text(ui, &action.label, egui::Sense::click(), |response| {
@@ -406,10 +470,7 @@ pub fn show(
     out: &mut Vec<UiCommand>,
 ) {
     let object = &inspection.object;
-    if cache.key.as_ref() != Some(object) {
-        cache.info = describe(object, galaxy);
-        cache.key = Some(object.clone());
-    }
+    cache.get(object, galaxy);
     let width = ui.available_width().min(480.0);
     halo_wrapped_text(ui, &cache.info.title, width, CURRENT);
     ui.scope(|ui| {
@@ -447,14 +508,7 @@ pub fn show(
     // Stepping through a list keeps its tab, though selecting or visiting a
     // star would otherwise move the inspector to it.
     let step = |out: &mut Vec<UiCommand>, command: UiCommand| {
-        let keep = matches!(object, ObjectRef::List { .. })
-            && matches!(command, UiCommand::PickStar { .. });
-        out.push(command);
-        if keep {
-            out.push(UiCommand::InspectObject {
-                inspection: inspection.clone(),
-            });
-        }
+        out.extend(action_commands(inspection, command));
     };
     if !actions.is_empty() {
         ui.add_space(HUD_LINE_GAP);
@@ -482,5 +536,142 @@ pub fn show(
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::breadcrumb::TrailSource;
+
+    fn inspection(object: ObjectRef) -> Inspection {
+        Inspection {
+            source: TrailSource::Selection,
+            object,
+        }
+    }
+
+    #[test]
+    fn developer_readout_matches_facts_and_action_commands_for_each_object_kind() {
+        let galaxy = space_simulation::demo_galaxy();
+        let nav = Navigation::default();
+        let field = Starfield::default();
+        let system = &galaxy.systems[0];
+        let star = objects::star_id(system, 0);
+        let mut objects = vec![
+            ObjectRef::Galaxy,
+            ObjectRef::List {
+                id: system.id.clone(),
+            },
+            ObjectRef::Star { id: star },
+            ObjectRef::Planet {
+                id: system.planets[0].id.clone(),
+            },
+        ];
+        if let Some(pair) = system.barycentres_on(0).next() {
+            objects.push(ObjectRef::Barycentre {
+                id: pair.id.clone(),
+            });
+        }
+        let mut cache = Cache::default();
+        for object in objects {
+            let inspection = inspection(object.clone());
+            let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache);
+            let info = describe(&object, &galaxy);
+            assert_eq!(exported["title"], info.title);
+            assert_eq!(exported["facts"].as_array().unwrap().len(), info.rows.len());
+            for (fact, (label, value)) in
+                exported["facts"].as_array().unwrap().iter().zip(info.rows)
+            {
+                assert_eq!(fact["label"], label);
+                assert_eq!(fact["value"], value);
+            }
+            let buttons: Vec<_> = exported["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|button| button["group"] == "navigation")
+                .collect();
+            for (button, action) in buttons.iter().zip(actions(&object, &nav, &galaxy, &field)) {
+                assert_eq!(button["label"], action.label);
+                assert_eq!(button["current"], action.current);
+                assert_eq!(button["available"], true);
+                let parsed =
+                    crate::command_line::parse(&button["commands"][0].to_string()).unwrap();
+                assert_eq!(parsed, action.command);
+            }
+            assert_eq!(buttons.len(), actions(&object, &nav, &galaxy, &field).len());
+        }
+    }
+
+    #[test]
+    fn list_buttons_preserve_inspection_and_cached_facts_invalidate() {
+        let mut galaxy = space_simulation::demo_galaxy();
+        let nav = Navigation::default();
+        let field = Starfield::default();
+        let inspection = inspection(ObjectRef::List {
+            id: galaxy.systems[0].id.clone(),
+        });
+        let mut cache = Cache::default();
+        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache);
+        let systems: Vec<_> = exported["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|button| button["group"] == "systems")
+            .collect();
+        assert_eq!(systems.len(), galaxy.systems[0].pages().len());
+        for button in systems {
+            let commands: Vec<UiCommand> =
+                serde_json::from_value(button["commands"].clone()).unwrap();
+            assert!(matches!(commands[0], UiCommand::PickStar { .. }));
+            assert_eq!(
+                commands[1],
+                UiCommand::InspectObject {
+                    inspection: inspection.clone()
+                }
+            );
+        }
+        galaxy.systems[0].name = "Updated list".into();
+        assert_eq!(
+            readout(&inspection, &nav, &galaxy, &field, &mut cache)["title"],
+            exported["title"]
+        );
+        cache.invalidate();
+        assert_eq!(
+            readout(&inspection, &nav, &galaxy, &field, &mut cache)["title"],
+            "Updated list"
+        );
+    }
+
+    #[test]
+    fn task_links_are_urls_and_unreachable_actions_are_omitted() {
+        let mut galaxy = space_simulation::demo_galaxy();
+        let nav = Navigation::default();
+        let field = Starfield::default();
+        let planet = galaxy.systems[0]
+            .planets
+            .iter_mut()
+            .find(|planet| planet.task.is_some())
+            .unwrap();
+        planet.task.as_mut().unwrap().url = Some("https://example.com/task".into());
+        let inspection = inspection(ObjectRef::Planet {
+            id: planet.id.clone(),
+        });
+        let mut cache = Cache::default();
+        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache);
+        let link = &exported["actions"][0];
+        assert_eq!(link["kind"], "link");
+        assert_eq!(link["url"], "https://example.com/task");
+        assert_eq!(link["commands"], serde_json::json!([]));
+        let unreachable = inspection_for_unreachable();
+        let exported = readout(&unreachable, &nav, &galaxy, &field, &mut cache);
+        assert_eq!(exported["actions"], serde_json::json!([]));
+    }
+
+    fn inspection_for_unreachable() -> Inspection {
+        inspection(ObjectRef::Star {
+            id: "g100.0.0".into(),
+        })
     }
 }

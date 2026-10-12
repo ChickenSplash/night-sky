@@ -175,7 +175,7 @@ fn stream(
     time: Res<Time>,
     mut backend: ResMut<Backend>,
     mut field: ResMut<Starfield>,
-    mut metrics: ResMut<StreamMetrics>,
+    (mut metrics, mut split): (ResMut<StreamMetrics>, ResMut<super::starfield::Split>),
     (rig, pose): (Res<CameraRig>, Res<CameraPose>),
     (debug, nav): (
         Res<crate::render::debug::RenderDebug>,
@@ -187,6 +187,9 @@ fn stream(
     if std::mem::take(&mut restart.0) || backend.magnitude() != nav.magnitude {
         *backend = Backend::start(nav.magnitude);
         field.clear();
+        *split = super::starfield::Split::default();
+        metrics.split_examined = 0;
+        metrics.split_systems = 0;
         metrics.loaded_at.clear();
     }
     let camera = camera_pc(&GalaxyModel::milky_way(), &rig, &pose);

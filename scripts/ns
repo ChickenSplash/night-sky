@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Thin, loopback-only client for the Night Sky developer API."""
+import argparse
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+def port(value):
+    try:
+        number = int(value)
+        if 1 <= number <= 65535:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("port must be 1..65535")
+
+
+def interval(value):
+    import math
+    try:
+        number = float(value)
+        if math.isfinite(number) and number >= 0.1:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("interval must be finite and at least 0.1 seconds")
+
+
+def parser():
+    result = argparse.ArgumentParser(
+        description="Night Sky developer CLI. Start the app with ./scripts/run.sh first.",
+        epilog="Commands return queued, not completed. Discover app commands with 'ns commands'.",
+    )
+    result.add_argument("--port", type=port, default=os.environ.get("NIGHT_SKY_API_PORT", "4322"))
+    result.add_argument("--json", action="store_true", help="compact JSON, including command help")
+    sub = result.add_subparsers(dest="action", required=True)
+    sub.add_parser("help", help="show CLI usage without connecting")
+    sub.add_parser("health", help="check the API listener")
+    commands = sub.add_parser("commands", help="discover app command syntax and descriptions")
+    commands.add_argument("name", nargs="?", help="one command, e.g. set_debug")
+    for name in ("state", "perf"):
+        read = sub.add_parser(name, help=f"read {name}, optionally a nested path")
+        read.add_argument("path", nargs="?", default="", help="e.g. latest/split/preparation_ms")
+        read.add_argument("--history", action="store_true", help="include history on the root endpoint")
+        read.add_argument("--seconds", type=float, help="limit a history path to the last (0, 10] seconds")
+    keys = sub.add_parser("keys", help="list child keys or array indices, without values")
+    keys.add_argument("path", help="state, state/camera, perf/latest, etc.")
+    cmd = sub.add_parser("cmd", help="queue an app command (typed text or JSON)")
+    cmd.add_argument("command", help='one quoted string, e.g. "set_debug bloom false"')
+    sub.add_parser("screenshot", help="schedule screenshot and bug report, PNG saved asynchronously")
+    inspect = sub.add_parser("inspect", help="read the active top-left inspector, including facts and actions")
+    inspect.add_argument("path", nargs="?", default="", help="facts, actions, title, object, or any nested path")
+    watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
+    watch.add_argument("target", choices=("state", "perf"))
+    watch.add_argument("path", nargs="?", default="", help="optional nested path")
+    watch.add_argument("--interval", type=interval, default=0.5, help="seconds between reads (default 0.5)")
+    return result
+
+
+def endpoint(target, path="", query=None):
+    # Preserve JSON-pointer ~0/~1 escapes, encode URL-special characters.
+    suffix = "/" + urllib.parse.quote(path, safe="/~") if path else ""
+    return "/" + target + suffix + ("?" + urllib.parse.urlencode(query) if query else "")
+
+
+def request(api_port, path, body=None):
+    headers = {}
+    if body is not None:
+        headers = {"X-Night-Sky-Client": "cli", "Content-Type": "text/plain; charset=utf-8"}
+    url = f"http://127.0.0.1:{api_port}{path}"
+    req = urllib.request.Request(url, data=body, headers=headers)
+    # Local requests must not leave the machine through configured proxies.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=5) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        try:
+            message = json.load(error).get("error", error.reason)
+        except (ValueError, AttributeError):
+            message = error.reason
+        raise RuntimeError(f"HTTP {error.code}: {message}") from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise RuntimeError(
+            f"Cannot reach Night Sky on port {api_port}: {error}. "
+            "Start ./scripts/run.sh with the API enabled."
+        ) from error
+    except ValueError as error:
+        raise RuntimeError("API returned invalid JSON") from error
+
+
+def output(value, compact=False, commands=False):
+    if commands and not compact:
+        for entry in value if isinstance(value, list) else [value]:
+            print(f"{entry['synopsis']}\n  {entry['about']}")
+    else:
+        print(json.dumps(value, indent=None if compact else 2, ensure_ascii=False), flush=True)
+
+
+def main(argv=None):
+    cli = parser()
+    args = cli.parse_args(argv)
+    if args.action == "help":
+        cli.print_help()
+        return 0
+    try:
+        if args.action == "commands":
+            path = endpoint("commands", args.name or "")
+        elif args.action == "inspect":
+            path = endpoint("state", "inspector" + ("/" + args.path if args.path else ""))
+        elif args.action in ("state", "perf"):
+            query = {}
+            if args.history:
+                query["history"] = 1
+            if args.seconds is not None:
+                query["seconds"] = args.seconds
+            path = endpoint(args.action, args.path, query)
+        elif args.action == "keys":
+            target, _, nested = args.path.partition("/")
+            if target not in ("state", "perf"):
+                cli.error("keys path must start with state or perf")
+            path = endpoint(target, nested, {"keys": 1})
+        elif args.action == "watch":
+            path = endpoint(args.target, args.path)
+            while True:
+                output(request(args.port, path), args.json)
+                time.sleep(args.interval)
+        else:
+            path = endpoint("command" if args.action == "cmd" else args.action)
+        body = args.command.encode("utf-8") if args.action == "cmd" else b"" if args.action == "screenshot" else None
+        output(request(args.port, path, body), args.json, args.action == "commands")
+        return 0
+    except RuntimeError as error:
+        print(f"ns: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 0
+    except BrokenPipeError:
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

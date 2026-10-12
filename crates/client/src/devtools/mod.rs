@@ -11,7 +11,10 @@ pub mod core_load;
 pub mod diagnostics;
 pub mod gpu_test;
 #[cfg(not(target_arch = "wasm32"))]
+mod http;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod smoke;
+pub mod snapshot;
 mod tabs;
 
 use crate::actions::UiCommand;
@@ -30,6 +33,8 @@ use std::collections::VecDeque;
 
 use capture::Line;
 pub use capture::log_layers;
+#[cfg(not(target_arch = "wasm32"))]
+pub use http::install as install_http;
 #[cfg(not(target_arch = "wasm32"))]
 use tabs::tools::save_bug_report;
 use tabs::{
@@ -201,8 +206,10 @@ pub fn draw(
                             &metrics,
                             &starfield,
                             diagnostics.as_deref(),
+                            &debug,
+                            &mut out,
                         ),
-                        Tab::Render => render(ui, &nav, &debug, &mut out),
+                        Tab::Render => render(ui, &nav, &mut out),
                         Tab::State => state(ui, &universe, &nav, &clock, &rig, &pose, &velocity),
                         _ => {
                             report = tools_tab(

@@ -1,12 +1,11 @@
-//! The `render` tab: exposure readouts, rendering and performance switches.
+//! The `render` tab: exposure readouts and rendering controls.
 use crate::Navigation;
 use crate::actions::{Display, GalaxyReference, UiCommand};
-use crate::render::debug::RenderDebug;
 use crate::ui::terminal::{self};
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-pub fn render(ui: &mut egui::Ui, nav: &Navigation, debug: &RenderDebug, out: &mut Vec<UiCommand>) {
+pub fn render(ui: &mut egui::Ui, nav: &Navigation, out: &mut Vec<UiCommand>) {
     terminal::heading(ui, "exposure");
     terminal::facts_with_details(ui, "debug-exposure", &crate::render::exposure::facts(nav));
     terminal::heading(ui, "realistic rendering");
@@ -43,15 +42,4 @@ pub fn render(ui: &mut egui::Ui, nav: &Navigation, debug: &RenderDebug, out: &mu
         }
     });
     terminal::note(ui, "Smooth glow only: no dust or spiral detail yet.");
-    terminal::heading(ui, "performance switches");
-    for (switch, label) in RenderDebug::SWITCHES {
-        let on = debug.get(switch);
-        if terminal::check(ui, on, label, true) {
-            out.push(UiCommand::SetDebug { switch, on: !on });
-        }
-    }
-    terminal::note(
-        ui,
-        "For A/B tests against the perf tab; they reset on restart. Freeze first so the star count holds still. Without pixel shading, points still run the vertex shader, which separates vertex cost from fill. Compact points clip a little of each star's light.",
-    );
 }

@@ -273,6 +273,9 @@ impl StarCell {
         if size == 1 || stars.len() <= LEAF_STARS as usize {
             for star in &self.stars[stars] {
                 *examined += 1;
+                if *examined > limit {
+                    return;
+                }
                 let distance = (0..3)
                     .map(|axis| (star.position_pc[axis] - p[axis]).powi(2))
                     .sum::<f64>()
@@ -1037,6 +1040,22 @@ mod tests {
         }
         // Outside the cluster, a few dozen stars per query, not 20,000.
         assert!(checked < 300 * 4 * 100, "{checked}");
+    }
+
+    #[test]
+    fn resolved_stops_measuring_at_the_budget_even_inside_a_leaf() {
+        let cell = scattered_cell();
+        let mut examined = 0;
+        let mut found = 0;
+        cell.resolved(
+            cell.cell.centre_pc(),
+            (1e9, 1e-10, 0.0),
+            3,
+            &mut examined,
+            &mut |_| found += 1,
+        );
+        assert_eq!(examined, 4);
+        assert!(found <= 3);
     }
 
     #[test]

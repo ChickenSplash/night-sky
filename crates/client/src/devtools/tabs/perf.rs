@@ -1,7 +1,9 @@
 //! The `perf` tab: frame times, star stream and star draw facts, and GPU
 //! passes.
+use crate::actions::UiCommand;
 use crate::devtools::FRAMES;
 use crate::format::{grouped, si};
+use crate::render::debug::RenderDebug;
 use crate::stars::stream::{Starfield, StreamMetrics};
 use crate::ui::terminal::{self, DIM, TEXT};
 use bevy::diagnostic::DiagnosticsStore;
@@ -15,236 +17,390 @@ pub fn perf(
     metrics: &StreamMetrics,
     field: &Starfield,
     diagnostics: Option<&DiagnosticsStore>,
+    debug: &RenderDebug,
+    out: &mut Vec<UiCommand>,
 ) {
-    terminal::heading(ui, "frames");
     let recent: Vec<f32> = frames.iter().rev().take(60).copied().collect();
     let mean = recent.iter().sum::<f32>() / recent.len().max(1) as f32;
     let worst = recent.iter().copied().fold(0.0, f32::max);
-    let mut rows = vec![
-        (
-            "fps",
-            format!("{:.0}", 1000.0 / mean.max(0.001)),
-            Some("Frames per second, from the mean of the last 60 frames."),
-        ),
-        (
-            "frame",
-            format!("{mean:.1} ms mean, {worst:.1} ms worst"),
-            Some("Mean and slowest frame time over the last 60 frames."),
-        ),
-    ];
-    if let Some(s) = &metrics.sample {
-        rows.push((
+    if terminal::section(ui, "frames") {
+        let mut rows = vec![
+            (
+                "fps",
+                format!("{:.0}", 1000.0 / mean.max(0.001)),
+                Some("Frames per second, from the mean of the last 60 frames."),
+            ),
+            (
+                "frame",
+                format!("{mean:.1} ms mean, {worst:.1} ms worst"),
+                Some("Mean and slowest frame time over the last 60 frames."),
+            ),
+            (
+                "latest / peak",
+                format!(
+                    "{:.1} / {:.1} ms",
+                    metrics.history.back().map_or(0.0, |f| f.frame_interval_ms),
+                    metrics.frame_peak_ms()
+                ),
+                Some(
+                    "Latest app-frame interval and maximum over the trailing second. The interval precedes that frame's CPU work, so a stall can appear in the following interval.",
+                ),
+            ),
+        ];
+        if let Some(s) = &metrics.sample {
+            rows.push((
             "last second",
             format!("P95 {:.1} ms, P99 {:.1} ms", s.frame_p95_ms, s.frame_p99_ms),
             Some("95% and 99% of last second's frames were faster than these, so stutters show here."),
         ));
+        }
+        terminal::facts_with_details(ui, "debug-frames", &rows);
+        frame_graph(ui, frames);
     }
-    terminal::facts_with_details(ui, "debug-frames", &rows);
-    frame_graph(ui, frames);
-    terminal::heading(ui, "star stream");
-    let Some(s) = &metrics.sample else {
-        terminal::note(ui, "Measuring…");
-        return;
-    };
-    let aimed = field.aimed_pc.map_or("nowhere yet".into(), |[x, y, z]| {
-        format!("{x:+.0}  {y:+.0}  {z:+.0} pc")
-    });
-    terminal::facts_with_details(
-        ui,
-        "debug-stream",
-        &[
-            (
-                "mode",
-                s.mode.to_lowercase(),
-                Some(
-                    "Where stars are generated: a background thread or worker, or slices of each frame as a fallback.",
+    if terminal::section(ui, "star stream") {
+        let s = metrics.live(field);
+        let aimed = field.aimed_pc.map_or("nowhere yet".into(), |[x, y, z]| {
+            format!("{x:+.0}  {y:+.0}  {z:+.0} pc")
+        });
+        terminal::facts_with_details(
+            ui,
+            "debug-stream",
+            &[
+                (
+                    "mode",
+                    s.mode.to_lowercase(),
+                    Some(
+                        "Where stars are generated: a background thread or worker, or slices of each frame as a fallback.",
+                    ),
                 ),
-            ),
-            (
-                "threads",
-                format!("{} started, {:.1} busy", s.threads, s.busy_threads),
-                Some(
-                    "Threads making stars (natively three quarters of the CPU's), and how many were working on average over the last second, grids included.",
+                (
+                    "threads",
+                    format!("{} started, {:.1} busy", s.threads, s.busy_threads),
+                    Some(
+                        "Threads making stars (natively three quarters of the CPU's), and how many were working on average over the last second, grids included.",
+                    ),
                 ),
-            ),
-            (
-                "loaded",
-                format!("{} stars in {} cells", grouped(s.stars), grouped(s.cells)),
-                Some("Stars generated and held in memory, in cells around the camera."),
-            ),
-            (
-                "pending",
-                format!("{} cells", grouped(s.pending)),
-                Some("Cells wanted around the camera but not generated yet."),
-            ),
-            (
-                "aimed at",
-                aimed,
-                Some("Where loading is centred, in parsecs from the central black hole."),
-            ),
-            (
-                "generation",
-                format!(
-                    "{:.0} ms for {} cells, {} cancelled",
-                    s.generation_ms, s.generated_cells, s.cancelled
+                (
+                    "loaded",
+                    format!("{} stars in {} cells", grouped(s.stars), grouped(s.cells)),
+                    Some("Stars generated and held in memory, in cells around the camera."),
                 ),
-                Some(
-                    "Generating time over the last second, and jobs dropped because the camera moved on.",
+                (
+                    "pending",
+                    format!("{} cells", grouped(s.pending)),
+                    Some("Cells wanted around the camera but not generated yet."),
                 ),
-            ),
-            (
-                "mesh queue",
-                format!(
-                    "{} cells, oldest {:.0} ms",
-                    s.mesh_chunks, s.mesh_wait_oldest_ms
+                (
+                    "aimed at",
+                    aimed,
+                    Some("Where loading is centred, in parsecs from the central black hole."),
                 ),
-                Some(
-                    "Loaded cells waiting to become GPU batches, and how long the oldest has waited.",
+                (
+                    "generation",
+                    format!(
+                        "{:.0} ms for {} cells, {} cancelled",
+                        s.generation_ms, s.generated_cells, s.cancelled
+                    ),
+                    Some(
+                        "Generating time in the trailing second, and jobs dropped because the camera moved on. Refreshed every frame.",
+                    ),
                 ),
-            ),
-            (
-                "mesh wait",
-                format!("{:.0} ms average", s.mesh_wait_avg_ms),
-                Some("Average time from a cell loading to its stars showing on screen."),
-            ),
-            (
-                "render sync",
-                format!(
-                    "{:.0} ms for {} chunks built",
-                    s.render_sync_ms, s.built_chunks
+                (
+                    "mesh queue",
+                    format!(
+                        "{} cells, oldest {:.0} ms",
+                        s.mesh_chunks, s.mesh_wait_oldest_ms
+                    ),
+                    Some(
+                        "Loaded cells waiting to become GPU batches, and how long the oldest has waited.",
+                    ),
                 ),
-                Some(
-                    "Frame time spent over the last second turning loaded stars into GPU batches.",
+                (
+                    "mesh wait",
+                    format!("{:.0} ms average", s.mesh_wait_avg_ms),
+                    Some("Average time from a cell loading to its stars showing on screen."),
                 ),
-            ),
-        ],
-    );
-    terminal::heading(ui, "cells, blocks and boxes");
-    let boxes: usize = field.cells.values().map(|cell| cell.boxes()).sum();
-    terminal::facts_with_details(
-        ui,
-        "debug-star-layout",
-        &[
-            (
-                "cells",
-                format!("{} loaded", grouped(field.cells.len())),
-                Some(
-                    "The loader's cubes, one brightness tier each, halving in size per tier; each is split into the blocks below.",
+                (
+                    "render sync",
+                    format!(
+                        "{:.0} ms for {} chunks built",
+                        s.render_sync_ms, s.built_chunks
+                    ),
+                    Some(
+                        "Frame time spent over the last second turning loaded stars into GPU batches.",
+                    ),
                 ),
-            ),
-            (
-                "blocks",
-                format!(
-                    "{} drawn of {} on the GPU",
-                    grouped(metrics.blocks_drawn),
-                    grouped(metrics.blocks)
+            ],
+        );
+    }
+    if terminal::section(ui, "cells, blocks and boxes") {
+        let boxes: usize = field.cells.values().map(|cell| cell.boxes()).sum();
+        terminal::facts_with_details(
+            ui,
+            "debug-star-layout",
+            &[
+                (
+                    "cells",
+                    format!("{} loaded", grouped(field.cells.len())),
+                    Some(
+                        "The loader's cubes, one brightness tier each, halving in size per tier; each is split into the blocks below.",
+                    ),
                 ),
-                Some(
-                    "Cubes of a cell's grid holding up to 262,144 stars, uploaded as one to four batches; those outside the view are skipped when culling is on (render tab).",
+                (
+                    "blocks",
+                    format!(
+                        "{} drawn of {} on the GPU",
+                        grouped(metrics.blocks_drawn),
+                        grouped(metrics.blocks)
+                    ),
+                    Some(
+                        "Cubes of a cell's grid holding up to 262,144 stars, uploaded as one to four batches; those outside the view are skipped when culling is on (render tab).",
+                    ),
                 ),
-            ),
-            (
-                "grid boxes",
-                format!(
-                    "{}, {:.1} stars each on average",
-                    grouped(boxes),
-                    field.stars as f64 / boxes.max(1) as f64
+                (
+                    "grid boxes",
+                    format!(
+                        "{}, {:.1} stars each on average",
+                        grouped(boxes),
+                        field.stars as f64 / boxes.max(1) as f64
+                    ),
+                    Some(
+                        "The smallest cubes, aiming for about 8 stars each, used to find nearby stars without scanning whole cells; empty ones included.",
+                    ),
                 ),
-                Some(
-                    "The smallest cubes, aiming for about 8 stars each, used to find nearby stars without scanning whole cells; empty ones included.",
+            ],
+        );
+    }
+    if terminal::section(ui, "star draw") {
+        let uploaded = metrics.uploaded_stars;
+        terminal::facts_with_details(
+            ui,
+            "debug-star-draw",
+            &[
+                (
+                    "draw calls",
+                    format!(
+                        "{} of {} batches",
+                        grouped(metrics.batch_draws),
+                        grouped(metrics.batches)
+                    ),
+                    Some(
+                        "Star batches drawn each frame, up to 65,536 stars each; each costs CPU time, on screen or not.",
+                    ),
                 ),
-            ),
-        ],
-    );
-    terminal::heading(ui, "star draw");
-    let uploaded = metrics.uploaded_stars;
-    terminal::facts_with_details(
-        ui,
-        "debug-star-draw",
-        &[
-            (
-                "draw calls",
-                format!(
-                    "{} of {} batches",
-                    grouped(metrics.batch_draws),
-                    grouped(metrics.batches)
+                (
+                    "uploaded",
+                    format!(
+                        "{} of {} loaded stars",
+                        grouped(uploaded),
+                        grouped(field.stars)
+                    ),
+                    Some(
+                        "Stars bright enough to pass the CPU filter; the shader drops the rest of the faint ones and those behind the camera.",
+                    ),
                 ),
-                Some(
-                    "Star batches drawn each frame, up to 65,536 stars each; each costs CPU time, on screen or not.",
+                (
+                    "vertices",
+                    format!(
+                        "{} drawn of {}",
+                        grouped(metrics.drawn_stars * 3),
+                        grouped(uploaded * 3)
+                    ),
+                    Some(
+                        "Vertex shader runs, three per star: one instanced triangle the shader shapes into a point.",
+                    ),
                 ),
-            ),
-            (
-                "uploaded",
-                format!(
-                    "{} of {} loaded stars",
-                    grouped(uploaded),
-                    grouped(field.stars)
+                (
+                    "vertex memory",
+                    format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
+                    Some("GPU memory holding the uploaded stars, 20 bytes each."),
                 ),
-                Some(
-                    "Stars bright enough to pass the CPU filter; the shader drops the rest of the faint ones and those behind the camera.",
+                (
+                    "precise sprites",
+                    grouped(metrics.precise_sprites),
+                    Some(
+                        "Stars too close to the camera for batch precision, drawn one by one; should stay small.",
+                    ),
                 ),
-            ),
-            (
-                "vertices",
-                format!(
-                    "{} drawn of {}",
-                    grouped(metrics.drawn_stars * 3),
-                    grouped(uploaded * 3)
+            ],
+        );
+    }
+    if terminal::section(ui, "split systems") {
+        let s = metrics.live(field);
+        let latest = &metrics.split_latest;
+        let peak = metrics.split_peak();
+        terminal::facts_with_details(
+            ui,
+            "debug-split-systems",
+            &[
+                (
+                    "search latest / peak",
+                    format!("{:.2} / {:.2} ms", latest.search_ms, peak.search_ms),
+                    Some(
+                        "Search CPU elapsed time this frame and maximum in the trailing second. Zero latest means no search this frame.",
+                    ),
                 ),
-                Some(
-                    "Vertex shader runs, three per star: one instanced triangle the shader shapes into a point.",
+                (
+                    "prep latest / peak",
+                    format!(
+                        "{:.2} / {:.2} ms",
+                        latest.preparation_ms, peak.preparation_ms
+                    ),
+                    Some(
+                        "Split preparation CPU elapsed time this frame and maximum in the trailing second; excludes search, GPU upload and GPU rendering.",
+                    ),
                 ),
-            ),
-            (
-                "vertex memory",
-                format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
-                Some("GPU memory holding the uploaded stars, 20 bytes each."),
-            ),
-            (
-                "precise sprites",
-                grouped(metrics.precise_sprites),
-                Some(
-                    "Stars too close to the camera for batch precision, drawn one by one; should stay small.",
+                (
+                    "generation latest / peak",
+                    format!("{:.2} / {:.2} ms", latest.generation_ms, peak.generation_ms),
+                    Some(
+                        "Uncached system generation within preparation. Peaks for different rows may belong to different frames.",
+                    ),
                 ),
-            ),
-            (
-                "split systems",
-                format!(
-                    "{} ({} examined)",
-                    grouped(metrics.split_systems),
-                    grouped(metrics.split_examined)
+                (
+                    "orbits latest / peak",
+                    format!(
+                        "{:.2} / {:.2} ms",
+                        latest.orbit_sprite_ms, peak.orbit_sprite_ms
+                    ),
+                    Some(
+                        "Orbital positions, sprite construction and off-screen counting within preparation. Remaining preparation time includes candidate checks and cache maintenance.",
+                    ),
                 ),
-                Some(
-                    "Multiple systems wide enough to show apart, drawn star by star as precise sprites, and the stars measured at the last search for them.",
+                (
+                    "rebuilt latest / peak",
+                    format!(
+                        "{} / {} systems",
+                        grouped(latest.rebuilt),
+                        grouped(peak.rebuilt)
+                    ),
+                    Some(
+                        "Systems regenerated this frame and maximum per frame in the trailing second.",
+                    ),
                 ),
-            ),
-        ],
-    );
-    terminal::heading(ui, "nearest star");
-    terminal::facts_with_details(
-        ui,
-        "debug-nearby",
-        &[
-            (
-                "lookup time",
-                format!("{:.2} ms per frame", s.nearby_ms_per_frame),
-                Some(
-                    "Time finding the nearest star, for automatic arrival and the close-up render scale.",
+                (
+                    "systems",
+                    format!(
+                        "{} ({} candidates)",
+                        grouped(metrics.split_systems),
+                        grouped(metrics.split_candidates)
+                    ),
+                    Some(
+                        "Systems submitted star by star this frame, and the cached candidates checked each frame. Submitted systems may be outside the view.",
+                    ),
                 ),
-            ),
-            (
-                "checked",
-                format!("{:.0} stars per frame", s.nearby_checked_per_frame),
-                Some("Stars measured by the lookups; each cell's grid keeps this low."),
-            ),
-            (
-                "cells",
-                format!("{:.0} searched per frame", s.nearby_cells_per_frame),
-                Some("Loaded cells close enough to hold the nearest star."),
-            ),
-        ],
-    );
-    gpu_passes(ui, diagnostics, mean);
+                (
+                    "examined",
+                    format!(
+                        "{} last search / {:.0} per second",
+                        grouped(metrics.split_examined),
+                        s.split_checked_per_second
+                    ),
+                    Some(
+                        "Work across all retries in the last search, not necessarily per frame. Up to four attempts of 100,000 stars, plus exhaustion probes. The per-second rate uses the trailing second.",
+                    ),
+                ),
+                (
+                    "search time",
+                    format!("{:.2} ms per search", s.split_search_avg_ms),
+                    Some(
+                        "CPU elapsed time gathering candidates, including retries and their allocations. Trailing-second average; excludes per-frame sprite preparation and GPU work.",
+                    ),
+                ),
+                (
+                    "search rate",
+                    format!("{:.1} per second", s.split_searches_per_second),
+                    Some(
+                        "Searches per second, including movement, cell changes, view changes and recovery attempts. A search may contain several retries.",
+                    ),
+                ),
+                (
+                    "search per frame",
+                    format!("{:.2} ms", s.split_search_ms_per_frame),
+                    Some(
+                        "Search CPU elapsed time divided by all frames in the trailing second, including frames without searches.",
+                    ),
+                ),
+                (
+                    "preparation",
+                    format!("{:.2} ms per frame", s.split_preparation_ms_per_frame),
+                    Some(
+                        "CPU elapsed time checking cached candidates, generating uncached systems, calculating orbital positions and constructing split sprite records. Includes cache maintenance and off-screen counting; excludes GPU upload, GPU rendering and searching.",
+                    ),
+                ),
+                (
+                    "rebuilt",
+                    format!("{:.1} systems per frame", s.split_rebuilt_per_frame),
+                    Some(
+                        "Systems generated on cache misses, averaged across all frames in the trailing second. Sustained rebuilding while stationary indicates cache churn.",
+                    ),
+                ),
+                (
+                    "cache",
+                    format!(
+                        "{} systems / {:.1} clears per second",
+                        grouped(metrics.split_cached),
+                        s.split_cache_clears_per_second
+                    ),
+                    Some(
+                        "Cached generated systems now, and capacity-triggered full cache clears per second. Toggle and streaming resets are not counted as capacity clears.",
+                    ),
+                ),
+                (
+                    "sprites",
+                    format!(
+                        "{} submitted / {} off-screen",
+                        grouped(metrics.split_sprites),
+                        grouped(metrics.split_offscreen_sprites)
+                    ),
+                    Some(
+                        "Split-star sprite records constructed and submitted this frame. Off-screen is a conservative whole-system sphere outside the view; some additional individual members may also be outside it. This counts wasted work without changing rendering.",
+                    ),
+                ),
+            ],
+        );
+    }
+    if terminal::section(ui, "nearest star") {
+        let s = metrics.live(field);
+        terminal::facts_with_details(
+            ui,
+            "debug-nearby",
+            &[
+                (
+                    "lookup time",
+                    format!("{:.2} ms per frame", s.nearby_ms_per_frame),
+                    Some(
+                        "Time finding the nearest star, for automatic arrival and the close-up render scale. Trailing-second average, refreshed every frame.",
+                    ),
+                ),
+                (
+                    "checked",
+                    format!("{:.0} stars per frame", s.nearby_checked_per_frame),
+                    Some("Stars measured by the lookups; each cell's grid keeps this low."),
+                ),
+                (
+                    "cells",
+                    format!("{:.0} searched per frame", s.nearby_cells_per_frame),
+                    Some("Loaded cells close enough to hold the nearest star."),
+                ),
+            ],
+        );
+    }
+    if terminal::section(ui, "gpu passes") {
+        gpu_passes(ui, diagnostics, mean);
+    }
+    if terminal::section(ui, "performance switches") {
+        for (switch, label) in RenderDebug::SWITCHES {
+            let on = debug.get(switch);
+            if terminal::check(ui, on, label, true) {
+                out.push(UiCommand::SetDebug { switch, on: !on });
+            }
+        }
+        terminal::note(
+            ui,
+            "For A/B tests; reset on restart. Freeze first to hold the star count still. Without pixel shading, points still run the vertex shader, separating vertex cost from fill.",
+        );
+    }
 }
 
 /// GPU bytes per uploaded star (`stars::render::StarInstance`).
@@ -260,7 +416,6 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
         vertices: Option<f64>,
         fragments: Option<f64>,
     }
-    terminal::heading(ui, "gpu passes");
     let mut passes = std::collections::BTreeMap::<&str, Pass>::new();
     for diagnostic in diagnostics.iter().flat_map(|store| store.iter()) {
         let Some((pass, field)) = diagnostic

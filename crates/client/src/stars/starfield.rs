@@ -63,6 +63,9 @@ const SPLIT_REACH_PC: f64 = 1_000.0;
 /// Stars measured per gather of split candidates. Beyond it the reach halves
 /// and the gather starts again, so crowded regions split only nearby systems.
 const SPLIT_BUDGET: usize = 100_000;
+const SPLIT_MIN_REACH_PC: f64 = 1e-6;
+const SPLIT_ATTEMPTS: usize = 4;
+const SPLIT_RETRY: Duration = Duration::from_millis(250);
 /// Systems kept built for splitting before the cache is cleared.
 const SPLIT_CACHE: usize = 4_096;
 
@@ -173,7 +176,8 @@ struct Precise {
 /// Multiple systems that may show their stars apart, gathered now and then,
 /// and the stars of those that do, built once.
 #[derive(Resource)]
-struct Split {
+pub(super) struct Split {
+    enabled: bool,
     /// Systems are split only within this distance, in parsecs; the batches
     /// hide them as points only within it too.
     reach_pc: f64,
@@ -184,6 +188,7 @@ struct Split {
     /// The angle and movement gathered for (`StarCell::resolved`).
     scanned_angle: f64,
     slack_pc: f64,
+    gathered_at: Option<bevy::platform::time::Instant>,
     candidates: Vec<(String, StarPoint)>,
     /// Each split system's stars and pairs, and its plane's rotation.
     built: HashMap<String, (space_shared::StarSystem, bevy::math::DQuat)>,
@@ -192,14 +197,68 @@ struct Split {
 impl Default for Split {
     fn default() -> Self {
         Self {
+            enabled: true,
             reach_pc: SPLIT_REACH_PC,
             next_reach_pc: SPLIT_REACH_PC,
             scanned_at: None,
             scanned_angle: 0.0,
             slack_pc: 0.0,
+            gathered_at: None,
             candidates: Vec::new(),
             built: HashMap::new(),
         }
+    }
+}
+
+impl Split {
+    fn set_enabled(&mut self, enabled: bool) {
+        if self.enabled != enabled {
+            *self = Self {
+                enabled,
+                ..Self::default()
+            };
+        }
+    }
+
+    fn gather(&mut self, field: &Starfield, eye: DVec3, angle: f64) -> usize {
+        let mut reach = self.next_reach_pc.max(SPLIT_MIN_REACH_PC);
+        let mut examined = 0;
+        self.candidates.clear();
+        // Zero is safe for the current frame's shader cutoff, but is never
+        // retained as the next search distance.
+        self.reach_pc = 0.0;
+        for _ in 0..SPLIT_ATTEMPTS {
+            let slack = (0.01 * reach).min(5.0);
+            self.slack_pc = slack;
+            if let Some((found, measured)) =
+                split_candidates(field, eye, (reach, angle * SPLIT_SLACK, slack))
+            {
+                examined += measured;
+                let empty = found.is_empty();
+                self.candidates = found;
+                self.reach_pc = reach;
+                self.next_reach_pc = if empty || measured < SPLIT_BUDGET / 8 {
+                    (reach * 2.0).min(SPLIT_REACH_PC)
+                } else {
+                    reach
+                };
+                break;
+            }
+            examined += SPLIT_BUDGET + 1;
+            reach = (reach * 0.5).max(SPLIT_MIN_REACH_PC);
+            self.next_reach_pc = reach;
+        }
+        self.scanned_at = Some(eye);
+        self.scanned_angle = angle * SPLIT_SLACK;
+        self.gathered_at = Some(bevy::platform::time::Instant::now());
+        examined
+    }
+
+    fn retry_due(&self) -> bool {
+        (self.reach_pc == 0.0 || self.next_reach_pc > self.reach_pc)
+            && self
+                .gathered_at
+                .is_none_or(|at| at.elapsed() >= SPLIT_RETRY)
     }
 }
 
@@ -371,6 +430,7 @@ fn sync(
 ) {
     let (universe, nav, debug, clock) = view;
     let sync_start = bevy::platform::time::Instant::now();
+    metrics.split_latest = Default::default();
     let Ok((camera_transform, view)) = camera.single() else {
         return;
     };
@@ -386,7 +446,7 @@ fn sync(
     let realistic = if nav.realistic { 1.0 } else { 0.0 };
     let (palette, wireframe) = *batches.palettes.get_or_insert_with(palettes);
     let skip_pixels = if debug.point_pixels { 0.0 } else { 1.0 };
-    let radius_px = debug.point_radius_px();
+    let radius_px = 2.0;
     frame.globals = Some(Globals {
         settings: Vec4::new(
             pc_per_unit as f32,
@@ -551,40 +611,24 @@ fn sync(
     // Multiple systems whose stars could show apart: gathered again when the
     // camera has moved, the view narrowed or the cells changed.
     let angle = SPLIT_PX * pixel;
-    if changed
+    split.set_enabled(debug.split_multiples && debug.galactic_points);
+    if !split.enabled {
+        metrics.split_examined = 0;
+    } else if changed
+        || split.retry_due()
         || angle < split.scanned_angle
         || angle > 4.0 * split.scanned_angle
         || split
             .scanned_at
             .is_none_or(|at| at.distance(eye) > split.slack_pc)
     {
-        let mut reach = split.next_reach_pc;
-        let gathered = loop {
-            let slack = (0.01 * reach).clamp(RESCAN_PC, 5.0);
-            let query = (reach, angle * SPLIT_SLACK, slack);
-            match split_candidates(&field, eye, query) {
-                Some(found) => break (found, query),
-                None if reach > 1e-3 => reach *= 0.5,
-                None => {
-                    break (
-                        (Vec::new(), SPLIT_BUDGET),
-                        (0.0, angle * SPLIT_SLACK, slack),
-                    );
-                }
-            }
-        };
-        let ((candidates, examined), (reach, scanned_angle, slack)) = gathered;
-        split.candidates = candidates;
-        split.reach_pc = reach;
-        split.next_reach_pc = if examined < SPLIT_BUDGET / 8 {
-            (reach * 1.5).min(SPLIT_REACH_PC)
-        } else {
-            reach
-        };
-        split.scanned_at = Some(eye);
-        split.scanned_angle = scanned_angle;
-        split.slack_pc = slack;
-        metrics.split_examined = examined;
+        let search_start = bevy::platform::time::Instant::now();
+        metrics.split_examined = split.gather(&field, eye, angle);
+        let search_time = search_start.elapsed();
+        metrics.split_search += search_time;
+        metrics.split_latest.search_ms = search_time.as_secs_f64() * 1000.0;
+        metrics.split_searches += 1;
+        metrics.split_checked += metrics.split_examined;
     }
     let batch_near = Vec4::new(
         BATCH_HIDE as f32,
@@ -649,9 +693,15 @@ fn sync(
     }
     // Each multiple system the batches hide as a point, star by star, where
     // its orbits have them now. The visited system is drawn as bodies.
+    let split_start = bevy::platform::time::Instant::now();
+    metrics.split_sprites = 0;
+    metrics.split_offscreen_sprites = 0;
+    metrics.split_candidates = split.candidates.len();
     let mut shown_apart = std::collections::HashSet::new();
     if split.built.len() > SPLIT_CACHE {
         split.built.clear();
+        metrics.split_cache_clears += 1;
+        metrics.split_latest.cache_clears += 1;
     }
     let split = &mut *split;
     for (id, star) in &split.candidates {
@@ -667,17 +717,33 @@ fn sync(
         {
             continue;
         }
-        let (system, plane) = split
-            .built
-            .entry(id.clone())
-            .or_insert_with(|| split_system(id));
+        let (system, plane) = split.built.entry(id.clone()).or_insert_with(|| {
+            metrics.split_rebuilt += 1;
+            metrics.split_latest.rebuilt += 1;
+            let start = bevy::platform::time::Instant::now();
+            let system = split_system(id);
+            metrics.split_latest.generation_ms += start.elapsed().as_secs_f64() * 1000.0;
+            system
+        });
         let at = position - eye;
+        let orbit_start = bevy::platform::time::Instant::now();
+        metrics.split_sprites += system.stars.len();
+        // Conservative system-sized sphere, not a per-member projection.
+        // This measures off-screen work without changing rendering policy.
+        if !sight.sees(at, separation) {
+            metrics.split_offscreen_sprites += system.stars.len();
+        }
         frame
             .precise
             .extend(apart(system, *plane, at, clock.0.seconds));
+        metrics.split_latest.orbit_sprite_ms += orbit_start.elapsed().as_secs_f64() * 1000.0;
         shown_apart.insert(id.as_str());
     }
     metrics.split_systems = shown_apart.len();
+    metrics.split_cached = split.built.len();
+    let preparation_time = split_start.elapsed();
+    metrics.split_preparation += preparation_time;
+    metrics.split_latest.preparation_ms = preparation_time.as_secs_f64() * 1000.0;
     for candidate in &precise.candidates {
         if shown_apart.contains(candidate.id.as_str()) {
             continue;
@@ -854,6 +920,136 @@ mod tests {
             distance > BATCH_HIDE * candidate[0].offset_pc,
             "batch must still cover the six-light-year transition"
         );
+    }
+
+    #[test]
+    fn re_enabling_splitting_discards_the_old_search_state() {
+        let mut split = Split {
+            reach_pc: 0.0,
+            next_reach_pc: SPLIT_MIN_REACH_PC,
+            scanned_at: Some(DVec3::ZERO),
+            gathered_at: Some(bevy::platform::time::Instant::now()),
+            ..Split::default()
+        };
+        split.set_enabled(false);
+        assert!(!split.enabled);
+        assert!(split.scanned_at.is_none());
+        split.set_enabled(true);
+        assert!(split.enabled);
+        assert_eq!(split.next_reach_pc, SPLIT_REACH_PC);
+        assert!(split.scanned_at.is_none());
+        assert!(split.gathered_at.is_none());
+        // Unchanged toggles must not invalidate useful cached work each frame.
+        split.scanned_at = Some(DVec3::ZERO);
+        split.set_enabled(true);
+        assert_eq!(split.scanned_at, Some(DVec3::ZERO));
+    }
+
+    #[test]
+    fn empty_split_search_expands_despite_a_busy_grid_leaf() {
+        let cell = Cell::containing(16, [0.01; 3]).unwrap();
+        let eye = DVec3::splat(0.01);
+        let point = StarPoint {
+            position_pc: (eye + DVec3::X * 0.01).to_array(),
+            luminosity_solar: 1.0,
+            temperature_k: 5772.0,
+            radius_solar: 1.0,
+            separation_au: 1000.0,
+            component: space_simulation::galaxy::Component::ThinDisc,
+            index: 0,
+        };
+        let mut field = Starfield::default();
+        field.cells.insert(
+            cell,
+            space_simulation::stream::StarCell::new(cell, vec![point; 20_000]),
+        );
+        let mut split = Split {
+            next_reach_pc: 0.001,
+            ..Split::default()
+        };
+        assert_eq!(split.gather(&field, eye, 1e-4), 20_000);
+        assert!(split.candidates.is_empty());
+        assert!(split.next_reach_pc > split.reach_pc);
+        split.gathered_at = Some(bevy::platform::time::Instant::now() - SPLIT_RETRY);
+        assert!(split.retry_due());
+    }
+
+    #[test]
+    fn overloaded_split_search_recovers_without_camera_movement() {
+        let cell = Cell::containing(16, [0.01; 3]).unwrap();
+        let eye = DVec3::splat(0.01);
+        let point = StarPoint {
+            position_pc: eye.to_array(),
+            luminosity_solar: 1.0,
+            temperature_k: 5772.0,
+            radius_solar: 1.0,
+            separation_au: 1000.0,
+            component: space_simulation::galaxy::Component::ThinDisc,
+            index: 0,
+        };
+        let mut field = Starfield::default();
+        field.cells.insert(
+            cell,
+            space_simulation::stream::StarCell::new(cell, vec![point; SPLIT_BUDGET + 1]),
+        );
+        let mut split = Split::default();
+        assert_eq!(
+            split.gather(&field, eye, 1e-4),
+            SPLIT_ATTEMPTS * (SPLIT_BUDGET + 1)
+        );
+        assert_eq!(split.reach_pc, 0.0);
+        assert!(split.next_reach_pc > 0.0);
+        assert!(split.candidates.is_empty());
+        split.gathered_at = Some(bevy::platform::time::Instant::now() - SPLIT_RETRY);
+        assert!(split.retry_due());
+        // A cheaper neighbourhood, without a camera or view change, recovers.
+        field.cells.insert(
+            cell,
+            space_simulation::stream::StarCell::new(cell, vec![point]),
+        );
+        assert_eq!(split.gather(&field, eye, 1e-4), 1);
+        assert!(split.reach_pc > 0.0);
+        assert_eq!(split.candidates.len(), 1);
+        assert!(split.next_reach_pc > split.reach_pc);
+        for _ in 0..20 {
+            split.gather(&field, eye, 1e-4);
+        }
+        assert_eq!(split.reach_pc, SPLIT_REACH_PC);
+        assert!(!split.retry_due());
+    }
+
+    #[test]
+    fn dense_split_search_shrinks_its_margin_and_keeps_nearby_systems() {
+        let cell = Cell::containing(16, [0.01; 3]).unwrap();
+        let eye = DVec3::splat(0.01);
+        let nearby = StarPoint {
+            position_pc: (eye + DVec3::X * 0.001).to_array(),
+            luminosity_solar: 1.0,
+            temperature_k: 5772.0,
+            radius_solar: 1.0,
+            separation_au: 1000.0,
+            component: space_simulation::galaxy::Component::ThinDisc,
+            index: 0,
+        };
+        let distant = StarPoint {
+            position_pc: (eye + DVec3::X * 0.8).to_array(),
+            ..nearby
+        };
+        let mut points = vec![distant; SPLIT_BUDGET + 1];
+        points.push(nearby);
+        let mut field = Starfield::default();
+        field
+            .cells
+            .insert(cell, space_simulation::stream::StarCell::new(cell, points));
+        let mut split = Split::default();
+        for _ in 0..4 {
+            split.gather(&field, eye, 1e-4);
+        }
+        assert!(split.reach_pc > 0.0);
+        assert!(split.reach_pc < 1.0);
+        assert!(split.slack_pc < RESCAN_PC);
+        assert_eq!(split.candidates.len(), 1);
+        assert_eq!(split.candidates[0].1, nearby);
     }
 
     #[test]

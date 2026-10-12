@@ -3,9 +3,9 @@
 //! data refresh that reorders them cannot redirect a click.
 use crate::{Clock, Navigation, Selection, Universe, presentation::PresentationMode};
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Message, Clone, Debug, PartialEq, Deserialize)]
+#[derive(Message, Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiCommand {
     /// Select a streamed star by stable ID, or visit it on a second click.
@@ -87,7 +87,7 @@ pub enum UiCommand {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Display {
     Exaggerate,
@@ -100,7 +100,7 @@ pub enum Display {
     Wireframe,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GalaxyReference {
     Inside,

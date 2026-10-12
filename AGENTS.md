@@ -35,6 +35,8 @@ design notes into every session:
 ## Development
 
 - `./scripts/run.sh`: build and start both processes, clean up backend on exit.
+  Enables the client's loopback developer API by default; use
+  `NIGHT_SKY_API=0 ./scripts/run.sh` to disable it for a run.
 - `./scripts/check.sh`: formatting, unit tests and strict Clippy checks.
 - `./scripts/run.sh --smoke-test`: desktop rendering check with eighteen screenshots, including a 50-task pagination fixture, mid-flight captures of a list jump and a page jump, and seven realistic-rendering captures (0 stops: system at 100% and 0% compression, lit planet close-up, constellation, star close-up at both compression settings; then the corona's structure at -16 stops, 0%).
 - Client logs live in `data/logs/client.log`, with `client.previous.log` for the last
@@ -156,14 +158,18 @@ design notes into every session:
   earlier cameras `~1`, `~2`, so the glow camera's pass no longer hides the
   main view's),
   `render` (manual exposure/compression readouts, galaxy glow, wireframes over
-  bodies, galaxy reference views, and performance switches), `state` (camera; navigation: location,
+  bodies and galaxy reference views), `state` (camera; navigation: location,
   open list, anchor, page, presentation mode, selection; anchor star; clock) and `tools` (GPU test, core load test and bug report
   natively, star-stream benchmark in the browser). New debug readouts and switches go there, not in Settings or the
-  canvas. The performance switches (`render::debug::RenderDebug`, not
+  canvas. Performance sections are collapsible, skipping UI work while closed;
+  counts are live and timings use trailing-second averages refreshed every frame.
+  Logging and benchmarks retain their independent one-second reports.
+  The performance switches live in a collapsible section in the `perf` tab
+  (`render::debug::RenderDebug`, not
   `Navigation`; `set_debug <switch> <on>`) are for A/B tests and reset on
   restart: freeze star streaming (the loader keeps its last aim), galactic
   star points, shade point pixels (off, points still run the vertex shader
-  but are never rasterised), compact 1.25 px points, 4x MSAA (both window
+  but are never rasterised), 4x MSAA (both window
   cameras), bloom, cull blocks outside the view (on by default), split multiple
   systems into individual stars and stars as points (native only, on by default natively).
   Each tab lives in `devtools/tabs/`; tracing capture lives in `devtools/capture.rs`.
@@ -190,7 +196,113 @@ design notes into every session:
   `tasks::Tasks`, not `Navigation` (`navigation.rs`).
 - `devtools/automation.rs` (browser only) is a test hook, not a UI: `window.space.command`
   sends a `UiCommand` as JSON and `window.space.state()` reads a small snapshot
-  (list, page, presentation_mode, display options, stream caption, benchmark results).
+   (list, page, presentation_mode, display options, stream caption, benchmark results).
+   `devtools/snapshot.rs` builds the shared, versioned native/browser state
+   snapshot at most every 250 ms. It includes f64 camera position (parsecs
+   from the galactic centre), debug switches, stream counts, performance
+   averages, latest CPU timings and one-second peaks, fresh native GPU
+   diagnostics with measurement ages, and per-frame history (10 seconds,
+   capped at 4,096 frames). History collection runs with the UI closed and
+   native export disabled. Frame intervals precede the recorded CPU work;
+   GPU measurements are delayed and not matched to individual CPU frames.
+   Peaks are component-wise maxima, not one correlated slow frame.
+   Native read-only access before an HTTP transport exists:
+   `NIGHT_SKY_SNAPSHOT=1 ./scripts/run.sh` enables atomic JSON export to
+   `data/logs/live-snapshot.json`, at most four snapshots per second. Final
+   JSON encoding and disk writes use a separate thread and bounded,
+   nonblocking queue. Export is off by default, contains process ID and
+   publication time, and may remain stale after exit: check those before
+   using it. No commands, camera movement, benchmarks or HTTP listener are
+   introduced by enabling snapshots. Snapshot construction itself is CPU
+   work on the main thread, so exported diagnostics are opt-in.
+   Native developer HTTP API (`devtools/http.rs`): `./scripts/run.sh` enables
+   it by default, with `NIGHT_SKY_API=0` to opt out. Direct client launches
+   still require `NIGHT_SKY_API=1`. Listens only on `127.0.0.1:4322`;
+   `NIGHT_SKY_API_PORT` may change the port, never the bind address. It
+   enables shared snapshots without requiring file export. `GET /health`
+   checks the listener; `GET /state` and `GET /perf` return the cached app
+   snapshot (at most 250 ms publication frequency), with process ID and
+   sample time. `GET /perf?history=1` includes bounded per-frame history.
+   Nested reads use a generic JSON-pointer resolver: `/state/camera`,
+   `/state/debug/split_multiples`, `/perf/latest/split`, or
+   `/perf/latest/split/preparation_ms`. `/perf/<path>` selects directly
+   inside the performance object (without the root response envelope).
+   Responses contain only the selected JSON value, including scalars or
+   null; unknown paths return 404. Array indices are zero-based path segments.
+   URL-encode special characters; JSON-pointer `~1` escapes `/` in keys and
+   `~0` escapes `~`. The full root response shapes remain compatible and
+   omit history by default; either root accepts `?history=1` to include it.
+   `/perf/history` returns the retained history array; append `?seconds=2`
+   to select samples within two seconds of the latest captured frame.
+   The same filter works on `/state/performance/history`. Seconds must be
+   finite, greater than zero and at most 10 (the existing retention limit).
+   Unsupported/duplicate query parameters return 400. Nested reads use the
+   same cached snapshots, not newly collected measurements; root sample
+   time is still needed to check freshness.
+   Discovery: `GET /commands` lists the live command catalogue (name,
+   positional fields, synopsis and description) from `command_line::USAGE`;
+   `GET /commands/set_debug` selects one entry. These do not require a
+   snapshot. Terminal-only `help` and `clear` are not UiCommands and are
+   not listed. Any snapshot path accepts `?keys=1` to list its immediate
+   object keys or array indices as strings, without values; scalars/null
+   return an empty array. `/perf?keys=1` describes the performance object,
+   not the legacy response envelope. Unknown paths still return 404;
+   `keys` cannot be combined with `history` or `seconds`.
+   This is the native client, not the galaxy backend on port 4321.
+   `POST /command` accepts the existing typed text or UiCommand JSON and
+   returns 202 after parsing and queueing, not proof of successful action.
+   `POST /screenshot` (no body) queues the existing bug-report capture;
+   its 202 reply describes report saving and asynchronous PNG scheduling.
+   Both POST routes require `X-Night-Sky-Client: cli`. Browser Origin and
+   Sec-Fetch-Site headers and non-loopback Host values are rejected, with
+   no CORS support. Local processes are trusted; this is not remote auth.
+   Command bodies are limited to 1,024 bytes, require Content-Length and
+   cannot use chunked transfer or Expect. The bounded queue holds 32 jobs,
+   with at most eight forwarded per frame. Screenshots wait at most two
+   seconds for a main-thread reply; timeout does not cancel the queued job.
+   Reads and final JSON encoding run on the HTTP thread. Commands/captures
+   run on the main thread; no endpoint manipulates ECS state directly.
+   The listener stops with its resource; bind failures leave the app usable.
+   Curl examples: `curl http://127.0.0.1:4322/state`,
+   `curl 'http://127.0.0.1:4322/perf?history=1'`, and
+   `curl -H 'X-Night-Sky-Client: cli' --data 'set_debug split_multiples false' http://127.0.0.1:4322/command`.
+   CLI wrapper: `./scripts/ns` (Python 3 standard library, no packages).
+   `./scripts/ns help` works offline; start `./scripts/run.sh` for other
+   commands. Discover before guessing: `./scripts/ns commands`,
+   `./scripts/ns commands set_debug`, `./scripts/ns keys state`,
+   `./scripts/ns keys perf/latest`. Read with `./scripts/ns state camera`
+   or `./scripts/ns perf latest/split/preparation_ms`; bounded history is
+   `./scripts/ns perf history --seconds 2`, full retained history is
+   `./scripts/ns perf --history`. Send one quoted string with
+   `./scripts/ns cmd "set_debug split_multiples false"` (text or JSON);
+   `./scripts/ns screenshot` schedules the existing bug-report capture.
+   `./scripts/ns watch perf latest/split --interval 0.5` repeatedly reads,
+   stopping with Ctrl+C, without changing app state. Each refresh prints a
+   new JSON value; it does not clear terminal output. Global `--json` gives
+   compact machine-readable JSON (including command discovery), e.g.
+   `./scripts/ns --json commands`; other reads default to indented JSON.
+   Global `--port` overrides `NIGHT_SKY_API_PORT` (default 4322). The host
+   is fixed to loopback, proxies are bypassed, requests time out after five
+   seconds and errors go to stderr with a nonzero exit code. Command help
+   defaults to readable text. Subcommand `--help` documents its arguments.
+   Inspector readout: `./scripts/ns inspect` reads `/state/inspector`, the
+   active top-left inspector, which may differ from the selected object.
+   `./scripts/ns inspect facts`, `./scripts/ns inspect actions`, or a nested
+   path such as `./scripts/ns inspect actions/0/commands` selects a subset.
+   The readout includes inspection source/object, title, ordered label/value
+   facts, task description, source note and available action buttons. It
+   reuses `ui::inspector::describe`, `actions` and list-page builders; cached
+   facts invalidate on object/universe changes, not each snapshot publication.
+   Buttons include label, current/available state, group and kind. Unreachable
+   buttons are omitted, as in the UI. Command buttons export an ordered
+   `commands` array of UiCommand JSON, each accepted by `ns cmd` or
+   `POST /command`. List system buttons also export the follow-up
+   InspectObject command which preserves the list tab. Task links export
+   their URL and no app commands; reading the CLI never opens them. The
+   inspector commands are read-only, do not select or move the camera, and
+   use the existing snapshot refresh rate.
+   `scripts/test-ns.py` tests CLI transport against an ephemeral mock server
+   and runs in `./scripts/check.sh`; it never drives the live app.
 - `./scripts/dev-web.sh`: web build plus server with `index.html` and
   `star-worker.js` linked live. `node scripts/test-browser.mjs` clicks the egui
   panels at 1600 x 1000 and checks the results through `window.space`; update its

@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mkdir -p data/tmp
 export TMPDIR="$PWD/data/tmp"
+python3 scripts/test-ns.py
 cargo fmt --all --check
 cargo test --locked --workspace
 cargo clippy --locked --workspace --all-targets -- -D warnings

@@ -132,6 +132,26 @@ pub fn heading(ui: &mut Ui, text: &str) {
     );
 }
 
+/// A persistent section toggle. Call its body only while expanded.
+pub fn section(ui: &mut Ui, text: &str) -> bool {
+    let id = ui.make_persistent_id(("section", text));
+    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(true));
+    ui.add_space(6.0);
+    let (rect, response, _) = row(ui, Sense::click());
+    ui.painter().text(
+        pos2(rect.left() + 8.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        format!("# {text} {}", if open { "-" } else { "+" }),
+        font(),
+        CYAN,
+    );
+    if response.clicked() {
+        open = !open;
+        ui.data_mut(|data| data.insert_persisted(id, open));
+    }
+    open
+}
+
 pub fn note(ui: &mut Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)

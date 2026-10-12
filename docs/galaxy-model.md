@@ -218,7 +218,7 @@ Paths below are relative to the repository root, or to the named crate's
   full-screen draw in `Transparent3d` (`starfield_points_composite.wgsl`)
   gives each point the 0.55 px Gaussian from the 6x6 supersampled pixels
   around each view pixel, so points land within a quarter pixel. Under
-  points the compact-points switch does nothing. The GPU test's star pass
+  points there is no alternate compact-footprint switch. The GPU test's star pass
   sums `main_transparent_pass_3d` and `star_points`, and records which path
   ran. The browser always uses triangles. A compute splat with atomics
   (`b6a078f`, reverted) was slower than triangles: 17.3 vs 14.3 ms.
@@ -243,8 +243,27 @@ Paths below are relative to the repository root, or to the named crate's
   `StarCell::resolved` finds the candidates through a per-block pyramid of
   widest separations (`StarCell::widest`), within a reach that halves
   whenever a gather would measure over `SPLIT_BUDGET` stars, so crowded
-  regions split only nearby systems. Debug switch `split_multiples`, perf
-  tab `split systems`. Elsewhere, it
+  regions split only nearby systems. Its movement margin shrinks with the
+  reach; at most four attempts run per gather. Overload temporarily keeps
+  combined points but retains a positive retry reach. Cheap searches expand
+  again on 250 ms retries even without movement; streaming restarts reset
+  this adaptive state. Empty searches also expand, even if a coarse grid leaf
+  measured many stars outside the search radius. Disabling splitting or
+  galactic points stops split searches; re-enabling starts a fresh search.
+  Examined counts include retries. The perf tab's collapsible `split systems`
+  section measures search CPU elapsed
+  time per search and per frame, searches and examined work per second,
+  preparation CPU elapsed time per frame, cache-miss rebuilds and capacity
+  clears, plus live cached systems and submitted/off-screen sprite counts.
+  Timings use trailing-second averages and are also in `StreamSample` for
+  benchmark reports. Preparation excludes GPU uploads and GPU rendering;
+  off-screen counts use conservative system-sized spheres and do not cull.
+  The UI additionally shows latest-frame and trailing-second peaks for
+  search and preparation, uncached generation, orbital/sprite construction
+  and rebuild counts. Generation and orbit timings are parts of preparation,
+  not extra costs to add to it.
+  Debug switch `split_multiples` is in the performance switches section.
+  Outside the splitting reach, a system
   is a galactic point under the same magnitude limit. Galactic points use
   apparent flux, scaled by `sky::radiance_gain`. Their colour (and,
   realistic, visual efficiency) comes from 32-entry tables by temperature in
@@ -252,8 +271,8 @@ Paths below are relative to the repository root, or to the named crate's
   realistic. Which stars load still follows bolometric luminosity. Every
   point is a
   0.55 px sigma Gaussian, the camera's point spread shared with body sprites
-  (`render::PSF_SIGMA_PX`) (2 px footprint, a uniform so the compact debug
-  switch can shrink it, widened up to 12 px for a star whose Gaussian shows
+  (`render::PSF_SIGMA_PX`) (2 px footprint,
+  widened up to 12 px for a star whose Gaussian shows
   beyond it), as in a perfect camera: brightness shows in its peak, linear,
   and above white in its glare (`hdr.wgsl`).
   The former logarithmic point knee remains only in wireframe mode. Crowds
