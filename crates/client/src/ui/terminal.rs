@@ -270,7 +270,7 @@ pub fn input(ui: &mut Ui, prompt: &str, text: &mut String, width: f32) -> egui::
     response
 }
 
-/// Labels and values in two aligned columns.
+/// Labels on the left and values flush right, joined by a dotted leader.
 pub fn facts(ui: &mut Ui, id: &str, rows: &[(&str, String)]) {
     let rows: Vec<_> = rows
         .iter()
@@ -282,65 +282,83 @@ pub fn facts(ui: &mut Ui, id: &str, rows: &[(&str, String)]) {
 /// As `facts`, but a row with a detail has a clickable label, `label +`,
 /// that shows the detail below it until clicked again.
 pub fn facts_with_details(ui: &mut Ui, id: &str, rows: &[(&str, String, Option<&str>)]) {
-    let mut rows = rows.iter().peekable();
-    let mut part = 0;
-    while rows.peek().is_some() {
-        let mut opened = None;
-        // Each open detail ends a grid; the columns line up across them
-        // because every label is narrower than the minimum column width.
-        egui::Grid::new((id, part))
-            .num_columns(2)
-            .min_col_width(130.0)
-            .spacing(vec2(16.0, 2.0))
-            .show(ui, |ui| {
-                for (label, value, detail) in rows.by_ref() {
-                    let open = match detail {
-                        Some(detail) => {
-                            expander(ui, egui::Id::new((id, *label)), label).then_some(*detail)
-                        }
-                        None => {
-                            ui.label(egui::RichText::new(*label).font(font()).color(DIM));
-                            None
-                        }
-                    };
-                    ui.label(egui::RichText::new(value).font(font()).color(TEXT));
-                    ui.end_row();
-                    if open.is_some() {
-                        opened = open;
-                        break;
-                    }
-                }
-            });
-        if let Some(detail) = opened {
+    for (label, value, detail) in rows {
+        let open = fact(
+            ui,
+            egui::Id::new((id, *label)),
+            label,
+            value,
+            detail.is_some(),
+        );
+        if let (true, Some(detail)) = (open, detail) {
             note(ui, detail);
         }
-        part += 1;
     }
 }
 
-/// `label +` that lights up on hover and toggles on click, `label -` while
-/// open. Returns whether it is open.
-fn expander(ui: &mut Ui, id: egui::Id, label: &str) -> bool {
-    let mut open = ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
-    let text = format!("{label} {}", if open { "-" } else { "+" });
-    let galley = ui.painter().layout_no_wrap(text, font(), DIM);
-    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::click());
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.1);
-    ui.painter().rect_filled(
+/// Space kept between a label, its leader and its value.
+const LEADER_GAP: f32 = 8.0;
+
+/// One full-width fact row. A value too wide to share the line with its
+/// label wraps, still flush right. Returns whether its detail is open.
+fn fact(ui: &mut Ui, id: egui::Id, label: &str, value: &str, expands: bool) -> bool {
+    let mut open = expands && ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
+    let label = if expands {
+        format!("{label} {}", if open { "-" } else { "+" })
+    } else {
+        label.to_owned()
+    };
+    let width = ui.available_width();
+    let label = ui.painter().layout_no_wrap(label, font(), DIM);
+    let wrap = (width - label.size().x - 2.0 * LEADER_GAP).max(120.0);
+    let value = ui.painter().layout(value.to_owned(), font(), TEXT, wrap);
+    let height = label.size().y.max(value.size().y);
+    let (rect, row) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+
+    let label_rect = Rect::from_min_size(rect.min, label.size());
+    let hover = if expands {
+        let response = ui
+            .interact(
+                label_rect.expand2(vec2(4.0, 1.0)),
+                id.with("label"),
+                Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            open = !open;
+            ui.data_mut(|data| data.insert_temp(id, open));
+        }
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), 0.1)
+    } else {
+        0.0
+    };
+    let tracked = ui.ctx().animate_bool_with_time(row.id, row.hovered(), 0.1);
+
+    let painter = ui.painter();
+    painter.rect_filled(
         rect.expand2(vec2(4.0, 1.0)),
+        4,
+        CYAN.gamma_multiply(0.06 * tracked),
+    );
+    painter.rect_filled(
+        label_rect.expand2(vec2(4.0, 1.0)),
         4,
         CYAN.gamma_multiply(0.15 * hover),
     );
-    ui.painter()
-        .galley_with_override_text_color(rect.min, galley, DIM.lerp_to_gamma(CYAN, hover));
-    if response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
-    {
-        open = !open;
-        ui.data_mut(|data| data.insert_temp(id, open));
+    let value_left = rect.right() - value.size().x;
+    let dots = egui::Rangef::new(label_rect.right() + LEADER_GAP, value_left - LEADER_GAP);
+    let y = rect.top() + label.size().y * 0.62;
+    let mut x = (dots.min / 6.0).ceil() * 6.0;
+    while x <= dots.max {
+        painter.circle_filled(pos2(x, y), 0.75, DIM.gamma_multiply(0.45 + 0.4 * tracked));
+        x += 6.0;
     }
+    painter.galley_with_override_text_color(
+        label_rect.min,
+        label,
+        DIM.lerp_to_gamma(CYAN, hover.max(0.5 * tracked)),
+    );
+    painter.galley(pos2(value_left, rect.top()), value, TEXT);
     open
 }
