@@ -132,7 +132,7 @@ pub(super) fn publish(
             "frame_peak_last_second_ms": metrics.frame_peak_ms(),
             "split_systems": metrics.split_systems, "split_candidates": metrics.split_candidates,
             "split_cached": metrics.split_cached, "split_sprites": metrics.split_sprites,
-            "split_offscreen_sprites": metrics.split_offscreen_sprites,
+            "split_offscreen_systems": metrics.split_offscreen_systems,
             "gpu_diagnostics": gpu,
             "history": metrics.history,
             "history_limit_seconds": 10, "history_limit_frames": 4096,

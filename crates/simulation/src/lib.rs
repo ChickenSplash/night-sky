@@ -69,6 +69,52 @@ pub fn member_position(system: &StarSystem, page: u32, id: &str, seconds: f64) -
     std::array::from_fn(|axis| base[axis] + relative[axis] * share)
 }
 
+/// Every star of a page, in `stars_on` order, where `member_position` puts
+/// it, solving each pair's orbit once rather than once per star below it.
+pub fn star_positions(system: &StarSystem, page: u32, seconds: f64) -> Vec<[f64; 3]> {
+    // Outermost first, so each pair's own position is known before its members'.
+    let mut pending: Vec<_> = system.barycentres_on(page).collect();
+    pending.reverse();
+    let mut placed: Vec<(&str, [f64; 3])> = Vec::with_capacity(2 * pending.len());
+    let find = |placed: &[(&str, [f64; 3])], id: &str| {
+        placed
+            .iter()
+            .find(|(member, _)| *member == id)
+            .map(|&(_, at)| at)
+    };
+    while !pending.is_empty() {
+        let before = pending.len();
+        pending.retain(|pair| {
+            let base = match find(&placed, &pair.id) {
+                Some(at) => at,
+                None if system.pair_of(page, &pair.id).is_none() => [0.0; 3],
+                None => return true,
+            };
+            let masses = pair.members.each_ref().map(|m| system.member_mass(page, m));
+            let total = masses[0] + masses[1];
+            let relative = position(&pair.orbit, total, seconds);
+            for (member, share) in pair
+                .members
+                .iter()
+                .zip([-masses[1] / total, masses[0] / total])
+            {
+                placed.push((
+                    member,
+                    std::array::from_fn(|axis| base[axis] + relative[axis] * share),
+                ));
+            }
+            false
+        });
+        if pending.len() == before {
+            break;
+        }
+    }
+    system
+        .stars_on(page)
+        .map(|star| find(&placed, &star.id).unwrap_or([0.0; 3]))
+        .collect()
+}
+
 /// Where a planet is, in metres from its page's outermost barycentre.
 pub fn planet_position(system: &StarSystem, planet: &Planet, seconds: f64) -> [f64; 3] {
     let host = member_position(system, planet.page, &planet.host, seconds);
@@ -256,6 +302,12 @@ mod tests {
                         mass += star.mass_solar;
                         (0..3).for_each(|i| centre[i] += p[i] * star.mass_solar);
                     }
+                    // Solving all stars at once matches them one by one exactly.
+                    let one_by_one: Vec<_> = system
+                        .stars_on(page)
+                        .map(|star| member_position(system, page, &star.id, seconds))
+                        .collect();
+                    assert_eq!(star_positions(system, page, seconds), one_by_one);
                     assert!(radius(centre) / mass < 1.0, "{centre:?}");
                     // Each pair's members follow their relative orbit.
                     for pair in system.barycentres_on(page) {

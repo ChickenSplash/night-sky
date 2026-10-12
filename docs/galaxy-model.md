@@ -235,8 +235,13 @@ Paths below are relative to the repository root, or to the named crate's
   no sprite. A multiple system is one point until its stars could appear
   `SPLIT_PX` (0.5) pixels apart, inside the point spread, so the split never
   shows; from there to arrival it is drawn star by star as precise sprites,
-  from `member_position` at the clock's time in `scene::star_frame`, exactly
-  where its bodies appear on arrival. `StarInstance` packs temperature and
+  from `star_positions` (`member_position` for every star at once, each
+  pair's orbit solved once) at the clock's time in `scene::star_frame`,
+  exactly where its bodies appear on arrival. A system whose
+  widest-separation sphere is outside the view is neither generated nor
+  placed. Generated systems stay cached; past `SPLIT_CACHE` systems beyond
+  those split this frame, the cache drops only the ones not split this
+  frame, so a crowded view never rebuilds every frame. `StarInstance` packs temperature and
   log2 separation as half floats (still 20 bytes), and both star shaders hide
   a batch point whose separation spans more than the draw's angle
   (`near.z`) within `near.w` parsecs; CPU and shader decode the same value.
@@ -254,10 +259,9 @@ Paths below are relative to the repository root, or to the named crate's
   section measures search CPU elapsed
   time per search and per frame, searches and examined work per second,
   preparation CPU elapsed time per frame, cache-miss rebuilds and capacity
-  clears, plus live cached systems and submitted/off-screen sprite counts.
+  prunes, plus live cached systems, submitted sprites and culled systems.
   Timings use trailing-second averages and are also in `StreamSample` for
-  benchmark reports. Preparation excludes GPU uploads and GPU rendering;
-  off-screen counts use conservative system-sized spheres and do not cull.
+  benchmark reports. Preparation excludes GPU uploads and GPU rendering.
   The UI additionally shows latest-frame and trailing-second peaks for
   search and preparation, uncached generation, orbital/sprite construction
   and rebuild counts. Generation and orbit timings are parts of preparation,

@@ -66,7 +66,8 @@ const SPLIT_BUDGET: usize = 100_000;
 const SPLIT_MIN_REACH_PC: f64 = 1e-6;
 const SPLIT_ATTEMPTS: usize = 4;
 const SPLIT_RETRY: Duration = Duration::from_millis(250);
-/// Systems kept built for splitting before the cache is cleared.
+/// Systems kept built for splitting, beyond those split this frame, before
+/// those not split this frame are dropped.
 const SPLIT_CACHE: usize = 4_096;
 
 /// Each temperature's realistic colour with unit luminance and visual
@@ -190,8 +191,23 @@ pub(super) struct Split {
     slack_pc: f64,
     gathered_at: Option<bevy::platform::time::Instant>,
     candidates: Vec<(String, StarPoint)>,
-    /// Each split system's stars and pairs, and its plane's rotation.
-    built: HashMap<String, (space_shared::StarSystem, bevy::math::DQuat)>,
+    /// Each split system's stars and pairs, its plane's rotation and the last
+    /// frame it was split.
+    built: Built,
+    frame: u64,
+}
+
+type Built = HashMap<String, (space_shared::StarSystem, bevy::math::DQuat, u64)>;
+
+/// Drops the systems not split in frame `now` once `built` holds
+/// `SPLIT_CACHE` more than the `shown` in use, never those in use, so a
+/// crowded view never rebuilds every frame. Whether it pruned.
+fn prune(built: &mut Built, now: u64, shown: usize) -> bool {
+    if built.len() <= SPLIT_CACHE + shown {
+        return false;
+    }
+    built.retain(|_, (_, _, used)| *used == now);
+    true
 }
 
 impl Default for Split {
@@ -206,6 +222,7 @@ impl Default for Split {
             gathered_at: None,
             candidates: Vec::new(),
             built: HashMap::new(),
+            frame: 0,
         }
     }
 }
@@ -285,16 +302,19 @@ fn apart(
     at: DVec3,
     seconds: f64,
 ) -> impl Iterator<Item = StarInstance> + '_ {
-    system.stars.iter().map(move |member| {
-        let offset = space_simulation::member_position(system, 0, &member.id, seconds);
-        let position = at + plane * DVec3::from_array(offset) / PC_METRES;
-        StarInstance::new(
-            position.to_array().map(|v| v as f32),
-            member.luminosity_solar as f32,
-            member.temperature_k as f32,
-            0.0,
-        )
-    })
+    let offsets = space_simulation::star_positions(system, 0, seconds);
+    system
+        .stars_on(0)
+        .zip(offsets)
+        .map(move |(member, offset)| {
+            let position = at + plane * DVec3::from_array(offset) / PC_METRES;
+            StarInstance::new(
+                position.to_array().map(|v| v as f32),
+                member.luminosity_solar as f32,
+                member.temperature_k as f32,
+                0.0,
+            )
+        })
 }
 
 /// Multiple systems within `reach_pc` of `eye` whose stars could appear
@@ -695,15 +715,12 @@ fn sync(
     // its orbits have them now. The visited system is drawn as bodies.
     let split_start = bevy::platform::time::Instant::now();
     metrics.split_sprites = 0;
-    metrics.split_offscreen_sprites = 0;
+    metrics.split_offscreen_systems = 0;
     metrics.split_candidates = split.candidates.len();
-    let mut shown_apart = std::collections::HashSet::new();
-    if split.built.len() > SPLIT_CACHE {
-        split.built.clear();
-        metrics.split_cache_clears += 1;
-        metrics.split_latest.cache_clears += 1;
-    }
+    let mut shown_apart = std::collections::HashSet::with_capacity(split.candidates.len());
     let split = &mut *split;
+    split.frame += 1;
+    let now = split.frame;
     for (id, star) in &split.candidates {
         let position = DVec3::from_array(star.position_pc);
         let distance = position.distance(eye);
@@ -717,27 +734,37 @@ fn sync(
         {
             continue;
         }
-        let (system, plane) = split.built.entry(id.clone()).or_insert_with(|| {
+        // Off screen it is neither a point nor its stars, so it is not built.
+        shown_apart.insert(id.as_str());
+        let at = position - eye;
+        // No star of the system is farther than its widest separation from
+        // its barycentre.
+        if !sight.sees(at, separation) {
+            metrics.split_offscreen_systems += 1;
+            continue;
+        }
+        if !split.built.contains_key(id) {
             metrics.split_rebuilt += 1;
             metrics.split_latest.rebuilt += 1;
             let start = bevy::platform::time::Instant::now();
-            let system = split_system(id);
+            let (system, plane) = split_system(id);
+            split.built.insert(id.clone(), (system, plane, now));
             metrics.split_latest.generation_ms += start.elapsed().as_secs_f64() * 1000.0;
-            system
-        });
-        let at = position - eye;
+        }
+        let Some((system, plane, used)) = split.built.get_mut(id) else {
+            continue;
+        };
+        *used = now;
         let orbit_start = bevy::platform::time::Instant::now();
         metrics.split_sprites += system.stars.len();
-        // Conservative system-sized sphere, not a per-member projection.
-        // This measures off-screen work without changing rendering policy.
-        if !sight.sees(at, separation) {
-            metrics.split_offscreen_sprites += system.stars.len();
-        }
         frame
             .precise
             .extend(apart(system, *plane, at, clock.0.seconds));
         metrics.split_latest.orbit_sprite_ms += orbit_start.elapsed().as_secs_f64() * 1000.0;
-        shown_apart.insert(id.as_str());
+    }
+    if prune(&mut split.built, now, shown_apart.len()) {
+        metrics.split_cache_clears += 1;
+        metrics.split_latest.cache_clears += 1;
     }
     metrics.split_systems = shown_apart.len();
     metrics.split_cached = split.built.len();
@@ -1080,5 +1107,21 @@ mod tests {
         assert!(separation > 1_000.0);
         let packed = StarInstance::new([0.0; 3], 1.0, 5772.0, separation as f32);
         assert!((packed.separation_au() / separation - 1.0).abs() < 2e-3);
+    }
+
+    #[test]
+    fn a_crowded_view_keeps_every_system_it_splits_cached() {
+        let (system, plane) = split_system("g2e4960.3.6000");
+        let entry = |used| (system.clone(), plane, used);
+        // More systems in use than the cache's spare room: none is dropped.
+        let shown = SPLIT_CACHE + 100;
+        let mut built: Built = (0..shown).map(|i| (format!("s{i}"), entry(7))).collect();
+        assert!(!prune(&mut built, 7, shown));
+        assert_eq!(built.len(), shown);
+        // Past the spare room, only those not split this frame go.
+        built.extend((0..SPLIT_CACHE + 1).map(|i| (format!("old{i}"), entry(6))));
+        assert!(prune(&mut built, 7, shown));
+        assert_eq!(built.len(), shown);
+        assert!(built.values().all(|(_, _, used)| *used == 7));
     }
 }

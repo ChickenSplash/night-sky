@@ -286,7 +286,7 @@ pub fn perf(
                         grouped(metrics.split_candidates)
                     ),
                     Some(
-                        "Systems submitted star by star this frame, and the cached candidates checked each frame. Submitted systems may be outside the view.",
+                        "Systems wide enough to split this frame, on screen or not, and the cached candidates checked each frame.",
                     ),
                 ),
                 (
@@ -325,7 +325,7 @@ pub fn perf(
                     "preparation",
                     format!("{:.2} ms per frame", s.split_preparation_ms_per_frame),
                     Some(
-                        "CPU elapsed time checking cached candidates, generating uncached systems, calculating orbital positions and constructing split sprite records. Includes cache maintenance and off-screen counting; excludes GPU upload, GPU rendering and searching.",
+                        "CPU elapsed time checking cached candidates, generating uncached systems, calculating orbital positions and constructing split sprite records. Includes cache maintenance and off-screen culling; excludes GPU upload, GPU rendering and searching.",
                     ),
                 ),
                 (
@@ -338,23 +338,23 @@ pub fn perf(
                 (
                     "cache",
                     format!(
-                        "{} systems / {:.1} clears per second",
+                        "{} systems / {:.1} prunes per second",
                         grouped(metrics.split_cached),
                         s.split_cache_clears_per_second
                     ),
                     Some(
-                        "Cached generated systems now, and capacity-triggered full cache clears per second. Toggle and streaming resets are not counted as capacity clears.",
+                        "Cached generated systems now, and capacity-triggered prunes per second. A prune drops the systems not split this frame, never those in use. Toggle and streaming resets are not counted.",
                     ),
                 ),
                 (
                     "sprites",
                     format!(
-                        "{} submitted / {} off-screen",
+                        "{} submitted / {} systems culled",
                         grouped(metrics.split_sprites),
-                        grouped(metrics.split_offscreen_sprites)
+                        grouped(metrics.split_offscreen_systems)
                     ),
                     Some(
-                        "Split-star sprite records constructed and submitted this frame. Off-screen is a conservative whole-system sphere outside the view; some additional individual members may also be outside it. This counts wasted work without changing rendering.",
+                        "Split-star sprite records constructed and submitted this frame, and systems skipped because a sphere of their widest separation lies outside the view. Culled systems are neither built nor placed.",
                     ),
                 ),
             ],
