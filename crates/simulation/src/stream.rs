@@ -534,7 +534,7 @@ fn near(level: usize, p: [f64; 3], radius: f64) -> Vec<Cell> {
 /// `work` on every part, by this thread and `threads - 1` more, each taking
 /// the next part as it finishes one. Results come in no particular order,
 /// with the time the other threads worked.
-fn in_parallel<P: Send, T: Send>(
+pub(crate) fn in_parallel<P: Send, T: Send>(
     threads: usize,
     parts: impl Iterator<Item = P> + Send,
     work: impl Fn(P) -> T + Sync,

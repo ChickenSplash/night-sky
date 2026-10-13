@@ -10,6 +10,7 @@ mod objects;
 mod presentation;
 mod render;
 mod scene;
+mod search;
 mod stars;
 mod ui;
 
@@ -91,6 +92,7 @@ fn main() {
         render::glow::GlowPlugin,
         render::black_hole::BlackHolePlugin,
         command_line::CommandLinePlugin,
+        search::SearchPlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {

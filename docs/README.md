@@ -5,6 +5,8 @@
 - [Galaxy model](galaxy-model.md): generation, multiple systems, streaming, spatial queries,
   galactic points, diffuse light and navigation.
 - [Realistic rendering](realistic-rendering.md): lighting, exposure, compression, HDR and sprites.
+- [Object search plan](object-search-plan.md): planned registry, query model, search
+  engine, CLI and browser, in three sessions.
 - [Agent rules](../AGENTS.md): working conventions and invariants.
 
 Night Sky is a space simulator first. Current data is procedural, with fictional

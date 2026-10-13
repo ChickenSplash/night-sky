@@ -27,6 +27,7 @@ crates/client/       Bevy client and egui interface
   src/main.rs        Entry point and system scheduling
   src/navigation.rs  Destination, visits and selection
   src/format.rs      Shared text formatting
+  src/search.rs      Object search requests, settings and the API's shared store
   src/scene/         Camera, controls, location, placement and wireframes
   src/stars/         Galactic star streaming, batching, drawing and shaders
     stream/          Native/web backends and streaming metrics
@@ -37,6 +38,8 @@ crates/client/       Bevy client and egui interface
 crates/server/       Axum API and static browser file server
 crates/shared/       Serializable models
 crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generation
+  src/objects.rs     ObjectRef: stable identities for inspection and search
+  src/search/        Object registry, query model, search engine and native worker
 crates/star-worker/  Generation-only WASM worker for browser streaming
 docs/               Development and design notes
 scripts/            Launch, build and verification commands

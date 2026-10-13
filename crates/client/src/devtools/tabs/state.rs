@@ -13,9 +13,8 @@ pub fn state(
     universe: &Universe,
     nav: &Navigation,
     clock: &Clock,
-    rig: &CameraRig,
-    pose: &CameraPose,
-    velocity: &CameraVelocity,
+    (rig, pose, velocity): (&CameraRig, &CameraPose, &CameraVelocity),
+    searches: &crate::search::Searches,
 ) {
     let galaxy = &universe.0;
     let ly = |v: bevy::math::DVec3| format!("{:+.3}  {:+.3}  {:+.3}", v.x, v.y, v.z);
@@ -119,6 +118,38 @@ pub fn state(
             ],
         );
     }
+    terminal::heading(ui, "search");
+    let recent = searches.recent();
+    let shown = searches
+        .shown
+        .and_then(|id| recent.iter().find(|e| e.id == id));
+    let running: Vec<String> = recent
+        .iter()
+        .filter(|e| e.state() == "running")
+        .map(|e| format!("#{}", e.id))
+        .collect();
+    terminal::facts(
+        ui,
+        "debug-search",
+        &[
+            (
+                "object browser",
+                shown.map_or("none".into(), |e| {
+                    format!("#{} {} · {} results", e.id, e.state(), e.result_count)
+                }),
+            ),
+            ("query", shown.map_or("none".into(), |e| e.query.clone())),
+            (
+                "running",
+                if running.is_empty() {
+                    "none".into()
+                } else {
+                    running.join(" ")
+                },
+            ),
+            ("requests kept", recent.len().to_string()),
+        ],
+    );
     terminal::heading(ui, "clock");
     terminal::facts(
         ui,

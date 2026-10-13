@@ -18,7 +18,9 @@ NS = runpy.run_path(str(SCRIPT))
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.server.requests.append(("GET", self.path, None, None))
-        if self.path == "/commands/set_debug":
+        if self.path.startswith("/search") or self.path == "/catalogue":
+            self.search_get()
+        elif self.path == "/commands/set_debug":
             self.reply(200, {"synopsis": "set_debug <switch> <on>", "about": "Render switches"})
         elif self.path == "/state/missing":
             self.reply(404, {"error": "Unknown snapshot path"})
@@ -37,12 +39,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
         self.server.requests.append(("POST", self.path, body, self.headers.get("X-Night-Sky-Client")))
-        if body == "jump missing":
+        if self.path.startswith("/search"):
+            self.reply(202, {"id": 5, "status": "running"} if self.path == "/search"
+                       else {"id": 5, "status": "cancelling"})
+        elif body.startswith("search "):
+            self.server.shown = True
+            self.reply(202, {"status": "accepted"})
+        elif body == "jump missing":
             self.reply(409, {"error": "Unknown list `missing`"})
         elif self.path == "/screenshot" and getattr(self.server, "png", None):
             self.reply(202, {"status": "capture_scheduled", "png": self.server.png})
         else:
             self.reply(202, {"status": "accepted" if body.startswith("jump") else "queued"})
+
+    def search_get(self):
+        entry = {"id": 5, "asker": "api", "query": "kind=planet within_ly=50", "origin_pc": [1.0, 2.0, 3.0],
+                 "error": None, "result_count": 1,
+                 "progress": {"state": "running", "complete_to_ly": 3.0, "elapsed_ms": 12.0, "stars": 0}}
+        if self.path == "/catalogue":
+            self.reply(200, {"kinds": [{"id": "planet", "label": "Planet", "family": "planetary"}],
+                             "families": [{"id": "planetary", "label": "Planetary bodies"}],
+                             "properties": [{"id": "radius_km", "label": "Planet radius", "unit": "km",
+                                             "values": {"type": "range"}, "kinds": ["planet"]}],
+                             "relations": [{"id": "orbits", "label": "Orbits", "subjects": ["planet"],
+                                            "targets": ["star"]}],
+                             "syntax": ["kind=<kind>"]})
+        elif self.path == "/search":
+            game = dict(entry, id=6, asker="game")
+            self.reply(200, [game] if getattr(self.server, "shown", False) else [entry])
+        elif self.path in ("/search/5", "/search/6"):
+            # Running on the first read, done on the next; #7 is refused.
+            self.server.polls = getattr(self.server, "polls", 0) + 1
+            if self.server.polls > 1:
+                entry["progress"]["state"] = "capped"
+                entry["results"] = [{"distance_ly": 4.2, "kind": "planet", "name": "TS 1-2-3 b",
+                                     "class": "Sub-Neptune", "system": "TS 1-2-3"}]
+            self.reply(200, dict(entry, id=int(self.path[-1])))
+        elif self.path == "/search/7":
+            self.reply(200, dict(entry, id=7, error="no system `g1.0.9` in this galaxy"))
+        else:
+            self.reply(404, {"error": "Unknown or expired search"})
 
     def reply(self, status, value):
         self.send_response(status)
@@ -146,6 +182,58 @@ class CliTests(unittest.TestCase):
         result = self.run_cli("keys", "commands")
         self.assertEqual(result.returncode, 2)
         self.assertIn("must start with state or perf", result.stderr)
+
+    def test_search_posts_json_and_waits_for_results(self):
+        self.server.polls = 0
+        result = self.run_cli("search", "--home", "kind=planet", "within_ly=50")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        post = [r for r in self.server.requests if r[0] == "POST"][-1]
+        self.assertEqual(post[:2], ("POST", "/search"))
+        self.assertEqual(json.loads(post[2]), {"query": "kind=planet within_ly=50", "origin": "home"})
+        self.assertEqual(post[3], "cli")
+        self.assertIn("#5 capped · 1 results", result.stdout)
+        self.assertIn("searched out to 3.0 ly", result.stdout)
+        self.assertIn("TS 1-2-3 b", result.stdout)
+        self.server.polls = 0
+        result = self.run_cli("--json", "search", "--origin", "1,2,3", "--work-cap", "5", "kind=planet")
+        self.assertEqual(json.loads(result.stdout)["results"][0]["class"], "Sub-Neptune")
+        post = [r for r in self.server.requests if r[0] == "POST"][-1]
+        self.assertEqual(json.loads(post[2]), {"query": "kind=planet", "origin": [1.0, 2.0, 3.0],
+                                               "work_cap": 5000000})
+        result = self.run_cli("search", "--origin", "1,2", "kind=planet")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--origin is x,y,z", result.stderr)
+
+    def test_search_show_sends_the_command_then_follows_the_game_request(self):
+        self.server.polls, self.server.shown = 0, False
+        try:
+            result = self.run_cli("search", "--show", "kind=planet", "within_ly=50")
+        finally:
+            self.server.shown = False
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(("POST", "/command", "search kind=planet within_ly=50", "cli"), self.server.requests)
+        self.assertIn("#6 capped", result.stdout)
+
+    def test_refused_searches_explain_why(self):
+        globals_ = NS["main"].__globals__
+        with mock.patch.dict(globals_, {"request": mock.Mock(side_effect=[
+                {"id": 7}, {"id": 7, "error": "no system `g1.0.9` in this galaxy",
+                            "progress": {"state": "done"}}])}):
+            with contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(NS["main"](["search", "--home", "TS", "1-0-9"]), 1)
+        self.assertIn("refused: no system", errors.getvalue())
+
+    def test_catalogue_and_searches_are_readable(self):
+        result = self.run_cli("catalogue")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("radius_km", result.stdout)
+        self.assertIn("min..max km", result.stdout)
+        self.assertIn("orbits.", result.stdout)
+        result = self.run_cli("searches")
+        self.assertIn("#5", result.stdout)
+        self.assertIn("kind=planet within_ly=50", result.stdout)
+        result = self.run_cli("--json", "catalogue")
+        self.assertEqual(json.loads(result.stdout)["kinds"][0]["id"], "planet")
 
     def test_watch_stops_on_interrupt(self):
         globals_ = NS["main"].__globals__

@@ -704,6 +704,60 @@ impl Sky {
         }
     }
 
+    /// Where a star lies, as `place` finds it, or `None` as soon as its descent
+    /// enters a box `keep` refuses (corner and size, in parsecs): a star
+    /// outside a search sphere is usually rejected in a few draws. Changes
+    /// nothing, so threads can share it; reports what to `complete` first.
+    pub(crate) fn try_place_if(
+        &self,
+        key: StarKey,
+        cell: Cell,
+        component: Component,
+        keep: impl Fn([f64; 3], f64) -> bool,
+    ) -> Result<Option<[f64; 3]>, Need> {
+        let mut rng = key.rng(":place");
+        let mut cell = cell;
+        let (mut min, mut size) = (cell.min_pc(), cell.size_pc());
+        while cell.level() < DEEPEST && size > resolution(&self.model, component, min, size) {
+            let weights = self
+                .masses
+                .get(&(cell, component))
+                .ok_or(Need::Masses(cell, component))?;
+            let total: f64 = weights.iter().sum();
+            if total <= 0.0 {
+                break;
+            }
+            let mut roll = rng.unit() * total;
+            let octant = weights
+                .iter()
+                .position(|&w| {
+                    roll -= w;
+                    roll < 0.0
+                })
+                .unwrap_or(7);
+            cell = cell.child(octant);
+            size /= 2.0;
+            min = corner(min, size, octant);
+            if !keep(min, size) {
+                return Ok(None);
+            }
+        }
+        let bound = *self
+            .bounds
+            .get(&(cell, component))
+            .ok_or(Need::Bound(cell, component))?;
+        Ok(Some(within(&self.model, component, cell, bound, &mut rng)))
+    }
+
+    /// Rough bytes held by the caches.
+    pub fn cache_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.counts.len() * (size_of::<Cell>() + size_of::<Counts>() + 16)
+            + self.masses.len() * (size_of::<(Cell, Component)>() + size_of::<[f64; 8]>())
+            + self.partial.len() * (size_of::<(Cell, Component)>() + 8 * 8 + 24)
+            + self.bounds.len() * (size_of::<(Cell, Component)>() + 8)
+    }
+
     /// A point by rejection in the cell a descent ended in.
     fn within_end(&mut self, end: Cell, component: Component, rng: &mut Rng) -> [f64; 3] {
         let model = &self.model;

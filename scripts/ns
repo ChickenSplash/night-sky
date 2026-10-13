@@ -61,6 +61,21 @@ def parser():
     shot.add_argument("--no-wait", action="store_true", help="return before the PNG is written")
     inspect = sub.add_parser("inspect", help="read the active top-left inspector, including facts and actions")
     inspect.add_argument("path", nargs="?", default="", help="facts, actions, title, object, or any nested path")
+    search = sub.add_parser(
+        "search", help="search for objects and print the results (see 'ns catalogue')",
+        description="Searches run in the app, from the camera unless --home or --origin is given. "
+        "Words without = are an exact designation or ID. Ctrl+C or --timeout cancels the search.",
+        epilog="example: ns search kind=planet planet_class=sub_neptune orbits.star_class=m within_ly=50")
+    search.add_argument("query", nargs="+", help="query words, e.g. kind=star star_class=white_dwarf limit=5")
+    search.add_argument("--home", action="store_true", help="search from home instead of the camera")
+    search.add_argument("--origin", help="search from x,y,z parsecs from the galactic centre")
+    search.add_argument("--work-cap", type=float, help="work cap in millions of units (default: the app's)")
+    search.add_argument("--show", action="store_true",
+                        help="send it to the in-game object browser (from the camera), then print its results")
+    search.add_argument("--no-wait", action="store_true", help="print the request ID and return at once")
+    search.add_argument("--timeout", type=interval, default=120.0, help="seconds to wait (default 120)")
+    sub.add_parser("searches", help="list the searches the app keeps, newest first, without results")
+    sub.add_parser("catalogue", help="what a search can name: kinds, families, properties and relationships")
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
     watch.add_argument("target", choices=("state", "perf"))
     watch.add_argument("path", nargs="?", default="", help="optional nested path")
@@ -130,6 +145,136 @@ def wait_for_file(path, timeout=5.0):
         time.sleep(0.05)
 
 
+def origin_value(args):
+    if args.home and args.origin:
+        raise RuntimeError("give --home or --origin, not both")
+    if args.home:
+        return "home"
+    if args.origin:
+        try:
+            values = [float(part) for part in args.origin.split(",")]
+        except ValueError:
+            values = []
+        if len(values) != 3:
+            raise RuntimeError("--origin is x,y,z in parsecs, e.g. 8200,0,20")
+        return values
+    return "camera"
+
+
+def wait_search(api_port, search_id, timeout):
+    """Polls a search until it stops running; cancels it on timeout or Ctrl+C."""
+    deadline = time.monotonic() + timeout
+    shown = time.monotonic()
+    try:
+        while True:
+            entry = request(api_port, f"/search/{search_id}")
+            progress = entry["progress"]
+            if entry.get("error") or progress["state"] != "running":
+                return entry
+            if time.monotonic() > deadline:
+                request(api_port, f"/search/{search_id}/cancel", b"")
+                raise RuntimeError(f"search #{search_id} still running after {timeout:g} s; cancelled")
+            if sys.stderr.isatty() and time.monotonic() - shown > 1:
+                shown = time.monotonic()
+                print(f"\r#{search_id} searched out to {progress['complete_to_ly']:.1f} ly, "
+                      f"{progress['stars'] / 1e6:.1f} M stars tried, {entry['result_count']} results  ",
+                      end="", file=sys.stderr, flush=True)
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        request(api_port, f"/search/{search_id}/cancel", b"")
+        print(f"\nns: search #{search_id} cancelled", file=sys.stderr)
+        raise
+    finally:
+        if sys.stderr.isatty():
+            print("\r\033[K", end="", file=sys.stderr, flush=True)
+
+
+def search_text(entry):
+    progress = entry["progress"]
+    origin = ", ".join(f"{x:.1f}" for x in entry["origin_pc"])
+    lines = [f"#{entry['id']} {progress['state']} · {entry['result_count']} results · "
+             f"{progress['elapsed_ms'] / 1000:.2f} s · from {origin} pc",
+             f"  {entry['query']}"]
+    if progress["state"] == "capped":
+        lines.append(f"  work cap reached: searched out to {progress['complete_to_ly']:.1f} ly, "
+                     "results nearer than that are exact")
+    rows = [(f"{r['distance_ly']:.2f} ly", r["kind"], r["name"], r["class"], r["system"])
+            for r in entry.get("results") or []]
+    if rows:
+        header = ("distance", "kind", "name", "class", "system")
+        widths = [max(len(row[i]) for row in rows + [header]) for i in range(4)]
+        for row in [header] + rows:
+            lines.append("  " + "  ".join(cell.ljust(w) for cell, w in zip(row, widths)) + "  " + row[4])
+    return "\n".join(lines)
+
+
+def run_search(args):
+    text = " ".join(args.query)
+    if args.show:
+        if args.home or args.origin or args.work_cap is not None:
+            raise RuntimeError("--show searches from the camera with the app's work cap")
+        before = max((entry["id"] for entry in request(args.port, "/search")), default=0)
+        request(args.port, "/command", ("search " + text).encode("utf-8"))
+        deadline = time.monotonic() + 5
+        while True:
+            shown = [e for e in request(args.port, "/search") if e["asker"] == "game" and e["id"] > before]
+            if shown:
+                search_id = shown[-1]["id"]
+                break
+            if time.monotonic() > deadline:
+                raise RuntimeError("the app accepted the search but has not started it")
+            time.sleep(0.1)
+    else:
+        body = {"query": text, "origin": origin_value(args)}
+        if args.work_cap is not None:
+            if args.work_cap <= 0:
+                raise RuntimeError("--work-cap must be above 0")
+            body["work_cap"] = int(args.work_cap * 1e6)
+        reply = request(args.port, "/search", json.dumps(body).encode("utf-8"))
+        search_id = reply["id"]
+        if args.no_wait:
+            return reply
+    if args.no_wait:
+        return {"id": search_id, "status": "running"}
+    entry = wait_search(args.port, search_id, args.timeout)
+    if entry.get("error"):
+        raise RuntimeError(f"search #{search_id} refused: {entry['error']}")
+    return entry
+
+
+def catalogue_text(catalogue):
+    lines = ["kinds (kind=)"]
+    for kind in catalogue["kinds"]:
+        lines.append(f"  {kind['id']:<14} {kind['label']} · family {kind['family']}")
+    lines.append("families (family=)")
+    for family in catalogue["families"]:
+        lines.append(f"  {family['id']:<14} {family['label']}")
+    lines.append("properties")
+    for prop in catalogue["properties"]:
+        values = prop["values"]
+        if values["type"] == "choice":
+            shape = ",".join(option[0] for option in values["options"])
+        elif values["type"] == "flag":
+            shape = "yes|no"
+        else:
+            shape = "min..max" + (f" {prop['unit']}" if prop.get("unit") else "")
+        lines.append(f"  {prop['id']:<17} {prop['label']} · {shape} · for {', '.join(prop['kinds'])}")
+    lines.append("relationships (prefix.property=)")
+    for relation in catalogue["relations"]:
+        lines.append(f"  {relation['id'] + '.':<17} {relation['label']} · "
+                     f"{', '.join(relation['subjects'])} -> {', '.join(relation['targets'])}")
+    lines.append("syntax")
+    lines.extend(f"  {line}" for line in catalogue["syntax"])
+    return "\n".join(lines)
+
+
+def searches_text(entries):
+    return "\n".join(
+        f"#{e['id']:<4} {e['asker']:<4} {('refused' if e.get('error') else e['progress']['state']):<9} "
+        f"{e['result_count']:>4} results {e['progress']['elapsed_ms'] / 1000:>7.2f} s  {e['query']}"
+        for e in entries) or "no searches yet"
+
+
 def lists(state):
     return [{"id": entry["id"], "name": entry["name"], "tasks": entry["tasks"],
              "systems": [system["star"] for system in entry["systems"]]} for entry in state]
@@ -158,6 +303,19 @@ def main(argv=None):
             if target not in ("state", "perf"):
                 cli.error("keys path must start with state or perf")
             path = endpoint(target, nested, {"keys": 1})
+        elif args.action == "search":
+            entry = run_search(args)
+            print(json.dumps(entry, separators=(",", ":"), ensure_ascii=False) if args.json
+                  else search_text(entry) if "progress" in entry
+                  else json.dumps(entry, indent=2), flush=True)
+            return 0
+        elif args.action in ("searches", "catalogue"):
+            value = request(args.port, "/search" if args.action == "searches" else "/catalogue")
+            if args.json:
+                output(value, True)
+            else:
+                print(searches_text(value) if args.action == "searches" else catalogue_text(value), flush=True)
+            return 0
         elif args.action == "lists":
             output(lists(request(args.port, endpoint("state", "lists"))), args.json)
             return 0

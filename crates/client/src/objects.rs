@@ -2,30 +2,9 @@
 use std::borrow::Cow;
 
 use bevy::math::DVec3;
-use serde::{Deserialize, Serialize};
 use space_shared::{Galaxy, Planet, StarSystem};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ObjectRef {
-    Galaxy,
-    List {
-        id: String,
-    },
-    /// By its system's key, a star system as a whole: its star, or a multiple
-    /// system's outermost barycentre. By a member ID (`key#B`), one star of a
-    /// multiple system.
-    Star {
-        id: String,
-    },
-    /// A pair within a triple or quadruple system, such as its close pair.
-    Barycentre {
-        id: String,
-    },
-    Planet {
-        id: String,
-    },
-}
+pub use space_simulation::objects::ObjectRef;
 
 /// Planet IDs encode their host, and so their system's key, including for
 /// planets on list pages.

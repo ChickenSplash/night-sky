@@ -144,7 +144,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 21] = [
+pub const USAGE: [Usage; 24] = [
     Usage {
         name: "pick_star",
         fields: &["id"],
@@ -250,6 +250,21 @@ pub const USAGE: [Usage; 21] = [
         fields: &["switch", "on"],
         about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars or split_multiples; true or false",
     },
+    Usage {
+        name: "search",
+        fields: &["query"],
+        about: "Search from the camera for the object browser, in ns search text: search kind=planet orbits.star_class=m within_ly=50",
+    },
+    Usage {
+        name: "clear_search",
+        fields: &[],
+        about: "Cancel and clear the object browser's search",
+    },
+    Usage {
+        name: "set_search",
+        fields: &["threads", "work_cap_millions"],
+        about: "Debug: search threads (1 to 64) and work cap in millions of units (1 to 10000); either may be left out",
+    },
 ];
 
 /// `name <field> <field>`, as help shows it.
@@ -277,6 +292,20 @@ fn parse_unchecked(line: &str) -> Result<UiCommand, String> {
     let Some((name, args)) = words.split_first() else {
         return Err("Empty command".into());
     };
+    // The rest of the line is the query, `=` signs and all.
+    if name.value == "search"
+        && name.field.is_none()
+        && let Some(query) = line.strip_prefix("search")
+    {
+        let query = query.trim();
+        let query = query
+            .strip_prefix('"')
+            .and_then(|q| q.strip_suffix('"'))
+            .unwrap_or(query);
+        return Ok(UiCommand::Search {
+            query: query.into(),
+        });
+    }
     let usage = USAGE
         .iter()
         .find(|u| u.name == name.value && name.field.is_none())

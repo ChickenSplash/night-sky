@@ -61,6 +61,9 @@ fn every_usage_parses() {
                 "switch" => "bloom",
                 "presentation_mode" => "table",
                 "view" => "inside",
+                "threads" => "4",
+                "work_cap_millions" => "100",
+                "query" => "kind=planet within_ly=20",
                 _ => "id",
             })
             .collect();
@@ -191,4 +194,40 @@ fn out_of_range_values_are_refused_not_clamped() {
     ] {
         assert!(parse(line).is_ok(), "{line}");
     }
+}
+
+#[test]
+fn search_takes_the_rest_of_the_line_and_explains_refusals() {
+    let query = "kind=planet orbits.star_class=m within_ly=50";
+    for line in [
+        format!("search {query}"),
+        format!("search \"{query}\""),
+        format!(r#"{{"type":"search","query":"{query}"}}"#),
+    ] {
+        assert_eq!(
+            parse(&line).unwrap(),
+            UiCommand::Search {
+                query: query.into()
+            },
+            "{line}"
+        );
+    }
+    assert!(
+        parse("search colour=red")
+            .unwrap_err()
+            .contains("unknown property `colour`")
+    );
+    assert_eq!(
+        parse("set_search work_cap_millions=5").unwrap(),
+        UiCommand::SetSearch {
+            threads: None,
+            work_cap_millions: Some(5.0)
+        }
+    );
+    assert!(parse("set_search").unwrap_err().contains("Give threads"));
+    assert!(
+        parse("set_search threads=0")
+            .unwrap_err()
+            .contains("threads must be 1 to 64")
+    );
 }

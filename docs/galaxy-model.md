@@ -151,6 +151,44 @@ Paths below are relative to the repository root, or to the named crate's
   hold tens of millions of stars at the galactic centre. The perf tab's
   nearest star section times the lookups.
 
+## Object search
+
+- `space_simulation::search` (plan and remaining work:
+  [object search plan](object-search-plan.md)). `registry` declares every
+  kind (`star`, `system`, `planet`; later kinds are registered but have no
+  source) and property once; `query::Query` is the serde, versioned query,
+  with one text syntax (`Query::parse`/`to_text`) and `check` refusals with
+  reasons. A `SearchRequest` adds the origin (parsecs, fixed when sent) and a
+  work cap; results are `objects::ObjectRef`s with a few display facts.
+- Relationships (`registry::RELATIONS`, text `orbits.star_class=m`,
+  `system.planet_class=gas_giant`, `system.kind=planet`): all of one
+  relationship's filters must hold for the same related object. `orbits`
+  leads from a planet to its host star, or to each star of the pair it
+  orbits (`Hosted::host_letters`), so a pair matches when either star does.
+  `system` leads to every other star and planet of the same system, and to
+  the system itself (`system.multiple=yes`), never to the object itself.
+- `Search` (`search/engine.rs`) has its own `Sky`, never the streamed one, so
+  results do not depend on the magnitude limit or streaming. Coarse cells
+  (level 12, 32 pc, and up) come off a nearest-first queue; each one's
+  subtree is walked depth first. Stars are placed by `Sky::try_place_if`,
+  which drops a star as soon as its descent leaves the sphere, before its
+  light. Only stars inside the sphere and nearer than the current last
+  result have their system generated (`tiered_stars`, or `tiered_bodies`
+  when planets are needed). The search stops once `limit` results are
+  nearer than the next queued cell.
+- Work is counted in stars tried plus 32 per cell (about 0.2 µs each
+  natively), never in time, so results are identical however a search is
+  sliced or threaded (tested, with a brute force over every overlapping cell
+  near home). A capped search reports `complete_to_ly`: results nearer than
+  that are exact. The cache is trimmed to coarse cells ahead of the walk and
+  the current branch, so it stays near 100 MB even at 1,000 ly.
+- `SearchService` (native only) runs requests in turn on one thread, a
+  million work units per slice, with several threads for large cells. The
+  client's `search.rs` owns it; requests come from `UiCommand::Search` and
+  the developer API (`ns search`), described in `AGENTS.md`.
+- Measure with `cargo test -p space-simulation --release search_probe --
+  --ignored --nocapture`; results are in the plan.
+
 ## Benchmarks
 
 - The native debug window's **core load test** (`tools` tab,

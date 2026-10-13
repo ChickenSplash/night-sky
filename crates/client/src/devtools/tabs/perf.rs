@@ -17,7 +17,7 @@ pub fn perf(
     metrics: &StreamMetrics,
     field: &Starfield,
     diagnostics: Option<&DiagnosticsStore>,
-    debug: &RenderDebug,
+    (debug, searches): (&RenderDebug, &crate::search::Searches),
     out: &mut Vec<UiCommand>,
 ) {
     let recent: Vec<f32> = frames.iter().rev().take(60).copied().collect();
@@ -483,6 +483,9 @@ pub fn perf(
             ],
         );
     }
+    if terminal::section(ui, "search") {
+        search(ui, searches, out);
+    }
     if terminal::section(ui, "gpu passes") {
         gpu_passes(ui, diagnostics, mean);
     }
@@ -496,6 +499,99 @@ pub fn perf(
         terminal::note(
             ui,
             "For A/B tests; reset on restart. Freeze first to hold the star count still. Without pixel shading, points still run the vertex shader, separating vertex cost from fill.",
+        );
+    }
+}
+
+/// Recent object searches' counters, newest first, and the debug settings.
+fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<UiCommand>) {
+    let recent = searches.recent();
+    let labels: Vec<String> = recent
+        .iter()
+        .map(|e| format!("#{} {:?}", e.id, e.asker).to_lowercase())
+        .collect();
+    let details: Vec<String> = recent
+        .iter()
+        .map(|e| {
+            let p = &e.progress;
+            let mut text = format!(
+                "{} · searched out to {:.1} ly · {} stars tried, {} rejected early, {} placed · {} systems tested · {} cells · cache {:.0} MB",
+                e.query,
+                p.complete_to_ly,
+                si(p.stars as f64),
+                si(p.rejected_early as f64),
+                si(p.placed as f64),
+                grouped(p.evaluated as usize),
+                grouped(p.cells as usize),
+                p.cache_bytes as f64 / 1e6,
+            );
+            if let Some(error) = &e.error {
+                text = format!("{} · {error}", e.query);
+            }
+            text
+        })
+        .collect();
+    let mut rows: Vec<(&str, String, Option<&str>)> = vec![
+        (
+            "threads",
+            searches.threads.to_string(),
+            Some(
+                "Threads sharing a large cell's stars natively; the browser will have one. The star loader keeps its own three quarters of the machine.",
+            ),
+        ),
+        (
+            "work cap",
+            format!("{} M units", searches.work_cap / 1_000_000),
+            Some(
+                "Work a new request may do: stars tried plus 32 per cell, about 0.2 µs each. A request that reaches it stops with \"searched out to\" and exact results within that radius.",
+            ),
+        ),
+    ];
+    rows.extend(
+        recent
+            .iter()
+            .zip(&labels)
+            .zip(&details)
+            .map(|((e, label), detail)| {
+                (
+                    label.as_str(),
+                    format!(
+                        "{} · {} results · {:.2} s",
+                        e.state(),
+                        e.result_count,
+                        e.progress.elapsed_ms / 1e3
+                    ),
+                    Some(detail.as_str()),
+                )
+            }),
+    );
+    terminal::facts_with_details(ui, "debug-search", &rows);
+    ui.horizontal_wrapped(|ui| {
+        let threads = searches.threads;
+        let cap = (searches.work_cap / 1_000_000) as f64;
+        let mut set = |threads: Option<usize>, work_cap_millions: Option<f64>| {
+            out.push(UiCommand::SetSearch {
+                threads,
+                work_cap_millions,
+            })
+        };
+        if terminal::button(ui, "threads -") && threads > *crate::search::THREADS.start() {
+            set(Some(threads - 1), None);
+        }
+        if terminal::button(ui, "threads +") && threads < *crate::search::THREADS.end() {
+            set(Some(threads + 1), None);
+        }
+        if terminal::button(ui, "cap ÷10") {
+            set(None, Some((cap / 10.0).max(1.0)));
+        }
+        if terminal::button(ui, "cap ×10") {
+            set(None, Some((cap * 10.0).min(10_000.0)));
+        }
+    });
+    if recent.is_empty() {
+        terminal::note(
+            ui,
+            "No searches yet: type search kind=planet within_ly=20 in the terminal tab, or use ns search.",
         );
     }
 }

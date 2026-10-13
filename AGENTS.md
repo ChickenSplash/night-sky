@@ -26,6 +26,8 @@ design notes into every session:
   diffuse glow and navigation.
 - [Realistic rendering](docs/realistic-rendering.md): body lighting, photometry,
   manual exposure, compression, HDR, point spread, sprites and cameras.
+- [Object search plan](docs/object-search-plan.md): planned object registry,
+  query model, search engine, CLI and browser. Read before starting that work.
 - [Documentation index](docs/README.md): controls, development setup, backend,
   logs, project structure and checks.
 - Paths in these notes are repository-relative or relative to a named crate's
@@ -94,7 +96,7 @@ design notes into every session:
   its star first, then following, like a second click). Stars are reachable
   by ID if mapped, visited or streamed (`galaxy_nav::reachable`/`visit_star`);
   unreachable actions are hidden, not disabled. New object kinds should extend
-  `ObjectRef`, hierarchy builders and inspector resolution (moons do not yet
+  `ObjectRef` (`space_simulation::objects`, re-exported by `objects`), the search registry, hierarchy builders and inspector resolution (moons do not yet
   exist). `ObjectRef::Star` by a system's key is the system as a whole: its
   star, or a multiple system's outermost barycentre, labelled with all its
   letters (`System 2 AB`). Below it, both trails show the planet's lineage
@@ -346,6 +348,30 @@ design notes into every session:
    their URL and no app commands; reading the CLI never opens them. The
    inspector commands are read-only, do not select or move the camera, and
    use the existing snapshot refresh rate.
+   Object search (`search.rs`, engine in `space_simulation::search`, see the
+   [object search plan](docs/object-search-plan.md)): `Searches` owns a
+   `native::Hub`, shared with the HTTP thread, which keeps the last 32
+   requests by ID and runs them on `SearchService`'s thread (a quarter of
+   the machine's threads by default; the star loader has three quarters).
+   `UiCommand::Search { query }` (typed `search <ns search text>`, the rest of
+   the line) searches from the camera and becomes `Searches::shown`, the
+   object browser's request, cancelling the previous one; `clear_search`
+   clears it; `set_search threads=<n> work_cap_millions=<m>` changes the
+   debug settings. The browser refuses `search` until its search worker
+   exists. `GET /catalogue` lists kinds, families, properties, relationships
+   and the syntax; `POST /search` takes query text or JSON
+   `{"query", "origin": "camera"|"home"|[x,y,z] pc, "work_cap"}` and replies
+   202 with an ID (400 with the reason if refused); `GET /search` lists kept
+   requests without results, `GET /search/<id>` gives one with results and
+   progress, `POST /search/<id>/cancel` stops it. API requests never change
+   `shown`. `ns search <words>` (`--home`, `--origin x,y,z`, `--work-cap`,
+   `--timeout`, `--json`) waits and prints a table, cancelling on Ctrl+C or
+   timeout; `ns search --show` sends `search` instead and follows the game
+   request; `ns searches` and `ns catalogue` list. Requests log their start,
+   refusal and end (state, counts, time) under the `search` target; the
+   `perf` tab's `search` section shows each request's counters and the
+   settings, the `state` tab's `search` heading the browser's request, and
+   the snapshot's `search` object both.
    `scripts/test-ns.py` tests CLI transport against an ephemeral mock server
    and runs in `./scripts/check.sh`; it never drives the live app.
 - `./scripts/dev-web.sh`: web build plus server with `index.html` and

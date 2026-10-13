@@ -3,6 +3,7 @@
 use super::snapshot::{Published, Snapshot};
 use crate::command_line::{Source, Typed};
 use crate::scene::{CameraPose, CameraRig};
+use crate::search::{Asker, native::Hub};
 use crate::stars::stream::Starfield;
 use crate::{Clock, Navigation, Universe};
 use bevy::prelude::*;
@@ -68,7 +69,12 @@ pub fn install(app: &mut App) {
         }
     };
     let shared = Arc::new(Mutex::new(None));
-    match start(server, shared.clone(), REPLY_WAIT) {
+    let hub = app
+        .world()
+        .resource::<crate::search::Searches>()
+        .hub
+        .clone();
+    match start(server, shared.clone(), hub, REPLY_WAIT) {
         Ok(api) => {
             app.world_mut().resource_mut::<Snapshot>().http = Some(shared);
             app.insert_resource(api).add_systems(PreUpdate, receive);
@@ -80,7 +86,12 @@ pub fn install(app: &mut App) {
     }
 }
 
-fn start(server: Server, shared: SharedState, wait: Duration) -> std::io::Result<HttpApi> {
+fn start(
+    server: Server,
+    shared: SharedState,
+    hub: Arc<Hub>,
+    wait: Duration,
+) -> std::io::Result<HttpApi> {
     let (sender, receiver) = mpsc::sync_channel(QUEUE_LIMIT);
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = stop.clone();
@@ -90,7 +101,7 @@ fn start(server: Server, shared: SharedState, wait: Duration) -> std::io::Result
         .spawn(move || {
             while !stopped.load(Ordering::Relaxed) {
                 match server.recv_timeout(Duration::from_millis(100)) {
-                    Ok(Some(request)) => handle(request, &shared, &sender, port, wait),
+                    Ok(Some(request)) => handle(request, &shared, &hub, &sender, port, wait),
                     Ok(None) => {}
                     Err(error) => {
                         warn!("Developer API listener stopped: {error}");
@@ -162,6 +173,7 @@ fn header<'a>(request: &'a Request, name: &'static str) -> Option<&'a str> {
 fn handle(
     mut request: Request,
     shared: &SharedState,
+    hub: &Hub,
     queue: &mpsc::SyncSender<Job>,
     port: u16,
     wait: Duration,
@@ -293,14 +305,145 @@ fn handle(
                 ),
             }
         }
-        _ if snapshot_route(&url) || commands_route(&url) => {
+        (&Method::Get, "/catalogue") => respond(request, 200, catalogue()),
+        (&Method::Get, "/search") => {
+            hub.poll(true);
+            respond(request, 200, json!(hub.summaries(true).unwrap_or_default()))
+        }
+        (&Method::Post, "/search") => {
+            let body = match read_body(&mut request) {
+                Ok(body) => body,
+                Err((status, error)) => {
+                    respond(request, status, json!({"error": error}));
+                    return;
+                }
+            };
+            let camera = || {
+                let published = shared.lock().ok().and_then(|cached| cached.clone())?;
+                serde_json::from_value(published.state["camera"]["position_pc"].clone()).ok()
+            };
+            let submitted = search_request(body.trim(), camera, hub.work_cap()).and_then(
+                |(query, origin, cap)| {
+                    let text = query.to_text();
+                    let id = hub.submit(Asker::Api, query, origin, cap)?;
+                    Ok(json!({"id": id, "status": "running", "query": text,
+                        "origin_pc": origin, "work_cap": cap}))
+                },
+            );
+            match submitted {
+                Ok(body) => respond(request, 202, body),
+                Err(error) => respond(request, 400, json!({"error": error})),
+            }
+        }
+        (&Method::Get, path) if path.starts_with("/search/") => {
+            match path["/search/".len()..]
+                .parse()
+                .ok()
+                .and_then(|id| hub.get(id))
+            {
+                Some(entry) => respond(request, 200, json!(entry)),
+                None => respond(
+                    request,
+                    404,
+                    json!({"error": "Unknown or expired search; GET /search lists those kept"}),
+                ),
+            }
+        }
+        (&Method::Post, path) if path.starts_with("/search/") && path.ends_with("/cancel") => {
+            let id = path["/search/".len()..path.len() - "/cancel".len()].parse();
+            match id.ok().and_then(|id| hub.get(id)) {
+                Some(entry) => {
+                    hub.cancel(entry.id);
+                    respond(
+                        request,
+                        202,
+                        json!({"id": entry.id, "status": "cancelling"}),
+                    )
+                }
+                None => respond(request, 404, json!({"error": "Unknown or expired search"})),
+            }
+        }
+        _ if snapshot_route(&url) || commands_route(&url) || url.starts_with("/search/") => {
             respond(request, 405, json!({"error": "Method not allowed"}))
         }
-        (_, "/health" | "/command" | "/screenshot") => {
+        (_, "/health" | "/command" | "/screenshot" | "/catalogue" | "/search") => {
             respond(request, 405, json!({"error": "Method not allowed"}))
         }
         _ => respond(request, 404, json!({"error": "Unknown endpoint"})),
     }
+}
+
+/// The registry, for discovering what a query can say.
+fn catalogue() -> Value {
+    use space_simulation::search::query::{
+        DEFAULT_LIMIT, DEFAULT_RADIUS_LY, MAX_LIMIT, MAX_RADIUS_LY,
+    };
+    let mut body = json!(space_simulation::search::registry::catalogue());
+    body["syntax"] = json!([
+        "kind=<kind>[,<kind>] or family=<family>",
+        "<property>=<min>..<max> (open ends allowed), =<a>,<b> for choices, =yes|no for flags",
+        "<relation>.<property>=... and <relation>.kind=<kind>: all of one relation's filters hold for the same related object",
+        "within_ly=<radius> (from the camera) or system=<system id>",
+        "limit=<n>; sort=<property> or -<property> within one system only",
+        "words without = are an exact designation or ID: TS 1abc-2-34 (AB) b",
+    ]);
+    body["limits"] = json!({"default_limit": DEFAULT_LIMIT, "max_limit": MAX_LIMIT,
+        "default_within_ly": DEFAULT_RADIUS_LY, "max_within_ly": MAX_RADIUS_LY});
+    body
+}
+
+/// A search body: query text, or JSON `{"query": text or query object,
+/// "origin": "camera" | "home" | [x, y, z] parsecs, "work_cap": units}`.
+fn search_request(
+    body: &str,
+    camera: impl FnOnce() -> Option<[f64; 3]>,
+    default_cap: u64,
+) -> Result<(space_simulation::search::Query, [f64; 3], u64), String> {
+    use space_simulation::search::Query;
+    let (query, origin, cap) = if body.starts_with('{') {
+        let value: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+        if let Some(key) = value.as_object().and_then(|o| {
+            o.keys()
+                .find(|k| !["query", "origin", "work_cap"].contains(&k.as_str()))
+        }) {
+            return Err(format!(
+                "unknown field `{key}`; give query, origin and work_cap"
+            ));
+        }
+        let query = match &value["query"] {
+            Value::String(text) => Query::parse(text)?,
+            object @ Value::Object(_) => {
+                serde_json::from_value(object.clone()).map_err(|e| e.to_string())?
+            }
+            _ => return Err("`query` must be text or a query object".into()),
+        };
+        let cap = match &value["work_cap"] {
+            Value::Null => default_cap,
+            cap => cap
+                .as_u64()
+                .filter(|&cap| cap > 0)
+                .ok_or("`work_cap` must be a whole number above 0")?,
+        };
+        (query, value["origin"].clone(), cap)
+    } else {
+        (Query::parse(body)?, Value::Null, default_cap)
+    };
+    // The query's own problems first: they matter wherever it is sent from.
+    query.check()?;
+    let origin = match origin {
+        Value::Null => camera()
+            .ok_or("No camera position yet (waiting for the first app snapshot); give an origin")?,
+        Value::String(name) if name == "camera" => camera()
+            .ok_or("No camera position yet (waiting for the first app snapshot); give an origin")?,
+        Value::String(name) if name == "home" => {
+            space_simulation::galaxy::GalaxyModel::milky_way().home_pc
+        }
+        origin => serde_json::from_value::<[f64; 3]>(origin)
+            .ok()
+            .filter(|p| p.iter().all(|x| x.is_finite()))
+            .ok_or("`origin` must be \"camera\", \"home\" or [x, y, z] parsecs")?,
+    };
+    Ok((query, origin, cap))
 }
 
 fn commands_route(url: &str) -> bool {
@@ -478,6 +621,153 @@ fn respond(request: Request, status: u16, body: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hub() -> Arc<Hub> {
+        Arc::new(Hub::new(2))
+    }
+
+    #[test]
+    fn search_bodies_are_text_or_json_with_an_origin() {
+        let camera = || Some([1.0, 2.0, 3.0]);
+        let (query, origin, cap) = search_request("kind=star within_ly=5", camera, 9).unwrap();
+        assert_eq!(query.to_text(), "kind=star within_ly=5");
+        assert_eq!((origin, cap), ([1.0, 2.0, 3.0], 9));
+        let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
+        let (query, origin, cap) = search_request(
+            r#"{"query":{"kinds":["planet"],"scope":{"within":{"radius_ly":20}}},"origin":"home","work_cap":7}"#,
+            || None,
+            9,
+        )
+        .unwrap();
+        assert_eq!(query.to_text(), "kind=planet within_ly=20");
+        assert_eq!((origin, cap), (home, 7));
+        let (_, origin, _) =
+            search_request(r#"{"query":"kind=star","origin":[4,5,6]}"#, || None, 9).unwrap();
+        assert_eq!(origin, [4.0, 5.0, 6.0]);
+        for (body, error) in [
+            ("kind=star", "No camera position"),
+            ("colour=red", "unknown property"),
+            (
+                r#"{"query":"kind=star","origin":"mars"}"#,
+                "`origin` must be",
+            ),
+            (
+                r#"{"query":"kind=star","origin":[1,2]}"#,
+                "`origin` must be",
+            ),
+            (
+                r#"{"query":"kind=star","from":"home"}"#,
+                "unknown field `from`",
+            ),
+            (r#"{"query":3}"#, "must be text or a query object"),
+            (
+                r#"{"query":"kind=star","origin":"home","work_cap":0}"#,
+                "above 0",
+            ),
+        ] {
+            let refused = search_request(body, || None, 9).unwrap_err();
+            assert!(refused.contains(error), "{body}: {refused}");
+        }
+    }
+
+    #[test]
+    fn search_endpoints_submit_read_cancel_and_refuse() {
+        let server = Server::http((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let api = start(server, Arc::new(Mutex::new(None)), hub(), REPLY_WAIT).unwrap();
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let url = format!("http://127.0.0.1:{port}");
+        let post = |path: &str, body: &str| {
+            let response = client
+                .post(format!("{url}{path}"))
+                .header("X-Night-Sky-Client", "cli")
+                .body(body.to_owned())
+                .send()
+                .unwrap();
+            (
+                response.status().as_u16(),
+                response.json::<Value>().unwrap(),
+            )
+        };
+        let get = |path: &str| {
+            let response = client.get(format!("{url}{path}")).send().unwrap();
+            (
+                response.status().as_u16(),
+                response.json::<Value>().unwrap(),
+            )
+        };
+        let (status, catalogue) = get("/catalogue");
+        assert_eq!(status, 200);
+        assert!(catalogue["relations"].as_array().unwrap().len() >= 2);
+        assert!(
+            catalogue["kinds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|k| k["source"] != "none")
+        );
+        let (status, body) = post("/search", "kind=star within_ly=5");
+        assert_eq!(status, 400, "no snapshot, so no camera");
+        assert!(body["error"].as_str().unwrap().contains("give an origin"));
+        let (status, body) = post(
+            "/search",
+            r#"{"query":"kind=star within_ly=10","origin":"home"}"#,
+        );
+        assert_eq!(status, 202, "{body}");
+        let id = body["id"].as_u64().unwrap();
+        let entry = loop {
+            let (status, entry) = get(&format!("/search/{id}"));
+            assert_eq!(status, 200);
+            if entry["progress"]["state"] != "running" {
+                break entry;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(entry["progress"]["state"], "done");
+        assert_eq!(entry["asker"], "api");
+        assert!(!entry["results"].as_array().unwrap().is_empty());
+        assert_eq!(entry["results"][0]["kind"], "star");
+        let (_, list) = get("/search");
+        assert_eq!(list[0]["id"], id);
+        assert!(list[0].get("results").is_none());
+        let (status, body) = post("/search", r#"{"query":"within_ly=50","origin":[0,0,0]}"#);
+        assert_eq!(status, 202);
+        let centre = body["id"].as_u64().unwrap();
+        assert_eq!(post(&format!("/search/{centre}/cancel"), "").0, 202);
+        assert_eq!(get("/search/999").0, 404);
+        assert_eq!(get("/search/x").0, 404);
+        assert_eq!(post("/search/999/cancel", "").0, 404);
+        let (status, body) = post("/search", "orbits.radius_km=1..");
+        assert_eq!(status, 400);
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("applies to planet, not star")
+        );
+        assert_eq!(
+            client
+                .post(format!("{url}/search"))
+                .body("kind=star")
+                .send()
+                .unwrap()
+                .status(),
+            403
+        );
+        assert_eq!(
+            client
+                .delete(format!("{url}/catalogue"))
+                .send()
+                .unwrap()
+                .status(),
+            405
+        );
+        drop(api);
+    }
 
     #[test]
     fn discovery_uses_the_shared_command_catalogue_and_snapshot_children() {
@@ -692,7 +982,7 @@ mod tests {
             })),
             history: Arc::from([frame(1), frame(2)]),
         })));
-        let api = Arc::new(start(server, shared, REPLY_WAIT).unwrap());
+        let api = Arc::new(start(server, shared, hub(), REPLY_WAIT).unwrap());
         // Stands in for the main thread: refuses `jump missing`, runs the rest.
         let done = Arc::new(AtomicBool::new(false));
         let main_thread = {
@@ -832,7 +1122,13 @@ mod tests {
     fn a_stalled_main_thread_fills_the_queue_then_refuses_commands() {
         let server = Server::http((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
-        let api = start(server, Arc::new(Mutex::new(None)), Duration::from_millis(1)).unwrap();
+        let api = start(
+            server,
+            Arc::new(Mutex::new(None)),
+            hub(),
+            Duration::from_millis(1),
+        )
+        .unwrap();
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
             .timeout(Duration::from_secs(5))
@@ -861,7 +1157,7 @@ mod tests {
     fn screenshot_endpoint_reports_scheduling_not_finished_pngs() {
         let server = Server::http((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
-        let api = start(server, Arc::new(Mutex::new(None)), REPLY_WAIT).unwrap();
+        let api = start(server, Arc::new(Mutex::new(None)), hub(), REPLY_WAIT).unwrap();
         let request = std::thread::spawn(move || {
             reqwest::blocking::Client::builder()
                 .no_proxy()

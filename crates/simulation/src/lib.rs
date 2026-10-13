@@ -2,7 +2,11 @@ pub mod cells;
 pub mod galaxy;
 pub mod light;
 pub mod multiple;
+pub mod objects;
 pub mod population;
+pub mod search;
+#[cfg(test)]
+mod search_probe;
 mod star;
 pub mod stream;
 pub mod stream_wire;

@@ -132,6 +132,7 @@ type Camera<'w> = (
     Res<'w, CameraVelocity>,
 );
 type Rendering<'w> = (
+    Res<'w, crate::search::Searches>,
     Res<'w, Starfield>,
     ResMut<'w, StreamMetrics>,
     Res<'w, RenderDebug>,
@@ -157,7 +158,8 @@ pub fn draw(
     let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (starfield, mut metrics, debug, diagnostics, mut core_load, mut gpu_test) = rendering;
+    let (searches, starfield, mut metrics, debug, diagnostics, mut core_load, mut gpu_test) =
+        rendering;
     metrics.instrumentation_latest.debug_window_ms = 0.0;
     if tools.frames.len() == FRAMES {
         tools.frames.pop_front();
@@ -213,12 +215,19 @@ pub fn draw(
                             &metrics,
                             &starfield,
                             diagnostics.as_deref(),
-                            &debug,
+                            (&debug, &searches),
                             &mut out,
                         ),
                         Tab::Render => render(ui, &nav, &mut out),
                         Tab::Controls => controls(ui),
-                        Tab::State => state(ui, &universe, &nav, &clock, &rig, &pose, &velocity),
+                        Tab::State => state(
+                            ui,
+                            &universe,
+                            &nav,
+                            &clock,
+                            (&rig, &pose, &velocity),
+                            &searches,
+                        ),
                         _ => {
                             report = tools_tab(
                                 ui,

@@ -877,7 +877,11 @@ mod tests {
         assert_eq!(system.pages().len(), system.page_stars.len());
         assert_eq!(
             system.planets.len() as u32,
-            system.page_stars.iter().map(|s| planet_count(&s.id)).sum()
+            system
+                .page_stars
+                .iter()
+                .map(|s| planet_count(&s.id))
+                .sum::<u32>()
         );
     }
 

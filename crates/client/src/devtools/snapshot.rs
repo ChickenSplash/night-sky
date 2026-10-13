@@ -60,7 +60,11 @@ pub(super) fn publish(
     field: Res<Starfield>,
     scene: (Res<Universe>, Res<Navigation>, Res<Clock>),
     camera: (Res<CameraPose>, Res<CameraRig>),
-    render: (Res<RenderDebug>, Option<Res<DiagnosticsStore>>),
+    render: (
+        Res<RenderDebug>,
+        Option<Res<DiagnosticsStore>>,
+        Res<crate::search::Searches>,
+    ),
     time: Res<Time>,
 ) {
     let record_start = Instant::now();
@@ -86,7 +90,7 @@ pub(super) fn publish(
     let snapshot_start = Instant::now();
     let (universe, nav, clock) = scene;
     let (pose, rig) = camera;
-    let (debug, diagnostics) = render;
+    let (debug, diagnostics, searches) = render;
     let trail = crate::ui::breadcrumb::trail(&nav, &universe.0);
     let selection_trail = crate::ui::breadcrumb::selection_trail(&nav, &universe.0);
     let inspection =
@@ -98,10 +102,7 @@ pub(super) fn publish(
         &field,
         &mut snapshot.inspector,
     );
-    let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
-    let position_pc = bevy::math::DVec3::from_array(home)
-        + rig.galactic_ly(&pose)
-            * (space_simulation::LY_METRES / space_simulation::galaxy::PC_METRES);
+    let position_pc = crate::search::camera_pc(&rig, &pose);
     let gpu: Vec<Value> = diagnostics
         .iter()
         .flat_map(|store| store.iter())
@@ -144,9 +145,14 @@ pub(super) fn publish(
         "fov_deg": nav.fov_deg, "magnitude": nav.magnitude,
         "stream": metrics.caption, "stream_stars": field.stars,
         "camera": {
-            "placed": rig.placed(), "position_pc": position_pc.to_array(),
+            "placed": rig.placed(), "position_pc": position_pc,
             "rotation_xyzw": rig.rotation().to_array(), "flying": rig.flying(),
             "flight_progress": rig.progress(), "render_scale_metres": pose.render_scale(),
+        },
+        // Requests without results: `GET /search/<id>` has those.
+        "search": {
+            "shown": searches.shown, "threads": searches.threads,
+            "work_cap": searches.work_cap, "requests": searches.recent(),
         },
         "debug": {
             "freeze_stream": debug.freeze_stream, "galactic_points": debug.galactic_points,
@@ -273,6 +279,7 @@ mod tests {
         .insert_resource(CameraPose::default())
         .insert_resource(CameraRig::default())
         .insert_resource(RenderDebug::default())
+        .init_resource::<crate::search::Searches>()
         .insert_resource(Time::<()>::default())
         .add_systems(Last, publish);
         app.update();
@@ -281,6 +288,9 @@ mod tests {
         assert_eq!(published.state["performance"]["history"], json!([]));
         let state = published.full();
         assert_eq!(state["schema_version"], 1);
+        assert_eq!(state["search"]["shown"], Value::Null);
+        assert!(state["search"]["requests"].is_array());
+        assert!(state["search"]["threads"].as_u64().unwrap() >= 1);
         let galaxy = &app.world().resource::<Universe>().0;
         assert_eq!(state["lists"][0]["id"], galaxy.systems[0].id);
         assert_eq!(

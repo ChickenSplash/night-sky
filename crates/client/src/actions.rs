@@ -85,6 +85,20 @@ pub enum UiCommand {
         switch: crate::render::debug::DebugSwitch,
         on: bool,
     },
+    /// Search from the camera and show the request in the object browser,
+    /// replacing the one it shows (`search.rs`). In `ns search` text.
+    Search {
+        query: String,
+    },
+    /// Cancel and clear the object browser's request.
+    ClearSearch,
+    /// Debug-only search settings; either may be left out.
+    SetSearch {
+        #[serde(default)]
+        threads: Option<usize>,
+        #[serde(default)]
+        work_cap_millions: Option<f64>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -143,6 +157,28 @@ impl UiCommand {
                 within("stops", *stops, crate::render::exposure::STOPS)
             }
             UiCommand::SetCompression { amount } => within("amount", *amount, 0.0..=1.0),
+            UiCommand::Search { query } => {
+                space_simulation::search::Query::parse(query).and_then(|query| query.check())
+            }
+            UiCommand::SetSearch {
+                threads,
+                work_cap_millions,
+            } => {
+                if threads.is_none() && work_cap_millions.is_none() {
+                    return Err("Give threads, work_cap_millions or both".into());
+                }
+                if let Some(threads) = threads {
+                    within("threads", *threads, crate::search::THREADS)?;
+                }
+                if let Some(millions) = work_cap_millions {
+                    within(
+                        "work_cap_millions",
+                        *millions,
+                        crate::search::WORK_CAP_MILLIONS,
+                    )?;
+                }
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -239,6 +275,10 @@ impl UiCommand {
                 .selected_planet(galaxy)
                 .map(|_| ())
                 .ok_or_else(|| "Select a planet in the visited system first".into()),
+            #[cfg(target_arch = "wasm32")]
+            UiCommand::Search { .. } => Err(
+                "Searches run in the native app for now; the browser's search worker comes with the object browser".into(),
+            ),
             _ => self.check_values(),
         }
     }
@@ -399,6 +439,8 @@ pub fn apply(
             UiCommand::SetCompression { amount } => nav.set_compression(*amount),
             UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
             UiCommand::SetDebug { switch, on } => debug.set(*switch, *on),
+            // `search::apply` runs these.
+            UiCommand::Search { .. } | UiCommand::ClearSearch | UiCommand::SetSearch { .. } => {}
         }
     }
 }
