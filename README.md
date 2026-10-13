@@ -26,6 +26,8 @@ While the native client runs, `./scripts/ns` is a CLI that can read and drive al
 ./scripts/ns search kind=planet planet_class=sub_neptune orbits.star_class=m within_ly=50
 ```
 
+If you are on any other platform outside of Linux, just chuck this to your AI of choice, I'm sure they can figure it out.
+
 ## Run in a browser
 
 The build script currently targets x86-64 Linux. It requires Rust via rustup, Clang, LLD, Python 3 (available as `python`), curl, tar and gzip.
