@@ -4,6 +4,7 @@ use crate::Navigation;
 use crate::actions::UiCommand;
 use crate::format::speed_label;
 use crate::ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, SIZE, halo_text};
+use crate::ui::kit::{Theme, TooltipExt};
 use bevy::prelude::*;
 use bevy_egui::egui;
 use space_simulation::SimulationClock;
@@ -107,11 +108,14 @@ pub(super) fn time_controls(
                     }
                 })
                 .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
-                .on_hover_text(if clock.paused {
-                    "Click to resume · Drag left/right to adjust speed"
-                } else {
-                    "Click to pause · Drag left/right to adjust speed"
-                });
+                .on_hover_text_themed(
+                    &Theme::GAME,
+                    if clock.paused {
+                        "Click to resume · Drag left/right to adjust speed"
+                    } else {
+                        "Click to pause · Drag left/right to adjust speed"
+                    },
+                );
                 ctx.data_mut(|data| {
                     data.insert_temp(
                         egui::Id::new("time-pointer-capture"),
@@ -189,7 +193,7 @@ pub(super) fn speed_readout(
                 },
             )
             .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
-            .on_hover_text("Drag left/right to adjust movement speed");
+            .on_hover_text_themed(&Theme::GAME, "Drag left/right to adjust movement speed");
             ctx.data_mut(|data| {
                 data.insert_temp(
                     egui::Id::new("speed-pointer-capture"),
@@ -256,7 +260,7 @@ pub(super) fn magnitude_control(
                 },
             )
             .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
-            .on_hover_text(
+            .on_hover_text_themed(&Theme::GAME,
                 "Faintest star drawn as a point; fainter ones join the galaxy glow · Drag left/right, stars reload on release",
             );
             ctx.data_mut(|data| {
@@ -306,7 +310,7 @@ pub(super) fn exposure_controls(
             .show(ctx, |ui| {
                 let response = halo_text(ui, &text, egui::Sense::click_and_drag(), |r| {
                     if nav.realistic && (r.hovered() || r.dragged() || r.has_focus()) { HOVER } else { LINK }
-                }).on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(
+                }).on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text_themed(&Theme::GAME,
                     if nav.realistic { help } else { "Turn on realistic lighting in the debug console's render tab to adjust this." });
                 ctx.data_mut(|data| data.insert_temp(egui::Id::new(format!("{id}-pointer-capture")),
                     (response.rect, response.dragged() || response.is_pointer_button_down_on())));

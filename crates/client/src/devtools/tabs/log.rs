@@ -32,7 +32,6 @@ pub fn log(ui: &mut egui::Ui, tools: &mut DevTools) {
                 tools.levels[i] = !tools.levels[i];
             }
         }
-        ui.add_space(8.0);
         terminal::input(ui, "grep", &mut tools.grep, 160.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if terminal::button(ui, "clear") {
@@ -52,7 +51,7 @@ pub fn log(ui: &mut egui::Ui, tools: &mut DevTools) {
     );
     let font = egui::FontId::monospace(12.0);
     let height = ui.fonts_mut(|f| f.row_height(&font));
-    egui::ScrollArea::both()
+    terminal::ScrollArea::both()
         .scroll_source(terminal::SCROLL_SOURCE)
         .id_salt("debug-log")
         .auto_shrink(false)

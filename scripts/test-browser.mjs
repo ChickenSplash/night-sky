@@ -64,7 +64,7 @@ try {
   await page.mouse.click(1570, 63); // ✔ Tasks icon, top right.
   await page.waitForTimeout(1500);
   await page.screenshot({ path: resolve(root, 'data/web-tasks.png') });
-  await page.mouse.click(1431, 308); // First list, in the Tasks window.
+  await page.mouse.click(1431, 388); // First list, in the shared-kit Tasks window.
   // A few seconds under SwiftShader.
   await page.waitForFunction(id => window.space.state().list === id, fixture.systems[0].id, { timeout: 30_000 });
   await page.waitForTimeout(1000);

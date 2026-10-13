@@ -104,7 +104,7 @@ pub fn results_window(mut contexts: EguiContexts, flight: Option<Res<BenchmarkFl
         return;
     };
     let last = &report["final"];
-    egui::Window::new("Star-stream benchmark")
+    let shown = egui::Window::new("Star-stream benchmark")
         .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -16.0])
         .collapsible(false)
         .resizable(false)
@@ -120,6 +120,9 @@ pub fn results_window(mut contexts: EguiContexts, flight: Option<Res<BenchmarkFl
                 save(report);
             }
         });
+    if let Some(shown) = shown {
+        crate::render::window_blur::register(ctx, shown.response.id, shown.response.rect);
+    }
 }
 
 /// Collects each one-second stream report during the flight, and the results

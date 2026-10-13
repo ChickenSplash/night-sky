@@ -144,11 +144,16 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 24] = [
+pub const USAGE: [Usage; 25] = [
     Usage {
         name: "pick_star",
         fields: &["id"],
         about: "Select a star by ID, or visit it if already selected",
+    },
+    Usage {
+        name: "select_star",
+        fields: &["id"],
+        about: "Select a known star by ID without travelling",
     },
     Usage {
         name: "jump",

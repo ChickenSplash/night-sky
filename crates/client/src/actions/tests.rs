@@ -89,6 +89,56 @@ fn an_unstreamed_generated_planet_can_be_selected_by_id() {
 }
 
 #[test]
+fn selecting_a_search_star_never_travels_even_when_selected_again() {
+    use space_simulation::{cells::Cell, galaxy::GalaxyModel};
+    let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
+    let point = Sky::default().cell_star_at(cell, 0).unwrap();
+    let mut app = run(space_simulation::demo_galaxy(), vec![]);
+    app.world_mut()
+        .resource_mut::<Navigation>()
+        .charted
+        .insert(point.id.clone(), point.position_pc);
+    let before = (
+        nav(&app).target,
+        nav(&app).eye,
+        nav(&app).distance,
+        nav(&app).visit.clone(),
+    );
+    for _ in 0..2 {
+        send(
+            &mut app,
+            vec![UiCommand::SelectStar {
+                id: point.id.clone(),
+            }],
+        );
+        assert_eq!(
+            nav(&app).selection.as_ref().unwrap().object(),
+            crate::objects::ObjectRef::Star {
+                id: point.id.clone()
+            }
+        );
+        assert_eq!(
+            nav(&app).inspection.as_ref().unwrap().object,
+            crate::objects::ObjectRef::Star {
+                id: point.id.clone()
+            }
+        );
+        assert_eq!(
+            (
+                nav(&app).target,
+                nav(&app).eye,
+                nav(&app).distance,
+                nav(&app).visit.clone()
+            ),
+            before
+        );
+        assert!(!nav(&app).fly);
+    }
+    send(&mut app, vec![UiCommand::Up]);
+    assert!(nav(&app).selection.is_none());
+}
+
+#[test]
 fn inspector_tabs_preserve_tracking_and_reject_absent_crumbs() {
     use crate::{
         objects::ObjectRef,

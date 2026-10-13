@@ -196,7 +196,6 @@ pub fn draw(
             }
         });
         terminal::rule(ui);
-        ui.add_space(4.0);
         match tools.tab {
             Tab::Log => {
                 tools.unseen = [0; 2];
@@ -204,7 +203,7 @@ pub fn draw(
             }
             Tab::Terminal => terminal_tab(ui, &mut tools, &mut lines),
             tab => {
-                egui::ScrollArea::vertical()
+                terminal::ScrollArea::vertical()
                     .scroll_source(terminal::SCROLL_SOURCE)
                     .id_salt("debug-tab")
                     .auto_shrink(false)

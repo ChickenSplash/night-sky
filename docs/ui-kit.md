@@ -1,0 +1,108 @@
+# Shared UI kit
+
+Both clients use the same egui interface over the 3D scene. The visual direction
+is precision: compact controls, consistent spacing and restrained accent motion,
+without changing the simulator's layout into a sidebar or HTML overlay.
+
+## Structure and ownership
+
+Paths are relative to `crates/client/src/`.
+
+| Module | Responsibility |
+| --- | --- |
+| `ui/mod.rs` | UI composition, top-right window toggles and command dispatch |
+| `ui/hud.rs` | Draggable scene HUD controls and pointer capture |
+| `ui/canvas.rs` | Scene captions, markers and picking overlays |
+| `ui/breadcrumb.rs` | Independent location/selection trails and inspection tabs |
+| `ui/inspector.rs` | Shared object descriptions, available actions and cached facts |
+| `ui/tasks.rs` | List/task filtering, sorting, status groups and navigation commands |
+| `ui/browser/` | Query editing, registry-driven picker and selected-result view |
+| `ui/terminal.rs` | Thin terminal-theme adapter used by `devtools/` |
+| `ui/kit/` | Reusable controls, themes, interaction and layout animation |
+
+`Navigation` remains authoritative for selection and travel. Feature panels own
+only their UI state, such as unfinished query text, sorting and folded groups.
+Actions leave panels as `UiCommand`s, never as direct camera mutations. The
+inspector's facts/actions are shared by breadcrumbs, browser and developer
+readouts; extending an object should extend that source, not duplicate it.
+
+## Themes and geometry
+
+- `Theme::GAME`: player-facing windows and modal controls.
+- `Theme::TERMINAL`: debug console, with monospace text-mode controls.
+- `Theme::DESTRUCTIVE`: shared red feedback for close, chip removal and reset.
+- `Theme::SUBTLE_ACCENT_OPACITY`: 0.12, shared by row backgrounds and idle
+  scrollbars. It is a gamma-multiplied accent tint, not a separate blue.
+- `SPACING`: 10 logical pixels. Windows, inputs and scroll handles are square;
+  row highlight corners still come from their theme.
+- `plain_style` installs the global base style. Windows, dropdowns and modals
+  apply their own theme's scrollbar visuals locally. Avoid global style changes
+  for individual controls.
+- Section separation uses space instead of decorative lines. Checkbox split
+  dividers and intentional diagnostic rules remain functional separators.
+- `eyebrow_text` supplies the shared selectable section/table-label typography.
+- `TooltipExt::on_hover_text_themed` supplies opaque, theme-matched tooltip
+  frames and text, independent of translucent window fills.
+
+## Interaction and animation
+
+`kit/interact.rs` owns the 0.18-second cubic ease-out and highlight painter.
+Hovering and leaving use the same curve. Rows combine hover, held-press and
+selection into one target, so changing between those states does not restart
+or jump the highlight. Read-only facts retain feedback during a press too.
+
+Interactive kit controls use click-and-drag sense, but do not move themselves
+on a drag. `held_click` preserves ordinary click-on-release behaviour during
+long presses and slow frames. Only dedicated window resize/header handles,
+range sliders and HUD controls consume movement.
+
+Input underlines expand from and retract towards their centre. Removable chips
+have independent edit/remove hit regions and delayed removal until their exit
+animation finishes. The Type dropdown shares the same curve for button width,
+arrow rotation and menu reveal. `animated_rect` in `motion.rs` retargets layout
+motion from its current displayed rectangle, including mid-animation resizing.
+
+Scene halo text is a separate lightweight overlay, not a framed kit widget.
+Keep its existing scene-specific appearance and pointer-capture behaviour.
+
+## Windows and scrolling
+
+- `kit::Window` is shared by the browser, Tasks and debug console. Only the
+  padded header moves it, excluding the close hit area; all edges and corners
+  resize it. Bounds are clamped to the viewport and the window minimum.
+- Clicking a window brings it forward. The existing scene-blur registration
+  stays in the shared frame; do not replace it when adding a panel.
+- `aligned_close_button` centres the visible glyph on title ink, rather than
+  the whole header block or font line box. Modals use the same helper.
+- Use `kit::ScrollArea`, not raw `egui::ScrollArea`, for application panels.
+  It defaults to wheel/scrollbar input with content dragging disabled, so
+  scrolling cannot steal a control's held press.
+- Scrollbar handles stay full-width and square. Tracks are invisible. Idle
+  handles use the subtle accent tint, easing to full accent on hover or drag.
+  Show handles only when scrolling is useful; dropdown reveal uses an explicit
+  decision based on full content height to keep its geometry stable.
+- Scrollbar response IDs depend on the pinned egui 0.33 implementation. Check
+  `scroll.rs` when upgrading egui; its named-area regression test protects the
+  ID mapping and easing in both directions.
+- Restore local styles after scoped work. `ScrollArea` restores its opacity
+  settings after rendering; row/fact groups scope their zero vertical spacing.
+
+## Extension checklist
+
+1. Put reusable behaviour in `ui/kit/`, with a focused module for stateful
+   controls (`pill`, `dropdown`, `number`, `range`, `scroll`). Export through
+   `kit/mod.rs`; callers should not depend on private implementation modules.
+2. Use the owning theme and shared spacing/easing. Reserve button slots with
+   `button_size` so layout and rendered controls agree in both themes.
+3. Scope persistent widget IDs to the owning UI. Use `push_id` or
+   `make_persistent_id` when controls repeat, including expandable facts.
+4. Keep animated children inside a reserved, clipped viewport. An outgoing
+   pane/menu can remain for animation, but must not accept stale actions or
+   increase window bounds.
+5. Use virtualised `show_rows` for large uniform lists. Cache expensive object
+   descriptions outside painting loops; do not generate systems every frame.
+6. Add egui regressions for geometry, long presses, theme feedback and stable
+   IDs. Larger feature test suites live beside their modules in `tests.rs`.
+7. Run `./scripts/check.sh` and `./scripts/build-web.sh`. Refresh the browser
+   to load rebuilt WASM. See [Development](development.md#checks) for optional
+   graphical checks and [Object browser](object-browser.md) for its controls.

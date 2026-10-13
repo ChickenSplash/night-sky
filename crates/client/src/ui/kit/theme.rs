@@ -3,6 +3,9 @@
 //! the player-facing windows.
 use bevy_egui::egui::{self, Color32, FontFamily, FontId};
 
+/// Shared horizontal and vertical gap between window controls.
+pub const SPACING: f32 = 10.0;
+
 /// A font as plain values, so themes can be constants.
 #[derive(Clone, Copy, Debug)]
 pub struct Font {
@@ -57,6 +60,10 @@ const fn font(size: f32, mono: bool) -> Font {
 }
 
 impl Theme {
+    /// Shared feedback colour for close, remove and reset actions.
+    pub const DESTRUCTIVE: Color32 = Color32::from_rgb(240, 100, 100);
+    /// Faint row highlights and idle scrollbars share this accent strength.
+    pub const SUBTLE_ACCENT_OPACITY: f32 = 0.12;
     /// The debug console: a translucent black window after the desktop's
     /// Hyprland windows, with a light grey border and text-mode controls.
     pub const TERMINAL: Self = Self {
@@ -69,9 +76,9 @@ impl Theme {
         // Light grey (0xc8, 0xcc, 0xd0) at 0.93.
         border: Color32::from_rgba_premultiplied(186, 190, 193, 237),
         border_width: 2.0,
-        radius: 10,
+        radius: 0,
         control_radius: 4,
-        padding: 16,
+        padding: 12,
         row: 24.0,
         inset: 8.0,
         font: font(13.0, true),
@@ -93,9 +100,9 @@ impl Theme {
         // #c3e7ff at 15%.
         border: Color32::from_rgba_premultiplied(29, 34, 38, 38),
         border_width: 1.0,
-        radius: 16,
+        radius: 0,
         control_radius: 6,
-        padding: 20,
+        padding: 12,
         row: 28.0,
         inset: 10.0,
         font: font(14.0, false),
@@ -108,11 +115,57 @@ impl Theme {
     pub fn line(&self) -> Color32 {
         self.dim.gamma_multiply(0.4)
     }
+
+    /// Shared background for text and labelled number inputs.
+    pub fn input_fill(&self) -> Color32 {
+        Color32::from_black_alpha(70)
+    }
+
+    pub fn input_padding(&self) -> egui::Margin {
+        egui::Margin::symmetric(10, 8)
+    }
+
+    pub fn field_height(&self) -> f32 {
+        self.row + 12.0
+    }
+
+    /// Tooltips use the owning window's colours and border, but never glass.
+    pub fn tooltip_frame(&self) -> egui::Frame {
+        egui::Frame::new()
+            .fill(self.fill.to_opaque())
+            .stroke((self.border_width, self.border))
+            .corner_radius(self.radius)
+            .inner_margin(self.padding)
+    }
+
+    /// Full-width square accent handles, subtle until hovered or dragged,
+    /// with an invisible track and reserved gutter.
+    pub fn style_scrollbars(&self, style: &mut egui::Style) {
+        let scroll = &mut style.spacing.scroll;
+        scroll.floating = true;
+        scroll.floating_width = scroll.bar_width;
+        scroll.floating_allocated_width =
+            scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin;
+        scroll.foreground_color = true;
+        scroll.dormant_background_opacity = 0.0;
+        scroll.active_background_opacity = 0.0;
+        scroll.interact_background_opacity = 0.0;
+        scroll.dormant_handle_opacity = Self::SUBTLE_ACCENT_OPACITY;
+        scroll.active_handle_opacity = Self::SUBTLE_ACCENT_OPACITY;
+        scroll.interact_handle_opacity = 1.0;
+        for visuals in [
+            &mut style.visuals.widgets.inactive,
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+            &mut style.visuals.widgets.noninteractive,
+        ] {
+            visuals.fg_stroke.color = self.accent;
+            visuals.corner_radius = egui::CornerRadius::ZERO;
+        }
+    }
 }
 
-/// Plain egui widgets' colours (the Tasks window), until they move to the
-/// kit.
-pub const MUTED: Color32 = Color32::from_rgb(118, 144, 174);
+/// Scene selection accent; plain egui styling remains for native/debug helpers.
 pub const ACCENT: Color32 = Color32::from_rgb(99, 214, 240);
 const PANEL: Color32 = Color32::from_rgb(7, 15, 31);
 
@@ -120,17 +173,17 @@ const PANEL: Color32 = Color32::from_rgb(7, 15, 31);
 pub fn plain_style(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
     style.visuals = egui::Visuals::dark();
+    style.visuals.window_corner_radius = egui::CornerRadius::ZERO;
+    style.visuals.menu_corner_radius = egui::CornerRadius::ZERO;
     style.visuals.panel_fill = PANEL;
-    style.visuals.window_fill = PANEL;
+    // Fallback for egui-generated tooltips and any plain helper popups.
+    style.visuals.window_fill = Theme::GAME.fill.to_opaque();
+    style.visuals.window_stroke = egui::Stroke::new(Theme::GAME.border_width, Theme::GAME.border);
     style.visuals.override_text_color = Some(Color32::from_rgb(214, 228, 244));
     style.visuals.selection.bg_fill = Color32::from_rgb(24, 65, 85);
     style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(15, 31, 49);
-    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+    style.spacing.item_spacing = egui::Vec2::splat(SPACING);
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
+    Theme::GAME.style_scrollbars(&mut style);
     ctx.set_style(style);
-}
-
-/// Small muted text in plain egui windows.
-pub fn muted(ui: &mut egui::Ui, text: impl Into<String>) {
-    ui.label(egui::RichText::new(text).size(11.0).color(MUTED));
 }

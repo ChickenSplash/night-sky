@@ -9,18 +9,16 @@ mod results;
 
 use crate::actions::UiCommand;
 use crate::search::Searches;
+use crate::ui::kit::TooltipExt;
 use crate::ui::kit::{self, Theme};
 use crate::{Navigation, Universe};
 use bevy::prelude::*;
 use bevy_egui::egui;
 use filters::Chip;
-use space_simulation::objects::ObjectRef;
+use space_simulation::search::query::{DEFAULT_RADIUS_LY, MAX_LIMIT, MAX_RADIUS_LY};
 use space_simulation::search::{Query, Scope};
 
 const THEME: Theme = Theme::GAME;
-/// Radius choices, in light years.
-const RADII: [f64; 5] = [10.0, 50.0, 100.0, 500.0, 1000.0];
-const LIMITS: [u32; 3] = [50, 250, 1000];
 
 #[derive(Resource, Default)]
 pub struct Browser {
@@ -35,7 +33,6 @@ pub struct Browser {
     /// The text of the query last sent, so any change sends it again.
     sent: Option<String>,
     picker: Option<picker::Picker>,
-    selected: Option<ObjectRef>,
     inspector: crate::ui::inspector::Cache,
 }
 
@@ -57,18 +54,15 @@ fn follow(mut commands: MessageReader<UiCommand>, mut browser: ResMut<Browser>) 
                     continue;
                 };
                 let text = query.to_text();
-                if browser.sent.as_deref() != Some(&text) {
-                    browser.selected = None;
-                }
                 browser.text = query.text.clone();
                 browser.query = query;
+                browser.text_error = None;
+                browser.problem = None;
                 browser.sent = Some(text);
                 browser.open = true;
             }
             UiCommand::ClearSearch => {
-                browser.query = Query::default();
-                browser.text.clear();
-                browser.selected = None;
+                browser.reset();
                 // Nothing is searched for until the query changes.
                 browser.sent = Some(browser.query.to_text());
             }
@@ -92,7 +86,7 @@ pub fn window(ctx: &egui::Context, browser: &mut Browser, view: View, out: &mut 
     let mut open = browser.open;
     kit::Window {
         title: "Object browser",
-        eyebrow: "Explore the galaxy",
+        eyebrow: "",
         width: (0.45, 560.0, 920.0),
         height: (0.78, 440.0, 900.0),
         min_size: egui::vec2(480.0, 380.0),
@@ -106,6 +100,14 @@ pub fn window(ctx: &egui::Context, browser: &mut Browser, view: View, out: &mut 
 }
 
 impl Browser {
+    /// Full reset, shared by the filter-row action and external clear commands.
+    fn reset(&mut self) {
+        self.query = Query::default();
+        self.text.clear();
+        self.text_error = None;
+        self.problem = None;
+    }
+
     /// Sends the query if it changed since it was last sent.
     fn send(&mut self, out: &mut Vec<UiCommand>) {
         let text = self.query.to_text();
@@ -118,7 +120,6 @@ impl Browser {
                     query: text.clone(),
                 });
                 self.problem = None;
-                self.selected = None;
             }
             Err(reason) => self.problem = Some(reason),
         }
@@ -154,6 +155,7 @@ impl Browser {
 
     fn body(&mut self, ui: &mut egui::Ui, view: &View, out: &mut Vec<UiCommand>) {
         let theme = &THEME;
+        self.chips(ui);
         let search = kit::field(
             ui,
             theme,
@@ -168,27 +170,21 @@ impl Browser {
         if let Some(error) = &self.text_error {
             kit::note(ui, theme, error);
         }
-        self.chips(ui);
-        self.scope(ui, view);
-        kit::rule(ui, theme);
+        self.scope(ui, view, out);
+        ui.add_space(kit::SPACING);
         results::show(ui, self, view, out);
-        self.footer(ui);
     }
 
     fn chips(&mut self, ui: &mut egui::Ui) {
         let theme = &THEME;
-        let chips = filters::chips(&self.query);
         ui.horizontal_wrapped(|ui| {
             if kit::primary_button(ui, theme, "+ Add filter", true).clicked() {
                 self.picker = Some(picker::Picker::new());
             }
-            if chips.is_empty() {
-                ui.label(
-                    egui::RichText::new("All objects · add a filter to narrow them")
-                        .font(theme.small.id())
-                        .color(theme.dim),
-                );
-            }
+            self.type_choice(ui);
+            let chips = filters::chips(&self.query)
+                .into_iter()
+                .filter(|(chip, _)| !matches!(chip, Chip::Kinds));
             for (chip, label) in chips {
                 let pill = kit::pill(ui, theme, &label);
                 if pill.remove {
@@ -202,11 +198,75 @@ impl Browser {
                     });
                 }
             }
+            let size = kit::button_size(ui, theme, "Reset filters");
+            let remaining = ui.available_size_before_wrap().x;
+            // Use the remaining row when it fits, otherwise wrap a full-width
+            // slot so the reset action stays at the right of the final row.
+            let width = if remaining >= size.x { remaining } else { ui.max_rect().width() };
+            ui.allocate_ui_with_layout(egui::vec2(width, size.y),
+                egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if kit::destructive_button(ui, theme, "Reset filters")
+                        .on_hover_text_themed(theme, "Clears search text, Type and all filters. Restores Within to 50 ly and Show to 50.")
+                        .clicked() {
+                        self.reset();
+                    }
+                });
         });
     }
 
+    fn type_choice(&mut self, ui: &mut egui::Ui) {
+        use space_simulation::search::registry::{self, KINDS};
+        let mut options = vec![("", "All types")];
+        options.extend(
+            KINDS
+                .iter()
+                .filter(|kind| kind.available())
+                .map(|kind| (kind.id, kind.label)),
+        );
+        let (label, selected) = if let Some(family) = &self.query.family {
+            (
+                registry::family(family)
+                    .map_or(family.as_str(), |family| family.label)
+                    .to_owned(),
+                None,
+            )
+        } else if self.query.kinds.is_empty() {
+            ("All types".to_owned(), Some(""))
+        } else {
+            let label = self
+                .query
+                .kinds
+                .iter()
+                .map(|id| registry::kind_index(id).map_or(id.as_str(), |index| KINDS[index].label))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            (
+                label,
+                if self.query.kinds.len() == 1 {
+                    Some(self.query.kinds[0].as_str())
+                } else {
+                    None
+                },
+            )
+        };
+        if let Some(kind) = kit::dropdown(
+            ui,
+            &THEME,
+            "browser-type",
+            &format!("Type: {label}"),
+            selected,
+            &options,
+        ) {
+            if kind.is_empty() {
+                filters::remove(&mut self.query, &Chip::Kinds);
+            } else {
+                filters::set_kind(&mut self.query, &kind);
+            }
+        }
+    }
+
     /// Radius or the visited system, and the limit.
-    fn scope(&mut self, ui: &mut egui::Ui, view: &View) {
+    fn scope(&mut self, ui: &mut egui::Ui, view: &View, out: &mut Vec<UiCommand>) {
         let theme = &THEME;
         let here = view
             .nav
@@ -214,27 +274,22 @@ impl Browser {
             .map(|system| crate::objects::star_id(system, view.nav.page))
             .map(|id| space_simulation::multiple::system_key(&id).to_owned())
             .filter(|key| space_simulation::cells::parse_cell_star(key).is_some());
-        let label = |text: &str| {
-            egui::RichText::new(text)
-                .font(theme.small.id())
-                .color(theme.dim)
-        };
         ui.horizontal_wrapped(|ui| {
-            ui.label(label("Within"));
-            let radius = match self.query.scope {
-                Scope::Within { radius_ly } => Some(radius_ly),
-                Scope::System { .. } => None,
+            let mut radius = match self.query.scope {
+                Scope::Within { radius_ly } => radius_ly,
+                Scope::System { .. } => DEFAULT_RADIUS_LY,
             };
-            let mut radii = RADII.to_vec();
-            if let Some(r) = radius.filter(|r| !RADII.contains(r)) {
-                radii.push(r);
-                radii.sort_by(f64::total_cmp);
-            }
-            for r in radii {
-                let text = format!("{} ly", filters::number_text(r));
-                if kit::choice(ui, theme, &text, radius == Some(r)) {
-                    self.query.scope = Scope::Within { radius_ly: r };
-                }
+            if kit::number_field(
+                ui,
+                theme,
+                "Within",
+                &mut radius,
+                f64::MIN_POSITIVE..=MAX_RADIUS_LY,
+                "ly",
+            )
+            .changed()
+            {
+                self.query.scope = Scope::Within { radius_ly: radius };
             }
             if let Some(key) = &here {
                 let chosen = matches!(&self.query.scope, Scope::System { id } if id == key);
@@ -242,14 +297,15 @@ impl Browser {
                     self.query.scope = Scope::System { id: key.clone() };
                 }
             }
-            ui.add_space(12.0);
-            ui.label(label("Show"));
-            for limit in LIMITS {
-                let text = crate::format::grouped(limit as usize);
-                if kit::choice(ui, theme, &text, self.query.limit == limit) {
-                    self.query.limit = limit;
+            kit::number_field(ui, theme, "Show", &mut self.query.limit, 1..=MAX_LIMIT, "");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if kit::button(ui, theme, "Refresh")
+                    .on_hover_text_themed(theme, "Distances are from where you searched. Refresh searches again from where you are now.")
+                    .clicked()
+                {
+                    self.refresh(out);
                 }
-            }
+            });
         });
     }
 
@@ -263,37 +319,6 @@ impl Browser {
             query: text.clone(),
         });
         self.sent = Some(text);
-        self.selected = None;
-    }
-
-    /// The query as an `ns search` command, and Reset.
-    fn footer(&mut self, ui: &mut egui::Ui) {
-        let theme = &THEME;
-        kit::rule(ui, theme);
-        let command = format!("./scripts/ns search {}", self.query.to_text());
-        ui.horizontal(|ui| {
-            if kit::button(ui, theme, "Copy as ns command")
-                .on_hover_text(&command)
-                .clicked()
-            {
-                ui.ctx().copy_text(command.clone());
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if kit::link(ui, theme, "Reset").clicked() {
-                    self.query = Query::default();
-                    self.text.clear();
-                    self.text_error = None;
-                }
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&command)
-                            .font(theme.mono.id())
-                            .color(theme.dim),
-                    )
-                    .truncate(),
-                );
-            });
-        });
     }
 }
 

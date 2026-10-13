@@ -216,23 +216,6 @@ pub fn value_text(property: &Property, test: &Test) -> String {
     }
 }
 
-/// Reads a range end: blank is open; thousands separators are allowed.
-pub fn parse_end(text: &str, integer: bool) -> Result<Option<f64>, String> {
-    let text = text.trim().replace([',', '_', ' '], "");
-    if text.is_empty() {
-        return Ok(None);
-    }
-    let n: f64 = text
-        .parse()
-        .ok()
-        .filter(|n: &f64| n.is_finite())
-        .ok_or_else(|| format!("`{text}` is not a number"))?;
-    if integer && n.fract() != 0.0 {
-        return Err(format!("{text} is not a whole number"));
-    }
-    Ok(Some(n))
-}
-
 /// Sets or replaces the filter on `filter.property` in `slot`.
 pub fn set_filter(query: &mut Query, slot: Slot, filter: Filter) {
     let list = filters_mut(query, slot);

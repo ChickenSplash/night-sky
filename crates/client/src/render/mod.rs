@@ -16,6 +16,7 @@ pub mod debug;
 pub mod exposure;
 pub mod glow;
 pub mod sky;
+pub mod window_blur;
 
 use bevy::{
     asset::{load_internal_asset, uuid_handle},
@@ -56,6 +57,7 @@ impl Plugin for RenderPlugin {
             MaterialPlugin::<BodyMaterial>::default(),
             MaterialPlugin::<PointMaterial>::default(),
             crate::render::exposure::ExposurePlugin,
+            window_blur::WindowBlurPlugin,
         ))
         .init_resource::<Lights>()
         .init_resource::<Photometry>()
