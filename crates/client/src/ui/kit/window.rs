@@ -116,15 +116,15 @@ impl<'a> Window<'a> {
             .order(egui::Order::Foreground);
         let shown = window.show(ctx, |ui| {
             ui.set_style(style.clone());
+            theme.style_scrollbars(ui.style_mut());
             ui.style_mut().spacing.item_spacing = egui::Vec2::splat(super::SPACING);
             let mut close_rect = Rect::NOTHING;
             let header = ui.horizontal(|ui| {
-                header(ui, theme, &self);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let response = super::widgets::close_button(ui, theme);
-                    close = response.clicked();
-                    close_rect = response.rect;
-                });
+                ui.set_min_height(28.0);
+                let title = header(ui, theme, &self);
+                let response = super::widgets::aligned_close_button(ui, theme, title);
+                close = response.clicked();
+                close_rect = response.rect;
             });
             // horizontal() already advances by item_spacing.y. Complete
             // the same padding below the header as the frame gives above it.
@@ -375,30 +375,39 @@ fn resize_edges(
 }
 
 /// A prompt and the title in text mode; else the eyebrow over a large title.
-fn header(ui: &mut Ui, theme: &Theme, window: &Window) {
+fn header(ui: &mut Ui, theme: &Theme, window: &Window) -> Rect {
+    let font = if theme.text_mode {
+        theme.font.id()
+    } else {
+        theme.title.id()
+    };
+    let colour = if theme.text_mode {
+        theme.accent
+    } else {
+        theme.text
+    };
+    let title = ui
+        .painter()
+        .layout_no_wrap(window.title.into(), font, colour);
+    let bounds = title.mesh_bounds;
     if theme.text_mode {
         ui.label(
             egui::RichText::new("night-sky:~$ ")
                 .font(theme.font.id())
                 .color(theme.dim),
         );
-        ui.label(
-            egui::RichText::new(window.title)
-                .font(theme.font.id())
-                .color(theme.accent),
-        );
+        let response = ui.label(title);
+        bounds.translate(response.rect.min.to_vec2())
     } else {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             if !window.eyebrow.is_empty() {
                 super::widgets::eyebrow(ui, theme, window.eyebrow);
             }
-            ui.label(
-                egui::RichText::new(window.title)
-                    .font(theme.title.id())
-                    .color(theme.text),
-            );
-        });
+            let response = ui.label(title);
+            bounds.translate(response.rect.min.to_vec2())
+        })
+        .inner
     }
 }
 

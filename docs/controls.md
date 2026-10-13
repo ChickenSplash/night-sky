@@ -1,7 +1,7 @@
 # Controls and interface
 
 Both clients use the same egui interface over a full-window 3D view. Debug console
-(⚙) and Tasks (✔) open from the top right. The top-left **Location** and
+(⚙), Tasks (✔) and Object browser (🔍) open from the top right. The top-left **Location** and
 **Selected** trails distinguish physical location from selection. Clicking a
 breadcrumb inspects it without changing selection or moving the camera.
 
@@ -61,13 +61,20 @@ The underlying simulation continues in every mode.
 ## Debug tools
 
 Toggle the debug console with the cog, F3 or the backtick key on either client.
-Toggle the object browser with the 🔍 icon or Ctrl+K (desktop only for now).
+Toggle the object browser with the 🔍 icon or Ctrl+K. Browser shortcuts can
+also be intercepted by the web browser; the icon is always available.
 There is no separate Settings window. Display options and realistic lighting
 live in `render`; shortcut help lives in `controls`.
 Click the left side of a checkbox row to toggle it. The square `+` / `-` button
 on the right expands or collapses its explanation without changing the switch.
 Only the console header (including its padding) moves the window, indicated by
 a four-way arrow cursor.
+
+The browser, Tasks and debug console use the same movable/resizable window
+frame. Close glyphs align with their title and hover red. Scrollbars have
+invisible tracks and subtle accent handles that brighten smoothly on hover or
+drag, without changing width. Tooltips are opaque and match the owning theme.
+See the [shared UI kit](ui-kit.md) for styling and interaction details.
 
 | Tab | Contents |
 | --- | --- |

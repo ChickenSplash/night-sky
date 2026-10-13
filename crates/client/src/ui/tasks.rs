@@ -4,6 +4,7 @@
 use crate::Navigation;
 use crate::actions::UiCommand;
 use crate::format::due_short;
+use crate::ui::kit::TooltipExt;
 use crate::ui::kit::{self, Theme};
 use bevy_egui::egui;
 use space_shared::{Galaxy, StarSystem, Task};
@@ -104,7 +105,7 @@ pub fn window(
         out,
     };
     kit::Window::new("Tasks").show(ctx, &Theme::GAME, open, |ui| {
-        egui::ScrollArea::vertical()
+        kit::ScrollArea::vertical()
             .id_salt("tasks")
             .scroll_source(kit::SCROLL_SOURCE)
             .auto_shrink([false, false])
@@ -173,7 +174,7 @@ impl Panel<'_> {
             ListSort::Name => lists.sort_by_key(|(_, s)| s.name.to_lowercase()),
             ListSort::Tasks => lists.sort_by_key(|(_, s)| std::cmp::Reverse(s.tasks().count())),
         }
-        egui::ScrollArea::vertical()
+        kit::ScrollArea::vertical()
             .id_salt("systems")
             .scroll_source(kit::SCROLL_SOURCE)
             .min_scrolled_height(0.0)
@@ -271,7 +272,7 @@ impl Panel<'_> {
         let selected = nav.selected_planet(galaxy);
         // Searching still scans names, but egui only builds widgets for the
         // visible rows. A list can hold over a thousand tasks.
-        egui::ScrollArea::vertical()
+        kit::ScrollArea::vertical()
             .id_salt("task-index")
             .scroll_source(kit::SCROLL_SOURCE)
             .min_scrolled_height(0.0)
@@ -308,7 +309,7 @@ impl Panel<'_> {
                                 .unwrap_or_default();
                             let text = format!("· {}{due}", task.name);
                             if task_row(ui, &text, tint(task.colour), ROW, active)
-                                .on_hover_text(&task.name)
+                                .on_hover_text_themed(&Theme::GAME, &task.name)
                                 .clicked()
                             {
                                 self.out.push(UiCommand::FindTask {

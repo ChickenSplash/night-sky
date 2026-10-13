@@ -203,7 +203,7 @@ pub fn draw(
             }
             Tab::Terminal => terminal_tab(ui, &mut tools, &mut lines),
             tab => {
-                egui::ScrollArea::vertical()
+                terminal::ScrollArea::vertical()
                     .scroll_source(terminal::SCROLL_SOURCE)
                     .id_salt("debug-tab")
                     .auto_shrink(false)

@@ -51,7 +51,7 @@ pub fn log(ui: &mut egui::Ui, tools: &mut DevTools) {
     );
     let font = egui::FontId::monospace(12.0);
     let height = ui.fonts_mut(|f| f.row_height(&font));
-    egui::ScrollArea::both()
+    terminal::ScrollArea::both()
         .scroll_source(terminal::SCROLL_SOURCE)
         .id_salt("debug-log")
         .auto_shrink(false)

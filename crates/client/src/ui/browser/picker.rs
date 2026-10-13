@@ -3,7 +3,7 @@
 use super::filters::{self, Slot};
 use crate::ui::kit::{self, Theme};
 use bevy_egui::egui::{self, Color32};
-use space_simulation::search::registry::{self, KINDS, PROPERTIES, RELATIONS, Values};
+use space_simulation::search::registry::{KINDS, PROPERTIES, RELATIONS, Values};
 use space_simulation::search::{Filter, Query, Test};
 
 pub struct Picker {
@@ -107,6 +107,7 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
         )
         .backdrop_color(Color32::from_black_alpha(140))
         .show(ctx, |ui| {
+            theme.style_scrollbars(ui.style_mut());
             ui.set_width(460.0);
             ui.spacing_mut().item_spacing = egui::Vec2::splat(kit::SPACING);
             let title = match &state.editor {
@@ -114,14 +115,20 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
                 None => "Add a filter".into(),
             };
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(title)
-                        .font(egui::FontId::proportional(18.0))
-                        .color(theme.text),
+                ui.set_min_height(28.0);
+                let galley = ui.painter().layout_no_wrap(
+                    title,
+                    egui::FontId::proportional(18.0),
+                    theme.text,
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close |= kit::close_button(ui, theme).clicked();
-                });
+                let bounds = galley.mesh_bounds;
+                let title = ui.label(galley);
+                close |= kit::aligned_close_button(
+                    ui,
+                    theme,
+                    bounds.translate(title.rect.min.to_vec2()),
+                )
+                .clicked();
             });
             ui.add_space(kit::SPACING);
             match &mut state.editor {
@@ -194,25 +201,12 @@ fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Quer
         needle.is_empty() || label.to_lowercase().contains(&needle) || id.contains(&needle)
     };
     let mut next = None;
-    egui::ScrollArea::vertical()
+    kit::ScrollArea::vertical()
         .id_salt("filter-picker-list")
         .scroll_source(kit::SCROLL_SOURCE)
-        .max_height(420.0)
+        .max_height(560.0_f32.min((ui.ctx().content_rect().height() - 160.0).max(0.0)))
         .show(ui, |ui| {
-            let kinds: Vec<_> = KINDS
-                .iter()
-                .filter(|k| k.available() && wanted(k.label, k.id))
-                .collect();
-            if !kinds.is_empty() {
-                group(ui, theme, "Type");
-                for kind in kinds {
-                    let family = registry::family(kind.family).map_or("", |f| f.label);
-                    if kit::item(ui, theme, kind.label, family).clicked() {
-                        filters::set_kind(query, kind.id);
-                        next = Some(Next::Close);
-                    }
-                }
-            }
+            ui.spacing_mut().item_spacing.y = 0.0;
             let properties: Vec<_> = filters::offered_properties(query, Slot::Own)
                 .into_iter()
                 .filter(|&i| wanted(PROPERTIES[i].label, PROPERTIES[i].id))
@@ -271,16 +265,13 @@ fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Quer
                 }
             }
         });
-    kit::note(
-        ui,
-        theme,
-        "Results match every filter. Relationship filters all hold for the same related object.",
-    );
     next
 }
 
 fn group(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+    ui.add_space(kit::SPACING);
     kit::eyebrow(ui, theme, text);
+    ui.add_space(kit::SPACING);
 }
 
 /// The editor for one filter. Returns whether it was applied, and whether

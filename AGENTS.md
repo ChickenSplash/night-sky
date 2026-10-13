@@ -29,6 +29,7 @@ design notes into every session:
 - [Object search plan](docs/object-search-plan.md): planned object registry,
   query model, search engine, CLI and browser. Read before starting that work.
 - [Object browser](docs/object-browser.md): browser controls, layout and styling.
+- [Shared UI kit](docs/ui-kit.md): module ownership, themes, interaction, motion and extension rules.
 - [Documentation index](docs/README.md): controls, development setup, backend,
   logs, project structure and checks.
 - Paths in these notes are repository-relative or relative to a named crate's
@@ -198,6 +199,12 @@ design notes into every session:
   `Typed` too. Every `UiCommand` needs a `command_line::USAGE` entry (tests
   compare it with serde's variant list and parse each entry, naming any
   mismatch).
+- Shared UI behaviour is documented in [the UI kit guide](docs/ui-kit.md).
+  Use `kit::Window`, `kit::ScrollArea` and themed tooltips rather than local
+  equivalents. `kit::interact` owns the 0.18-second cubic ease-out;
+  `kit::motion` owns retargetable layout motion. Removable chips live in
+  `kit::pill`, dropdowns in `kit::dropdown`, range fields/sliders in
+  `kit::range`. Scope widget IDs to the owning UI, including expandable facts.
 - The debug window uses the terminal look (`ui/terminal.rs`): a translucent
   black, Hyprland-like window with a light grey border and text-mode
   checkboxes and buttons. Only its full padded header drags the window, with a four-way arrow cursor;
@@ -301,7 +308,7 @@ design notes into every session:
    `check` in step with `apply`'s conditions; a test applies every refused
    command and asserts nothing changed. Typed terminal and stdin commands
    get the same checks as warnings. Panels and drags never go through
-   them and still clamp. With no main-thread reply in `REPLY_WAIT` (2 s)
+  them and still clamp. With no main-thread reply in `REPLY_WAIT` (2 s)
    the reply is 202 `queued`. `POST /screenshot` (no body) runs the existing
    bug-report capture; its reply gives the canonical `report` and `png`
    paths (the PNG lands a frame or two later).

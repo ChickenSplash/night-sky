@@ -5,6 +5,7 @@ use super::kit::{self, Theme};
 use bevy_egui::egui::{self, Color32, FontId, Ui};
 
 pub use kit::SCROLL_SOURCE;
+pub use kit::ScrollArea;
 
 pub const THEME: Theme = Theme::TERMINAL;
 pub const CYAN: Color32 = THEME.accent;
@@ -21,9 +22,13 @@ pub fn rule(ui: &mut Ui) {
 }
 
 /// A floating window, movable and resizable, that opens at the top right,
-/// below the HUD icons. Its `[ × ]` button clears `open`.
+/// below the HUD icons. Its title-aligned `×` button clears `open`.
 pub fn window(ctx: &egui::Context, title: &str, open: &mut bool, add: impl FnOnce(&mut Ui)) {
-    kit::Window::new(title).show(ctx, &THEME, open, add);
+    kit::Window::new(title).show(ctx, &THEME, open, |ui| {
+        // Console rows are contiguous; horizontal controls retain kit spacing.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        add(ui);
+    });
 }
 
 pub fn heading(ui: &mut Ui, text: &str) {

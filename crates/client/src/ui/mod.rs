@@ -157,6 +157,7 @@ pub fn draw_ui(
 /// ⚙ Debug console, ✔ Tasks and 🔍 Object browser, top to bottom,
 /// free-floating at the top right of the view. Each toggles its window.
 fn icons(ctx: &egui::Context, rect: egui::Rect, icons: [(&str, &str, &mut bool); 3]) {
+    use kit::TooltipExt;
     use kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_glyph};
     let id = egui::Id::new("hud-icons");
     let area = egui::Area::new(id)
@@ -179,7 +180,7 @@ fn icons(ctx: &egui::Context, rect: egui::Rect, icons: [(&str, &str, &mut bool);
                             }
                         })
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(hint);
+                        .on_hover_text_themed(&kit::Theme::GAME, hint);
                     if response.clicked() {
                         *open = !*open;
                     }

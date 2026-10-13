@@ -12,6 +12,152 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
 }
 
 #[test]
+fn filter_removal_and_reset_use_red_feedback_without_recolouring_normal_actions() {
+    let ctx = egui::Context::default();
+    let theme = super::Theme::GAME;
+    let frame = |time, pointer| {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(700.0, 400.0))),
+                events: vec![egui::Event::PointerMoved(pointer)],
+                time: Some(time),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        super::pill(ui, &theme, "Example filter");
+                        super::destructive_button(ui, &theme, "Reset");
+                    });
+                });
+            },
+        )
+    };
+    let outside = pos2(0.0, 0.0);
+    frame(0.0, outside);
+    frame(0.3, outside);
+    let idle = frame(0.31, outside);
+    let position = |label| {
+        idle.shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    let colour_count = |output: egui::FullOutput, colour| {
+        output
+            .shapes
+            .iter()
+            .filter(|shape| {
+                matches!(&shape.shape,
+        egui::epaint::Shape::Rect(rect) if rect.fill == colour && rect.rect.height() == 2.0)
+            })
+            .count()
+    };
+    frame(0.32, position("×"));
+    assert_eq!(
+        colour_count(frame(0.6, position("×")), super::Theme::DESTRUCTIVE),
+        1
+    );
+    frame(0.61, outside);
+    frame(0.9, outside);
+    frame(0.91, position("Reset"));
+    assert_eq!(
+        colour_count(frame(1.2, position("Reset")), super::Theme::DESTRUCTIVE),
+        1
+    );
+    frame(1.21, outside);
+    frame(1.5, outside);
+    frame(1.51, position("Example filter"));
+    assert_eq!(
+        colour_count(frame(1.8, position("Example filter")), theme.accent),
+        1
+    );
+}
+
+#[test]
+fn debug_window_control_rows_are_contiguous() {
+    let ctx = egui::Context::default();
+    let frame = || {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 800.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                window(ctx, "contiguous-console", &mut true, |ui| {
+                    assert_eq!(ui.spacing().item_spacing.x, super::SPACING);
+                    check(ui, false, "First control", true, "");
+                    check(ui, false, "Second control", true, "");
+                })
+            },
+        )
+    };
+    frame();
+    let output = frame();
+    let top = |label| {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.text().contains(label) => {
+                    Some(text.pos.y)
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert!((top("Second control") - top("First control") - THEME.row).abs() < 0.1);
+}
+
+#[test]
+fn shared_fact_rows_are_contiguous_without_changing_surrounding_spacing() {
+    for details in [false, true] {
+        let ctx = egui::Context::default();
+        super::plain_style(&ctx);
+        let theme = super::Theme::GAME;
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let spacing = ui.spacing().item_spacing.y;
+                if details {
+                    super::facts_with_details(
+                        ui,
+                        &theme,
+                        "test-facts",
+                        &[("First", "1".into(), None), ("Second", "2".into(), None)],
+                    );
+                } else {
+                    super::facts(
+                        ui,
+                        &theme,
+                        "test-facts",
+                        &[("First", "1".into()), ("Second", "2".into())],
+                    );
+                }
+                assert_eq!(ui.spacing().item_spacing.y, spacing);
+            });
+        });
+        let top = |label| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        Some(text.pos.y)
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert!((top("Second") - top("First") - theme.row).abs() < 0.1);
+    }
+}
+
+#[test]
 fn selected_choices_keep_their_underlines_without_hover_or_focus() {
     let ctx = egui::Context::default();
     let theme = super::Theme::GAME;
@@ -310,8 +456,7 @@ fn all_terminal_rows_keep_the_same_bright_edge_during_long_presses() {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        egui::ScrollArea::vertical()
-                            .scroll_source(SCROLL_SOURCE)
+                        super::ScrollArea::vertical()
                             .max_height(160.0)
                             .show(ui, |ui| {
                                 match kind {
@@ -448,6 +593,126 @@ fn long_presses_click_when_released_over_the_control() {
         frame(5.8, vec![button(pos, true), button(pos, false)]),
         "pressed and released in one frame"
     );
+}
+
+#[test]
+fn reserved_button_sizes_match_rendered_buttons_in_both_themes() {
+    for theme in [super::Theme::GAME, super::Theme::TERMINAL] {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let expected = super::button_size(ui, &theme, "Reset filters");
+                let response = super::button(ui, &theme, "Reset filters");
+                assert_eq!(response.rect.size(), expected);
+            });
+        });
+    }
+}
+
+#[test]
+fn expandable_fact_state_is_scoped_to_its_owning_panel() {
+    let ctx = egui::Context::default();
+    super::plain_style(&ctx);
+    let frame = |events| {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(600.0, 400.0))),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    for (panel, detail) in [
+                        ("first", "First panel detail"),
+                        ("second", "Second panel detail"),
+                    ] {
+                        ui.push_id(panel, |ui| {
+                            super::facts_with_details(
+                                ui,
+                                &super::Theme::GAME,
+                                "facts",
+                                &[("Shared label", "Value".into(), Some(detail))],
+                            )
+                        });
+                    }
+                });
+            },
+        )
+    };
+    frame(vec![]);
+    let output = frame(vec![]);
+    let pos = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == "Shared label +" => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .unwrap();
+    frame(vec![egui::Event::PointerMoved(pos)]);
+    frame(vec![button(pos, true)]);
+    let output = frame(vec![button(pos, false)]);
+    let contains = |label| {
+        output.shapes.iter().any(|shape| {
+            matches!(&shape.shape,
+        egui::epaint::Shape::Text(text) if text.galley.text() == label)
+        })
+    };
+    assert!(contains("First panel detail"));
+    assert!(
+        !contains("Second panel detail"),
+        "panels must not share expansion state"
+    );
+}
+
+#[test]
+fn window_close_glyph_aligns_with_title_ink_in_both_themes() {
+    for theme in [super::Theme::GAME, super::Theme::TERMINAL] {
+        for eyebrow in ["", "EXPLORER"] {
+            let ctx = egui::Context::default();
+            super::plain_style(&ctx);
+            let mut open = true;
+            let mut frame = || {
+                ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(1200.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        let mut window = super::Window::new("Alignment test");
+                        window.eyebrow = eyebrow;
+                        window.show(ctx, &theme, &mut open, |ui| {
+                            ui.label("Content");
+                        });
+                    },
+                )
+            };
+            frame();
+            let output = frame();
+            let centre = |label| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                            Some(text.pos.y + text.galley.mesh_bounds.center().y)
+                        }
+                        _ => None,
+                    })
+                    .unwrap()
+            };
+            assert!(
+                (centre("×") - centre("Alignment test")).abs() < 1.0,
+                "close glyph must align with title, text_mode={}, eyebrow={eyebrow}",
+                theme.text_mode
+            );
+        }
+    }
 }
 
 #[test]
@@ -829,11 +1094,87 @@ fn shared_scrollbars_reserve_their_expanded_width() {
     let style = ctx.style();
     let scroll = &style.spacing.scroll;
     assert!(scroll.floating);
-    assert!(scroll.floating_width < scroll.bar_width);
+    assert_eq!(scroll.floating_width, scroll.bar_width);
     assert_eq!(
         scroll.allocated_width(),
         scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin
     );
+}
+
+#[test]
+fn scrollbars_are_square_full_width_accent_handles_without_tracks() {
+    for theme in [super::Theme::GAME, super::Theme::TERMINAL] {
+        let ctx = egui::Context::default();
+        super::plain_style(&ctx);
+        // Ignore visibility fade-in when comparing idle/hover handle widths.
+        ctx.style_mut(|style| style.animation_time = 0.0);
+        let mut bar_width = 0.0;
+        let mut frame = |events| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(600.0, 400.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        theme.style_scrollbars(ui.style_mut());
+                        let scroll = &ui.spacing().scroll;
+                        bar_width = scroll.bar_width;
+                        assert_eq!(scroll.floating_width, bar_width);
+                        assert_eq!(
+                            [
+                                scroll.dormant_background_opacity,
+                                scroll.active_background_opacity,
+                                scroll.interact_background_opacity
+                            ],
+                            [0.0; 3]
+                        );
+                        egui::ScrollArea::vertical()
+                            .max_height(140.0)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.allocate_space(vec2(ui.available_width(), 1000.0));
+                            });
+                    });
+                },
+            )
+        };
+        let handles = |output: egui::FullOutput, colour| {
+            output
+                .shapes
+                .into_iter()
+                .filter_map(|shape| match shape.shape {
+                    egui::epaint::Shape::Rect(rect) if rect.fill == colour => {
+                        assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO);
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        frame(vec![]);
+        let idle = handles(frame(vec![]), theme.accent.gamma_multiply(0.12));
+        assert_eq!(idle.len(), 1);
+        let content_hover = handles(
+            frame(vec![egui::Event::PointerMoved(pos2(50.0, 50.0))]),
+            theme.accent.gamma_multiply(0.12),
+        );
+        assert_eq!(
+            content_hover.len(),
+            1,
+            "hovering content must not brighten the scrollbar"
+        );
+        let hovered = handles(
+            frame(vec![egui::Event::PointerMoved(idle[0].center())]),
+            theme.accent,
+        );
+        assert_eq!(hovered.len(), 1);
+        assert_eq!(idle[0].width(), hovered[0].width());
+        // Release the frame closure's mutable borrow before reading its output.
+        let actual_width = idle[0].width();
+        assert!((actual_width - bar_width).abs() < 0.1);
+    }
 }
 
 #[test]
@@ -911,7 +1252,7 @@ fn filter_chips_reveal_and_remove_with_eased_horizontal_sweeps() {
     let ctx = egui::Context::default();
     let theme = super::Theme::GAME;
     let frame = |time, events| {
-        let mut result = super::widgets::Pill::default();
+        let mut result = super::pill::Pill::default();
         let output = ctx.run(
             egui::RawInput {
                 time: Some(time),

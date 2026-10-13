@@ -152,7 +152,13 @@ pub(super) fn highlight(ui: &Ui, theme: &Theme, rect: Rect, hover: f32, part: Hi
             se: r,
         },
     };
-    painter.rect_filled(rect, corners, theme.accent.gamma_multiply(0.12 * hover));
+    painter.rect_filled(
+        rect,
+        corners,
+        theme
+            .accent
+            .gamma_multiply(Theme::SUBTLE_ACCENT_OPACITY * hover),
+    );
     let edges = [rect.min, pos2(rect.right() - 2.0, rect.top())];
     let edges = match part {
         Highlight::Whole => &edges[..],
@@ -209,7 +215,13 @@ pub(super) fn focus_input_padding(ui: &Ui, response: &egui::Response, outer: Rec
 }
 
 /// Shared hover/focus underline: expands from the centre and retracts to it.
-pub(super) fn input_underline(ui: &Ui, theme: &Theme, rect: Rect, id: egui::Id, active: bool) {
+pub(super) fn input_underline(
+    ui: &Ui,
+    theme: &Theme,
+    rect: Rect,
+    id: egui::Id,
+    active: bool,
+) -> f32 {
     let amount = animate_highlight(ui, id, active);
     growing_edge(
         ui,
@@ -218,6 +230,7 @@ pub(super) fn input_underline(ui: &Ui, theme: &Theme, rect: Rect, id: egui::Id, 
         amount,
         false,
     );
+    amount
 }
 
 /// A full-width row of `height`, lit on hover.

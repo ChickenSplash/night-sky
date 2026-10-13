@@ -9,6 +9,7 @@ mod results;
 
 use crate::actions::UiCommand;
 use crate::search::Searches;
+use crate::ui::kit::TooltipExt;
 use crate::ui::kit::{self, Theme};
 use crate::{Navigation, Universe};
 use bevy::prelude::*;
@@ -55,12 +56,13 @@ fn follow(mut commands: MessageReader<UiCommand>, mut browser: ResMut<Browser>) 
                 let text = query.to_text();
                 browser.text = query.text.clone();
                 browser.query = query;
+                browser.text_error = None;
+                browser.problem = None;
                 browser.sent = Some(text);
                 browser.open = true;
             }
             UiCommand::ClearSearch => {
-                browser.query = Query::default();
-                browser.text.clear();
+                browser.reset();
                 // Nothing is searched for until the query changes.
                 browser.sent = Some(browser.query.to_text());
             }
@@ -98,6 +100,14 @@ pub fn window(ctx: &egui::Context, browser: &mut Browser, view: View, out: &mut 
 }
 
 impl Browser {
+    /// Full reset, shared by the filter-row action and external clear commands.
+    fn reset(&mut self) {
+        self.query = Query::default();
+        self.text.clear();
+        self.text_error = None;
+        self.problem = None;
+    }
+
     /// Sends the query if it changed since it was last sent.
     fn send(&mut self, out: &mut Vec<UiCommand>) {
         let text = self.query.to_text();
@@ -167,11 +177,14 @@ impl Browser {
 
     fn chips(&mut self, ui: &mut egui::Ui) {
         let theme = &THEME;
-        let chips = filters::chips(&self.query);
         ui.horizontal_wrapped(|ui| {
             if kit::primary_button(ui, theme, "+ Add filter", true).clicked() {
                 self.picker = Some(picker::Picker::new());
             }
+            self.type_choice(ui);
+            let chips = filters::chips(&self.query)
+                .into_iter()
+                .filter(|(chip, _)| !matches!(chip, Chip::Kinds));
             for (chip, label) in chips {
                 let pill = kit::pill(ui, theme, &label);
                 if pill.remove {
@@ -185,7 +198,71 @@ impl Browser {
                     });
                 }
             }
+            let size = kit::button_size(ui, theme, "Reset filters");
+            let remaining = ui.available_size_before_wrap().x;
+            // Use the remaining row when it fits, otherwise wrap a full-width
+            // slot so the reset action stays at the right of the final row.
+            let width = if remaining >= size.x { remaining } else { ui.max_rect().width() };
+            ui.allocate_ui_with_layout(egui::vec2(width, size.y),
+                egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if kit::destructive_button(ui, theme, "Reset filters")
+                        .on_hover_text_themed(theme, "Clears search text, Type and all filters. Restores Within to 50 ly and Show to 50.")
+                        .clicked() {
+                        self.reset();
+                    }
+                });
         });
+    }
+
+    fn type_choice(&mut self, ui: &mut egui::Ui) {
+        use space_simulation::search::registry::{self, KINDS};
+        let mut options = vec![("", "All types")];
+        options.extend(
+            KINDS
+                .iter()
+                .filter(|kind| kind.available())
+                .map(|kind| (kind.id, kind.label)),
+        );
+        let (label, selected) = if let Some(family) = &self.query.family {
+            (
+                registry::family(family)
+                    .map_or(family.as_str(), |family| family.label)
+                    .to_owned(),
+                None,
+            )
+        } else if self.query.kinds.is_empty() {
+            ("All types".to_owned(), Some(""))
+        } else {
+            let label = self
+                .query
+                .kinds
+                .iter()
+                .map(|id| registry::kind_index(id).map_or(id.as_str(), |index| KINDS[index].label))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            (
+                label,
+                if self.query.kinds.len() == 1 {
+                    Some(self.query.kinds[0].as_str())
+                } else {
+                    None
+                },
+            )
+        };
+        if let Some(kind) = kit::dropdown(
+            ui,
+            &THEME,
+            "browser-type",
+            &format!("Type: {label}"),
+            selected,
+            &options,
+        ) {
+            if kind.is_empty() {
+                filters::remove(&mut self.query, &Chip::Kinds);
+            } else {
+                filters::set_kind(&mut self.query, &kind);
+            }
+        }
     }
 
     /// Radius or the visited system, and the limit.
@@ -222,13 +299,8 @@ impl Browser {
             }
             kit::number_field(ui, theme, "Show", &mut self.query.limit, 1..=MAX_LIMIT, "");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if kit::button(ui, theme, "Reset").clicked() {
-                    self.query = Query::default();
-                    self.text.clear();
-                    self.text_error = None;
-                }
                 if kit::button(ui, theme, "Refresh")
-                    .on_hover_text("Distances are from where you searched. Refresh searches again from where you are now.")
+                    .on_hover_text_themed(theme, "Distances are from where you searched. Refresh searches again from where you are now.")
                     .clicked()
                 {
                     self.refresh(out);

@@ -8,9 +8,19 @@ use bevy_egui::egui::{self, Ui, pos2, vec2};
 const LEADER_GAP: f32 = 8.0;
 
 pub fn facts(ui: &mut Ui, theme: &Theme, id: &str, rows: &[(&str, String)]) {
-    for (label, value) in rows {
-        fact(ui, theme, egui::Id::new((id, *label)), label, value, false);
-    }
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (label, value) in rows {
+            fact(
+                ui,
+                theme,
+                ui.make_persistent_id((id, *label)),
+                label,
+                value,
+                false,
+            );
+        }
+    });
 }
 
 /// As `facts`, but a row with a detail has a clickable label, `label +`,
@@ -21,19 +31,22 @@ pub fn facts_with_details(
     id: &str,
     rows: &[(&str, String, Option<&str>)],
 ) {
-    for (label, value, detail) in rows {
-        let open = fact(
-            ui,
-            theme,
-            egui::Id::new((id, *label)),
-            label,
-            value,
-            detail.is_some(),
-        );
-        if let (true, Some(detail)) = (open, detail) {
-            super::note(ui, theme, detail);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (label, value, detail) in rows {
+            let open = fact(
+                ui,
+                theme,
+                ui.make_persistent_id((id, *label)),
+                label,
+                value,
+                detail.is_some(),
+            );
+            if let (true, Some(detail)) = (open, detail) {
+                super::note(ui, theme, detail);
+            }
         }
-    }
+    });
 }
 
 /// One full-width fact row, lit on hover like every other row; a row with a

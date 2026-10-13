@@ -34,8 +34,9 @@ crates/client/       Bevy client and egui interface
     stream/          Native/web backends and streaming metrics
   src/render/        Bodies, exposure, glow, black hole and shaders
   src/ui/            HUD, breadcrumbs, inspector, tasks and the debug console's skin
-  src/ui/kit/        Themed widget kit (terminal and game themes), halo text
+  src/ui/kit/        Shared themes, controls, windows, scrolling, animation and halo text
   src/ui/browser/    Object browser: query chips, filter picker, results
+  src/ui/tasks/      Task-panel regression tests
   src/devtools/      Debug window, tests, benchmarks and diagnostics
     tabs/            One module per debug tab
 crates/server/       Axum API and static browser file server
@@ -57,6 +58,12 @@ vendor/             Documented Bevy renderer patch
 Large test blocks live in sibling `tests.rs` files. Shaders are beside their Rust
 modules; internal asset paths are relative to the loading `.rs` file. Keep both
 native and WASM configurations working when moving code.
+
+The [UI kit guide](ui-kit.md) describes module ownership, shared interaction
+rules and how to add controls without duplicating theme or animation logic.
+The [object browser notes](object-browser.md) cover query controls, filters,
+range editors and responsive results. The debug console uses a thin
+`ui/terminal.rs` adapter over the same kit, not a second widget implementation.
 
 Runtime files and build output stay in the project. Rust toolchains and Cargo's
 dependency cache use their normal user-level locations. Set
@@ -96,6 +103,9 @@ It checks formatting, workspace unit tests and strict Clippy, natively and
 for the browser's WebAssembly build.
 Tests cover orbital and clock invariants, deterministic generation, multiple
 systems, streaming, persistent task slots, presentation layout and camera flights.
+UI regressions cover long presses, window movement/resizing, title alignment,
+selection-driven rows, responsive result panes and reset placement, numeric
+precision/validation, dropdown geometry, themed tooltips and scrollbar easing.
 
 Additional graphical and browser checks:
 

@@ -60,6 +60,10 @@ const fn font(size: f32, mono: bool) -> Font {
 }
 
 impl Theme {
+    /// Shared feedback colour for close, remove and reset actions.
+    pub const DESTRUCTIVE: Color32 = Color32::from_rgb(240, 100, 100);
+    /// Faint row highlights and idle scrollbars share this accent strength.
+    pub const SUBTLE_ACCENT_OPACITY: f32 = 0.12;
     /// The debug console: a translucent black window after the desktop's
     /// Hyprland windows, with a light grey border and text-mode controls.
     pub const TERMINAL: Self = Self {
@@ -124,6 +128,41 @@ impl Theme {
     pub fn field_height(&self) -> f32 {
         self.row + 12.0
     }
+
+    /// Tooltips use the owning window's colours and border, but never glass.
+    pub fn tooltip_frame(&self) -> egui::Frame {
+        egui::Frame::new()
+            .fill(self.fill.to_opaque())
+            .stroke((self.border_width, self.border))
+            .corner_radius(self.radius)
+            .inner_margin(self.padding)
+    }
+
+    /// Full-width square accent handles, subtle until hovered or dragged,
+    /// with an invisible track and reserved gutter.
+    pub fn style_scrollbars(&self, style: &mut egui::Style) {
+        let scroll = &mut style.spacing.scroll;
+        scroll.floating = true;
+        scroll.floating_width = scroll.bar_width;
+        scroll.floating_allocated_width =
+            scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin;
+        scroll.foreground_color = true;
+        scroll.dormant_background_opacity = 0.0;
+        scroll.active_background_opacity = 0.0;
+        scroll.interact_background_opacity = 0.0;
+        scroll.dormant_handle_opacity = Self::SUBTLE_ACCENT_OPACITY;
+        scroll.active_handle_opacity = Self::SUBTLE_ACCENT_OPACITY;
+        scroll.interact_handle_opacity = 1.0;
+        for visuals in [
+            &mut style.visuals.widgets.inactive,
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+            &mut style.visuals.widgets.noninteractive,
+        ] {
+            visuals.fg_stroke.color = self.accent;
+            visuals.corner_radius = egui::CornerRadius::ZERO;
+        }
+    }
 }
 
 /// Scene selection accent; plain egui styling remains for native/debug helpers.
@@ -137,16 +176,14 @@ pub fn plain_style(ctx: &egui::Context) {
     style.visuals.window_corner_radius = egui::CornerRadius::ZERO;
     style.visuals.menu_corner_radius = egui::CornerRadius::ZERO;
     style.visuals.panel_fill = PANEL;
-    style.visuals.window_fill = PANEL;
+    // Fallback for egui-generated tooltips and any plain helper popups.
+    style.visuals.window_fill = Theme::GAME.fill.to_opaque();
+    style.visuals.window_stroke = egui::Stroke::new(Theme::GAME.border_width, Theme::GAME.border);
     style.visuals.override_text_color = Some(Color32::from_rgb(214, 228, 244));
     style.visuals.selection.bg_fill = Color32::from_rgb(24, 65, 85);
     style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(15, 31, 49);
     style.spacing.item_spacing = egui::Vec2::splat(SPACING);
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
-    // Keep the slim hover-expanding bars, but reserve their full width in
-    // every scroll area, including modals and plain egui windows.
-    let scroll = &mut style.spacing.scroll;
-    scroll.floating_allocated_width =
-        scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin;
+    Theme::GAME.style_scrollbars(&mut style);
     ctx.set_style(style);
 }

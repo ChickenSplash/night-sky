@@ -16,7 +16,7 @@ pub fn terminal_tab(ui: &mut egui::Ui, tools: &mut DevTools, lines: &mut Vec<Str
             "Type help for the commands. On the desktop, the terminal that ran ./scripts/run.sh takes them too.",
         );
     }
-    egui::ScrollArea::both()
+    terminal::ScrollArea::both()
         .scroll_source(terminal::SCROLL_SOURCE)
         .id_salt("debug-terminal")
         .auto_shrink(false)

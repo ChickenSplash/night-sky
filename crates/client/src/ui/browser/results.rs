@@ -4,6 +4,7 @@ use super::{Browser, THEME, View};
 use crate::actions::UiCommand;
 use crate::search::Entry;
 use crate::ui::kit;
+use crate::ui::kit::TooltipExt;
 use bevy_egui::egui::{self, Align2, pos2, vec2};
 use space_simulation::search::registry::{self, KINDS};
 use space_simulation::search::{Scope, SearchResult, State};
@@ -233,22 +234,25 @@ fn list_content(
     let width = ui.available_width() - ui.spacing().scroll.allocated_width();
     let class_x = (width * 0.55).max(200.0);
     let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), egui::Sense::hover());
-    let head = egui::FontId::monospace(9.0);
     for (x, align, text) in [
         (
             rect.left() + theme.inset,
-            Align2::LEFT_CENTER,
+            Align2::LEFT_TOP,
             "OBJECT · SYSTEM",
         ),
-        (rect.left() + class_x, Align2::LEFT_CENTER, "CLASS"),
-        (rect.right() - theme.inset, Align2::RIGHT_CENTER, "DISTANCE"),
+        (rect.left() + class_x, Align2::LEFT_TOP, "CLASS"),
+        (rect.right() - theme.inset, Align2::RIGHT_TOP, "DISTANCE"),
     ] {
-        ui.painter().text(
-            pos2(x, rect.center().y),
-            align,
-            text,
-            head.clone(),
-            theme.dim,
+        let galley = egui::WidgetText::from(kit::eyebrow_text(theme, text)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            theme.font.id(),
+        );
+        let label_rect = align.anchor_size(pos2(x, rect.top()), galley.size());
+        ui.place(
+            label_rect,
+            egui::Label::new(kit::eyebrow_text(theme, text)).extend(),
         );
     }
     // Move inter-row spacing inside the hit/highlight rectangle, keeping
@@ -257,15 +261,16 @@ fn list_content(
     let row_height = ROW + padding;
     let viewport_height = (height - 20.0 - padding).max(0.0);
     ui.spacing_mut().item_spacing.y = 0.0;
-    egui::ScrollArea::vertical()
+    kit::ScrollArea::vertical()
         .id_salt("browser-results")
-        // A stable gutter also keeps column headings aligned with the rows.
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
         .scroll_source(kit::SCROLL_SOURCE)
         .auto_shrink([false, false])
         .min_scrolled_height(0.0)
         .max_height(viewport_height)
         .show_rows(ui, row_height, results.len(), |ui, rows| {
+            // Keep rows aligned with their headings even without a scrollbar.
+            ui.set_max_width(width);
             for result in &results[rows] {
                 let selected = selection.as_ref() == Some(&result.object);
                 let (rect, response, hover) = kit::list_row(ui, theme, row_height, selected);
@@ -385,7 +390,10 @@ fn detail(
             | space_simulation::objects::ObjectRef::List { id } => id.clone(),
             space_simulation::objects::ObjectRef::Galaxy => String::new(),
         };
-        if kit::link(ui, theme, "Copy ID").on_hover_text(&id).clicked() {
+        if kit::link(ui, theme, "Copy ID")
+            .on_hover_text_themed(theme, &id)
+            .clicked()
+        {
             ui.ctx().copy_text(id);
         }
     });
@@ -396,7 +404,7 @@ fn detail(
         .map(|(label, value)| (label.as_str(), value.clone()))
         .collect();
     let note = info.note.clone();
-    egui::ScrollArea::vertical()
+    kit::ScrollArea::vertical()
         .id_salt("browser-detail")
         .scroll_source(kit::SCROLL_SOURCE)
         .auto_shrink([false, true])
