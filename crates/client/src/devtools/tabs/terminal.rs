@@ -9,7 +9,7 @@ use bevy_egui::egui;
 pub fn terminal_tab(ui: &mut egui::Ui, tools: &mut DevTools, lines: &mut Vec<String>) {
     let font = egui::FontId::monospace(12.0);
     let height = ui.fonts_mut(|f| f.row_height(&font));
-    let prompt = ui.fonts_mut(|f| f.row_height(&terminal::font())) + 12.0;
+    let prompt = terminal::THEME.field_height() + ui.spacing().item_spacing.y;
     if tools.terminal.is_empty() {
         terminal::note(
             ui,
@@ -42,7 +42,6 @@ pub fn terminal_tab(ui: &mut egui::Ui, tools: &mut DevTools, lines: &mut Vec<Str
                 );
             }
         });
-    ui.add_space(4.0);
     if let Some(line) = command_line(ui, tools) {
         // Clearing is the window's own business; everything else runs as typed.
         if line.trim() == "clear" {
@@ -100,4 +99,52 @@ fn command_line(ui: &mut egui::Ui, tools: &mut DevTools) -> Option<String> {
         tools.history.push(line.clone());
     }
     Some(line)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_terminal_does_not_grow_the_window_each_frame() {
+        let ctx = egui::Context::default();
+        crate::ui::kit::plain_style(&ctx);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
+        let mut tools = DevTools::default();
+        let mut frame = |show_terminal| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ctx| {
+                    terminal::window(ctx, "terminal-test", &mut true, |ui| {
+                        if show_terminal {
+                            terminal_tab(ui, &mut tools, &mut Vec::new());
+                        } else {
+                            ui.allocate_space(ui.available_size());
+                        }
+                    });
+                },
+            );
+            ctx.memory(|memory| {
+                memory
+                    .area_rect(egui::Id::new(("window", "terminal-test")))
+                    .unwrap()
+            })
+        };
+        frame(false);
+        let before = frame(false);
+        for _ in 0..30 {
+            let after = frame(true);
+            assert!(
+                (after.height() - before.height()).abs() < 1.0,
+                "terminal changed the window height: {before:?} -> {after:?}"
+            );
+            assert!(
+                screen.contains_rect(after),
+                "window left the viewport: {after:?}"
+            );
+        }
+    }
 }

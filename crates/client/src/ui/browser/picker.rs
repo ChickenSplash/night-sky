@@ -19,8 +19,7 @@ struct Editor {
     property: usize,
     /// Chosen option IDs.
     chosen: Vec<String>,
-    min: String,
-    max: String,
+    range: kit::RangeInput,
     flag: Option<bool>,
     /// Editing a chip, rather than adding a filter.
     existing: bool,
@@ -50,8 +49,7 @@ impl Editor {
             slot,
             property,
             chosen: Vec::new(),
-            min: String::new(),
-            max: String::new(),
+            range: kit::RangeInput::default(),
             flag: None,
             existing: false,
         };
@@ -60,7 +58,7 @@ impl Editor {
             let end = |n: &Option<f64>| n.map_or(String::new(), filters::number_text);
             match &filter.test {
                 Test::OneOf(ids) => editor.chosen = ids.clone(),
-                Test::Range { min, max } => (editor.min, editor.max) = (end(min), end(max)),
+                Test::Range { min, max } => editor.range = kit::RangeInput::new(end(min), end(max)),
                 Test::Is(flag) => editor.flag = Some(*flag),
             }
         }
@@ -77,8 +75,7 @@ impl Editor {
                 .map(Test::Is)
                 .ok_or_else(|| "Choose yes or no".into()),
             Values::Range { integer } => {
-                let min = filters::parse_end(&self.min, integer)?;
-                let max = filters::parse_end(&self.max, integer)?;
+                let kit::NumericRange { min, max } = self.range.value(integer)?;
                 match (min, max) {
                     (None, None) => Err("Give a minimum, a maximum or both".into()),
                     (Some(min), Some(max)) if min > max => {
@@ -103,7 +100,7 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
         .area(egui::Modal::default_area(id).order(egui::Order::Tooltip))
         .frame(
             egui::Frame::new()
-                .fill(theme.fill.to_opaque())
+                .fill(theme.fill)
                 .stroke((1.0, theme.border))
                 .corner_radius(theme.radius)
                 .inner_margin(theme.padding),
@@ -111,7 +108,7 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
         .backdrop_color(Color32::from_black_alpha(140))
         .show(ctx, |ui| {
             ui.set_width(460.0);
-            ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(kit::SPACING);
             let title = match &state.editor {
                 Some(editor) => editor_title(editor),
                 None => "Add a filter".into(),
@@ -123,10 +120,10 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
                         .color(theme.text),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close |= kit::link(ui, theme, "×").clicked();
+                    close |= kit::close_button(ui, theme).clicked();
                 });
             });
-            kit::rule(ui, theme);
+            ui.add_space(kit::SPACING);
             match &mut state.editor {
                 Some(editor) => {
                     let (done, back) = edit(ui, theme, editor, query);
@@ -147,6 +144,7 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
                 }
             }
         });
+    crate::render::window_blur::register(ctx, id, modal.response.rect);
     if close || modal.should_close() {
         *picker = None;
     }
@@ -282,7 +280,6 @@ fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Quer
 }
 
 fn group(ui: &mut egui::Ui, theme: &Theme, text: &str) {
-    ui.add_space(6.0);
     kit::eyebrow(ui, theme, text);
 }
 
@@ -315,38 +312,33 @@ fn edit(ui: &mut egui::Ui, theme: &Theme, editor: &mut Editor, query: &mut Query
                 }
             });
         }
-        Values::Range { .. } => {
+        Values::Range { integer } => {
             let unit = filters::unit_text(property).unwrap_or("");
             kit::note(ui, theme, "Leave either end blank to leave it open.");
-            ui.horizontal(|ui| {
-                let width = (ui.available_width() - 40.0) / 2.0;
-                kit::field(
-                    ui,
-                    theme,
-                    "range-min",
-                    &format!("Minimum {unit}"),
-                    &mut editor.min,
-                    width,
-                );
-                kit::field(
-                    ui,
-                    theme,
-                    "range-max",
-                    &format!("Maximum {unit}"),
-                    &mut editor.max,
-                    width,
-                );
-            });
+            let range = kit::range_field(
+                ui,
+                theme,
+                property.id,
+                &mut editor.range,
+                kit::RangeField {
+                    unit,
+                    integer,
+                    slider: slider_span(property.id),
+                },
+            );
+            debug_assert_eq!(range.value, editor.range.value(integer));
+            if range.response.changed() {
+                ui.ctx().request_repaint();
+            }
         }
     }
     let test = editor.test();
     if let (Err(reason), true) = (
         &test,
-        editor.existing || !editor.min.is_empty() || !editor.max.is_empty(),
+        editor.existing || !editor.range.min.is_empty() || !editor.range.max.is_empty(),
     ) {
         kit::note(ui, theme, reason);
     }
-    ui.add_space(6.0);
     let mut done = false;
     let mut back = false;
     ui.horizontal(|ui| {
@@ -373,4 +365,55 @@ fn edit(ui: &mut egui::Ui, theme: &Theme, editor: &mut Editor, query: &mut Query
         }
     });
     (done, back)
+}
+
+/// Property-specific exploration spans, not physical or query validation bounds.
+fn slider_span(property: &str) -> Option<kit::RangeSlider> {
+    use kit::RangeScale::{Linear, Logarithmic};
+    let (min, max, scale, step) = match property {
+        "temperature_k" => (1000.0, 50000.0, Linear, Some(1.0)),
+        "mass_solar" => (0.08, 100.0, Logarithmic, None),
+        "radius_solar" => (0.01, 1000.0, Logarithmic, None),
+        "luminosity_solar" => (0.0001, 1000000.0, Logarithmic, None),
+        "star_count" => (1.0, 4.0, Linear, Some(1.0)),
+        "planet_count" => (0.0, 30.0, Linear, Some(1.0)),
+        "radius_km" => (100.0, 100000.0, Logarithmic, None),
+        "mass_earth" => (0.0001, 10000.0, Logarithmic, None),
+        "semi_major_au" => (0.01, 1000.0, Logarithmic, None),
+        "eccentricity" => (0.0, 1.0, Linear, Some(0.001)),
+        "period_days" => (0.1, 1000000.0, Logarithmic, None),
+        _ => return None,
+    };
+    Some(kit::RangeSlider {
+        min,
+        max,
+        scale,
+        step,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_numeric_property_has_a_valid_slider_configuration() {
+        for property in PROPERTIES {
+            if let Values::Range { integer } = property.values {
+                let span = slider_span(property.id)
+                    .unwrap_or_else(|| panic!("missing slider for {}", property.id));
+                assert!(span.min.is_finite() && span.max.is_finite() && span.min < span.max);
+                if span.scale == kit::RangeScale::Logarithmic {
+                    assert!(span.min > 0.0);
+                }
+                if integer {
+                    assert_eq!(span.step, Some(1.0));
+                    assert_eq!(span.min.fract(), 0.0);
+                    assert_eq!(span.max.fract(), 0.0);
+                }
+            } else {
+                assert!(slider_span(property.id).is_none());
+            }
+        }
+    }
 }

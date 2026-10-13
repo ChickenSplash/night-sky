@@ -28,6 +28,7 @@ design notes into every session:
   manual exposure, compression, HDR, point spread, sprites and cameras.
 - [Object search plan](docs/object-search-plan.md): planned object registry,
   query model, search engine, CLI and browser. Read before starting that work.
+- [Object browser](docs/object-browser.md): browser controls, layout and styling.
 - [Documentation index](docs/README.md): controls, development setup, backend,
   logs, project structure and checks.
 - Paths in these notes are repository-relative or relative to a named crate's

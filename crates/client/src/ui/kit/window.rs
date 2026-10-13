@@ -6,6 +6,17 @@ use bevy_egui::egui::{self, Color32, Rect, Sense, Ui, epaint, pos2, vec2};
 /// Space between a window and the screen's edges when it first opens.
 const GAP: f32 = 12.0;
 
+const RESIZE_HANDLES: [&str; 8] = [
+    "left",
+    "right",
+    "top",
+    "bottom",
+    "left_top",
+    "right_top",
+    "left_bottom",
+    "right_bottom",
+];
+
 pub struct Window<'a> {
     pub title: &'a str,
     /// Small text above a framed title; text-mode windows have a prompt.
@@ -44,11 +55,44 @@ impl<'a> Window<'a> {
             (screen.height() * self.height.0).clamp(self.height.1, self.height.2),
         );
         let padding = f32::from(theme.padding);
+        let window_id = egui::Id::new(("window", self.title));
+        clamp_resize(
+            ctx,
+            window_id,
+            self.min_size + egui::Vec2::splat(2.0 * (padding + theme.border_width)),
+            screen,
+        );
         let mut close = false;
-        let position_id = egui::Id::new(("window-position", self.title));
+        let position_id = egui::Id::new(("window-center", self.title));
+        let position = ctx
+            .data(|data| data.get_temp::<egui::Pos2>(position_id))
+            .unwrap_or_else(|| {
+                pos2(
+                    screen.right() - GAP - size.x * 0.5 - padding - theme.border_width,
+                    below_icons(ctx, screen.top() + GAP)
+                        + size.y * 0.5
+                        + padding
+                        + theme.border_width,
+                )
+            });
         let mut movement = egui::Vec2::ZERO;
-        let mut window = egui::Window::new(self.title)
-            .id(egui::Id::new(("window", self.title)))
+        // egui paints resize feedback from the area's context style, outside
+        // the content closure. Suppress only that native stroke, then restore
+        // the original style for controls and after this window is drawn.
+        let style = ctx.style();
+        let mut frame_style = (*style).clone();
+        frame_style.visuals.widgets.hovered.bg_stroke.color = Color32::TRANSPARENT;
+        frame_style.visuals.widgets.active.bg_stroke.color = Color32::TRANSPARENT;
+        frame_style.visuals.widgets.hovered.fg_stroke.color = theme.accent;
+        frame_style.visuals.widgets.active.fg_stroke.color = theme.accent;
+        ctx.set_style(frame_style);
+        let window = egui::Window::new(self.title)
+            .id(window_id)
+            // egui 0.33 checks the anchor (not just the pivot) to decide
+            // which edges an immovable window may resize from. Track the
+            // centre anchor ourselves to allow every edge and header moves.
+            .pivot(egui::Align2::CENTER_CENTER)
+            .anchor(egui::Align2::CENTER_CENTER, position - screen.center())
             .title_bar(false)
             .frame(
                 egui::Frame::new()
@@ -65,39 +109,27 @@ impl<'a> Window<'a> {
             )
             // `size` is the content's; the frame's padding and border go
             // outside it.
-            .default_rect(Rect::from_min_size(
-                pos2(
-                    screen.right() - GAP - size.x - 2.0 * (padding + theme.border_width),
-                    below_icons(ctx, screen.top() + GAP),
-                ),
-                size,
-            ))
+            .default_size(size)
             .min_size(self.min_size)
             .movable(false)
             .resizable(true)
             .order(egui::Order::Foreground);
-        if let Some(position) = ctx.data(|data| data.get_temp::<egui::Pos2>(position_id)) {
-            window = window.current_pos(position);
-        }
         let shown = window.show(ctx, |ui| {
-            ui.style_mut().spacing.item_spacing = if theme.text_mode {
-                vec2(8.0, 4.0)
-            } else {
-                vec2(10.0, 8.0)
-            };
+            ui.set_style(style.clone());
+            ui.style_mut().spacing.item_spacing = egui::Vec2::splat(super::SPACING);
             let mut close_rect = Rect::NOTHING;
             let header = ui.horizontal(|ui| {
                 header(ui, theme, &self);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if theme.text_mode { "[ × ]" } else { "×" };
-                    let response =
-                        super::widgets::chip_response(ui, theme, label.into(), theme.text);
+                    let response = super::widgets::close_button(ui, theme);
                     close = response.clicked();
                     close_rect = response.rect;
                 });
             });
-            ui.add_space(4.0);
-            // The whole header, including frame padding down to the rule, is
+            // horizontal() already advances by item_spacing.y. Complete
+            // the same padding below the header as the frame gives above it.
+            ui.add_space((padding - ui.spacing().item_spacing.y).max(0.0));
+            // The whole header, including its surrounding frame padding, is
             // a handle. Cut out only the close button, not its whole column.
             let handle = Rect::from_min_max(
                 header.response.rect.min - vec2(padding, padding),
@@ -129,16 +161,216 @@ impl<'a> Window<'a> {
                 }
             }
             ui.set_clip_rect(content_clip);
-            super::widgets::rule(ui, theme);
-            ui.add_space(4.0);
+            ui.add_space(super::SPACING);
             add(ui);
         });
+        ctx.set_style(style.clone());
         if let Some(shown) = shown {
-            ctx.data_mut(|data| data.insert_temp(position_id, shown.response.rect.min + movement));
+            crate::render::window_blur::register(ctx, window_id, shown.response.rect);
+            resize_edges(
+                ctx,
+                theme,
+                shown.response.rect,
+                shown.response.layer_id,
+                &style,
+            );
+            ctx.data_mut(|data| {
+                data.insert_temp(position_id, shown.response.rect.center() + movement)
+            });
         }
         if close {
             *open = false;
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ResizeDrag {
+    bounds: Rect,
+    edges: [bool; 4],
+}
+
+/// Clamp the dragged edge before egui applies resize sizing or viewport
+/// translation. Its native path otherwise moves the whole rectangle first
+/// and only afterwards enforces the minimum content size.
+fn clamp_resize(ctx: &egui::Context, window_id: egui::Id, minimum: egui::Vec2, screen: Rect) {
+    let layer = egui::LayerId::new(egui::Order::Foreground, window_id);
+    let handles_id = egui::Id::new(layer).with("edge_drag");
+    let dragging = RESIZE_HANDLES.map(|name| {
+        ctx.read_response(handles_id.with(name))
+            .is_some_and(|response| response.dragged())
+    });
+    let session_id = window_id.with("kit-resize-drag");
+    if !dragging.iter().any(|drag| *drag) {
+        ctx.data_mut(|data| data.remove::<ResizeDrag>(session_id));
+        return;
+    }
+    let Some(delta) = ctx.input(|input| input.pointer.total_drag_delta()) else {
+        return;
+    };
+    let Some(bounds) = ctx.memory(|memory| memory.area_rect(window_id)) else {
+        return;
+    };
+    let session = ctx.data_mut(|data| {
+        *data.get_temp_mut_or(
+            session_id,
+            ResizeDrag {
+                bounds,
+                edges: [
+                    dragging[0] || dragging[4] || dragging[6],
+                    dragging[1] || dragging[5] || dragging[7],
+                    dragging[2] || dragging[4] || dragging[5],
+                    dragging[3] || dragging[6] || dragging[7],
+                ],
+            },
+        )
+    });
+    let target = bounded_resize(session.bounds, session.edges, delta, minimum, screen);
+    // egui adds the total drag delta to this reference rectangle. Supply a
+    // compensated reference so its native interaction lands on our bounded
+    // target while retaining capture, cursors, rounding and resize feedback.
+    let mut reference = target;
+    if session.edges[0] {
+        reference.min.x -= delta.x;
+    }
+    if session.edges[1] {
+        reference.max.x -= delta.x;
+    }
+    if session.edges[2] {
+        reference.min.y -= delta.y;
+    }
+    if session.edges[3] {
+        reference.max.y -= delta.y;
+    }
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            window_id.with("resize").with("window_rect_at_drag_start"),
+            reference,
+        )
+    });
+}
+
+pub(super) fn bounded_resize(
+    start: Rect,
+    edges: [bool; 4],
+    delta: egui::Vec2,
+    minimum: egui::Vec2,
+    screen: Rect,
+) -> Rect {
+    let mut rect = start;
+    if edges[0] {
+        rect.min.x = (start.left() + delta.x).clamp(
+            screen.left().min(start.left()),
+            start.right() - minimum.x.min(start.width()),
+        );
+    } else if edges[1] {
+        rect.max.x = (start.right() + delta.x).clamp(
+            start.left() + minimum.x.min(start.width()),
+            screen.right().max(start.right()),
+        );
+    }
+    if edges[2] {
+        rect.min.y = (start.top() + delta.y).clamp(
+            screen.top().min(start.top()),
+            start.bottom() - minimum.y.min(start.height()),
+        );
+    } else if edges[3] {
+        rect.max.y = (start.bottom() + delta.y).clamp(
+            start.top() + minimum.y.min(start.height()),
+            screen.bottom().max(start.bottom()),
+        );
+    }
+    rect
+}
+
+/// Reuse egui's actual edge/corner responses, so feedback follows the same
+/// hit testing and captured resize drag rather than competing with it.
+fn resize_edges(
+    ctx: &egui::Context,
+    theme: &Theme,
+    rect: Rect,
+    layer: egui::LayerId,
+    style: &egui::Style,
+) {
+    use super::interact::{ANIMATION_SECONDS, ease_out};
+    // These response IDs belong to the pinned egui 0.33 Window implementation.
+    let id = egui::Id::new(layer).with("edge_drag");
+    let responses = RESIZE_HANDLES.map(|side| ctx.read_response(id.with(side)));
+    let dragging = responses.iter().flatten().any(egui::Response::dragged);
+    let frame = ctx.cumulative_frame_nr();
+    let painter = ctx.layer_painter(layer);
+    let border = rect.shrink(theme.border_width * 0.5);
+    for (side, corners) in [(0, [4, 6]), (1, [5, 7]), (2, [4, 5]), (3, [6, 7])] {
+        let active = [side, corners[0], corners[1]].into_iter().any(|index| {
+            responses[index].as_ref().is_some_and(|response| {
+                if dragging {
+                    response.dragged()
+                } else {
+                    response.hovered()
+                }
+            })
+        });
+        let animation_id = id.with(("kit-resize-edge", side));
+        let origin_id = animation_id.with("origin");
+        let vertical = side < 2;
+        let pointer = ctx.input(|input| input.pointer.hover_pos());
+        let origin = ctx.data_mut(|data| {
+            let (was_active, mut origin, previous) = data
+                .get_temp::<(bool, f32, u64)>(origin_id)
+                .unwrap_or((false, 0.5, frame));
+            if active
+                && (!was_active || frame > previous + 1)
+                && let Some(pointer) = pointer
+            {
+                origin = if vertical {
+                    (pointer.y - border.top()) / border.height().max(1.0)
+                } else {
+                    (pointer.x - border.left()) / border.width().max(1.0)
+                }
+                .clamp(0.0, 1.0);
+            }
+            data.insert_temp(origin_id, (active, origin, frame));
+            origin
+        });
+        // Initialise idle edges before their first hover, matching inputs.
+        let amount = ctx.animate_bool_with_time_and_easing(
+            animation_id,
+            active,
+            ANIMATION_SECONDS,
+            ease_out,
+        );
+        if amount <= 0.0 {
+            continue;
+        }
+        let start = origin * (1.0 - amount);
+        let end = origin + (1.0 - origin) * amount;
+        let width = if dragging {
+            style.visuals.widgets.active.bg_stroke.width
+        } else {
+            style.visuals.widgets.hovered.bg_stroke.width
+        };
+        let points = if vertical {
+            let x = if side == 0 {
+                border.left()
+            } else {
+                border.right()
+            };
+            [
+                pos2(x, border.top() + border.height() * start),
+                pos2(x, border.top() + border.height() * end),
+            ]
+        } else {
+            let y = if side == 2 {
+                border.top()
+            } else {
+                border.bottom()
+            };
+            [
+                pos2(border.left() + border.width() * start, y),
+                pos2(border.left() + border.width() * end, y),
+            ]
+        };
+        painter.line_segment(points, (width, theme.accent));
     }
 }
 

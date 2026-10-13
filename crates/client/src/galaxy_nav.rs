@@ -281,6 +281,32 @@ pub fn reachable(nav: &Navigation, lists: &Galaxy, field: &Starfield, id: &str) 
     route(nav, lists, field, id).is_some()
 }
 
+/// Resolve selection without visiting or generating a whole planetary system.
+pub fn selectable_star(
+    nav: &Navigation,
+    lists: &Galaxy,
+    field: &Starfield,
+    id: &str,
+) -> Option<PickedStar> {
+    let key = space_simulation::multiple::system_key(id);
+    let mut star = match route(nav, lists, field, key)? {
+        Route::Located(star) => star,
+        Route::List(index, page) => {
+            let system = &lists.systems[index];
+            page_pick(system, page).unwrap_or_else(|| PickedStar {
+                id: key.into(),
+                position_ly: DVec3::from_array(system.position_ly),
+            })
+        }
+        Route::Visited => PickedStar {
+            id: key.into(),
+            position_ly: DVec3::from_array(nav.system(lists)?.position_ly),
+        },
+    };
+    star.id = id.to_owned();
+    Some(star)
+}
+
 /// Fly to any star's system and frame it, as a second click on the star does.
 pub fn visit_star(nav: &mut Navigation, lists: &Galaxy, field: &Starfield, id: &str) -> bool {
     match route(nav, lists, field, id) {

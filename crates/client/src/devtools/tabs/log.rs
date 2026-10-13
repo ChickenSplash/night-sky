@@ -32,7 +32,6 @@ pub fn log(ui: &mut egui::Ui, tools: &mut DevTools) {
                 tools.levels[i] = !tools.levels[i];
             }
         }
-        ui.add_space(8.0);
         terminal::input(ui, "grep", &mut tools.grep, 160.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if terminal::button(ui, "clear") {

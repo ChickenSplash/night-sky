@@ -12,6 +12,10 @@ pub enum UiCommand {
     PickStar {
         id: String,
     },
+    /// Select a known star by ID without travelling, even if already selected.
+    SelectStar {
+        id: String,
+    },
     /// Open a list's constellation from any view.
     Jump {
         list: String,
@@ -228,6 +232,13 @@ impl UiCommand {
                     Err(format!("Star `{id}` is not loaded or a list's system"))
                 }
             }
+            UiCommand::SelectStar { id } => {
+                crate::galaxy_nav::selectable_star(nav, galaxy, field, id)
+                    .map(|_| ())
+                    .ok_or_else(|| {
+                        format!("Star `{id}` is not loaded, visited, mapped or found by search")
+                    })
+            }
             UiCommand::Jump { list: id } => list(id).map(|_| ()),
             UiCommand::FindTask { list: id, task } => {
                 let index = list(id)?;
@@ -335,6 +346,11 @@ pub fn apply(
                         crate::galaxy_nav::page_pick(&galaxy.systems[list], page)
                     })
                 }) {
+                    nav.select(Some(Selection::Star(star)));
+                }
+            }
+            UiCommand::SelectStar { id } => {
+                if let Some(star) = crate::galaxy_nav::selectable_star(&nav, galaxy, &field, id) {
                     nav.select(Some(Selection::Star(star)));
                 }
             }

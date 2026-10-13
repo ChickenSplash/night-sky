@@ -10,9 +10,49 @@ pub const SCROLL_SOURCE: egui::scroll_area::ScrollSource = egui::scroll_area::Sc
     mouse_wheel: true,
 };
 
+/// One timing and easing curve for hover edges and input underlines.
+pub(super) const ANIMATION_SECONDS: f32 = 0.18;
+
+pub(super) fn ease_out(progress: f32) -> f32 {
+    egui::emath::easing::cubic_out(progress)
+}
+
+fn animate_highlight(ui: &Ui, id: egui::Id, active: bool) -> f32 {
+    ui.ctx().animate_bool_with_time_and_easing(
+        id.with("highlight-animation"),
+        active,
+        ANIMATION_SECONDS,
+        ease_out,
+    )
+}
+
+fn growing_edge(ui: &Ui, theme: &Theme, rect: Rect, amount: f32, vertical: bool) {
+    if amount <= 0.0 {
+        return;
+    }
+    let size = if vertical {
+        vec2(rect.width(), rect.height() * amount)
+    } else {
+        vec2(rect.width() * amount, rect.height())
+    };
+    ui.painter()
+        .rect_filled(Rect::from_center_size(rect.center(), size), 0, theme.accent);
+}
+
 /// How lit a control is, 0 to 1. A held press remains lit even when egui no
 /// longer calls the active widget hovered.
 pub(super) fn hover_amount(ui: &Ui, response: &egui::Response, enabled: bool) -> f32 {
+    selection_amount(ui, response, enabled, false)
+}
+
+/// Hover, held presses and persistent selection share one animation target,
+/// so handing the highlight between these states never jumps or restarts it.
+pub(super) fn selection_amount(
+    ui: &Ui,
+    response: &egui::Response,
+    enabled: bool,
+    selected: bool,
+) -> f32 {
     // Read-only facts have hover sense, so egui never gives them an active
     // button press. Keep their highlight while pressing inside them too.
     let readout_pressed = response.sense == Sense::hover()
@@ -24,10 +64,14 @@ pub(super) fn hover_amount(ui: &Ui, response: &egui::Response, enabled: bool) ->
                     .press_origin()
                     .is_some_and(|pos| response.rect.contains(pos))
         });
-    ui.ctx().animate_bool_with_time(
+    animate_highlight(
+        ui,
         response.id,
-        enabled && (response.hovered() || response.is_pointer_button_down_on() || readout_pressed),
-        0.1,
+        enabled
+            && (selected
+                || response.hovered()
+                || response.is_pointer_button_down_on()
+                || readout_pressed),
     )
 }
 
@@ -116,12 +160,64 @@ pub(super) fn highlight(ui: &Ui, theme: &Theme, rect: Rect, hover: f32, part: Hi
         Highlight::Right => &edges[1..],
     };
     for &edge in edges {
-        painter.rect_filled(
+        growing_edge(
+            ui,
+            theme,
             Rect::from_min_size(edge, vec2(2.0, rect.height())),
-            0,
-            theme.accent.gamma_multiply(hover),
+            hover,
+            true,
         );
     }
+}
+
+/// Clicking a field's padding focuses and selects its text for replacement.
+pub(super) fn focus_input_padding(ui: &Ui, response: &egui::Response, outer: Rect, text: &str) {
+    let inner = response.rect;
+    // Keep hit areas separate from TextEdit so text clicks and drags retain
+    // their native caret/selection behaviour.
+    let zones = [
+        Rect::from_min_max(outer.min, pos2(inner.left(), outer.bottom())),
+        Rect::from_min_max(pos2(inner.right(), outer.top()), outer.max),
+        Rect::from_min_max(
+            pos2(inner.left(), outer.top()),
+            pos2(inner.right(), inner.top()),
+        ),
+        Rect::from_min_max(
+            pos2(inner.left(), inner.bottom()),
+            pos2(inner.right(), outer.bottom()),
+        ),
+    ];
+    let mut select_all = false;
+    for (index, rect) in zones.into_iter().enumerate() {
+        let click = ui
+            .interact(rect, response.id.with(("padding", index)), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::Text);
+        select_all |= click.clicked();
+    }
+    if select_all {
+        response.request_focus();
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(text.chars().count()),
+                )));
+            egui::TextEdit::store_state(ui.ctx(), response.id, state);
+        }
+    }
+}
+
+/// Shared hover/focus underline: expands from the centre and retracts to it.
+pub(super) fn input_underline(ui: &Ui, theme: &Theme, rect: Rect, id: egui::Id, active: bool) {
+    let amount = animate_highlight(ui, id, active);
+    growing_edge(
+        ui,
+        theme,
+        Rect::from_min_max(pos2(rect.left(), rect.bottom() - 2.0), rect.max),
+        amount,
+        false,
+    );
 }
 
 /// A full-width row of `height`, lit on hover.

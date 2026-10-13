@@ -196,7 +196,6 @@ pub fn draw(
             }
         });
         terminal::rule(ui);
-        ui.add_space(4.0);
         match tools.tab {
             Tab::Log => {
                 tools.unseen = [0; 2];

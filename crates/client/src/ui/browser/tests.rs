@@ -9,6 +9,37 @@ fn property(id: &str) -> usize {
     registry::property_index(id).unwrap()
 }
 
+#[test]
+fn filter_picker_and_property_editors_have_no_header_divider() {
+    let query = Query::default();
+    for state in std::iter::once(picker::Picker::new()).chain(
+        (0..PROPERTIES.len()).map(|property| picker::Picker::edit(&query, Slot::Own, property)),
+    ) {
+        let ctx = egui::Context::default();
+        kit::plain_style(&ctx);
+        let mut picker = Some(state);
+        let mut query = query.clone();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| picker::show(ctx, &THEME, &mut picker, &mut query),
+        );
+        assert!(
+            !output.shapes.iter().any(|shape| matches!(
+                &shape.shape,
+                egui::epaint::Shape::LineSegment { points, stroke }
+                    if stroke.color == THEME.line() && points[0].y == points[1].y
+            )),
+            "picker header should use spacing rather than a divider"
+        );
+    }
+}
+
 fn relation(id: &str) -> usize {
     registry::relation_index(id).unwrap()
 }
@@ -31,6 +62,250 @@ fn run(query: Query) -> Vec<SearchResult> {
     .unwrap();
     while search.step(1_000_000, 2).state == State::Running {}
     search.results()
+}
+
+#[test]
+fn opening_browser_keeps_its_height_stable_and_inside_the_viewport() {
+    let ctx = egui::Context::default();
+    kit::plain_style(&ctx);
+    let searches = Searches::default();
+    let nav = Navigation::default();
+    let universe = Universe(space_shared::Galaxy {
+        source: String::new(),
+        systems: Vec::new(),
+    });
+    let field = crate::stars::stream::Starfield::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
+    let mut browser = Browser {
+        open: true,
+        ..Default::default()
+    };
+    let mut previous = None;
+    for frame in 0..30 {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                time: Some(f64::from(frame) * 0.05),
+                ..Default::default()
+            },
+            |ctx| {
+                window(
+                    ctx,
+                    &mut browser,
+                    View {
+                        searches: &searches,
+                        nav: &nav,
+                        universe: &universe,
+                        field: &field,
+                    },
+                    &mut Vec::new(),
+                );
+            },
+        );
+        let bounds = ctx.memory(|memory| {
+            memory
+                .area_rect(egui::Id::new(("window", "Object browser")))
+                .unwrap()
+        });
+        if frame > 1 {
+            assert!(
+                screen.contains_rect(bounds),
+                "browser left the viewport: {bounds:?}"
+            );
+            assert!(
+                (bounds.height() - previous.unwrap_or(bounds.height())).abs() < 1.0,
+                "browser keeps growing: {bounds:?}"
+            );
+        }
+        previous = Some(bounds.height());
+    }
+}
+
+#[test]
+fn result_rows_follow_scene_selection_and_emit_selection_commands() {
+    use crate::{Selection, objects::ObjectRef};
+    let results = run(Query::parse("kind=planet within_ly=20 limit=2").unwrap());
+    assert_eq!(results.len(), 2);
+    let ctx = egui::Context::default();
+    kit::plain_style(&ctx);
+    let searches = Searches::default();
+    let universe = Universe(space_shared::Galaxy {
+        source: String::new(),
+        systems: vec![],
+    });
+    let field = crate::stars::stream::Starfield::default();
+    let mut nav = Navigation::default();
+    let frame = |nav: &Navigation, events| {
+        let mut commands = Vec::new();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    results::list(
+                        ui,
+                        &results,
+                        250.0,
+                        &mut commands,
+                        &View {
+                            searches: &searches,
+                            nav,
+                            universe: &universe,
+                            field: &field,
+                        },
+                    );
+                });
+            },
+        );
+        (output, commands)
+    };
+    let edges = |output: egui::FullOutput| {
+        output
+            .shapes
+            .into_iter()
+            .filter_map(|shape| match shape.shape {
+                egui::epaint::Shape::Rect(rect)
+                    if rect.fill == THEME.accent && rect.rect.width() == 2.0 =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    frame(&nav, vec![]);
+    assert!(edges(frame(&nav, vec![]).0).is_empty());
+    let ObjectRef::Planet { id } = &results[0].object else {
+        panic!("expected planet")
+    };
+    nav.select(Some(Selection::Planet(id.clone())));
+    for _ in 0..20 {
+        frame(&nav, vec![]);
+    }
+    let selected = edges(frame(&nav, vec![]).0);
+    assert_eq!(selected.len(), 2);
+    nav.select(None);
+    for _ in 0..20 {
+        frame(&nav, vec![]);
+    }
+    assert!(edges(frame(&nav, vec![]).0).is_empty());
+    let ObjectRef::Planet { id: other } = &results[1].object else {
+        panic!("expected planet")
+    };
+    nav.select(Some(Selection::Planet(other.clone())));
+    for _ in 0..20 {
+        frame(&nav, vec![]);
+    }
+    let other_edges = edges(frame(&nav, vec![]).0);
+    assert_eq!(other_edges.len(), 2);
+    assert!(other_edges[0].top() > selected[0].top());
+    // Clicking the first row emits the application's normal planet selection.
+    let pos = selected[0].center() + egui::vec2(30.0, 0.0);
+    frame(&nav, vec![egui::Event::PointerMoved(pos)]);
+    for pressed in [true, false] {
+        let (_, commands) = frame(
+            &nav,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        if !pressed {
+            assert_eq!(commands, vec![UiCommand::Inspect { planet: id.clone() }]);
+        }
+    }
+}
+
+#[test]
+#[allow(clippy::field_reassign_with_default)] // Searches has private service fields.
+fn animated_result_panes_never_expand_their_parent_viewport() {
+    use crate::{Selection, objects::ObjectRef};
+    let query = Query::parse("kind=planet within_ly=20 limit=1").unwrap();
+    let hits = run(query.clone());
+    let ObjectRef::Planet { id } = &hits[0].object else {
+        panic!("expected planet")
+    };
+    let mut searches = Searches::default();
+    searches.shown_entry = Some(crate::search::Entry {
+        id: 1,
+        asker: crate::search::Asker::Game,
+        query: query.to_text(),
+        origin_pc: [0.0; 3],
+        work_cap: DEFAULT_WORK_CAP,
+        progress: space_simulation::search::Progress {
+            state: State::Done,
+            ..Default::default()
+        },
+        error: None,
+        result_count: hits.len(),
+        results: Some(hits.clone()),
+        revision: 1,
+    });
+    let ctx = egui::Context::default();
+    kit::plain_style(&ctx);
+    let universe = Universe(space_shared::Galaxy {
+        source: String::new(),
+        systems: vec![],
+    });
+    let field = crate::stars::stream::Starfield::default();
+    let mut nav = Navigation::default();
+    let mut browser = Browser {
+        sent: Some(query.to_text()),
+        query,
+        ..Default::default()
+    };
+    for frame in 0..40 {
+        if frame == 5 {
+            nav.select(Some(Selection::Planet(id.clone())));
+        }
+        if frame == 30 {
+            nav.select(None);
+        }
+        let width = if (15..25).contains(&frame) {
+            600.0
+        } else {
+            900.0
+        };
+        let _ = ctx.run(
+            egui::RawInput {
+                time: Some(f64::from(frame) * 0.03),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let bounds = ui.available_rect_before_wrap();
+                    results::show(
+                        ui,
+                        &mut browser,
+                        &View {
+                            searches: &searches,
+                            nav: &nav,
+                            universe: &universe,
+                            field: &field,
+                        },
+                        &mut Vec::new(),
+                    );
+                    assert!(
+                        bounds.expand(0.1).contains_rect(ui.min_rect()),
+                        "animated children expanded their parent: {:?} beyond {bounds:?}",
+                        ui.min_rect()
+                    );
+                });
+            },
+        );
+    }
 }
 
 /// Session 3's acceptance: the same query built in the browser and typed in
@@ -149,14 +424,14 @@ fn values_read_and_parse_like_a_person_writes_them() {
         filters::value_text(mass, &range(None, Some(2.0))),
         "at most 2 Earth masses"
     );
-    assert_eq!(filters::parse_end(" 12,000 ", false), Ok(Some(12000.0)));
-    assert_eq!(filters::parse_end("", true), Ok(None));
+    assert_eq!(kit::parse_range_end(" 12,000 ", false), Ok(Some(12000.0)));
+    assert_eq!(kit::parse_range_end("", true), Ok(None));
     assert!(
-        filters::parse_end("2.5", true)
+        kit::parse_range_end("2.5", true)
             .unwrap_err()
             .contains("whole")
     );
-    assert!(filters::parse_end("lots", false).is_err());
+    assert!(kit::parse_range_end("lots", false).is_err());
 }
 
 #[test]

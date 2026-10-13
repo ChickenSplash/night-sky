@@ -2,7 +2,10 @@
 //! Text-mode themes draw controls as text (`[ button ]`); framed themes draw
 //! outlines. Every control shares `interact`'s hover and press light.
 use super::Theme;
-use super::interact::{Highlight, control_sense, held_click, highlight, hover_amount, row};
+use super::interact::{
+    ANIMATION_SECONDS, Highlight, control_sense, ease_out, focus_input_padding, held_click,
+    highlight, hover_amount, input_underline, row,
+};
 use bevy_egui::egui::{self, Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 
 /// A faint full-width line.
@@ -10,7 +13,6 @@ pub fn rule(ui: &mut Ui, theme: &Theme) {
     let line = ui.cursor().top();
     ui.painter()
         .hline(ui.max_rect().x_range(), line, (1.0, theme.line()));
-    ui.add_space(1.0);
 }
 
 /// Small spaced capitals, above a title or a group.
@@ -34,7 +36,6 @@ fn heading_text(theme: &Theme, text: &str, open: Option<bool>) -> String {
 
 /// A fixed heading, laid out like a `section` row.
 pub fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
-    ui.add_space(6.0);
     let (rect, _, _) = row(ui, theme, theme.row, false);
     ui.painter().text(
         pos2(rect.left() + theme.inset, rect.center().y),
@@ -49,7 +50,6 @@ pub fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
 pub fn section(ui: &mut Ui, theme: &Theme, text: &str) -> bool {
     let id = ui.make_persistent_id(("section", text));
     let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(true));
-    ui.add_space(6.0);
     let (rect, response, _) = row(ui, theme, theme.row, true);
     ui.painter().text(
         pos2(rect.left() + theme.inset, rect.center().y),
@@ -228,24 +228,107 @@ fn framed(ui: &mut Ui, theme: &Theme, text: &str, strong: bool, enabled: bool) -
     }
 }
 
-/// `[ label ]` in text mode, else an outlined button.
+/// `[ label ]` in text mode, else a neutral square action.
 pub fn button(ui: &mut Ui, theme: &Theme, label: &str) -> egui::Response {
     if theme.text_mode {
         chip_response(ui, theme, format!("[ {label} ]"), theme.text)
     } else {
-        framed(ui, theme, label, false, true)
+        input_button(ui, theme, label)
     }
 }
 
 /// The main action of a group: accent text in a lit frame. Disabled ones
 /// are dim and ignore clicks.
 pub fn primary_button(ui: &mut Ui, theme: &Theme, label: &str, enabled: bool) -> egui::Response {
-    framed(ui, theme, label, true, enabled)
+    if theme.text_mode {
+        framed(ui, theme, label, true, enabled)
+    } else {
+        flat_button(ui, theme, label, true, enabled, false)
+    }
+}
+
+/// A larger close glyph with red hover feedback and no highlight frame.
+pub fn close_button(ui: &mut Ui, theme: &Theme) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(
+        "×".into(),
+        egui::FontId::proportional(22.0),
+        Color32::PLACEHOLDER,
+    );
+    let (rect, response) = ui.allocate_exact_size(vec2(28.0, 28.0), control_sense(true));
+    let response = held_click(response);
+    let hover = hover_amount(ui, &response, true);
+    let colour = theme
+        .text
+        .lerp_to_gamma(Color32::from_rgb(240, 100, 100), hover);
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, colour);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A square, borderless button matching labelled number inputs.
+pub fn input_button(ui: &mut Ui, theme: &Theme, label: &str) -> egui::Response {
+    flat_button(ui, theme, label, false, true, false)
+}
+
+fn flat_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    label: &str,
+    primary: bool,
+    enabled: bool,
+    selected: bool,
+) -> egui::Response {
+    let colour = if !enabled {
+        theme.dim.gamma_multiply(0.6)
+    } else if primary {
+        theme.accent
+    } else {
+        theme.text
+    };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), theme.font.id(), colour);
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            galley.size().x,
+            galley.size().y.max(ui.spacing().interact_size.y),
+        ) + theme.input_padding().sum(),
+        control_sense(enabled),
+    );
+    let response = held_click(response);
+    let fill = if primary {
+        theme.accent.gamma_multiply(0.16)
+    } else {
+        theme.input_fill()
+    };
+    ui.painter().rect_filled(rect, 0, fill);
+    input_underline(
+        ui,
+        theme,
+        rect,
+        response.id,
+        enabled
+            && (selected
+                || response.hovered()
+                || response.is_pointer_button_down_on()
+                || response.has_focus()),
+    );
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, colour);
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 /// Text that acts like a button without a frame, such as `Reset`.
 pub fn link(ui: &mut Ui, theme: &Theme, label: &str) -> egui::Response {
-    chip_response(ui, theme, label.to_owned(), theme.dim)
+    if theme.text_mode {
+        chip_response(ui, theme, label.to_owned(), theme.dim)
+    } else {
+        input_button(ui, theme, label)
+    }
 }
 
 /// `[x] label` on one line with other controls.
@@ -274,35 +357,7 @@ pub fn choice(ui: &mut Ui, theme: &Theme, label: &str, chosen: bool) -> bool {
     if theme.text_mode {
         return tab(ui, theme, label, chosen);
     }
-    let colour = if chosen { theme.accent } else { theme.dim };
-    let galley = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), theme.small.id(), colour);
-    let size = galley.size() + vec2(18.0, 10.0);
-    let (rect, response) = ui.allocate_exact_size(size, control_sense(true));
-    let response = held_click(response);
-    let hover = hover_amount(ui, &response, true);
-    let lit = if chosen { 1.0 } else { hover };
-    ui.painter().rect(
-        rect,
-        theme.control_radius,
-        theme.accent.gamma_multiply(0.1 * lit),
-        (
-            1.0,
-            theme
-                .line()
-                .lerp_to_gamma(theme.accent.gamma_multiply(0.6), lit),
-        ),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().galley(
-        rect.center() - galley.size() / 2.0,
-        galley,
-        colour.lerp_to_gamma(theme.accent, hover),
-    );
-    response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
+    flat_button(ui, theme, label, chosen, true, chosen).clicked()
 }
 
 /// `grep text`: a one-line text field after a prompt, underlined.
@@ -318,24 +373,7 @@ pub fn input(
             .font(theme.font.id())
             .color(theme.dim),
     );
-    let response = ui.add(
-        egui::TextEdit::singleline(text)
-            .font(theme.font.id())
-            .text_color(theme.text)
-            .frame(false)
-            .desired_width(width),
-    );
-    let colour = if response.has_focus() {
-        theme.accent
-    } else {
-        theme.dim.gamma_multiply(0.6)
-    };
-    ui.painter().hline(
-        response.rect.x_range(),
-        response.rect.bottom(),
-        (1.0, colour),
-    );
-    response
+    field(ui, theme, prompt, "", text, width)
 }
 
 /// A framed one-line field, `width` wide (the rest of the line if
@@ -349,7 +387,7 @@ pub fn field(
     width: f32,
 ) -> egui::Response {
     let width = width.min(ui.available_width());
-    let height = theme.row + 12.0;
+    let height = theme.field_height();
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     // The frame goes behind the text, which is laid out first.
     let frame = ui.painter().add(egui::Shape::Noop);
@@ -376,23 +414,25 @@ pub fn field(
             },
         )
         .inner;
-    let focus =
-        ui.ctx()
-            .animate_bool_with_time(response.id.with("focus"), response.has_focus(), 0.1);
     ui.painter().set(
         frame,
         egui::epaint::RectShape::new(
             rect,
-            theme.control_radius,
-            Color32::from_black_alpha(70),
-            (
-                1.0,
-                theme
-                    .line()
-                    .lerp_to_gamma(theme.accent.gamma_multiply(0.8), focus),
-            ),
+            0,
+            theme.input_fill(),
+            egui::Stroke::NONE,
             egui::StrokeKind::Inside,
         ),
+    );
+    focus_input_padding(ui, &response, rect, text);
+    input_underline(
+        ui,
+        theme,
+        rect,
+        response.id,
+        response.has_focus()
+            || ui.rect_contains_pointer(rect)
+            || response.is_pointer_button_down_on(),
     );
     response
 }
@@ -406,63 +446,113 @@ pub struct Pill {
     pub remove: bool,
 }
 
-/// A rounded chip with a `×`, such as a search filter.
+/// A square filter chip with separate edit and remove actions.
 pub fn pill(ui: &mut Ui, theme: &Theme, label: &str) -> Pill {
-    let font = theme.small.id();
+    let id = ui.id().with(("pill", label));
+    let removal_id = id.with("removal");
+    let appearance_id = id.with("appearance");
+    let now = ui.input(|input| input.time);
+    let frame = ui.ctx().cumulative_frame_nr();
+    let appeared = ui.data_mut(|data| {
+        let (start, previous) = data
+            .get_temp::<(f64, u64)>(appearance_id)
+            .unwrap_or((now, frame));
+        let start = if frame > previous + 1 { now } else { start };
+        data.insert_temp(appearance_id, (start, frame));
+        ease_out(((now - start) / f64::from(ANIMATION_SECONDS)).clamp(0.0, 1.0) as f32)
+    });
+    if appeared < 1.0 {
+        ui.ctx().request_repaint();
+    }
+    let removal = ui.data_mut(|data| {
+        let removal = data.get_temp::<(f64, u64)>(removal_id);
+        // A query replaced elsewhere must not leave a stale removal behind
+        // if the same filter is added again later.
+        if removal.is_some_and(|(_, previous)| frame > previous + 1) {
+            data.remove::<(f64, u64)>(removal_id);
+            None
+        } else {
+            removal
+        }
+    });
+    let remaining = removal.map_or(1.0, |(start, _)| {
+        1.0 - ease_out(((now - start) / f64::from(ANIMATION_SECONDS)).clamp(0.0, 1.0) as f32)
+    });
+    if removal.is_some() && remaining <= 0.0 {
+        ui.data_mut(|data| {
+            data.remove::<(f64, u64)>(removal_id);
+            data.remove::<(f64, u64)>(appearance_id);
+        });
+        return Pill {
+            open: false,
+            remove: true,
+        };
+    }
+    if let Some((start, _)) = removal {
+        ui.data_mut(|data| data.insert_temp(removal_id, (start, frame)));
+        ui.ctx().request_repaint();
+    }
+    let font = theme.font.id();
     let text = ui
         .painter()
         .layout_no_wrap(label.to_owned(), font.clone(), theme.text);
     let cross = ui.painter().layout_no_wrap("×".into(), font, theme.text);
-    let height = text.size().y + 12.0;
-    let width = 12.0 + text.size().x + 10.0 + cross.size().x + 10.0;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    let split = rect.right() - cross.size().x - 18.0;
+    let height = text.size().y.max(ui.spacing().interact_size.y) + theme.input_padding().sum().y;
+    let width = 10.0 + text.size().x + 10.0 + cross.size().x + 20.0;
+    let (visible, _) =
+        ui.allocate_exact_size(vec2(width * appeared * remaining, height), Sense::hover());
+    if visible.width() <= 0.0 {
+        return Pill::default();
+    }
+    let rect = Rect::from_min_size(visible.min, vec2(width, height));
+    let split = rect.right() - cross.size().x - 20.0;
     let body = Rect::from_min_max(rect.min, pos2(split, rect.bottom()));
     let close = Rect::from_min_max(pos2(split, rect.top()), rect.max);
-    let id = ui.id().with(("pill", label));
-    let open = held_click(ui.interact(body, id.with("open"), control_sense(true)))
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let remove = held_click(ui.interact(close, id.with("remove"), control_sense(true)))
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text("Remove");
-    let (hover, cross_hover) = (
-        hover_amount(ui, &open, true),
-        hover_amount(ui, &remove, true),
-    );
+    let open = held_click(ui.interact(
+        body.intersect(visible),
+        id.with("open"),
+        control_sense(removal.is_none()),
+    ))
+    .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let remove = held_click(ui.interact(
+        close.intersect(visible),
+        id.with("remove"),
+        control_sense(removal.is_none()),
+    ))
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
+    .on_hover_text("Remove");
+    let clip = ui.clip_rect();
+    ui.set_clip_rect(clip.intersect(visible));
     let painter = ui.painter();
-    painter.rect(
-        rect,
-        egui::CornerRadius::same((height / 2.0) as u8),
-        theme
-            .accent
-            .gamma_multiply(0.07 + 0.08 * hover.max(cross_hover)),
-        (
-            1.0,
-            theme
-                .accent
-                .gamma_multiply(0.25 + 0.3 * hover.max(cross_hover)),
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let tint = theme.accent.lerp_to_gamma(theme.text, 0.55);
+    painter.rect_filled(rect, 0, theme.input_fill());
+    for (part, response) in [(body, &open), (close, &remove)] {
+        input_underline(
+            ui,
+            theme,
+            part,
+            response.id,
+            response.hovered() || response.is_pointer_button_down_on() || response.has_focus(),
+        );
+    }
     painter.galley(
-        pos2(rect.left() + 12.0, rect.center().y - text.size().y / 2.0),
+        pos2(rect.left() + 10.0, rect.center().y - text.size().y / 2.0),
         text,
-        tint.lerp_to_gamma(Color32::WHITE, hover * 0.6),
+        theme.text,
     );
-    painter.galley(
-        close.center() - cross.size() / 2.0,
-        cross,
-        tint.lerp_to_gamma(Color32::WHITE, cross_hover),
-    );
+    painter.galley(close.center() - cross.size() / 2.0, cross, theme.text);
+    ui.set_clip_rect(clip);
+    if remove.clicked() {
+        ui.data_mut(|data| data.insert_temp(removal_id, (now, frame)));
+        ui.ctx().request_repaint();
+    }
     Pill {
         open: open.clicked(),
-        remove: remove.clicked(),
+        remove: false,
     }
 }
 
 /// A full-width list row `height` tall, for its caller to paint into; lit
-/// on hover, and with a steady accent edge while `selected`.
+/// on hover or selection, easing both transitions through the same state.
 pub fn list_row(
     ui: &mut Ui,
     theme: &Theme,
@@ -472,18 +562,8 @@ pub fn list_row(
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), control_sense(true));
     let response = held_click(response);
-    let hover = hover_amount(ui, &response, true);
-    if selected {
-        ui.painter()
-            .rect_filled(rect, theme.control_radius, theme.accent.gamma_multiply(0.1));
-        ui.painter().rect_filled(
-            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
-            0,
-            theme.accent,
-        );
-    } else {
-        highlight(ui, theme, rect, hover, Highlight::Whole);
-    }
+    let hover = super::interact::selection_amount(ui, &response, true, selected);
+    highlight(ui, theme, rect, hover, Highlight::Whole);
     (
         rect,
         response.on_hover_cursor(egui::CursorIcon::PointingHand),

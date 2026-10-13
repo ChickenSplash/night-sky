@@ -4,7 +4,7 @@
 use crate::Navigation;
 use crate::actions::UiCommand;
 use crate::format::due_short;
-use crate::ui::kit::{MUTED, muted};
+use crate::ui::kit::{self, Theme};
 use bevy_egui::egui;
 use space_shared::{Galaxy, StarSystem, Task};
 use std::collections::HashSet;
@@ -87,13 +87,13 @@ enum Row<'a> {
     Task(&'a StarSystem, usize, &'a Task),
 }
 
-/// The window opens with its top right corner at `anchor`.
+/// Uses the same header movement, bounded resizing and foreground stacking
+/// as the object browser and debug console.
 pub fn window(
     ctx: &egui::Context,
-    anchor: egui::Pos2,
     open: &mut bool,
     galaxy: &Galaxy,
-    nav: &mut Navigation,
+    nav: &Navigation,
     state: &mut Tasks,
     out: &mut Vec<UiCommand>,
 ) {
@@ -103,24 +103,21 @@ pub fn window(
         state,
         out,
     };
-    egui::Window::new("Tasks")
-        .open(open)
-        .pivot(egui::Align2::RIGHT_TOP)
-        .default_pos(anchor)
-        .default_width(300.0)
-        .default_height(640.0)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("tasks")
-                .show(ui, |ui| panel.sections(ui));
-        });
+    kit::Window::new("Tasks").show(ctx, &Theme::GAME, open, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("tasks")
+            .scroll_source(kit::SCROLL_SOURCE)
+            .auto_shrink([false, false])
+            .min_scrolled_height(0.0)
+            .max_height(ui.available_height().max(0.0))
+            .show(ui, |ui| panel.sections(ui));
+    });
 }
 
 /// It only reads state; every change is a `UiCommand`.
 struct Panel<'a> {
     galaxy: &'a Galaxy,
-    nav: &'a mut Navigation,
+    nav: &'a Navigation,
     state: &'a mut Tasks,
     out: &'a mut Vec<UiCommand>,
 }
@@ -128,38 +125,41 @@ struct Panel<'a> {
 impl Panel<'_> {
     /// Every section in one column, each collapsible.
     fn sections(&mut self, ui: &mut egui::Ui) {
-        let section = |title: &str| {
-            egui::CollapsingHeader::new(egui::RichText::new(title).size(11.0).color(MUTED).strong())
-                .default_open(true)
-        };
-        section("01 / LIST CONSTELLATIONS").show(ui, |ui| self.lists(ui));
-        section("02 / TASK INDEX").show(ui, |ui| self.tasks(ui));
+        if kit::section(ui, &Theme::GAME, "01 / List constellations") {
+            self.lists(ui);
+        }
+        ui.add_space(kit::SPACING);
+        if kit::section(ui, &Theme::GAME, "02 / Task index") {
+            self.tasks(ui);
+        }
     }
 
     fn lists(&mut self, ui: &mut egui::Ui) {
-        let (galaxy, nav, state) = (self.galaxy, &mut *self.nav, &mut *self.state);
-        muted(
+        let (galaxy, nav, state) = (self.galaxy, self.nav, &mut *self.state);
+        kit::note(
             ui,
-            format!(
+            &Theme::GAME,
+            &format!(
                 "{} lists in your local universe\n{}\n{}",
                 galaxy.systems.len(),
                 galaxy.source,
                 nav.notice
             ),
         );
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut state.list_filter)
-                    .hint_text("Filter lists…")
-                    .desired_width(130.0),
-            );
-            egui::ComboBox::from_id_salt("list-sort")
-                .selected_text(state.list_sort.label())
-                .show_ui(ui, |ui| {
-                    for sort in ListSort::ALL {
-                        ui.selectable_value(&mut state.list_sort, sort, sort.label());
-                    }
-                });
+        kit::field(
+            ui,
+            &Theme::GAME,
+            "task-list-filter",
+            "Filter lists…",
+            &mut state.list_filter,
+            f32::INFINITY,
+        );
+        ui.horizontal_wrapped(|ui| {
+            for sort in ListSort::ALL {
+                if kit::choice(ui, &Theme::GAME, sort.label(), state.list_sort == sort) {
+                    state.list_sort = sort;
+                }
+            }
         });
         let filter = state.list_filter.trim().to_lowercase();
         let mut lists: Vec<_> = galaxy
@@ -175,18 +175,14 @@ impl Panel<'_> {
         }
         egui::ScrollArea::vertical()
             .id_salt("systems")
+            .scroll_source(kit::SCROLL_SOURCE)
+            .min_scrolled_height(0.0)
             .max_height(170.0)
             .show(ui, |ui| {
                 for (i, system) in lists {
                     let active = nav.list() == Some(i);
                     let text = format!("{}\n{} task planets", system.name, system.tasks().count());
-                    if ui
-                        .add_sized(
-                            [ui.available_width(), 48.0],
-                            egui::Button::new(text).selected(active),
-                        )
-                        .clicked()
-                    {
+                    if task_row(ui, &text, Theme::GAME.text, 48.0, active).clicked() {
                         self.out.push(UiCommand::Jump {
                             list: system.id.clone(),
                         });
@@ -196,22 +192,25 @@ impl Panel<'_> {
     }
 
     fn tasks(&mut self, ui: &mut egui::Ui) {
-        let (galaxy, nav, state) = (self.galaxy, &mut *self.nav, &mut *self.state);
-        let search = ui.add(
-            egui::TextEdit::singleline(&mut state.task_filter)
-                .hint_text("Search all task planets…")
-                .desired_width(f32::INFINITY),
+        let (galaxy, nav, state) = (self.galaxy, self.nav, &mut *self.state);
+        let search = kit::field(
+            ui,
+            &Theme::GAME,
+            "task-filter",
+            "Search all task planets…",
+            &mut state.task_filter,
+            f32::INFINITY,
         );
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("task-sort")
-                .selected_text(state.task_sort.label())
-                .show_ui(ui, |ui| {
-                    for sort in TaskSort::ALL {
-                        ui.selectable_value(&mut state.task_sort, sort, sort.label());
-                    }
-                });
-            ui.checkbox(&mut state.group, "Group by status");
+        ui.horizontal_wrapped(|ui| {
+            for sort in TaskSort::ALL {
+                if kit::choice(ui, &Theme::GAME, sort.label(), state.task_sort == sort) {
+                    state.task_sort = sort;
+                }
+            }
         });
+        if kit::toggle(ui, &Theme::GAME, state.group, "Group by status") {
+            state.group = !state.group;
+        }
         let query = state.task_filter.trim().to_lowercase();
         // The current list's tasks, or every list's while searching.
         let mut matches: Vec<_> = galaxy
@@ -254,9 +253,10 @@ impl Panel<'_> {
                 task: task.id.clone(),
             });
         }
-        muted(
+        kit::note(
             ui,
-            format!(
+            &Theme::GAME,
+            &format!(
                 "{total} task{}{}{}",
                 if total == 1 { "" } else { "s" },
                 if query.is_empty() { "" } else { " matching" },
@@ -273,6 +273,8 @@ impl Panel<'_> {
         // visible rows. A list can hold over a thousand tasks.
         egui::ScrollArea::vertical()
             .id_salt("task-index")
+            .scroll_source(kit::SCROLL_SOURCE)
+            .min_scrolled_height(0.0)
             .auto_shrink([false, true])
             .max_height(360.0)
             .show_rows(ui, ROW, rows.len(), |ui, range| {
@@ -285,20 +287,12 @@ impl Panel<'_> {
                             count,
                         } => {
                             let folded = state.collapsed.contains(key);
-                            let text = egui::RichText::new(format!(
+                            let text = format!(
                                 "{} {}  ({count})",
                                 if folded { "⏵" } else { "⏷" },
                                 name.to_uppercase()
-                            ))
-                            .size(11.0)
-                            .strong()
-                            .color(tint(*colour));
-                            if ui
-                                .add_sized(
-                                    [ui.available_width(), ROW],
-                                    egui::Button::selectable(false, text),
-                                )
-                                .clicked()
+                            );
+                            if task_row(ui, &text, tint(*colour), ROW, false).clicked()
                                 && !state.collapsed.remove(key)
                             {
                                 state.collapsed.insert(key.clone());
@@ -312,13 +306,8 @@ impl Panel<'_> {
                                 .due_date_ms
                                 .map(|ms| format!("   {}", due_short(ms)))
                                 .unwrap_or_default();
-                            let text = egui::RichText::new(format!("· {}{due}", task.name))
-                                .color(tint(task.colour));
-                            if ui
-                                .add_sized(
-                                    [ui.available_width(), ROW],
-                                    egui::Button::selectable(active, text).truncate(),
-                                )
+                            let text = format!("· {}{due}", task.name);
+                            if task_row(ui, &text, tint(task.colour), ROW, active)
                                 .on_hover_text(&task.name)
                                 .clicked()
                             {
@@ -332,6 +321,36 @@ impl Panel<'_> {
                 }
             });
     }
+}
+
+/// Shared animated rows, retaining task/status colours and multiline list
+/// captions. Truncate each line rather than growing the window for long names.
+fn task_row(
+    ui: &mut egui::Ui,
+    text: &str,
+    colour: egui::Color32,
+    height: f32,
+    selected: bool,
+) -> egui::Response {
+    let theme = &Theme::GAME;
+    let (rect, response, _) = kit::list_row(ui, theme, height, selected);
+    let lines: Vec<_> = text.lines().collect();
+    let line_height = ui.fonts_mut(|fonts| fonts.row_height(&theme.font.id()));
+    let top = rect.center().y - line_height * lines.len() as f32 * 0.5;
+    for (index, line) in lines.iter().enumerate() {
+        let mut job =
+            egui::text::LayoutJob::simple_singleline((*line).to_owned(), theme.font.id(), colour);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(
+            (rect.width() - 2.0 * theme.inset).max(0.0),
+        );
+        let galley = ui.painter().layout_job(job);
+        ui.painter().galley(
+            egui::pos2(rect.left() + theme.inset, top + index as f32 * line_height),
+            galley,
+            colour,
+        );
+    }
+    response
 }
 
 /// Status groups follow the board: open, then custom, then done and closed.
@@ -405,3 +424,6 @@ fn status_rank(task: &Task) -> u32 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,6 +1,7 @@
 # Documentation
 
 - [Controls and interface](controls.md): navigation, inspection, HUD and debug tools.
+- [Object browser](object-browser.md): search controls, results layout and styling.
 - [Development](development.md): prerequisites, project structure, backend, logs and tests.
 - [Galaxy model](galaxy-model.md): generation, multiple systems, streaming, spatial queries,
   galactic points, diffuse light and navigation.
