@@ -337,7 +337,7 @@ pub const PROPERTIES: &[Property] = &[
     ),
     property(
         "resonant",
-        "In resonance with the next planet in",
+        "In resonance with the planet inside it",
         None,
         Values::Flag,
         PLANET,

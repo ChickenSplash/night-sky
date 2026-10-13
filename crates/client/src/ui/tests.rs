@@ -5,12 +5,11 @@ use crate::format::civil_date;
 use space_simulation::SimulationClock;
 
 #[test]
-fn cog_toggles_console_without_opening_tasks() {
+fn each_icon_toggles_only_its_own_window() {
+    const GLYPHS: [&str; 3] = ["⚙", "✔", "🔍"];
     let ctx = egui::Context::default();
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
-    let mut tools = crate::devtools::DevTools::default();
-    let mut tasks = false;
-    let mut frame = |events| {
+    let frame = |open: &mut [bool; 3], events| {
         ctx.run(
             egui::RawInput {
                 screen_rect: Some(rect),
@@ -18,35 +17,50 @@ fn cog_toggles_console_without_opening_tasks() {
                 ..default()
             },
             |ctx| {
-                icons(ctx, rect, &mut tools.open, &mut tasks);
+                let [debug, tasks, browser] = open;
+                icons(
+                    ctx,
+                    rect,
+                    [
+                        (GLYPHS[0], "Debug console", debug),
+                        (GLYPHS[1], "Tasks", tasks),
+                        (GLYPHS[2], "Object browser", browser),
+                    ],
+                );
             },
         )
     };
-    frame(vec![]);
-    let output = frame(vec![]);
-    let pos = output
-        .shapes
-        .iter()
-        .find_map(|shape| match &shape.shape {
-            egui::epaint::Shape::Text(text) if text.galley.job.text == "⚙" => {
-                Some(text.pos + text.galley.size() * 0.5)
-            }
-            _ => None,
-        })
-        .expect("cog is painted");
-    let button = |pressed| egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    for _ in 0..3 {
-        frame(vec![egui::Event::PointerMoved(pos), button(true)]);
-        frame(vec![button(false)]);
+    for (index, glyph) in GLYPHS.into_iter().enumerate() {
+        let mut open = [false; 3];
+        frame(&mut open, vec![]);
+        let output = frame(&mut open, vec![]);
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == glyph => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{glyph} is painted"));
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for _ in 0..3 {
+            frame(
+                &mut open,
+                vec![egui::Event::PointerMoved(pos), button(true)],
+            );
+            frame(&mut open, vec![button(false)]);
+        }
+        let expected: [bool; 3] = std::array::from_fn(|i| i == index);
+        assert_eq!(open, expected, "{glyph}");
+        assert!(pointer_captured(&ctx));
     }
-    assert!(tools.open);
-    assert!(!tasks);
-    assert!(pointer_captured(&ctx));
 }
 
 #[test]
@@ -422,7 +436,7 @@ fn magnitude_drag_applies_once_on_release() {
 
 #[test]
 fn text_huds_share_edge_padding_and_bottom_baseline() {
-    use crate::ui::breadcrumb::{CURRENT, HUD_LINE_GAP, HUD_PADDING, LINK};
+    use crate::ui::kit::halo::{CURRENT, HUD_LINE_GAP, HUD_PADDING, LINK};
     for size in [egui::vec2(1000.0, 700.0), egui::vec2(1600.0, 1000.0)] {
         let ctx = egui::Context::default();
         let rect = egui::Rect::from_min_max(egui::pos2(320.0, 0.0), size.to_pos2());
@@ -563,7 +577,7 @@ fn floating_inspector_grows_after_tab_changes_and_wraps_in_a_narrow_viewport() {
                 .memory(|memory| memory.area_rect(egui::Id::new("breadcrumb")))
                 .unwrap();
             assert!(
-                area.right() <= rect.right() - crate::ui::breadcrumb::HUD_PADDING + 1.0,
+                area.right() <= rect.right() - crate::ui::kit::halo::HUD_PADDING + 1.0,
                 "inspector exceeds viewport: {area:?}"
             );
         }
@@ -609,7 +623,7 @@ fn floating_inspector_expands_instead_of_scrolling() {
         area.height() > viewport.height(),
         "information must use its natural height: {area:?}"
     );
-    assert!((area.top() - crate::ui::breadcrumb::HUD_PADDING).abs() < 1.0);
+    assert!((area.top() - crate::ui::kit::halo::HUD_PADDING).abs() < 1.0);
     assert!(
         output.shapes.iter().any(|shape| match &shape.shape {
             egui::epaint::Shape::Text(text) =>

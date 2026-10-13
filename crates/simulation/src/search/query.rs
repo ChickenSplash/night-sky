@@ -197,6 +197,12 @@ impl Query {
         self.plan().map(|_| ())
     }
 
+    /// The kinds results can be, once the family, kinds, filters and
+    /// relationships are applied: what further filters can narrow.
+    pub fn kinds_left(&self) -> Result<KindSet, String> {
+        self.plan().map(|plan| plan.kinds)
+    }
+
     pub(crate) fn plan(&self) -> Result<Plan, String> {
         if self.version != VERSION {
             return Err(format!(

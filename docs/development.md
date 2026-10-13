@@ -32,7 +32,9 @@ crates/client/       Bevy client and egui interface
   src/stars/         Galactic star streaming, batching, drawing and shaders
     stream/          Native/web backends and streaming metrics
   src/render/        Bodies, exposure, glow, black hole and shaders
-  src/ui/            HUD, breadcrumbs, inspector, tasks and terminal widgets
+  src/ui/            HUD, breadcrumbs, inspector, tasks and the debug console's skin
+  src/ui/kit/        Themed widget kit (terminal and game themes), halo text
+  src/ui/browser/    Object browser: query chips, filter picker, results
   src/devtools/      Debug window, tests, benchmarks and diagnostics
     tabs/            One module per debug tab
 crates/server/       Axum API and static browser file server

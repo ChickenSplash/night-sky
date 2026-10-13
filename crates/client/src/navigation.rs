@@ -89,7 +89,10 @@ pub struct Navigation {
     pub compression: f64,
     /// Wireframes over the realistic bodies. Always drawn otherwise.
     pub wireframe: bool,
-    pub search: String,
+    /// Systems found by the object browser's search, by key, with their
+    /// positions in parsecs from the galactic centre: visitable without
+    /// being streamed (`galaxy_nav::route`).
+    pub charted: std::collections::HashMap<String, [f64; 3]>,
     pub notice: String,
     /// Animate the camera to the new target instead of cutting to it.
     pub fly: bool,
@@ -123,7 +126,7 @@ impl Default for Navigation {
             exposure: 0.0,
             compression: 0.5,
             wireframe: true,
-            search: String::new(),
+            charted: std::collections::HashMap::new(),
             notice: "Connecting to local API…".into(),
             fly: false,
         }

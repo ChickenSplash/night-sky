@@ -3,6 +3,7 @@
 use crate::Navigation;
 use crate::actions::UiCommand;
 use crate::format::speed_label;
+use crate::ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, SIZE, halo_text};
 use bevy::prelude::*;
 use bevy_egui::egui;
 use space_simulation::SimulationClock;
@@ -79,8 +80,6 @@ pub(super) fn time_controls(
     drag_start: &mut Option<f64>,
     out: &mut Vec<UiCommand>,
 ) {
-    use crate::ui::breadcrumb::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_text};
-
     egui::Area::new(egui::Id::new("time-controls"))
         .order(egui::Order::Background)
         .movable(false)
@@ -164,8 +163,6 @@ pub(super) fn speed_readout(
     drag_start: &mut Option<f64>,
     out: &mut Vec<UiCommand>,
 ) {
-    use crate::ui::breadcrumb::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_text};
-
     egui::Area::new(egui::Id::new("speed-readout"))
         .order(egui::Order::Background)
         .movable(false)
@@ -239,8 +236,6 @@ pub(super) fn magnitude_control(
     drag: &mut Option<(f64, f64)>,
     out: &mut Vec<UiCommand>,
 ) {
-    use crate::ui::breadcrumb::{HOVER, HUD_PADDING, LINK, halo_text};
-
     egui::Area::new(egui::Id::new("magnitude-control"))
         .order(egui::Order::Background)
         .movable(false)
@@ -298,7 +293,6 @@ pub(super) fn exposure_controls(
     drags: &mut [Option<f64>; 2],
     out: &mut Vec<UiCommand>,
 ) {
-    use crate::ui::breadcrumb::{HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, SIZE, halo_text};
     let height = ctx.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(SIZE)));
     for (index, (id, value, text, help)) in [
         ("exposure", nav.exposure, format!("Exposure {:+.2} stops", nav.exposure), "Drag left/right: 20 pixels per stop. +1 stop doubles light, -1 halves it. Applies immediately, with no automatic adaptation."),

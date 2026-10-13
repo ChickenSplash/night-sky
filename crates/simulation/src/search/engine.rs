@@ -80,6 +80,9 @@ pub struct SearchResult {
     pub system: String,
     /// From the request's origin to its system.
     pub distance_ly: f64,
+    /// Its system's position, in parsecs from the galactic centre, so it can
+    /// be visited without being found again.
+    pub position_pc: [f64; 3],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,7 +296,13 @@ impl Search {
             .star(key)
             .ok_or_else(|| format!("no system `{key}` in this galaxy"))?;
         let distance = distance(star.position_pc, self.origin);
-        for hit in evaluate(&self.plan, key, star.cell, star.component, distance) {
+        for hit in evaluate(
+            &self.plan,
+            key,
+            (star.cell, star.component),
+            star.position_pc,
+            distance,
+        ) {
             if target.is_none_or(|t| *t == hit.result.object) {
                 self.best.push(hit);
             }
@@ -510,7 +519,8 @@ fn batch(
                 if d * d <= r2 && d <= kth {
                     out.evaluated += 1;
                     let id = cell_star_id(cell, component, index);
-                    out.hits.extend(evaluate(plan, &id, cell, component, d));
+                    out.hits
+                        .extend(evaluate(plan, &id, (cell, component), p, d));
                 }
             }
         }
@@ -683,8 +693,8 @@ fn system_class(stars: usize) -> &'static str {
 pub(crate) fn evaluate(
     plan: &Plan,
     key: &str,
-    cell: Cell,
-    component: Component,
+    (cell, component): (Cell, Component),
+    position_pc: [f64; 3],
     distance_pc: f64,
 ) -> Vec<Hit> {
     let wants = |id: &str| plan.kinds.has(id);
@@ -781,6 +791,7 @@ pub(crate) fn evaluate(
                 class: class.into(),
                 system: system.clone(),
                 distance_ly: distance_pc / PC_PER_LY,
+                position_pc,
             },
         }
     };

@@ -61,6 +61,7 @@ The underlying simulation continues in every mode.
 ## Debug tools
 
 Toggle the debug console with the cog, F3 or the backtick key on either client.
+Toggle the object browser with the 🔍 icon or Ctrl+K (desktop only for now).
 There is no separate Settings window. Display options and realistic lighting
 live in `render`; shortcut help lives in `controls`.
 Click the left side of a checkbox row to toggle it. The square `+` / `-` button

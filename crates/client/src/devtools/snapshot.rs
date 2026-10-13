@@ -64,6 +64,7 @@ pub(super) fn publish(
         Res<RenderDebug>,
         Option<Res<DiagnosticsStore>>,
         Res<crate::search::Searches>,
+        Res<crate::ui::browser::Browser>,
     ),
     time: Res<Time>,
 ) {
@@ -90,7 +91,7 @@ pub(super) fn publish(
     let snapshot_start = Instant::now();
     let (universe, nav, clock) = scene;
     let (pose, rig) = camera;
-    let (debug, diagnostics, searches) = render;
+    let (debug, diagnostics, searches, browser) = render;
     let trail = crate::ui::breadcrumb::trail(&nav, &universe.0);
     let selection_trail = crate::ui::breadcrumb::selection_trail(&nav, &universe.0);
     let inspection =
@@ -151,7 +152,7 @@ pub(super) fn publish(
         },
         // Requests without results: `GET /search/<id>` has those.
         "search": {
-            "shown": searches.shown, "threads": searches.threads,
+            "browser_open": browser.open, "shown": searches.shown, "threads": searches.threads,
             "work_cap": searches.work_cap, "requests": searches.recent(),
         },
         "debug": {
@@ -280,6 +281,7 @@ mod tests {
         .insert_resource(CameraRig::default())
         .insert_resource(RenderDebug::default())
         .init_resource::<crate::search::Searches>()
+        .init_resource::<crate::ui::browser::Browser>()
         .insert_resource(Time::<()>::default())
         .add_systems(Last, publish);
         app.update();
@@ -289,6 +291,7 @@ mod tests {
         let state = published.full();
         assert_eq!(state["schema_version"], 1);
         assert_eq!(state["search"]["shown"], Value::Null);
+        assert_eq!(state["search"]["browser_open"], false);
         assert!(state["search"]["requests"].is_array());
         assert!(state["search"]["threads"].as_u64().unwrap() >= 1);
         let galaxy = &app.world().resource::<Universe>().0;

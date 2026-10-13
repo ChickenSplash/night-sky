@@ -254,7 +254,8 @@ pub fn visit_selected(nav: &mut Navigation, lists: &Galaxy) -> bool {
 enum Route {
     List(usize, u32),
     Visited,
-    Streamed(PickedStar),
+    /// Streamed, or found by a search (`Navigation::charted`).
+    Located(PickedStar),
 }
 
 /// Resolves a route without generating a system, so the UI can ask every frame.
@@ -266,7 +267,14 @@ fn route(nav: &Navigation, lists: &Galaxy, field: &Starfield, id: &str) -> Optio
     if matches!(&nav.visit, Some(Visit::Generated(system)) if system.id == id) {
         return Some(Route::Visited);
     }
-    picked_id(field, id).map(Route::Streamed)
+    picked_id(field, id)
+        .or_else(|| {
+            nav.charted.get(id).map(|&position_pc| PickedStar {
+                id: id.to_owned(),
+                position_ly: relative_ly(position_pc),
+            })
+        })
+        .map(Route::Located)
 }
 
 pub fn reachable(nav: &Navigation, lists: &Galaxy, field: &Starfield, id: &str) -> bool {
@@ -278,7 +286,7 @@ pub fn visit_star(nav: &mut Navigation, lists: &Galaxy, field: &Starfield, id: &
     match route(nav, lists, field, id) {
         Some(Route::List(list, page)) => nav.arrive(Visit::List(list), page, lists),
         Some(Route::Visited) => nav.frame(lists),
-        Some(Route::Streamed(star)) => match generated(id, star.position_ly) {
+        Some(Route::Located(star)) => match generated(id, star.position_ly) {
             Some(system) => nav.arrive(Visit::Generated(Box::new(system)), 0, lists),
             None => return false,
         },

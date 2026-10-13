@@ -41,6 +41,10 @@ pub struct Entry {
     /// Left out of summaries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<Vec<SearchResult>>,
+    /// Counts the updates taken in, so a copy can tell it is out of date.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[serde(skip)]
+    pub revision: u64,
 }
 
 impl Entry {
@@ -71,8 +75,10 @@ pub fn camera_pc(rig: &CameraRig, pose: &CameraPose) -> [f64; 3] {
 pub struct Searches {
     #[cfg(not(target_arch = "wasm32"))]
     pub hub: std::sync::Arc<native::Hub>,
-    /// The request the object browser shows.
+    /// The request the object browser shows, and a copy of it as of its
+    /// last update.
     pub shown: Option<u64>,
+    pub shown_entry: Option<Entry>,
     /// Debug settings, reset on restart (`set_search`).
     pub threads: usize,
     pub work_cap: u64,
@@ -87,6 +93,7 @@ impl Default for Searches {
             #[cfg(not(target_arch = "wasm32"))]
             hub: std::sync::Arc::new(native::Hub::new(threads)),
             shown: None,
+            shown_entry: None,
             threads,
             work_cap: DEFAULT_WORK_CAP,
         }
@@ -94,6 +101,11 @@ impl Default for Searches {
 }
 
 impl Searches {
+    /// Whether this build can search; the browser's worker comes later.
+    pub fn available(&self) -> bool {
+        cfg!(not(target_arch = "wasm32"))
+    }
+
     /// Recent requests, newest first, without their results. Empty if the
     /// store is busy this frame.
     pub fn recent(&self) -> Vec<Entry> {
@@ -113,11 +125,43 @@ impl Plugin for SearchPlugin {
     }
 }
 
-fn poll(searches: Res<Searches>) {
+/// Takes in the service's updates, and refreshes the shown request's copy
+/// and the systems it charts for navigation when it has changed.
+fn poll(mut searches: ResMut<Searches>, mut nav: ResMut<crate::Navigation>) {
     #[cfg(not(target_arch = "wasm32"))]
-    searches.hub.poll(false);
+    {
+        searches.hub.poll(false);
+        let Some(id) = searches.shown else {
+            searches.shown_entry = None;
+            return;
+        };
+        let since = searches
+            .shown_entry
+            .as_ref()
+            .filter(|e| e.id == id)
+            .map_or(0, |e| e.revision);
+        if let Some(entry) = searches.hub.newer(id, since) {
+            chart(&mut nav, &entry);
+            searches.shown_entry = Some(entry);
+        }
+    }
     #[cfg(target_arch = "wasm32")]
-    let _ = searches;
+    let _ = (&mut searches, &mut nav);
+}
+
+/// Every system a request found, so its results can be visited.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn chart(nav: &mut crate::Navigation, entry: &Entry) {
+    use space_simulation::objects::ObjectRef;
+    nav.charted.clear();
+    for result in entry.results.iter().flatten() {
+        if let ObjectRef::Star { id } | ObjectRef::Barycentre { id } | ObjectRef::Planet { id } =
+            &result.object
+        {
+            let key = space_simulation::multiple::system_key(id);
+            nav.charted.insert(key.to_owned(), result.position_pc);
+        }
+    }
 }
 
 /// The search commands; `actions::apply` leaves them to this.
@@ -270,6 +314,7 @@ pub mod native {
                     error: None,
                     result_count: 0,
                     results: Some(Vec::new()),
+                    revision: 1,
                 });
                 if store.len() > KEPT {
                     let at = store
@@ -329,6 +374,7 @@ pub mod native {
                 let Some(entry) = store.iter_mut().find(|e| e.id == update.id()) else {
                     continue;
                 };
+                entry.revision += 1;
                 match update {
                     SearchUpdate::Refused { reason, .. } => {
                         warn!(target: TARGET, "#{} refused: {reason}", entry.id);
@@ -368,6 +414,17 @@ pub mod native {
                     })
                     .collect(),
             )
+        }
+
+        /// A copy of a request if it has changed since `revision`; `None`
+        /// too if the store is busy, so the app never waits.
+        pub fn newer(&self, id: u64, revision: u64) -> Option<Entry> {
+            self.store
+                .try_lock()
+                .ok()?
+                .iter()
+                .find(|e| e.id == id && e.revision > revision)
+                .cloned()
         }
 
         /// One request with its results so far.

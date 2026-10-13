@@ -5,9 +5,8 @@ use crate::{
     objects::{self, ObjectRef},
     presentation::PresentationMode,
     stars::stream::Starfield,
-    ui::breadcrumb::{
-        CURRENT, HOVER, HUD_LINE_GAP, Inspection, LINK, halo_text, halo_wrapped_text,
-    },
+    ui::breadcrumb::Inspection,
+    ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, LINK, halo_text, halo_wrapped_text},
 };
 use bevy_egui::egui;
 use space_shared::Galaxy;
@@ -23,7 +22,7 @@ impl Cache {
         self.key = None;
     }
 
-    fn get(&mut self, object: &ObjectRef, galaxy: &Galaxy) -> &Info {
+    pub(crate) fn get(&mut self, object: &ObjectRef, galaxy: &Galaxy) -> &Info {
         if self.key.as_ref() != Some(object) {
             self.info = describe(object, galaxy);
             self.key = Some(object.clone());

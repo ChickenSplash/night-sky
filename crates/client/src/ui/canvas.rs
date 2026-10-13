@@ -1,6 +1,7 @@
 //! Captions, planet labels, hover rings, the velocity marker and clicks on
 //! the 3D view itself.
-use super::{ACCENT, pointer_captured};
+use super::kit::ACCENT;
+use super::pointer_captured;
 use crate::actions::UiCommand;
 use crate::presentation::PresentationMode;
 use crate::{
@@ -138,7 +139,7 @@ pub(super) fn canvas_overlay(
                 (x, point.y - text.size().y * 0.5)
             };
             // Labels sit over star glare in tables and close-ups.
-            crate::ui::breadcrumb::halo_galley(&painter, egui::pos2(x, y), text, tint);
+            crate::ui::kit::halo::halo_galley(&painter, egui::pos2(x, y), text, tint);
         }
         // A second click on the selected planet follows it.
         if hovered && click {

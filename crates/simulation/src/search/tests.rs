@@ -16,11 +16,11 @@ fn home() -> [f64; 3] {
     GalaxyModel::milky_way().home_pc
 }
 
-type Systems = Vec<(String, Cell, Component, f64)>;
+type Systems = Vec<(String, Cell, Component, [f64; 3])>;
 
 /// Every star system within `RADIUS_LY` of home, from every tier's cells
 /// that overlap the sphere, each built in full.
-fn near_home() -> &'static [(String, Cell, Component, f64)] {
+fn near_home() -> &'static [(String, Cell, Component, [f64; 3])] {
     static NEAR: OnceLock<Systems> = OnceLock::new();
     NEAR.get_or_init(|| around_home(RADIUS_LY))
 }
@@ -43,7 +43,7 @@ fn around_home(radius_ly: f64) -> Systems {
                         for star in sky.cell_stars(cell) {
                             let d = distance(star.position_pc, centre);
                             if d <= radius {
-                                found.push((star.id, cell, star.component, d));
+                                found.push((star.id, cell, star.component, star.position_pc));
                             }
                         }
                     }
@@ -58,11 +58,16 @@ fn brute_force(query: &Query) -> Vec<SearchResult> {
     brute_force_in(near_home(), query)
 }
 
-fn brute_force_in(systems: &[(String, Cell, Component, f64)], query: &Query) -> Vec<SearchResult> {
+fn brute_force_in(
+    systems: &[(String, Cell, Component, [f64; 3])],
+    query: &Query,
+) -> Vec<SearchResult> {
     let plan = query.plan().unwrap();
     let mut hits: Vec<Hit> = systems
         .iter()
-        .flat_map(|(id, cell, component, d)| evaluate(&plan, id, *cell, *component, *d))
+        .flat_map(|(id, cell, component, p)| {
+            evaluate(&plan, id, (*cell, *component), *p, distance(*p, home()))
+        })
         .collect();
     hits.sort();
     hits.into_iter()

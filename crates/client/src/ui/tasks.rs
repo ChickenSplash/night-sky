@@ -4,7 +4,7 @@
 use crate::Navigation;
 use crate::actions::UiCommand;
 use crate::format::due_short;
-use crate::ui::{MUTED, muted};
+use crate::ui::kit::{MUTED, muted};
 use bevy_egui::egui;
 use space_shared::{Galaxy, StarSystem, Task};
 use std::collections::HashSet;
@@ -18,6 +18,8 @@ fn tint(colour: [u8; 3]) -> egui::Color32 {
 /// Panel-only choices: filters, sorting and folded status groups.
 pub struct Tasks {
     list_filter: String,
+    /// Searches every list's task planets while not empty.
+    task_filter: String,
     list_sort: ListSort,
     task_sort: TaskSort,
     group: bool,
@@ -29,6 +31,7 @@ impl Default for Tasks {
     fn default() -> Self {
         Self {
             list_filter: String::new(),
+            task_filter: String::new(),
             list_sort: ListSort::Default,
             task_sort: TaskSort::Default,
             group: true,
@@ -195,7 +198,7 @@ impl Panel<'_> {
     fn tasks(&mut self, ui: &mut egui::Ui) {
         let (galaxy, nav, state) = (self.galaxy, &mut *self.nav, &mut *self.state);
         let search = ui.add(
-            egui::TextEdit::singleline(&mut nav.search)
+            egui::TextEdit::singleline(&mut state.task_filter)
                 .hint_text("Search all task planets…")
                 .desired_width(f32::INFINITY),
         );
@@ -209,7 +212,7 @@ impl Panel<'_> {
                 });
             ui.checkbox(&mut state.group, "Group by status");
         });
-        let query = nav.search.trim().to_lowercase();
+        let query = state.task_filter.trim().to_lowercase();
         // The current list's tasks, or every list's while searching.
         let mut matches: Vec<_> = galaxy
             .systems

@@ -1,4 +1,6 @@
-use super::*;
+//! The debug console's controls, through `ui::terminal`.
+use crate::ui::terminal::*;
+use bevy_egui::egui::{self, Rect, pos2, vec2};
 
 fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
     egui::Event::PointerButton {
@@ -150,7 +152,7 @@ fn all_terminal_rows_keep_the_same_bright_edge_during_long_presses() {
                                         check(ui, false, "Setting", true, "Explanation");
                                     }
                                     6 => {
-                                        super::button(ui, "Button");
+                                        crate::ui::terminal::button(ui, "Button");
                                     }
                                     _ => {
                                         tab(ui, "Tab", false);
@@ -248,7 +250,7 @@ fn window_moves_only_from_header_and_shows_move_cursor() {
     frame(vec![]);
     let position = || {
         ctx.data(|data| {
-            data.get_temp::<egui::Pos2>(egui::Id::new(("terminal-position", "test")))
+            data.get_temp::<egui::Pos2>(egui::Id::new(("window-position", "test")))
                 .unwrap()
         })
     };
@@ -284,4 +286,11 @@ fn window_moves_only_from_header_and_shows_move_cursor() {
             "header padding is draggable"
         );
     }
+}
+
+#[test]
+fn terminal_theme_keeps_the_console_colours() {
+    let grey = egui::Color32::from_rgb(0xc8, 0xcc, 0xd0);
+    assert_eq!(THEME.border, grey.gamma_multiply(0.93));
+    assert_eq!(THEME.fill, egui::Color32::from_black_alpha(205));
 }

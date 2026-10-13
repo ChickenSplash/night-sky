@@ -93,6 +93,7 @@ fn main() {
         render::black_hole::BlackHolePlugin,
         command_line::CommandLinePlugin,
         search::SearchPlugin,
+        ui::browser::BrowserPlugin,
     ))
     .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {

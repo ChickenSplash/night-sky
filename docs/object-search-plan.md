@@ -3,8 +3,8 @@
 Status: Sessions 1 and 2 done (registry, query, engine, relationships,
 native worker, client wiring, developer API and CLI; see
 [galaxy model](galaxy-model.md#object-search) and `AGENTS.md`). Session 3
-(the browser UI) to do. Fold this note into the design notes as each part
-lands.
+(UI kit and object browser) in progress; Session 4 (the browser's search
+worker) to do. Fold this note into the design notes as each part lands.
 
 ## Goal
 
@@ -281,21 +281,51 @@ tab and snapshot, and the frame-drop check at the centre (all done there).
 Left for the user, in their own window: the frame-drop check at the
 galactic centre while a search runs (`ns perf`).
 
-## Session 3 · Browser UI
+## Session 3 · UI kit and object browser
+
+1. **UI kit** (`ui/kit/`), extracted from the debug console rather than
+   designed up front:
+   - `Theme` values (colours, fonts, sizes): `Theme::TERMINAL` for the
+     debug console and `Theme::GAME` for player-facing windows.
+   - Shared interaction (hover and held-press light), the floating window
+     (header drag, opens below the halo icons), halo text (from
+     `breadcrumb.rs`), facts, notes, text input, buttons and the widgets
+     the browser needs: chips, search box, menus and result rows.
+   - `ui/terminal.rs` stays the debug console's text-mode skin over the
+     kit; the console must look and behave the same. Tasks and the
+     inspector move over when they are next changed.
+2. **Results carry their system's position** (`SearchResult::position_pc`),
+   and navigation keeps the shown request's stars as charted, so a result
+   can be visited without being streamed (locating a star from its ID
+   alone takes about 150 ms).
+3. **Object browser** (`ui/browser/`), a third halo icon. The prototype is
+   a loose guide; no object pictures or 3D previews yet.
+   - Search box: an exact designation, or pasted `ns search` text, which
+     becomes chips.
+   - **Add filter** picker driven by the registry: kinds by family,
+     properties for the chosen kinds, then relationships; set, range and
+     yes/no editors. Each filter is a removable, editable chip.
+   - Scope (radius or the visited system) and limit; progress, "searched
+     out to" and **Refresh** (resend from where you are).
+   - Results list (name, system, class, distance); selecting one shows its
+     inspector facts and actions (fly to, inspect), plus copying the query
+     as an `ns search` command.
+   - `UiCommand::Search` (and `ns search --show`) opens the browser with
+     its query.
+4. Update `scripts/test-browser.mjs` (icon positions included), `AGENTS.md`,
+   `docs/galaxy-model.md`, `docs/controls.md` and the project structure.
+
+Done when the same query built in the UI and typed in the CLI gives
+identical results. Until Session 4 the browser build's window explains that
+searching runs in the desktop app.
+
+## Session 4 · Browser search worker
 
 1. Search Web Worker, built by `scripts/build-web.sh`, with a fallback like
    the star worker's. Lift the browser's refusal of `search` in
    `UiCommand::check` and give `Searches` a worker in place of the hub.
-2. Third halo icon and egui object browser in the prototype's layout, using
-   the existing terminal and halo styles.
-3. Filter picker (kinds, families, sets and ranges), chips, scope,
-   partial-result progress, "searched out to" and **Refresh**.
-4. Result actions: inspect, fly to, and copy the query as an `ns` command.
-5. Update `scripts/test-browser.mjs` (icon positions included), `AGENTS.md`,
-   `docs/galaxy-model.md` and `docs/controls.md`.
-
-Done when the same query built in the UI and typed in the CLI gives
-identical results.
+2. Measure the one-thread browser timings; the browser may need its own
+   default work cap.
 
 ## Later
 
@@ -351,3 +381,7 @@ identical results.
   cancelled; the CLI changes the browser only through
   `Search`/`ns search --show`.
 - **Where the browser lives:** a new, third halo icon.
+- **UI kit:** one module of themed widgets inside the client, extracted from
+  the debug console; two themes (terminal, game). Not a separate crate.
+- **Browser look:** the prototype's layout as a guide, not a specification;
+  text only, no object pictures yet.

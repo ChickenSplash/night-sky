@@ -50,10 +50,17 @@ design notes into every session:
 - `./scripts/build-web.sh`: WebGL 2 WASM build into `web/dist/`.
 - The browser is the main target; native is a dev fallback. Both use the same
   egui interface (`crates/client/src/ui/mod.rs`), drawn in the same frame as the scene, which fills
-  the whole window: there is no sidebar. Two free-floating halo icons at the
-  top right (`ui::icons`, ⚙ above ✔, `breadcrumb::halo_glyph`, hover blue,
-  white while open) toggle the debug console and Tasks window, which first open just below
-  them, right-aligned. Tasks (`ui/tasks.rs`, 01 lists and 02 task
+  the whole window: there is no sidebar. Three free-floating halo icons at the
+  top right (`ui::icons`, ⚙ then ✔ then 🔍, `kit::halo::halo_glyph`, hover blue,
+  white while open) toggle the debug console, Tasks window and object
+  browser, which first open just below them, right-aligned. Widgets come
+  from `ui/kit/` (`Theme::TERMINAL` for the console through `ui/terminal.rs`,
+  `Theme::GAME` for player windows); halo text lives in `kit::halo`. The
+  object browser (`ui/browser/`, Ctrl+K) edits a `Query` as chips through a
+  registry-driven filter picker and sends it as `UiCommand::Search` when it
+  changes; any `search` command opens it on that query. Selecting a result
+  shows the inspector's facts and actions; the shown request's systems are
+  charted in `Navigation::charted` so they can be visited unstreamed. Tasks (`ui/tasks.rs`, 01 lists and 02 task
   index, with the data-source note) keeps lists and tasks apart as
   the future integration point; the rest reaches them through `UiCommand`s.
   Both start closed. The debug window opens below the icons
@@ -64,7 +71,7 @@ design notes into every session:
   the 3D view, under any window, with no container. A soft dark halo (two
   rings of translucent black copies, `HALO_EDGE` at 1 px and `HALO_FADE` at
   2 px) keeps it readable over star discs and the galaxy band; it vanishes
-  on dark space. Reuse `halo_text`/`halo_wrapped_text` for scene text, or
+  on dark space. Reuse `kit::halo::halo_text`/`halo_wrapped_text` for scene text, or
   `halo_galley` for text placed by hand, such as the canvas planet labels
   (table labels sit in star glare).
   `breadcrumb::trail` is physical location: `Milky Way`, the current star's
