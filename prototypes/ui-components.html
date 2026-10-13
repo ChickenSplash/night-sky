@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Night Sky · UI directions</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #090c11; color: #e5e9ef; font: 14px/1.5 system-ui, sans-serif; }
+    main { max-width: 1180px; margin: auto; padding: 48px 28px; }
+    h1 { margin: 0; font-size: 26px; font-weight: 500; letter-spacing: -.6px; }
+    .intro { color: #8893a3; margin: 8px 0 32px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    article { --accent: #96caff; --muted: #8592a3; --edge: #303b49; --surface: #121922; padding: 26px; border: 1px solid #242c37; background: #0d1219; }
+    .eyebrow { color: var(--accent); font: 11px/1.4 ui-monospace, monospace; letter-spacing: 2px; text-transform: uppercase; }
+    h2 { margin: 8px 0; font-size: 21px; font-weight: 500; }
+    .description { color: var(--muted); margin: 0 0 24px; }
+    .panel { background: var(--surface); border: 1px solid var(--edge); }
+    .header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--edge); font-weight: 500; }
+    .content { padding: 18px 16px; }
+    .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    button, input { font: inherit; border-radius: 0; }
+    button { cursor: pointer; color: inherit; background: transparent; border: 1px solid var(--edge); padding: 8px 14px; transition: background .15s, border-color .15s; }
+    button:hover { background: #ffffff0b; border-color: var(--accent); }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #0b121b; font-weight: 600; }
+    button.primary:hover { filter: brightness(1.12); }
+    button:disabled { opacity: .35; cursor: not-allowed; }
+    .close { border: 0; padding: 0 4px; color: var(--muted); font-size: 20px; line-height: 1; }
+    .tabs { display: flex; border-bottom: 1px solid var(--edge); padding: 0 16px; gap: 20px; }
+    .tabs button { border: 0; border-bottom: 2px solid transparent; padding: 12px 0; color: var(--muted); }
+    .tabs .active { color: var(--accent); border-bottom-color: var(--accent); }
+    label.field { display: block; margin: 18px 0; }
+    .field span, .caption { display: block; color: var(--muted); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 7px; }
+    input[type="search"] { width: 100%; padding: 10px 12px; color: inherit; background: #00000025; border: 1px solid var(--edge); }
+    input::placeholder { color: var(--muted); opacity: .7; }
+    .chip { padding: 5px 10px; font-size: 12px; color: var(--accent); border-color: var(--edge); }
+    .chip b { font-weight: 400; margin-left: 12px; color: var(--muted); }
+    .toggle { display: flex; gap: 9px; align-items: center; margin: 18px 0; font-size: 13px; }
+    input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+    .footer { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--edge); padding: 12px 16px; }
+    .text-button { border: 0; padding-left: 0; color: var(--muted); }
+    .precision { --accent: #a5d2f5; --edge: #344555; --surface: #111c26; }
+    .precision .panel { border-top: 2px solid var(--accent); }
+    .precision .header { font: 12px ui-monospace, monospace; text-transform: uppercase; letter-spacing: 1.5px; }
+    .precision .chip { background: #a5d2f50b; }
+    .editorial { --accent: #e0d9c9; --muted: #96978f; --edge: #373a36; --surface: #191c19; }
+    .editorial .panel { border: 0; }
+    .editorial .header { font-size: 18px; padding-top: 20px; }
+    .editorial .chip { border: 0; background: #e0d9c910; }
+    .editorial input[type="search"] { border: 0; border-bottom: 1px solid var(--edge); background: transparent; padding-left: 0; }
+    .editorial .tabs .active { color: #f1ede4; }
+    .signal { --accent: #c4ee83; --muted: #8c998c; --edge: #354335; --surface: #131c17; }
+    .signal .panel { border-left: 3px solid var(--accent); }
+    .signal .primary { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px)); }
+    .signal .tabs { gap: 4px; padding: 8px 12px; }
+    .signal .tabs button { padding: 6px 12px; border: 0; }
+    .signal .tabs .active { color: var(--accent); background: #c4ee8312; }
+    .signal .chip { border-style: dashed; }
+    .outline { --accent: #c4b7ef; --muted: #918b9f; --edge: #393345; --surface: #15121c; }
+    .outline .panel { position: relative; border-color: #393345; }
+    .outline .panel::before, .outline .panel::after { content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none; }
+    .outline .panel::before { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+    .outline .panel::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+    .outline .primary { color: var(--accent); background: #c4b7ef12; }
+    .outline .chip { border-color: #c4b7ef50; }
+    .note { color: #758090; font-size: 12px; margin-top: 24px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } main { padding: 28px 16px; } article { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Night Sky · UI directions</h1>
+    <p class="intro">Four component treatments. Sharp edges, quiet surfaces, no glow. Mix and match.</p>
+    <div class="grid">
+      <article class="precision">
+        <div class="eyebrow">01 · Precision</div>
+        <h2>Instrument panel</h2>
+        <p class="description">Cool blue, fine dividers, restrained technical labels.</p>
+        <section class="panel" aria-label="Precision component examples">
+          <div class="header">Object browser <button class="close" aria-label="Close example">×</button></div>
+          <nav class="tabs" aria-label="Precision tabs"><button class="active">Search</button><button>Saved</button></nav>
+          <div class="content">
+            <div class="caption">Filters</div>
+            <div class="row"><button class="chip">Object type <b>×</b></button><button class="chip">+ Add filter</button></div>
+            <label class="field"><span>Search</span><input type="search" placeholder="Search objects…"></label>
+            <label class="toggle"><input type="checkbox" checked> Show orbital paths</label>
+            <div class="row"><button>Inspect</button><button disabled>Fly to</button></div>
+          </div>
+          <div class="footer"><button class="text-button">Reset</button><button class="primary">Search</button></div>
+        </section>
+      </article>
+      <article class="editorial">
+        <div class="eyebrow">02 · Editorial</div>
+        <h2>Quiet and refined</h2>
+        <p class="description">Warm neutrals, fewer boxes, clear type and generous spacing.</p>
+        <section class="panel" aria-label="Editorial component examples">
+          <div class="header">Object browser <button class="close" aria-label="Close example">×</button></div>
+          <nav class="tabs" aria-label="Editorial tabs"><button class="active">Search</button><button>Saved</button></nav>
+          <div class="content">
+            <div class="caption">Filters</div>
+            <div class="row"><button class="chip">Object type <b>×</b></button><button class="chip">+ Add filter</button></div>
+            <label class="field"><span>Search</span><input type="search" placeholder="Search objects…"></label>
+            <label class="toggle"><input type="checkbox" checked> Show orbital paths</label>
+            <div class="row"><button>Inspect</button><button disabled>Fly to</button></div>
+          </div>
+          <div class="footer"><button class="text-button">Reset</button><button class="primary">Search</button></div>
+        </section>
+      </article>
+      <article class="signal">
+        <div class="eyebrow">03 · Signal</div>
+        <h2>Utility with character</h2>
+        <p class="description">Lime accents, clipped action corners and compact filled tabs.</p>
+        <section class="panel" aria-label="Signal component examples">
+          <div class="header">Object browser <button class="close" aria-label="Close example">×</button></div>
+          <nav class="tabs" aria-label="Signal tabs"><button class="active">Search</button><button>Saved</button></nav>
+          <div class="content">
+            <div class="caption">Filters</div>
+            <div class="row"><button class="chip">Object type <b>×</b></button><button class="chip">+ Add filter</button></div>
+            <label class="field"><span>Search</span><input type="search" placeholder="Search objects…"></label>
+            <label class="toggle"><input type="checkbox" checked> Show orbital paths</label>
+            <div class="row"><button>Inspect</button><button disabled>Fly to</button></div>
+          </div>
+          <div class="footer"><button class="text-button">Reset</button><button class="primary">Search</button></div>
+        </section>
+      </article>
+      <article class="outline">
+        <div class="eyebrow">04 · Outline</div>
+        <h2>Lightweight sci-fi</h2>
+        <p class="description">Lavender linework, corner marks and outlined primary actions.</p>
+        <section class="panel" aria-label="Outline component examples">
+          <div class="header">Object browser <button class="close" aria-label="Close example">×</button></div>
+          <nav class="tabs" aria-label="Outline tabs"><button class="active">Search</button><button>Saved</button></nav>
+          <div class="content">
+            <div class="caption">Filters</div>
+            <div class="row"><button class="chip">Object type <b>×</b></button><button class="chip">+ Add filter</button></div>
+            <label class="field"><span>Search</span><input type="search" placeholder="Search objects…"></label>
+            <label class="toggle"><input type="checkbox" checked> Show orbital paths</label>
+            <div class="row"><button>Inspect</button><button disabled>Fly to</button></div>
+          </div>
+          <div class="footer"><button class="text-button">Reset</button><button class="primary">Search</button></div>
+        </section>
+      </article>
+    </div>
+    <p class="note">Static visual samples only. Buttons do not perform actions; hover and focus styles are CSS.</p>
+  </main>
+</body>
+</html>
