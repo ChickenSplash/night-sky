@@ -128,8 +128,9 @@ Paths below are relative to the repository root, or to the named crate's
   `Navigation::magnitude` (6.5 by default): a
   worker thread natively (`native.rs`), a dedicated module Web Worker in the browser
   (`web.rs`), into the `Starfield` resource. The worker's generation-only WASM crate is
-  `crates/star-worker`, with `web/star-worker.js` as its entry point; both WASM
-  bundles are built by `scripts/build-web.sh`. `stream_wire` transfers cells in
+  `crates/sim-worker` (shared with the search worker), with
+  `web/star-worker.js` as its entry point; both WASM bundles are built by
+  `scripts/build-web.sh`. `stream_wire` transfers cells in
   binary with f64 positions, and browser startup/worker errors fall back to
   the old 4 ms per-frame loader. Native loads about 1.06 million stars in 175
   cells near home in 2.3 s; the pre-worker browser took about 8 to 14 s.
@@ -182,10 +183,18 @@ Paths below are relative to the repository root, or to the named crate's
   near home). A capped search reports `complete_to_ly`: results nearer than
   that are exact. The cache is trimmed to coarse cells ahead of the walk and
   the current branch, so it stays near 100 MB even at 1,000 ly.
-- `SearchService` (native only) runs requests in turn on one thread, a
-  million work units per slice, with several threads for large cells. The
-  client's `search.rs` owns it; requests come from `UiCommand::Search` and
-  the developer API (`ns search`), described in `AGENTS.md`.
+- `Runner` (`search/runner.rs`) runs every open request in turn, a slice of
+  work each, taking `Order`s and giving `SearchUpdate`s; clocks are the
+  caller's, so it builds for every target. Natively `SearchService` runs it
+  on one thread, a million work units per slice, with several threads for
+  large cells. In the browser a dedicated search Web Worker
+  (`web/search-worker.js`, `SearchWorker` in `crates/sim-worker`, the star
+  worker's WASM in its own instance) runs it on one thread, with orders and
+  updates as JSON; if the worker fails, the client runs it in 4 ms slices of
+  each frame, restarting unfinished requests. The client's `search/` owns
+  the service (`web.rs` in the browser); requests come from
+  `UiCommand::Search` and the developer API (`ns search`), described in
+  `AGENTS.md`.
 - Measure with `cargo test -p space-simulation --release search_probe --
   --ignored --nocapture`; results are in the plan.
 

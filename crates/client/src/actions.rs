@@ -275,10 +275,6 @@ impl UiCommand {
                 .selected_planet(galaxy)
                 .map(|_| ())
                 .ok_or_else(|| "Select a planet in the visited system first".into()),
-            #[cfg(target_arch = "wasm32")]
-            UiCommand::Search { .. } => Err(
-                "Searches run in the native app for now; the browser's search worker comes with the object browser".into(),
-            ),
             _ => self.check_values(),
         }
     }

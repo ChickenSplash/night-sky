@@ -19,7 +19,7 @@ try {
   const requests = new Set();
   const errors = [];
   page.on('response', response => {
-    if (response.url().includes('star_worker') || response.url().includes('star-worker')) {
+    if (response.url().includes('sim_worker') || response.url().includes('star-worker')) {
       assert.equal(response.status(), 200, response.url());
       requests.add(new URL(response.url()).pathname);
     }
@@ -31,7 +31,7 @@ try {
     return /STAR STREAM \[WEB WORKER\] [1-9]\d* stars/.test(text);
   }, null, { timeout: 90_000 });
   assert.deepEqual(errors.filter(error => !error.includes('Using exceptions for control flow')), []);
-  for (const path of ['/star-worker.js', '/star_worker.js', '/star_worker_bg.wasm']) {
+  for (const path of ['/star-worker.js', '/sim_worker.js', '/sim_worker_bg.wasm']) {
     assert(requests.has(path), `Worker asset not requested: ${path}`);
   }
   console.log('Browser star worker generated and delivered cells to the renderer.');

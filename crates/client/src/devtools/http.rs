@@ -3,7 +3,7 @@
 use super::snapshot::{Published, Snapshot};
 use crate::command_line::{Source, Typed};
 use crate::scene::{CameraPose, CameraRig};
-use crate::search::{Asker, native::Hub};
+use crate::search::{Asker, Hub};
 use crate::stars::stream::Starfield;
 use crate::{Clock, Navigation, Universe};
 use bevy::prelude::*;

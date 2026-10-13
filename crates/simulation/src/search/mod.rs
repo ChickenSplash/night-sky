@@ -4,6 +4,7 @@
 mod engine;
 pub mod query;
 pub mod registry;
+mod runner;
 #[cfg(test)]
 mod tests;
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,5 +14,6 @@ pub use engine::{
     DEFAULT_WORK_CAP, Origin, PC_PER_LY, Progress, Search, SearchRequest, SearchResult, State,
 };
 pub use query::{Filter, Query, Scope, Sort, Test};
+pub use runner::{Order, Runner, SearchUpdate};
 #[cfg(not(target_arch = "wasm32"))]
-pub use worker::{SearchService, SearchUpdate};
+pub use worker::SearchService;

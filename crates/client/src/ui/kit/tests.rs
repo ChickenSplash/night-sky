@@ -229,6 +229,49 @@ fn all_terminal_rows_keep_the_same_bright_edge_during_long_presses() {
 }
 
 #[test]
+fn long_presses_click_when_released_over_the_control() {
+    let ctx = egui::Context::default();
+    let frame = |time, events| {
+        let mut clicked = false;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(600.0, 400.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    clicked = tab(ui, "Tab", false);
+                });
+            },
+        );
+        clicked
+    };
+    let pos = pos2(30.0, 18.0);
+    frame(0.0, vec![egui::Event::PointerMoved(pos)]);
+    // A second between frames, as under software rendering.
+    frame(0.1, vec![button(pos, true)]);
+    assert!(frame(1.9, vec![button(pos, false)]), "released over it");
+    frame(2.0, vec![button(pos, true)]);
+    frame(3.0, vec![]);
+    let away = pos2(300.0, 300.0);
+    assert!(
+        !frame(
+            3.1,
+            vec![egui::Event::PointerMoved(away), button(away, false)]
+        ),
+        "released elsewhere"
+    );
+    // A press and release that arrive together, behind one slow frame.
+    frame(4.0, vec![egui::Event::PointerMoved(pos)]);
+    assert!(
+        frame(5.8, vec![button(pos, true), button(pos, false)]),
+        "pressed and released in one frame"
+    );
+}
+
+#[test]
 fn window_moves_only_from_header_and_shows_move_cursor() {
     let ctx = egui::Context::default();
     let frame = |events| {

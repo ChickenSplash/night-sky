@@ -1,10 +1,11 @@
 # Object search · implementation plan
 
-Status: Sessions 1 and 2 done (registry, query, engine, relationships,
-native worker, client wiring, developer API and CLI; see
-[galaxy model](galaxy-model.md#object-search) and `AGENTS.md`). Session 3
-(UI kit and object browser) in progress; Session 4 (the browser's search
-worker) to do. Fold this note into the design notes as each part lands.
+Status: Sessions 1 to 4 done (registry, query, engine, relationships,
+native worker, client wiring, developer API and CLI, UI kit and object
+browser, the browser's search worker; see
+[galaxy model](galaxy-model.md#object-search) and `AGENTS.md`). Next: polish
+the object browser's look and UX. Fold this note into the design notes as
+each part lands.
 
 ## Goal
 
@@ -319,13 +320,40 @@ Done when the same query built in the UI and typed in the CLI gives
 identical results. Until Session 4 the browser build's window explains that
 searching runs in the desktop app.
 
-## Session 4 · Browser search worker
+## Session 4 · Browser search worker (done)
 
-1. Search Web Worker, built by `scripts/build-web.sh`, with a fallback like
-   the star worker's. Lift the browser's refusal of `search` in
-   `UiCommand::check` and give `Searches` a worker in place of the hub.
-2. Measure the one-thread browser timings; the browser may need its own
-   default work cap.
+1. `search::Runner` (round robin over open requests, clock passed in)
+   builds for every target; the native `SearchService` thread, the browser's
+   search worker and its fallback all run it. The star worker's crate became
+   `crates/sim-worker`, one WASM for both workers (`StarWorker`,
+   `SearchWorker`), each worker with its own instance; `web/search-worker.js`
+   takes `Order`s and gives `SearchUpdate`s as JSON. The client's `Hub`
+   (request store) is shared by both targets; only the service under it
+   differs (`search/web.rs`, falling back to 4 ms frame slices, restarting
+   unfinished requests). The browser's `search` refusal and the object
+   browser's "desktop only" note are gone; the perf tab and snapshot show the
+   search `mode`.
+2. One-thread browser timings, measured on the built `sim_worker` WASM under
+   Node (V8, as Chromium), default 100 M work cap, 30 s limit per case:
+
+   | Where | Radius | Query | Time | State |
+   |---|---|---|---|---|
+   | Home | 50 ly | nothing | 0.49 s | done |
+   | Home | 50 ly | sub-Neptunes | 0.36 s | done |
+   | Home | 1,000 ly | nothing | over 30 s | 78 M work, out to 518 ly |
+   | Home | 1,000 ly | sub-Neptunes | 0.44 s | done |
+   | 500 ly from centre | 50 ly | sub-Neptunes | 6.5 s | done |
+   | Centre | 5 ly | nothing | 19 s | capped, complete to 0 ly |
+   | Centre | 50 ly | sub-Neptunes | 19 s | capped, complete to 0 ly |
+
+   - About 0.19 µs per unit, as one native thread; cell-heavy wide scans are
+     about twice as slow as natively (a capped complete 1,000 ly scan takes
+     about 40 s).
+   - The browser keeps the shared 100 M default: near home everything
+     finishes in under a second, searches never touch the frame, and a
+     capped result is still exact within its radius. Centre searches cap
+     before any result is final, at any cap under about 150 M; reusing
+     streamed cells (above) is what would fix them.
 
 ## Later
 
@@ -372,7 +400,9 @@ searching runs in the desktop app.
   browser only through `search` (`ns search --show`).
 - **Search threads:** a quarter of the machine natively by default, since
   the star loader takes three quarters; `set_search` changes it.
-- **Browser worker:** a dedicated search worker, not the star worker.
+- **Browser worker:** a dedicated search worker, not the star worker, sharing
+  the star worker's WASM file (`sim-worker`) in its own instance.
+- **Browser work cap:** the shared 100 M default.
 - **Extensibility:** a source per kind, not a fixed star-to-planet pipeline.
 - **Query logic:** AND across filters, sets of kinds and of values; no OR.
 - **Text search:** exact designations and IDs only.

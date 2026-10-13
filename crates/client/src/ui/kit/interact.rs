@@ -41,6 +41,43 @@ pub(super) fn control_sense(interactive: bool) -> Sense {
     }
 }
 
+/// egui reports no click for a press held past its click time, even across a
+/// single slow frame (a press and release a second apart). Counts a release
+/// as a click when the press began on the control and ends over it, as
+/// ordinary buttons do.
+pub(super) fn held_click(mut response: egui::Response) -> egui::Response {
+    let ctx = response.ctx.clone();
+    // egui forgets where the press began by the frame it ends.
+    let id = response.id.with("held-press");
+    if response.is_pointer_button_down_on() {
+        ctx.data_mut(|data| data.insert_temp(id, ()));
+    }
+    let (released, over) = ctx.input(|input| {
+        (
+            input.pointer.primary_released(),
+            input
+                .pointer
+                .latest_pos()
+                .is_some_and(|pos| response.interact_rect.contains(pos)),
+        )
+    });
+    if !released {
+        return response;
+    }
+    let pressed = ctx.data_mut(|data| data.remove_temp::<()>(id)).is_some();
+    if pressed
+        && over
+        && response.sense.senses_click()
+        && response.contains_pointer()
+        && !response.clicked()
+    {
+        response
+            .flags
+            .insert(egui::response::Flags::FAKE_PRIMARY_CLICKED);
+    }
+    response
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Highlight {
     Whole,
@@ -98,6 +135,7 @@ pub(super) fn row(
         vec2(ui.available_width(), height),
         control_sense(interactive),
     );
+    let response = held_click(response);
     let hover = hover_amount(ui, &response, true);
     highlight(ui, theme, rect, hover, Highlight::Whole);
     let response = if interactive {

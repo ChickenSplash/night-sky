@@ -24,7 +24,7 @@ pub(super) fn show(
         view.searches.shown_entry.as_ref().filter(|e| {
             browser.sent.as_deref() == Some(e.query.as_str()) && browser.problem.is_none()
         });
-    status(ui, browser, view, entry, out);
+    status(ui, browser, entry, out);
     let results: &[SearchResult] = entry.and_then(|e| e.results.as_deref()).unwrap_or(&[]);
     let selected = browser
         .selected
@@ -81,7 +81,6 @@ fn radius_text(browser: &Browser) -> String {
 fn status(
     ui: &mut egui::Ui,
     browser: &mut Browser,
-    view: &View,
     entry: Option<&Entry>,
     out: &mut Vec<UiCommand>,
 ) {
@@ -90,12 +89,7 @@ fn status(
         1 => "1 result".to_owned(),
         n => format!("{} results", crate::format::grouped(n)),
     };
-    let (text, bar) = if !view.searches.available() {
-        (
-            "Searching runs in the desktop app for now; the browser build gets its own search worker next.".to_owned(),
-            None,
-        )
-    } else if let Some(problem) = &browser.problem {
+    let (text, bar) = if let Some(problem) = &browser.problem {
         (format!("Can't search for this: {problem}"), None)
     } else if let Some(entry) = entry {
         let p = &entry.progress;
@@ -159,7 +153,7 @@ fn status(
             let refresh = kit::button(ui, theme, "Refresh").on_hover_text(
                 "Distances are from where you searched. Refresh searches again from where you are now.",
             );
-            if refresh.clicked() && view.searches.available() {
+            if refresh.clicked() {
                 browser.refresh(out);
             }
         });

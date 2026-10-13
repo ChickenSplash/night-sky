@@ -17,7 +17,7 @@ also provides graphical smoke tests and screenshot-based bug reports.
 
 See [the README](../README.md) for native and browser launch commands.
 `./scripts/dev-web.sh` builds the browser client and starts the server with the
-HTML and worker entry point linked to their sources. Refresh for changes to
+HTML and worker entry points linked to their sources. Refresh for changes to
 those files; rerun the script after Rust changes.
 
 ## Project structure
@@ -27,7 +27,8 @@ crates/client/       Bevy client and egui interface
   src/main.rs        Entry point and system scheduling
   src/navigation.rs  Destination, visits and selection
   src/format.rs      Shared text formatting
-  src/search.rs      Object search requests, settings and the API's shared store
+  src/search/        Object search requests, settings, the shared store and the
+                     browser's search worker transport
   src/scene/         Camera, controls, location, placement and wireframes
   src/stars/         Galactic star streaming, batching, drawing and shaders
     stream/          Native/web backends and streaming metrics
@@ -41,14 +42,14 @@ crates/server/       Axum API and static browser file server
 crates/shared/       Serializable models
 crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generation
   src/objects.rs     ObjectRef: stable identities for inspection and search
-  src/search/        Object registry, query model, search engine and native worker
-crates/star-worker/  Generation-only WASM worker for browser streaming
+  src/search/        Object registry, query model, search engine, runner and native thread
+crates/sim-worker/   Generation-only WASM for the browser's star and search workers
 docs/               Development and design notes
 scripts/            Launch, build and verification commands
 assets/             Reserved project assets
 data/               Local logs, fixtures and screenshots (ignored)
 target/             Compiled output (ignored)
-web/                Browser page, worker entry point and generated dist/
+web/                Browser page, worker entry points and generated dist/
 tools/              Downloaded build/test tools (ignored)
 vendor/             Documented Bevy renderer patch
 ```
@@ -89,10 +90,10 @@ Keep it in step with Bevy upgrades.
 
 ```sh
 ./scripts/check.sh
-cargo check -p space-client --target wasm32-unknown-unknown
 ```
 
-The first command checks formatting, workspace unit tests and strict Clippy.
+It checks formatting, workspace unit tests and strict Clippy, natively and
+for the browser's WebAssembly build.
 Tests cover orbital and clock invariants, deterministic generation, multiple
 systems, streaming, persistent task slots, presentation layout and camera flights.
 
@@ -101,7 +102,6 @@ Additional graphical and browser checks:
 ```sh
 ./scripts/run.sh --smoke-test
 ./scripts/build-web.sh
-cargo clippy --locked -p space-client --target wasm32-unknown-unknown -- -D warnings
 node scripts/test-browser.mjs
 SPACE_URL=http://127.0.0.1:4321 node scripts/test-breadcrumbs.mjs
 node scripts/test-star-worker.mjs

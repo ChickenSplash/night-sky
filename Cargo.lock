@@ -4626,6 +4626,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sim-worker"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "serde_json",
+ "space-simulation",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4817,15 +4827,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115beb9c69db2393ff10b75a1b8587a51716e5551d015001e55320ed279d32f9"
 dependencies = [
  "const_panic",
-]
-
-[[package]]
-name = "star-worker"
-version = "0.1.0"
-dependencies = [
- "js-sys",
- "space-simulation",
- "wasm-bindgen",
 ]
 
 [[package]]

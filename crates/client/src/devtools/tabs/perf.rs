@@ -533,10 +533,21 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
         .collect();
     let mut rows: Vec<(&str, String, Option<&str>)> = vec![
         (
-            "threads",
-            searches.threads.to_string(),
+            "runs on",
+            searches.mode().to_owned(),
             Some(
-                "Threads sharing a large cell's stars natively; the browser will have one. The star loader keeps its own three quarters of the machine.",
+                "Natively, the search thread. In the browser, the search worker, apart from the star worker; if it fails, slices of each frame.",
+            ),
+        ),
+        (
+            "threads",
+            if cfg!(target_arch = "wasm32") {
+                "1".to_owned()
+            } else {
+                searches.threads.to_string()
+            },
+            Some(
+                "Threads sharing a large cell's stars natively; the browser has one. The star loader keeps its own three quarters of the machine.",
             ),
         ),
         (
@@ -575,11 +586,13 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
                 work_cap_millions,
             })
         };
-        if terminal::button(ui, "threads -") && threads > *crate::search::THREADS.start() {
-            set(Some(threads - 1), None);
-        }
-        if terminal::button(ui, "threads +") && threads < *crate::search::THREADS.end() {
-            set(Some(threads + 1), None);
+        if cfg!(not(target_arch = "wasm32")) {
+            if terminal::button(ui, "threads -") && threads > *crate::search::THREADS.start() {
+                set(Some(threads - 1), None);
+            }
+            if terminal::button(ui, "threads +") && threads < *crate::search::THREADS.end() {
+                set(Some(threads + 1), None);
+            }
         }
         if terminal::button(ui, "cap ÷10") {
             set(None, Some((cap / 10.0).max(1.0)));

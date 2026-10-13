@@ -2,7 +2,7 @@
 //! Text-mode themes draw controls as text (`[ button ]`); framed themes draw
 //! outlines. Every control shares `interact`'s hover and press light.
 use super::Theme;
-use super::interact::{Highlight, control_sense, highlight, hover_amount, row};
+use super::interact::{Highlight, control_sense, held_click, highlight, hover_amount, row};
 use bevy_egui::egui::{self, Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 
 /// A faint full-width line.
@@ -113,9 +113,8 @@ pub fn check(
     let divider = rect.right() - height;
     let toggle_rect = Rect::from_min_max(rect.min, pos2(divider, rect.bottom()));
     let detail_rect = Rect::from_min_max(pos2(divider, rect.top()), rect.max);
-    let response = ui.interact(toggle_rect, id.with("toggle"), control_sense(enabled));
-    let expand = ui
-        .interact(detail_rect, id.with("expand"), control_sense(true))
+    let response = held_click(ui.interact(toggle_rect, id.with("toggle"), control_sense(enabled)));
+    let expand = held_click(ui.interact(detail_rect, id.with("expand"), control_sense(true)))
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     let hover = hover_amount(ui, &response, enabled);
     let detail_hover = hover_amount(ui, &expand, true);
@@ -177,6 +176,7 @@ pub(super) fn chip_response(
         .size()
         + vec2(8.0, 6.0);
     let (rect, response) = ui.allocate_exact_size(size, control_sense(true));
+    let response = held_click(response);
     let hover = hover_amount(ui, &response, true);
     highlight(ui, theme, rect, hover, Highlight::Whole);
     ui.painter().text(
@@ -203,6 +203,7 @@ fn framed(ui: &mut Ui, theme: &Theme, text: &str, strong: bool, enabled: bool) -
         .layout_no_wrap(text.to_owned(), theme.font.id(), colour);
     let size = galley.size() + vec2(24.0, 14.0);
     let (rect, response) = ui.allocate_exact_size(size, control_sense(enabled));
+    let response = held_click(response);
     let hover = hover_amount(ui, &response, enabled);
     let base = if strong { 0.1 } else { 0.03 };
     ui.painter().rect(
@@ -279,6 +280,7 @@ pub fn choice(ui: &mut Ui, theme: &Theme, label: &str, chosen: bool) -> bool {
         .layout_no_wrap(label.to_owned(), theme.small.id(), colour);
     let size = galley.size() + vec2(18.0, 10.0);
     let (rect, response) = ui.allocate_exact_size(size, control_sense(true));
+    let response = held_click(response);
     let hover = hover_amount(ui, &response, true);
     let lit = if chosen { 1.0 } else { hover };
     ui.painter().rect(
@@ -418,11 +420,9 @@ pub fn pill(ui: &mut Ui, theme: &Theme, label: &str) -> Pill {
     let body = Rect::from_min_max(rect.min, pos2(split, rect.bottom()));
     let close = Rect::from_min_max(pos2(split, rect.top()), rect.max);
     let id = ui.id().with(("pill", label));
-    let open = ui
-        .interact(body, id.with("open"), control_sense(true))
+    let open = held_click(ui.interact(body, id.with("open"), control_sense(true)))
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let remove = ui
-        .interact(close, id.with("remove"), control_sense(true))
+    let remove = held_click(ui.interact(close, id.with("remove"), control_sense(true)))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text("Remove");
     let (hover, cross_hover) = (
@@ -471,6 +471,7 @@ pub fn list_row(
 ) -> (Rect, egui::Response, f32) {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), control_sense(true));
+    let response = held_click(response);
     let hover = hover_amount(ui, &response, true);
     if selected {
         ui.painter()

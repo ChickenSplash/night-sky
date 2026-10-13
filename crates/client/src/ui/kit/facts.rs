@@ -1,7 +1,7 @@
 //! Label and value rows: labels on the left, values flush right, joined by
 //! a dotted leader.
 use super::Theme;
-use super::interact::{Highlight, control_sense, highlight, hover_amount};
+use super::interact::{Highlight, control_sense, held_click, highlight, hover_amount};
 use bevy_egui::egui::{self, Ui, pos2, vec2};
 
 /// Space kept between a label, its leader and its value.
@@ -58,6 +58,7 @@ fn fact(ui: &mut Ui, theme: &Theme, id: egui::Id, label: &str, value: &str, expa
     let padding = (theme.row - label.size().y) / 2.0;
     let height = theme.row.max(value.size().y + 2.0 * padding);
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), control_sense(expands));
+    let response = held_click(response);
     let hover = hover_amount(ui, &response, true);
     highlight(ui, theme, rect, hover, Highlight::Whole);
     if expands

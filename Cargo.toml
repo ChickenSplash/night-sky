@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/client", "crates/server", "crates/shared", "crates/simulation", "crates/star-worker"]
+members = ["crates/client", "crates/server", "crates/shared", "crates/simulation", "crates/sim-worker"]
 resolver = "2"
 exclude = ["vendor"]
 

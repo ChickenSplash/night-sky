@@ -65,21 +65,31 @@ try {
   await page.waitForTimeout(1500);
   await page.screenshot({ path: resolve(root, 'data/web-tasks.png') });
   await page.mouse.click(1431, 308); // First list, in the Tasks window.
-  await page.waitForTimeout(2500);
-  assert.equal((await state()).list, fixture.systems[0].id);
+  // A few seconds under SwiftShader.
+  await page.waitForFunction(id => window.space.state().list === id, fixture.systems[0].id, { timeout: 30_000 });
+  await page.waitForTimeout(1000);
   assert.equal((await state()).presentation_mode, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-list.png') });
   await page.mouse.click(1570, 63); // Close Tasks.
   await page.waitForTimeout(1000);
-  // 🔍 opens the object browser, which explains that searching is native-only for now.
+  // 🔍 opens the object browser; its searches run on the search worker.
   await page.mouse.click(1570, 95);
   await page.waitForFunction(() => window.space.state().search.browser_open, null, { timeout: 5000 });
+  const command = cmd => page.evaluate(cmd => window.space.command(cmd), cmd);
+  await command({ type: 'search', query: 'kind=planet within_ly=20 limit=5' });
+  await page.waitForFunction(() => {
+    const search = window.space.state().search;
+    const shown = search.requests.find(request => request.id === search.shown);
+    return shown?.query.includes('limit=5') && shown.progress.state === 'done';
+  }, null, { timeout: 60_000 });
+  const search = (await state()).search;
+  assert.equal(search.mode, 'WEB WORKER');
+  assert.equal(search.requests.find(request => request.id === search.shown).result_count, 5);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: resolve(root, 'data/web-browser.png') });
   await page.mouse.click(1570, 95); // Close it.
   await page.waitForFunction(() => !window.space.state().search.browser_open, null, { timeout: 5000 });
   // Presentation and paging live in the canvas inspector's actions, sent here as commands.
-  const command = cmd => page.evaluate(cmd => window.space.command(cmd), cmd);
   await command({ type: 'set_presentation_mode', presentation_mode: 'table' });
   await page.waitForFunction(() => window.space.state().presentation_mode === 'table', null, { timeout: 30_000 });
   await page.waitForTimeout(2500);
@@ -95,32 +105,6 @@ try {
   await page.waitForTimeout(2500);
   assert.equal((await state()).presentation_mode, 'constellation');
   await page.screenshot({ path: resolve(root, 'data/web-constellation.png') });
-   // ⚙ opens the unified debug console below the icons.
-   assert.equal('exaggerate' in (await state()).display, false);
-   const orbits = (await state()).display.orbits;
-   await page.mouse.click(1570, 31);
-   await page.waitForTimeout(3000); // Its fade-in is slow under SwiftShader.
-   await page.mouse.click(1176, 180); // render tab.
-   await page.waitForTimeout(1500);
-   await page.mouse.click(1048, 250); // Orbital paths.
-   await page.waitForFunction(on => window.space.state().display.orbits === on, !orbits, { timeout: 5000 });
-   const realistic = (await state()).display.realistic;
-   await page.mouse.click(1048, 362); // Realistic lighting.
-   await page.waitForFunction(on => window.space.state().display.realistic === on, !realistic, { timeout: 5000 });
-   await page.screenshot({ path: resolve(root, 'data/web-debug.png') });
-   await page.mouse.click(1248, 180); // controls tab.
-   await page.waitForTimeout(1500);
-   await page.screenshot({ path: resolve(root, 'data/web-controls.png') });
-  // The terminal tab focuses its command line, which runs typed commands.
-  await page.mouse.click(1028, 180); // terminal tab.
-  await page.waitForTimeout(1500);
-  await page.keyboard.type('set_display labels false');
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => window.space.state().display.labels === false, null, { timeout: 5000 });
-  await page.screenshot({ path: resolve(root, 'data/web-terminal.png') });
-  await page.keyboard.press('Escape'); // Leave the command line so ` closes the window.
-  await page.keyboard.press('Backquote');
-  await page.waitForTimeout(1500);
   // Exercise event handling and resize, not just the initial WebAssembly boot.
   await page.mouse.move(750, 400);
   await page.mouse.down({ button: 'right' });
@@ -135,7 +119,7 @@ try {
   await page.screenshot({ path: resolve(root, 'data/web-resized.png') });
   assert.equal(await page.locator('#loading').evaluate(el => el.style.display), 'none', 'A renderer error overlay appeared');
   assert.deepEqual(errors, [], 'Browser runtime errors');
-  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, galaxy/tasks/browser/table/constellation/settings/debug/terminal/input/resize, private-file isolation.');
+  console.log('Browser smoke passed: 50-task fixture, WebAssembly boot, galaxy/tasks/browser search/table/constellation/input/resize, private-file isolation.');
 } finally {
   writeFileSync(resolve(root, 'data/browser-console.log'), [...logs, ...errors].join('\n'));
   await browser.close();

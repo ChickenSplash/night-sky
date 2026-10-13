@@ -152,7 +152,8 @@ pub(super) fn publish(
         },
         // Requests without results: `GET /search/<id>` has those.
         "search": {
-            "browser_open": browser.open, "shown": searches.shown, "threads": searches.threads,
+            "browser_open": browser.open, "shown": searches.shown, "mode": searches.mode(),
+            "threads": searches.threads,
             "work_cap": searches.work_cap, "requests": searches.recent(),
         },
         "debug": {

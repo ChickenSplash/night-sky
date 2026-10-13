@@ -208,7 +208,10 @@ design notes into every session:
   state and blue highlight painter. Whole elements have bright edges on both
   sides; checkbox halves keep their single outer edge independently. Holds keep
   the highlight visible. Interactive controls share click-and-drag sense to
-  retain egui's long presses, but never move anything on a drag. Debug scroll
+  retain egui's long presses, but never move anything on a drag; a press
+  that began on a control and is released over it clicks however long it
+  was held (`kit::interact::held_click`), as egui alone does not, which also
+  keeps clicks working at very slow frame rates. Debug scroll
   areas share wheel/scrollbar sources, never content dragging, so they cannot
   steal control presses.
   Disabled switches still allow description clicks. There is no hold gesture or shortcut tooltip.
@@ -355,17 +358,20 @@ design notes into every session:
    their URL and no app commands; reading the CLI never opens them. The
    inspector commands are read-only, do not select or move the camera, and
    use the existing snapshot refresh rate.
-   Object search (`search.rs`, engine in `space_simulation::search`, see the
+   Object search (`search/`, engine in `space_simulation::search`, see the
    [object search plan](docs/object-search-plan.md)): `Searches` owns a
-   `native::Hub`, shared with the HTTP thread, which keeps the last 32
-   requests by ID and runs them on `SearchService`'s thread (a quarter of
-   the machine's threads by default; the star loader has three quarters).
+   `Hub`, shared natively with the HTTP thread, which keeps the last 32
+   requests by ID and runs them off the app's thread: natively on
+   `SearchService`'s thread (a quarter of the machine's threads by default;
+   the star loader has three quarters), in the browser on the search worker
+   (`search/web.rs`, `web/search-worker.js`, one thread, separate from the
+   star worker), falling back to 4 ms frame slices if it fails. The perf
+   tab's and snapshot's search `mode` says which.
    `UiCommand::Search { query }` (typed `search <ns search text>`, the rest of
    the line) searches from the camera and becomes `Searches::shown`, the
    object browser's request, cancelling the previous one; `clear_search`
    clears it; `set_search threads=<n> work_cap_millions=<m>` changes the
-   debug settings. The browser refuses `search` until its search worker
-   exists. `GET /catalogue` lists kinds, families, properties, relationships
+   debug settings (threads are native only). `GET /catalogue` lists kinds, families, properties, relationships
    and the syntax; `POST /search` takes query text or JSON
    `{"query", "origin": "camera"|"home"|[x,y,z] pc, "work_cap"}` and replies
    202 with an ID (400 with the reason if refused); `GET /search` lists kept
@@ -381,10 +387,14 @@ design notes into every session:
    the snapshot's `search` object both.
    `scripts/test-ns.py` tests CLI transport against an ephemeral mock server
    and runs in `./scripts/check.sh`; it never drives the live app.
-- `./scripts/dev-web.sh`: web build plus server with `index.html` and
-  `star-worker.js` linked live. `node scripts/test-browser.mjs` clicks the egui
-  panels at 1600 x 1000 and checks the results through `window.space`; update its
-  coordinates when the panel layout changes.
+- `./scripts/dev-web.sh`: web build plus server with `index.html`,
+  `star-worker.js` and `search-worker.js` linked live; both workers load the
+  `sim-worker` WASM (`crates/sim-worker`), each in its own instance.
+  `node scripts/test-browser.mjs` clicks the egui panels at 1600 x 1000, runs
+  a search on the search worker and checks the results through
+  `window.space`; update its coordinates when the panel layout changes. Under
+  SwiftShader frames take one to two seconds, so wait for state rather than
+  fixed times.
 - Keep native threading/reqwest and browser fetch/timers behind target-specific code.
 - Browser requests use same-origin `/galaxy`. Never bake a LAN IP or token into WASM.
 - Bevy, big_space and bevy_egui are pinned as a compatible set. Check compatibility
@@ -396,8 +406,8 @@ design notes into every session:
   are in sibling `tests.rs` files.
 - The user runs GPU, core-load and star-flight benchmarks on their own focused
   window. Read results from `data/logs/`; do not launch benchmark runs yourself.
-- After code changes, run `./scripts/check.sh` and
-  `cargo check -p space-client --target wasm32-unknown-unknown` to cover both targets.
+- After code changes, run `./scripts/check.sh`; it covers both targets,
+  including strict Clippy on the browser's WebAssembly build.
 
 ## Invariants
 

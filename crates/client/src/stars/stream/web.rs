@@ -16,8 +16,15 @@ use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 /// Share of each frame spent loading.
 const SLICE: Duration = Duration::from_millis(4);
 
+/// The worker and its handlers, which must live as long as it does.
+type Running = (
+    Worker,
+    Closure<dyn FnMut(MessageEvent)>,
+    Closure<dyn FnMut(ErrorEvent)>,
+);
+
 thread_local! {
-    static WORKER: RefCell<Option<(Worker, Closure<dyn FnMut(MessageEvent)>, Closure<dyn FnMut(ErrorEvent)>)>> = const { RefCell::new(None) };
+    static WORKER: RefCell<Option<Running>> = const { RefCell::new(None) };
 }
 
 #[derive(Resource)]
@@ -30,7 +37,7 @@ pub enum Backend {
         camera: Option<[f64; 3]>,
         awaiting_response: bool,
     },
-    Inline(Loader),
+    Inline(Box<Loader>),
 }
 
 type Batch = (Vec<Event>, usize, Duration, usize);
@@ -71,7 +78,7 @@ impl Backend {
         let url = format!("star-worker.js?magnitude={magnitude}");
         let Ok(worker) = Worker::new_with_options(&url, &options) else {
             warn!("Cannot start star worker; using the frame-sliced loader");
-            return Self::Inline(Loader::new(Sky::default(), magnitude));
+            return Self::Inline(Box::new(Loader::new(Sky::default(), magnitude)));
         };
         let (sender, receiver) = mpsc::channel();
         let failed = Arc::new(AtomicBool::new(false));
@@ -115,20 +122,19 @@ impl Backend {
             magnitude,
             ..
         } = self
+            && failed.load(Ordering::Relaxed)
         {
-            if failed.load(Ordering::Relaxed) {
-                warn!("Falling back to frame-sliced galaxy loading");
-                WORKER.with_borrow_mut(|slot| {
-                    if let Some((worker, ..)) = slot.take() {
-                        worker.terminate();
-                    }
-                });
-                let mut loader = Loader::new(Sky::default(), *magnitude);
-                if let Some(camera) = *camera {
-                    loader.aim(camera);
+            warn!("Falling back to frame-sliced galaxy loading");
+            WORKER.with_borrow_mut(|slot| {
+                if let Some((worker, ..)) = slot.take() {
+                    worker.terminate();
                 }
-                *self = Self::Inline(loader);
+            });
+            let mut loader = Loader::new(Sky::default(), *magnitude);
+            if let Some(camera) = *camera {
+                loader.aim(camera);
             }
+            *self = Self::Inline(Box::new(loader));
         }
         match self {
             Self::Worker {
@@ -168,11 +174,11 @@ impl Backend {
                         array.push(&value.into());
                     }
                     WORKER.with_borrow(|slot| {
-                        if let Some((worker, ..)) = &*slot {
-                            if let Err(err) = worker.post_message(&array) {
-                                warn!("Cannot aim star worker: {err:?}");
-                                failed.store(true, Ordering::Relaxed);
-                            }
+                        if let Some((worker, ..)) = slot
+                            && let Err(err) = worker.post_message(&array)
+                        {
+                            warn!("Cannot aim star worker: {err:?}");
+                            failed.store(true, Ordering::Relaxed);
                         }
                     });
                     *awaiting_response = true;

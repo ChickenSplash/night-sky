@@ -101,9 +101,7 @@ pub fn window(ctx: &egui::Context, browser: &mut Browser, view: View, out: &mut 
     browser.open = open;
     if browser.open {
         picker::show(ctx, &THEME, &mut browser.picker, &mut browser.query);
-        if view.searches.available() {
-            browser.send(out);
-        }
+        browser.send(out);
     }
 }
 

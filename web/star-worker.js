@@ -1,5 +1,5 @@
 // Dedicated worker: star generation has its own WASM memory and event loop.
-import init, { StarWorker } from './star_worker.js';
+import init, { StarWorker } from './sim_worker.js';
 
 let loader;
 let latest;
