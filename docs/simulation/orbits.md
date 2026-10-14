@@ -5,7 +5,6 @@
   follow the semi-major axis and the host's mass, including barycentre hosts.
 - Simulation time is integrated. Never multiply lifetime elapsed time by a
   mutable rate: changing the rate or pausing must not jump orbit phase.
-- Task deadlines use wall-clock time independently of the simulation clock.
 - Multiple systems are nested two-body orbits about barycentres; see
   [stars and multiple systems](stars.md). Planet generation and stable spacing
   are described in [planetary systems](planetary-systems.md).

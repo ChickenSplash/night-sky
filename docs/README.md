@@ -2,7 +2,12 @@
 
 Night Sky is a space simulator first. Its galaxy is synthetic and procedural,
 grounded in observations and scientific research. Fictional lists and tasks
-are an optional information overlay, not a live integration.
+are an optional information overlay. Future external integrations belong in
+optional plugins, not the simulator core; see [the overlay guide](shared/information-overlay.md).
+
+Native Linux and browser/WASM clients are both supported, with neither treated
+as the primary target. They share the simulation and interface; some capabilities
+are platform-specific.
 
 Start with [development](development.md) for setup, project structure, logs and
 checks, or [controls](client/controls.md) to use the app.
@@ -67,7 +72,7 @@ The shared native/browser client in `crates/client`, with browser workers in
 
 ## Current limitations
 
-- No N-body interactions, moons, collisions or live task integrations.
+- No N-body interactions, moons or collisions.
 - Dust, lensing and galaxy rotation are not implemented. Diffuse galaxy glow
   is an approximate smooth prototype, not a detailed dust-attenuated renderer.
 - Camera flights are navigation aids, not physical spacecraft or warp simulations.

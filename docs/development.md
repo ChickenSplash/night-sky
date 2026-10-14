@@ -1,7 +1,8 @@
 # Development
 
-Run commands from the repository root. Both clients share the same Rust
-simulation and egui interface. Browser rendering uses WebGL 2; the native client
+Run commands from the repository root. Native Linux and browser/WASM are both
+supported targets and share the same Rust simulation and egui interface.
+Browser rendering uses WebGL 2; the native client
 also provides graphical smoke tests and screenshot-based bug reports.
 
 ## Prerequisites

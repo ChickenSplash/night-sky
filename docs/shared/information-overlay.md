@@ -2,7 +2,9 @@
 
 Night Sky is a space simulator first. Lists and tasks are an optional information
 overlay on generated systems, currently supplied only by the built-in demo.
-The ClickUp integration was removed; there is no live task integration.
+Future external integrations should be optional plugins, not dependencies of
+the simulator core. There is no live integration or implemented plugin system
+described here; this guide covers the existing demo overlay.
 
 ## Planets are not tasks
 
@@ -14,6 +16,8 @@ The ClickUp integration was removed; there is no live task integration.
   star without visiting or needing streamed meshes.
 - Find tasks with `StarSystem::tasks`/`task_planet`. Task status and deadlines
   never change orbital elements. Orbital identity survives reordering and edits.
+- Task deadlines use wall-clock time independently of the simulation clock.
+  This is overlay behaviour, not part of orbital mechanics.
 - Task slots are append-only per list, including when tasks disappear from a
   snapshot. Tasks fill stable generated planets, not the other way around.
 

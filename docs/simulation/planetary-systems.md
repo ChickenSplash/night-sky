@@ -27,9 +27,9 @@ how optional tasks attach to planets.
 - A `Planet` has a stable ID made from its host's ID and orbit index:
   `key/n` around a single star, `key#B/n` around one member of a multiple,
   `key#AB/n` around a close pair (`Planet::host`).
-- Tasks fill stable slots on generated bodies and never determine their
-  physical properties. Status, deadlines, ordering and removals do not change
-  surviving bodies' orbital elements or permanent slots.
+- Body properties and orbital elements are determined by generation, not by
+  optional information attached to a body. Overlay-specific identity and slot
+  rules belong in [the information-overlay guide](../shared/information-overlay.md).
 - Each system has its own orbital-plane tilt (`plane_tilt`), including pages
   belonging to one constellation.
 

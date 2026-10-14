@@ -1,6 +1,8 @@
 # Night Sky
 
-A realistic space simulator built in Rust, running natively on Linux and in a browser. Explore a procedurally generated galaxy at real distances, with orbiting planets, multiple-star systems and physical lighting.
+A space simulator built in Rust around scientific plausibility, running natively on Linux and in a browser. Explore a procedurally generated galaxy at real distances, with orbiting planets, multiple-star systems and physical lighting.
+
+Both native Linux and browser clients are supported, with neither the primary target. They share the simulation and interface, with some platform-specific capabilities.
 
 Highly optimised star generation, streaming and GPU rendering make galaxy-scale exploration possible. The project is actively developed, with plans to simulate more physical phenomena and improve visual fidelity. The galaxy is synthetic, grounded in real-world observations and scientific research.
 

@@ -1,7 +1,7 @@
 # Galaxy backend
 
 The Axum server (`crates/server`) serves only `web/dist/` and the built-in demo
-galaxy. There is no live task integration. Both clients share serializable
+galaxy. Both clients share serializable
 models from `crates/shared` and engine-independent generation from
 `crates/simulation`. See [lists and tasks](../shared/information-overlay.md)
 for the demo's information overlay.

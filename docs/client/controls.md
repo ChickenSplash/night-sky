@@ -24,7 +24,6 @@ breadcrumb inspects it without changing selection or moving the camera.
 | Adjust visible-star magnitude limit | Drag Magnitude limit, 3 to 10.5; applies on release |
 
 Simulation time is integrated continuously; rate changes never jump orbit phase.
-Task deadlines use wall-clock time independently of the simulation clock.
 Exposure and compression apply immediately, with defaults of 0 stops and 50%.
 Compression balances individual bodies, not the galaxy. Neither is persisted.
 See [realistic rendering](rendering.md) for the physical model.

@@ -1,10 +1,11 @@
 # Night Sky
 
 A procedural space simulator at real distances and physical planet radii.
-The browser is the main target; native Linux is the development fallback.
-Both use the same Bevy/egui client. Lists and tasks are an optional information
-overlay, currently demo-only, with no live task integration.
-Formerly Task Space; repository: `ChickenSplash/night-sky`.
+Native Linux and browser/WASM are both supported targets, neither is primary.
+They share the Bevy/egui client, with some platform-specific capabilities.
+Lists and tasks are an optional information overlay, currently demo-only.
+External integrations are optional extensions, not part of the simulator core.
+Repository: `ChickenSplash/night-sky`.
 
 ## Code and documentation map
 
@@ -45,7 +46,7 @@ Current limitations are listed in [the documentation index](docs/README.md#curre
 - Credentials belong only in the backend, never API models, logs or WASM.
   Browser galaxy requests stay same-origin. Keep the native developer API loopback-only.
 - Preserve physical scale, f64 simulation/camera precision, deterministic
-  generation and stable body/task-slot identities. Read the relevant guides
+  generation and stable body identities. Read the relevant guides
   for these cross-system constraints before changing them.
 
 ## Documentation standard
