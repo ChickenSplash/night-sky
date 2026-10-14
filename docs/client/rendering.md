@@ -6,6 +6,115 @@ relative to `crates/client/src/`. Shaders live beside
 their modules in `render/` or `stars/`. See [star streaming](streaming.md) and
 [galactic rendering](galactic-rendering.md) for point rendering and diffuse glow.
 
+## Physical light model
+
+The conceptual path is:
+
+```text
+stellar luminosity and temperature -> emitted colour and visual power
+                                  -> illumination at each planet
+                                  -> reflected light and visible phase
+                                  -> shared exposure and optional body compression
+                                  -> disc/point spread, glare and display
+```
+
+Generated planets are illuminated spheres, not light sources. Stars contribute
+their own light; every stellar member of a visited multiple system can illuminate
+its planets. Changing exposure alters the display, not the generated luminosity,
+planet properties or orbits.
+
+### Luminosity, flux and radiance
+
+These describe different things:
+
+- **Luminosity:** total power emitted by a source. A star's generated luminosity
+  is in solar units, with one solar luminosity equal to $3.828\times10^{26}$ W.
+- **Flux:** power reaching a unit area at some distance, in W/m².
+- **Radiance:** directional surface brightness, in W/(m²·sr), used for surfaces
+  and lighting before camera exposure. Here it uses the model's visual weighting,
+  rather than every emitted wavelength equally.
+
+For visual luminosity $L_v$ and distance $d$ in metres:
+
+$$
+F(d) = \frac{L_v}{4\pi d^2}
+$$
+
+Double the distance and illumination is quartered. A one-solar-visual-luminosity
+source gives about 1,361 W/m² at 1 AU. A star's surface radiance is modelled as
+$F(R_\star)/\pi$. Unlike a point's received flux, a resolved surface's radiance
+does not simply fall as observer distance squared: its apparent area shrinks
+instead. This distinction lets discs and their distant point replacements carry
+consistent total light.
+
+### Colour and visual versus total power
+
+Generated **bolometric luminosity** includes all wavelengths. Realistic rendering
+weights a blackbody spectrum by the CIE 1931 observer over the visible range,
+then converts it to linear RGB and white-balances against a 5,772 K Sun.
+Thus the Sun is neutral white, cool red dwarfs appear orange, and hot stars
+appear blue-white, rather than saturated category colours.
+
+Visual efficiency is the visible-weighted share relative to the Sun:
+$L_v/L_\odot=(L_{\mathrm{bol}}/L_\odot)\,\eta(T)$, with $\eta(5772\,\mathrm{K})=1$.
+A cool star emits much of its power in infrared and looks dimmer than its
+bolometric luminosity alone suggests. The visual units are normalised to the
+Sun; they are not an unweighted visible-band watt integral or a lumen scale.
+Wireframe mode instead uses an intentionally stretched spectral palette.
+
+The streaming magnitude selection still uses bolometric luminosity with a solar
+magnitude reference, while realistic displayed light uses visual efficiency.
+Consequently the visibility cutoff is not a full temperature-dependent visual
+survey model. See [galactic points](galactic-rendering.md#point-light-and-central-black-hole).
+
+### Planet reflectance and phase
+
+The surface model is **Lambertian**: diffuse reflection, bright when lit head-on
+and fading as the surface normal turns away from the light. For a representative
+reflectance coefficient $A$ and incoming flux $F$, face-on radiance is:
+
+$$
+I = \frac{AF}{\pi}
+$$
+
+A surface tilted by angle $\theta$ to the incoming light contributes a factor
+$\max(0,\cos\theta)$. Multiple stars add their contributions with their own
+directions and colours. There is no artificial night-side ambient illumination.
+Planet classes provide fixed representative coefficients and tints: rocky worlds
+use 0.30, dwarfs 0.15, sub-Neptunes 0.35, ice giants 0.45 and gas giants 0.50.
+These are appearance prescriptions, not calculated atmospheres, clouds, terrain
+or climate. The model does not resolve detailed scattering or spectral reflectance.
+
+When a planet is too small to resolve, its point light includes the illuminated
+phase. Let $\alpha$ be the angle at the planet between the star and observer:
+0 means full, $\pi$ means new. The Lambert phase curve, normalised to full, is:
+
+$$
+g(\alpha)=\frac{\sin\alpha+(\pi-\alpha)\cos\alpha}{\pi}
+$$
+
+The implementation uses $(2/3)g(\alpha)$ for the disc's mean radiance relative
+to its face-on sub-stellar point. A full sphere therefore averages two-thirds
+of that peak, a half-lit disc ($\alpha=\pi/2$) has about 32% of its full-phase light,
+and a new planet contributes none from that star. The factor avoids confusing
+the brightest point on a sphere with its average brightness.
+
+### Physical model versus presentation
+
+Luminosities, reflectance and orbit geometry supply the light; exposure,
+compression, bloom and point spread are camera/display choices. Per-body
+compression is a readability aid, not extra illumination. The procedural
+granules/corona are approximate surface/appearance models, not stellar-fluid
+calculations. Table view deliberately uses comparison positions and primary-side
+lighting, so it should not be interpreted as a physical snapshot of the system.
+
+`crates/simulation/src/light.rs` implements the blackbody/photometry relations
+and representative surfaces. CIE observer functions use the analytic fits of
+Wyman, Sloan & Shirley (2013); the illumination and phase relations are standard
+inverse-square and Lambertian approximations. These models do not include dust
+extinction, atmospheric transmission, relativistic light propagation or a
+physically evolving atmosphere.
+
 ## Pipeline and light inputs
 
 - On by default (`Navigation::realistic`); the wireframe bodies must stay

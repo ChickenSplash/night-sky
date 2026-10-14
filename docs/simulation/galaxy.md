@@ -8,6 +8,73 @@ galaxy. See [stars](stars.md) for stellar properties and companions,
 
 ## Population model
 
+The model adds seven overlapping populations. A component is not a disjoint
+region: a location near the centre can contain nuclear-disc, bulge and other
+stars. Each contributes its own density and formation-age distribution.
+
+| Component | Spatial shape | Generated ages |
+| --- | --- | --- |
+| Nuclear star cluster | Compact spherical concentration around the central black hole, with a Plummer profile | Mostly 5 to 12 billion years, plus a younger population |
+| Bar and bulge | Rotated, elongated three-axis exponential concentration | Mostly 8 to 12 billion years, with a smaller 1 to 5 billion-year population |
+| Thin disc | Broad exponential disc, with weak spiral modulation | 0.2 to 10 billion years |
+| Young arm stars | Thin, strongly spiral-modulated disc with a depleted inner region | Up to 200 million years |
+| Thick disc | More vertically extended exponential disc, without arm modulation | 8 to 12 billion years |
+| Halo | Flattened, cored outer population, fading roughly as distance to the power of -4 | 11 to 13 billion years |
+| Nuclear stellar disc | Dense, flattened exponential disc near the centre, separate from the spherical cluster | Mostly 8 to 12 billion years, with intermediate and recent bursts |
+
+Those ages are sampled at generation, not advanced by the simulation clock.
+Young arms can contain massive hot stars whose short lives would already have
+ended in the old halo. Low-mass stars survive in both, while white dwarfs
+represent part of the older population. See [stellar generation](stars.md).
+
+### Density shapes
+
+For an ordinary exponential disc, density decreases both outward and above or
+below the galactic plane:
+
+$$
+\rho(R,y) \propto e^{-R/l}\,e^{-|y|/h}
+$$
+
+$R$ is distance from the centre in the XZ plane, $l$ the radial scale length,
+and $h$ the vertical scale height. Each scale is an e-folding distance: move
+one scale farther and that factor becomes about 37% of its previous value.
+For example, the thin disc has $l=2.6$ kpc and $h=300$ pc; the thick disc's
+larger 900 pc height spreads its stars much farther from the plane.
+
+The young-arm disc instead multiplies the radial exponential by $(R/l)^2$,
+so it is depleted at the centre and peaks at $R=2l$ before spiral modulation.
+The bar uses an exponential in ellipsoidal distance, rather than cylindrical
+radius. The nuclear cluster uses the Plummer shape
+$\rho(r)\propto[1+(r/a)^2]^{-5/2}$, with a 4 pc scale; the halo has a core
+and flattened-distance shape $\rho(s)\propto(s^2+c^2)^{-2}$, not a dark-matter
+or gravitational-potential model.
+
+Four logarithmic spiral arms redistribute stars around each radial circle.
+Their contrast is strong for young arm stars and much weaker for the ordinary
+thin disc. Modulation averages to one, so winding or sharpening an arm changes
+where stars appear, not the component's total population. These arms and
+galactic system positions are static; there is no galactic rotation or migration.
+
+### Counts and local mixtures
+
+The default model allocates **200 billion star systems**, not 200 billion
+individual stellar members. Its largest shares are the thin disc (63.65%),
+bar/bulge (22.5%) and thick disc (9%); the halo, young arms and nuclear
+populations make up the remainder. Companions add stars without changing that
+number of system primaries.
+
+At a location, the relative contribution of a component is its density divided
+by the sum of all component densities. Global shares are therefore not the
+local mix everywhere. Cells use integrated population weights to allocate
+systems across regions while conserving their parent counts.
+
+The galactic model cuts off at 50 kpc from the centre; this physical model
+boundary is distinct from the larger 131,072 pc-wide procedural root cube.
+Smooth profile integrals set the intended populations, while discrete cell
+allocation preserves exact system counts. Numerical integration tests check
+the profiles against their intended shares to within 1%.
+
 - `space_simulation::galaxy::GalaxyModel` (parameterised, `milky_way()` by
   default) gives stars per cubic parsec at any point, per `Component`: nuclear
   cluster, bar and bulge, thin disc, young arm stars, thick disc, halo and
@@ -48,3 +115,19 @@ Preserve generation draw order and component indices. Full stars and the compact
 `Sky::try_point` path must match bit for bit, including companions and separation;
 results must not depend on traversal order, caching or loader thread count.
 Component populations remain exact and spiral modulation remains normalised.
+
+## Scientific basis and approximations
+
+The component layout is inspired by the Milky Way synthesis of Bland-Hawthorn
+& Gerhard (2016), bar/bulge work by Wegg & Gerhard (2013), and nuclear-disc
+work by Launhardt et al. (2002) and Sormani et al. (2022). Its nuclear-disc age
+mixture draws on the burst history discussed by Nogueras-Lara et al. (2020).
+Parameters and simplified profiles are implemented in
+`crates/simulation/src/galaxy.rs`.
+
+This is a statistical synthetic galaxy, not a reconstruction of observed stars,
+a galactic gravitational simulation or an evolving star-formation calculation.
+Its central black hole has a specified mass and rendered Schwarzschild radius;
+stars are not integrated under its gravity. The smooth glow renderer further
+approximates these populations and averages out their spiral structure; see
+[diffuse light](../client/galactic-rendering.md#diffuse-galaxy-glow).

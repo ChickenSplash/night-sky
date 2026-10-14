@@ -18,13 +18,14 @@ and documentation conventions.
 
 Engine-independent models in `crates/simulation`:
 
-- [Galaxy](simulation/galaxy.md): regional density, exact populations, cells,
-  brightness tiers and deterministic identity.
-- [Stars and multiple systems](simulation/stars.md): mass/age populations,
-  stellar evolution, companions, barycentres and stability zones.
-- [Planetary systems](simulation/planetary-systems.md): composition, snow line,
-  spacing, resonances, spins and stable body IDs.
-- [Orbits and time](simulation/orbits.md): analytical motion, units and clock behaviour.
+- [Galaxy](simulation/galaxy.md): component shapes and ages, regional density,
+  exact populations, cells, brightness tiers and deterministic identity.
+- [Stars and multiple systems](simulation/stars.md): spectral labels, mass/age
+  generation, evolved stars, companions, barycentres and stability zones.
+- [Planetary systems](simulation/planetary-systems.md): generation sequence,
+  snow line, mass–radius fits, Hill spacing, resonances, spins and stable body IDs.
+- [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
+  worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
   nearest-first search, completeness and native/browser execution.
 
@@ -38,7 +39,7 @@ The shared native/browser client in `crates/client`, with browser workers in
   picking, camera frames and precision.
 - [Streaming](client/streaming.md): compact generation, loading, magnitude
   changes, native/web workers and spatial queries.
-- [Realistic rendering](client/rendering.md): body lighting, photometry,
+- [Realistic rendering](client/rendering.md): physical light, reflectance and phase,
   exposure, compression, HDR, sprites, scale and cameras.
 - [Galactic rendering](client/galactic-rendering.md): GPU point batches,
   precise sprites, multiple-system resolution and diffuse galaxy glow.
