@@ -44,22 +44,25 @@ These are the drive's known theoretical limits, used as game rules:
 
 ## Phases
 
-### 0 · Star velocities
+### 0 · Star velocities ✅ Done
 
-- **Done for star systems** (see [galaxy motion](../simulation/galaxy.md#motion)):
-  a rotation curve plus per-component rotation and scatter, drawn from each
-  system's seed. Stars do not move yet, so cells and streaming are unchanged.
-  The spiral arms were flipped to trail the rotation as part of this.
+- Every star system has a galactocentric velocity (see
+  [galaxy motion](../simulation/galaxy.md#motion)): a rotation curve plus
+  per-component rotation and scatter, drawn from each system's seed. Stars do
+  not move yet, so cells and streaming are unchanged.
+- The spiral arms were flipped to trail the rotation as part of this.
+- Shown as "Galactic velocity" in the inspector and as `velocity_kms` in
+  `ns inspect`.
 - Needed so interstellar warp can match the destination star's velocity.
-- **Remaining:** planet and barycentre orbital velocities (the derivative of
-  their Kepler positions), needed by phase 1.
-- **Done when:** any star and any body can report position and velocity at a given time.
 
 Moons are not a prerequisite. Nested motion already exists through planets
 around stars and barycentre hosts in multiple systems; moons extend it later.
 
-### 1 · The ship as a body
+### 1 · The ship as a body (next)
 
+- Start here: planet and barycentre orbital velocities (the derivative of
+  their Kepler positions), so any body reports position and velocity at a
+  given time.
 - An engine-independent ship model in `crates/simulation`: f64 position,
   velocity and orientation in the current star's frame.
 - Gravity summed from nearby bodies at their analytic (Kepler) positions. The
