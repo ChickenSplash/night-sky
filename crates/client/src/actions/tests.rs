@@ -83,7 +83,8 @@ fn an_unstreamed_generated_planet_can_be_selected_by_id() {
     let galaxy = &app.world().resource::<Universe>().0;
     let trail = crate::ui::breadcrumb::selection_trail(nav(&app), galaxy);
     assert_eq!(trail.last().unwrap().label, system.planets[0].designation);
-    let info = crate::ui::inspector::describe(&crate::objects::ObjectRef::Planet { id }, galaxy);
+    let info =
+        crate::ui::inspector::describe(&crate::objects::ObjectRef::Planet { id }, galaxy, None);
     assert_eq!(info.title, system.planets[0].designation);
     assert!(info.rows.iter().any(|(label, _)| label == "Mass"));
 }

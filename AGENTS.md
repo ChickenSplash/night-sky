@@ -48,6 +48,8 @@ Current limitations are listed in [the documentation index](docs/README.md#curre
 - Preserve physical scale, f64 simulation/camera precision, deterministic
   generation and stable body identities. Read the relevant guides
   for these cross-system constraints before changing them.
+- The project is in alpha: generation changes may freely regenerate existing
+  stars and bodies, so favour better generation over preserving current output.
 
 ## Documentation standard
 

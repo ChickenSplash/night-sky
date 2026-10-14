@@ -126,8 +126,9 @@ curl -H 'X-Night-Sky-Client: cli' --data 'set_debug split_multiples false' http:
 `ns inspect` reads `/state/inspector`, the active top-left inspector, which
 can differ from selection. `ns inspect facts`, `ns inspect actions`, or
 `ns inspect actions/0/commands` selects subsets. The readout includes source/
-object, title, ordered label/value facts, task description, source note and
-action buttons. It reuses `ui::inspector::describe`, actions and list-page
+object, title, ordered label/value facts, task description, source note,
+action buttons and, for a located star or system, `velocity_kms`
+(galactocentric, galaxy axes). It reuses `ui::inspector::describe`, actions and list-page
 builders; facts invalidate on object/universe changes, not every publication.
 
 Buttons include label, current/available state, group and kind. Unreachable

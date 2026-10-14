@@ -12,6 +12,7 @@
 //! - Every profile has a closed-form integral, so each component holds exactly
 //!   its share of `GalaxyModel::stars`. Arms only move stars around their circle.
 
+use crate::kinematics::RotationCurve;
 use crate::star::galactic_star;
 use crate::system::Rng;
 use space_shared::Star;
@@ -212,7 +213,7 @@ impl Spiral {
         let weight = smoothstep(self.inner_pc * 0.7, self.inner_pc, radius)
             * (1.0 - smoothstep(self.outer_pc * 0.7, self.outer_pc, radius));
         let winding = (radius / self.reference_pc).ln() / self.pitch_rad.tan();
-        let angle = f64::from(self.arms) * (z.atan2(x) - winding - self.phase_rad);
+        let angle = f64::from(self.arms) * (z.atan2(x) + winding - self.phase_rad);
         let profile = ((1.0 + angle.cos()) / 2.0).powi(self.sharpness);
         let mean = self.mean();
         1.0 + strength / mean * weight * (profile - mean)
@@ -251,6 +252,7 @@ pub struct GalaxyModel {
     pub halo_core_pc: f64,
     /// Vertical axis of the halo relative to its radial ones.
     pub halo_flattening: f64,
+    pub rotation: RotationCurve,
 }
 
 impl Default for GalaxyModel {
@@ -309,6 +311,7 @@ impl GalaxyModel {
             spiral,
             halo_core_pc: 2_500.0,
             halo_flattening: 0.7,
+            rotation: RotationCurve::milky_way(),
         }
     }
 

@@ -53,8 +53,9 @@ or gravitational-potential model.
 Four logarithmic spiral arms redistribute stars around each radial circle.
 Their contrast is strong for young arm stars and much weaker for the ordinary
 thin disc. Modulation averages to one, so winding or sharpening an arm changes
-where stars appear, not the component's total population. These arms and
-galactic system positions are static; there is no galactic rotation or migration.
+where stars appear, not the component's total population. The arms wind
+outward against the rotation, so they trail it as real spiral arms do. Arms
+and system positions are static; see [motion](#motion) for velocities.
 
 ### Counts and local mixtures
 
@@ -90,6 +91,52 @@ the profiles against their intended shares to within 1%.
   companion. Neutron stars and stellar black holes are redrawn, so this count
   is of star systems; companions add about a third more individual stars.
 
+## Motion
+
+Every star system has a galactocentric velocity, but nothing moves yet:
+positions, cells and streaming are unchanged. The disc turns clockwise seen
+from the north pole (+Y), as the Milky Way does, so home moves toward +Z.
+
+A system's velocity is a shared mean rotation plus random scatter sized by
+its component (`crates/simulation/src/kinematics.rs`):
+
+- **Rotation curve.** The circular speed $v_c(R)$ at distance $R$ from the
+  axis comes from a spherical mass model: the black hole, Plummer spheres for
+  the nuclear cluster and nuclear disc, a Hernquist bar and bulge, and a cored
+  logarithmic term for the disc and dark halo together:
+  $$
+  v_c^2 = G\left[\frac{M_\bullet}{R} + \sum \frac{M R^2}{(R^2+a^2)^{3/2}}
+  + \frac{M_b R}{(R+c)^2}\right] + v_0^2\frac{R^2}{R^2+R_c^2}
+  $$
+  It rises steeply near the centre and is about 232 km/s at home, roughly flat
+  beyond a few kiloparsecs. It sets motion only; star counts still come from
+  the density profiles, which are not a mass model.
+- **Mean rotation.** Disc components lag $v_c$ by their asymmetric drift,
+  $\sigma_R^2/80$ km/s, so hotter populations rotate more slowly. The
+  spheroids rotate at a fixed share of $v_c$: the nuclear cluster 0.3, the bar
+  and bulge 0.35, the halo 0.1.
+- **Scatter.** Gaussian draws in the radial, rotational and vertical
+  directions, from the system's own `{key}:velocity` seed:
+
+| Component | Dispersion (radial, along, vertical), km/s |
+| --- | --- |
+| Young arm stars | 12, 8, 6 |
+| Thin disc | 45, 30, 27 at 10 billion years, scaling as age$^{0.31}$ (vertical $^{0.43}$) |
+| Thick disc | 60, 45, 40 |
+| Nuclear stellar disc | 75, 70, 60 |
+| Bar and bulge | 115, 100, 95 |
+| Nuclear star cluster | 100 each, rising as $\sqrt{GM_\bullet/3r}$ near the black hole |
+| Halo | 140, 80, 95 |
+
+- The thin disc's age-velocity relation needs the system's age
+  (`system_age_gyr`): a multiple's comes from the draw its companions use, and
+  a single star whose draw never needed one gets it from its `{key}:age` seed.
+- Home moves at circular speed plus the Sun's peculiar motion (11.1 km/s
+  inward, 12.24 along rotation, 7.25 north; Schönrich et al. 2010), so nearby
+  stars move tens of km/s relative to it, as around the Sun.
+- Legacy page stars without a component move as thin-disc stars. Companions
+  share their system's velocity; their orbits about the barycentre are separate.
+
 ## Cells and brightness tiers
 
 - Galactic stars are generated from cells (`space_simulation::cells`), never
@@ -122,6 +169,8 @@ The component layout is inspired by the Milky Way synthesis of Bland-Hawthorn
 & Gerhard (2016), bar/bulge work by Wegg & Gerhard (2013), and nuclear-disc
 work by Launhardt et al. (2002) and Sormani et al. (2022). Its nuclear-disc age
 mixture draws on the burst history discussed by Nogueras-Lara et al. (2020).
+Kinematics follow the same review, with asymmetric drift after Dehnen & Binney
+(1998) and thin-disc heating after Aumer & Binney (2009).
 Parameters and simplified profiles are implemented in
 `crates/simulation/src/galaxy.rs`.
 

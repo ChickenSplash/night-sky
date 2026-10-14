@@ -106,6 +106,12 @@ impl Rng {
     pub(crate) fn rayleigh(&mut self, sigma: f64) -> f64 {
         sigma * (-2.0 * (1.0 - self.unit()).ln()).sqrt()
     }
+
+    /// A standard normal draw (Box–Muller), using two uniforms.
+    pub(crate) fn normal(&mut self) -> f64 {
+        let radius = (-2.0 * (1.0 - self.unit()).ln()).sqrt();
+        radius * (std::f64::consts::TAU * self.unit()).cos()
+    }
 }
 
 /// The SplitMix64 finaliser: spreads every input bit over the output.
@@ -278,6 +284,22 @@ pub fn system_stars(key: &str) -> (Vec<space_shared::Star>, Vec<space_shared::Ba
         },
         |(cell, component, _)| crate::population::tiered_stars(key, component, cell.level()),
     )
+}
+
+/// A star system's age in billions of years: its companions' age for a
+/// multiple, otherwise drawn from its own `{key}:age` seed when its star was
+/// drawn without one.
+pub fn system_age_gyr(key: &str) -> f64 {
+    let (formed, origin, mut draws) = match crate::cells::parse_cell_star(key) {
+        Some((cell, component, _)) => {
+            let (formed, origin, draws, _) =
+                crate::population::tiered(key, component, cell.level());
+            (formed, origin, draws)
+        }
+        None => census(key),
+    };
+    let primary = crate::multiple::Primary::of(&formed, origin);
+    crate::multiple::system_age(&mut draws, &primary, &mut Rng::new(&format!("{key}:age")))
 }
 
 /// Every planet of one page star's system, by host and innermost first.

@@ -1,5 +1,6 @@
 pub mod cells;
 pub mod galaxy;
+pub mod kinematics;
 pub mod light;
 pub mod multiple;
 pub mod objects;

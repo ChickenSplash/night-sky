@@ -349,7 +349,8 @@ fn detail(
 ) {
     let theme = &THEME;
     let galaxy = &view.universe.0;
-    let info = browser.inspector.get(&result.object, galaxy);
+    let position = crate::ui::inspector::position_ly(&result.object, view.nav, galaxy, view.field);
+    let info = browser.inspector.get(&result.object, galaxy, position);
     kit::eyebrow(ui, theme, "Selected");
     let title = if info.title.is_empty() {
         &result.name
@@ -396,7 +397,7 @@ fn detail(
             ui.ctx().copy_text(id);
         }
     });
-    let info = browser.inspector.get(&result.object, galaxy);
+    let info = browser.inspector.get(&result.object, galaxy, position);
     let rows: Vec<(&str, String)> = info
         .rows
         .iter()

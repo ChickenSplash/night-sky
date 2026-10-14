@@ -8,12 +8,17 @@ use crate::{
     ui::breadcrumb::Inspection,
     ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, LINK, halo_text, halo_wrapped_text},
 };
+use bevy::math::DVec3;
 use bevy_egui::egui;
 use space_shared::Galaxy;
+use space_simulation::{
+    LY_METRES,
+    galaxy::{GalaxyModel, PC_METRES},
+};
 
 #[derive(Default)]
 pub struct Cache {
-    key: Option<ObjectRef>,
+    key: Option<(ObjectRef, Option<DVec3>)>,
     info: Info,
 }
 
@@ -22,10 +27,16 @@ impl Cache {
         self.key = None;
     }
 
-    pub(crate) fn get(&mut self, object: &ObjectRef, galaxy: &Galaxy) -> &Info {
-        if self.key.as_ref() != Some(object) {
-            self.info = describe(object, galaxy);
-            self.key = Some(object.clone());
+    /// A star's facts include its motion once its position is known.
+    pub(crate) fn get(
+        &mut self,
+        object: &ObjectRef,
+        galaxy: &Galaxy,
+        position_ly: Option<DVec3>,
+    ) -> &Info {
+        if self.key.as_ref() != Some(&(object.clone(), position_ly)) {
+            self.info = describe(object, galaxy, position_ly);
+            self.key = Some((object.clone(), position_ly));
         }
         &self.info
     }
@@ -38,6 +49,8 @@ pub struct Info {
     pub note: String,
     description: String,
     url: Option<String>,
+    /// Galactocentric, km/s, for a located star or system.
+    velocity_kms: Option<[f64; 3]>,
 }
 
 impl Info {
@@ -46,7 +59,23 @@ impl Info {
     }
 }
 
-pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
+/// Where an inspected star or system is, in light years from home, if known.
+pub(crate) fn position_ly(
+    object: &ObjectRef,
+    nav: &Navigation,
+    galaxy: &Galaxy,
+    field: &Starfield,
+) -> Option<DVec3> {
+    match object {
+        ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
+            crate::galaxy_nav::selectable_star(nav, galaxy, field, id).map(|star| star.position_ly)
+        }
+        _ => None,
+    }
+}
+
+/// `position_ly` is the system's, from home, when known.
+pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>) -> Info {
     use crate::format::{luminosity_text, mass_text, period_text, rotation_text, star_radius_text};
     let mut info = Info::default();
     match object {
@@ -62,6 +91,13 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
                 "Central black hole",
                 format!("{:.1} million solar masses", model.black_hole_solar / 1e6),
             );
+            info.fact(
+                "Rotation at home",
+                format!(
+                    "{:.0} km/s",
+                    model.circular_speed_kms(model.home_pc[0].hypot(model.home_pc[2]))
+                ),
+            );
             info.note = "Simulation model · not catalogue measurements".into();
         }
         ObjectRef::List { id } => {
@@ -76,6 +112,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
             let key = space_simulation::multiple::system_key(id);
             if let Some((system, page)) = objects::system(galaxy, key) {
                 let name = crate::galaxy_nav::label(galaxy, key);
+                let velocity = position_ly.map(|at| velocity_kms(key, at));
                 // The system as a whole is its outermost barycentre.
                 let member = if id == key {
                     system.root(page).unwrap_or(key).to_owned()
@@ -110,6 +147,9 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
                             crate::format::au_text(pair.orbit.semi_major_au),
                         );
                     }
+                }
+                if let Some(velocity) = velocity {
+                    motion_facts(&mut info, velocity);
                 }
             }
         }
@@ -182,6 +222,29 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy) -> Info {
         info.title = "Object unavailable".into();
     }
     info
+}
+
+/// A system's galactocentric velocity in km/s, from its position from home.
+fn velocity_kms(key: &str, position_ly: DVec3) -> [f64; 3] {
+    let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+    let position_pc = home + position_ly * (LY_METRES / PC_METRES);
+    space_simulation::kinematics::system_velocity_kms(key, position_pc.to_array())
+}
+
+/// Speed around the galaxy, and relative to home, where nearby stars move
+/// tens of km/s as they do around the Sun.
+fn motion_facts(info: &mut Info, velocity: [f64; 3]) {
+    let home = DVec3::from_array(GalaxyModel::milky_way().home_velocity_kms());
+    let velocity_vector = DVec3::from_array(velocity);
+    info.fact(
+        "Galactic velocity",
+        format!("{:.0} km/s", velocity_vector.length()),
+    );
+    info.fact(
+        "Relative to home",
+        format!("{:.0} km/s", (velocity_vector - home).length()),
+    );
+    info.velocity_kms = Some(velocity);
 }
 
 /// Letters of a star or barycentre within its system.
@@ -411,7 +474,8 @@ pub fn readout(
     cache: &mut Cache,
 ) -> serde_json::Value {
     use serde_json::json;
-    let info = cache.get(&inspection.object, galaxy);
+    let position = position_ly(&inspection.object, nav, galaxy, field);
+    let info = cache.get(&inspection.object, galaxy, position);
     let export = |action: Action, group: &str| {
         json!({
             "label": action.label, "current": action.current, "available": true,
@@ -441,6 +505,7 @@ pub fn readout(
         "title": info.title,
         "facts": info.rows.iter().map(|(label, value)| json!({"label": label, "value": value})).collect::<Vec<_>>(),
         "description": info.description, "note": info.note, "actions": buttons,
+        "velocity_kms": info.velocity_kms,
     })
 }
 
@@ -469,7 +534,7 @@ pub fn show(
     out: &mut Vec<UiCommand>,
 ) {
     let object = &inspection.object;
-    cache.get(object, galaxy);
+    cache.get(object, galaxy, position_ly(object, nav, galaxy, field));
     let width = ui.available_width().min(480.0);
     halo_wrapped_text(ui, &cache.info.title, width, CURRENT);
     ui.scope(|ui| {
@@ -576,8 +641,21 @@ mod tests {
         for object in objects {
             let inspection = inspection(object.clone());
             let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache);
-            let info = describe(&object, &galaxy);
+            let info = describe(
+                &object,
+                &galaxy,
+                position_ly(&object, &nav, &galaxy, &field),
+            );
             assert_eq!(exported["title"], info.title);
+            // A list page's star is located, so its motion is known.
+            if matches!(object, ObjectRef::Star { .. }) {
+                assert_eq!(exported["velocity_kms"].as_array().unwrap().len(), 3);
+                assert!(
+                    info.rows
+                        .iter()
+                        .any(|(label, _)| label == "Relative to home")
+                );
+            }
             assert_eq!(exported["facts"].as_array().unwrap().len(), info.rows.len());
             for (fact, (label, value)) in
                 exported["facts"].as_array().unwrap().iter().zip(info.rows)

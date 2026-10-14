@@ -76,7 +76,8 @@ The shared native/browser client in `crates/client`, with browser workers in
 ## Current limitations
 
 - No N-body interactions, moons or collisions.
-- Dust, lensing and galaxy rotation are not implemented. Diffuse galaxy glow
+- Dust and lensing are not implemented. Star systems have galactic velocities,
+  but stars do not move around the galaxy. Diffuse galaxy glow
   is an approximate smooth prototype, not a detailed dust-attenuated renderer.
 - Camera flights are navigation aids, not physical spacecraft or warp simulations.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.

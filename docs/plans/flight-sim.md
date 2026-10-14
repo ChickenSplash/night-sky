@@ -46,11 +46,13 @@ These are the drive's known theoretical limits, used as game rules:
 
 ### 0 · Star velocities
 
-- Give every star an orbital velocity around the galaxy, drawn from its seed
-  (the epicycle approximation: guiding radius, rotation-curve speed, radial
-  wobble and vertical oscillation).
-- Velocities only: stars do not move yet, so cells and streaming are unchanged.
+- **Done for star systems** (see [galaxy motion](../simulation/galaxy.md#motion)):
+  a rotation curve plus per-component rotation and scatter, drawn from each
+  system's seed. Stars do not move yet, so cells and streaming are unchanged.
+  The spiral arms were flipped to trail the rotation as part of this.
 - Needed so interstellar warp can match the destination star's velocity.
+- **Remaining:** planet and barycentre orbital velocities (the derivative of
+  their Kepler positions), needed by phase 1.
 - **Done when:** any star and any body can report position and velocity at a given time.
 
 Moons are not a prerequisite. Nested motion already exists through planets

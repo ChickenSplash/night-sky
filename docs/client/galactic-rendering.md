@@ -149,5 +149,5 @@ below the visible magnitude limit. Both share the manual exposure described in
   enabled (render tab), alongside Inside, Face-on and Edge-on reference camera
   commands on both clients. `node scripts/test-galaxy-glow.mjs` saves comparison
   screenshots and on/off timings to `data/logs/`, on the secondary monitor.
-- Dust, detailed spiral structure, other galaxy types and galaxy rotation are
+- Dust, detailed spiral structure, other galaxy types and moving stars are
   not implemented. Glow is a smooth prototype, not a dust-attenuated renderer.

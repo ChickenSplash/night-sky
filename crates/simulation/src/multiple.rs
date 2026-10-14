@@ -240,20 +240,36 @@ fn companion_kind(rng: &mut Rng, primary: &Primary, age: f64) -> Option<Kind> {
     evolve(rng, (q * birth).max(LIGHTEST_STAR), age)
 }
 
-/// The primary's companions, brightest first. Draws nothing more for a
-/// single star than whether it is one.
-pub(crate) fn companions(rng: &mut Rng, primary: &Primary) -> Vec<Companion> {
-    let birth = primary.origin.birth_mass;
+fn companion_count(rng: &mut Rng, birth: f64) -> usize {
     if !rng.chance(multiple_share(birth)) {
-        return Vec::new();
-    }
-    let extra = if !rng.chance(higher_order_share(birth)) {
+        0
+    } else if !rng.chance(higher_order_share(birth)) {
         1
     } else if rng.chance(QUADRUPLES) {
         3
     } else {
         2
-    };
+    }
+}
+
+/// The system's age: the one `companions` draws from the same `draws`, or for
+/// a single star, whose age nothing else needs, one drawn from `own`.
+pub(crate) fn system_age(draws: &mut Rng, primary: &Primary, own: &mut Rng) -> f64 {
+    if companion_count(draws, primary.origin.birth_mass) == 0 {
+        primary.age(own)
+    } else {
+        primary.age(draws)
+    }
+}
+
+/// The primary's companions, brightest first. Draws nothing more for a
+/// single star than whether it is one.
+pub(crate) fn companions(rng: &mut Rng, primary: &Primary) -> Vec<Companion> {
+    let birth = primary.origin.birth_mass;
+    let extra = companion_count(rng, birth);
+    if extra == 0 {
+        return Vec::new();
+    }
     let age = primary.age(rng);
     let giant_au = 3.0 * primary.radius_solar * crate::SUN_RADIUS_METRES / crate::AU_METRES;
     let mut companions = Vec::with_capacity(extra);
