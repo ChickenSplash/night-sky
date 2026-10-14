@@ -62,6 +62,8 @@ and browser clients draw the same egui controls, using the
   than divider lines, and there is no helper footer.
 - The list can grow to 560 logical pixels high, capped against viewport height
   with space for the header, search field and padding. Short lists shrink.
+  The modal resets its available height each frame so the list is not limited
+  by an inherited modal size or a previously shorter editor/search result.
 - Every numeric property uses the shared **Min / Max** field, unit and
   two-handle slider. Blank endpoints mean unbounded. At least one endpoint is
   needed to add a filter; the minimum cannot exceed the maximum.

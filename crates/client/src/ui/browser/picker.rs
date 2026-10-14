@@ -109,6 +109,12 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
         .show(ctx, |ui| {
             theme.style_scrollbars(ui.style_mut());
             ui.set_width(460.0);
+            // Areas reuse their previous content height. Let the scroll list
+            // grow beyond that inherited size, including after a short editor
+            // or a narrowed find result, while leaving room around the modal.
+            ui.set_max_height(
+                (ctx.content_rect().height() - 40.0 - 2.0 * f32::from(theme.padding)).max(0.0),
+            );
             ui.spacing_mut().item_spacing = egui::Vec2::splat(kit::SPACING);
             let title = match &state.editor {
                 Some(editor) => editor_title(editor),

@@ -286,6 +286,48 @@ fn filter_picker_no_longer_offers_top_level_types() {
 }
 
 #[test]
+fn filter_picker_uses_a_tall_list_and_stays_inside_small_viewports() {
+    for height in [800.0, 480.0] {
+        let ctx = egui::Context::default();
+        kit::plain_style(&ctx);
+        let mut state = Some(picker::Picker::new());
+        let mut query = Query::default();
+        let mut painted = false;
+        for _ in 0..4 {
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, height),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| picker::show(ctx, &THEME, &mut state, &mut query),
+            );
+            let list = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.text() == "Star class" => {
+                    Some(shape.clip_rect)
+                }
+                _ => None,
+            });
+            // The first frame measures the modal without painting it.
+            if let Some(list) = list {
+                painted = true;
+                let list = list.shrink(ctx.style().visuals.clip_rect_margin);
+                let expected = 560.0_f32.min(height - 160.0);
+                assert!(
+                    (list.height() - expected).abs() < 3.0,
+                    "picker list should use {expected} px, got {}",
+                    list.height()
+                );
+                assert!(list.top() >= 0.0 && list.bottom() <= height);
+            }
+        }
+        assert!(painted, "picker list must be painted");
+    }
+}
+
+#[test]
 fn filter_picker_and_property_editors_have_no_header_divider() {
     let query = Query::default();
     for state in std::iter::once(picker::Picker::new()).chain(
