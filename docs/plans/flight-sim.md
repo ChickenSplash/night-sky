@@ -70,6 +70,20 @@ only member in the alpha.
   generated results, since craft are not in the procedural walk.
 - **Picking:** craft are few, so clicks test their markers directly rather
   than through star picking.
+- **Player-made only.** Every craft is built or placed by a player; none are
+  generated from seeds.
+- **Saved on the backend, ready for multiplayer.** Craft state is a
+  serializable model in `crates/shared`, so client and server agree on it.
+  - The backend owns which craft exist, their owners and their last saved
+    state, and shares them with every client.
+  - Each client flies its own ship and reports its state a few times a
+    second; other clients show it by extrapolating from the last report.
+    Server-checked physics is not needed for a rudimentary multiplayer.
+  - Live updates need a push channel (WebSockets in Axum); the two-second
+    `/galaxy` poll is too slow for moving craft.
+  - With no backend, the native client keeps its craft in memory, as it
+    already runs alone with demo data.
+  - Phase 1 keeps the ship in client memory; saving and sharing come later.
 
 ## Phases
 
@@ -154,6 +168,8 @@ around stars and barycentre hosts in multiple systems; moons extend it later.
   (spheres of influence), a deliberate simplification of the summed gravity.
 - More craft: stations on rails, rovers on planet surfaces, probes. The craft
   model and browser integration already cover them.
+- Craft saved on the backend, then rudimentary multiplayer: other players'
+  ships shown live through a WebSocket channel.
 - Live UI on in-world screens (render to texture).
 - Thrust gravity, fuel and delta-v limits, crashing into bodies.
 - Proper ship models.
@@ -166,6 +182,3 @@ around stars and barycentre hosts in multiple systems; moons extend it later.
 - Fuel limits, or unlimited for the alpha?
 - Can the ship crash?
 - Thrust gravity or artificial deck gravity in the long run?
-- Where craft state is saved: locally per client, or on the backend?
-- Are some stations generated from seeds (part of the galaxy), or are all
-  craft placed or built by the player?
