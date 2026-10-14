@@ -27,7 +27,7 @@ Simulation time is integrated continuously; rate changes never jump orbit phase.
 Task deadlines use wall-clock time independently of the simulation clock.
 Exposure and compression apply immediately, with defaults of 0 stops and 50%.
 Compression balances individual bodies, not the galaxy. Neither is persisted.
-See [realistic rendering](realistic-rendering.md) for the physical model.
+See [realistic rendering](rendering.md) for the physical model.
 
 ## Selection, inspection and travel
 
@@ -74,7 +74,7 @@ The browser, Tasks and debug console use the same movable/resizable window
 frame. Close glyphs align with their title and hover red. Scrollbars have
 invisible tracks and subtle accent handles that brighten smoothly on hover or
 drag, without changing width. Tooltips are opaque and match the owning theme.
-See the [shared UI kit](ui-kit.md) for styling and interaction details.
+See the [shared UI kit](ui/kit.md) for styling and interaction details.
 
 | Tab | Contents |
 | --- | --- |

@@ -41,4 +41,4 @@ Open **http://127.0.0.1:4321/** in a desktop browser with WebGL 2 and hardware a
 
 ## For developers and agents
 
-See the [documentation](docs/README.md) for controls, project structure, development checks and simulation/rendering design. Contribution rules and invariants live in [AGENTS.md](AGENTS.md).
+See the [documentation](docs/README.md) for controls, development and explanations of the simulation, rendering and interface. [AGENTS.md](AGENTS.md) provides a code-to-docs map and working conventions.

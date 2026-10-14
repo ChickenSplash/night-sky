@@ -1,18 +1,83 @@
 # Documentation
 
-- [Controls and interface](controls.md): navigation, inspection, HUD and debug tools.
-- [Object browser](object-browser.md): search controls, results layout and styling.
-- [Shared UI kit](ui-kit.md): module ownership, themes, interaction, animation and extension rules.
-- [Development](development.md): prerequisites, project structure, backend, logs and tests.
-- [Galaxy model](galaxy-model.md): generation, multiple systems, streaming, spatial queries,
-  galactic points, diffuse light and navigation.
-- [Realistic rendering](realistic-rendering.md): lighting, exposure, compression, HDR and sprites.
-- [Object search plan](object-search-plan.md): planned registry, query model, search
-  engine, CLI and browser, in three sessions.
-- [Agent rules](../AGENTS.md): working conventions and invariants.
+Night Sky is a space simulator first. Its galaxy is synthetic and procedural,
+grounded in observations and scientific research. Fictional lists and tasks
+are an optional information overlay, not a live integration.
 
-Night Sky is a space simulator first. Current data is procedural, with fictional
-lists and tasks as an optional information overlay, not a live task integration.
-The direction is broader physical simulation and higher visual fidelity.
-N-body interactions, moons, collisions, dust, lensing and galaxy rotation are not
-implemented yet. Diffuse galactic light remains an approximate smooth model.
+Start with [development](development.md) for setup, project structure, logs and
+checks, or [controls](client/controls.md) to use the app.
+[AGENTS.md](../AGENTS.md) maps code areas to these guides and defines working
+and documentation conventions.
+
+## Simulation
+
+Engine-independent models in `crates/simulation`:
+
+- [Galaxy](simulation/galaxy.md): regional density, exact populations, cells,
+  brightness tiers and deterministic identity.
+- [Stars and multiple systems](simulation/stars.md): mass/age populations,
+  stellar evolution, companions, barycentres and stability zones.
+- [Planetary systems](simulation/planetary-systems.md): composition, snow line,
+  spacing, resonances, spins and stable body IDs.
+- [Orbits and time](simulation/orbits.md): analytical motion, units and clock behaviour.
+- [Object search](simulation/search.md): registry, query syntax, relationships,
+  nearest-first search, completeness and native/browser execution.
+
+## Client
+
+The shared native/browser client in `crates/client`, with browser workers in
+`crates/sim-worker` and `web/`:
+
+- [Controls](client/controls.md): shortcuts, travel, inspection and presentation modes.
+- [Navigation](client/navigation.md): visits, physical arrival, selection,
+  picking, camera frames and precision.
+- [Streaming](client/streaming.md): compact generation, loading, magnitude
+  changes, native/web workers and spatial queries.
+- [Realistic rendering](client/rendering.md): body lighting, photometry,
+  exposure, compression, HDR, sprites, scale and cameras.
+- [Galactic rendering](client/galactic-rendering.md): GPU point batches,
+  precise sprites, multiple-system resolution and diffuse galaxy glow.
+- [Debug tools](client/devtools.md): console, command path, performance
+  readouts, snapshots and browser automation.
+- [Developer API and CLI](client/developer-api.md): local reads, discovery,
+  commands, captures, inspector export and search endpoints.
+- [Benchmarks](client/benchmarks.md): fixed routes, historical baselines,
+  measurement procedures and result files.
+
+### Interface and shared UI kit
+
+- [Scene interface](client/ui/interface.md): windows, HUD, breadcrumbs,
+  inspector, actions and input capture.
+- [Object browser](client/ui/browser.md): query controls, filters, ranges,
+  results and selected-object readouts.
+- [UI kit](client/ui/kit.md): reusable themes, widgets, interaction,
+  animation, windows, scrolling and extension rules.
+
+## Shared data and server
+
+- [Information overlay](shared/information-overlay.md): lists, stable task
+  slots, pages, assigned stars and the relationship between tasks and planets.
+- [Galaxy backend](server/backend.md): demo serving, polling, configuration,
+  network exposure and the boundary with the native developer API.
+
+## Plans and history
+
+- [Object search](plans/object-search.md): original plan, completed sessions,
+  historical measurements and future ideas. This is not the current UI specification.
+
+## Current limitations
+
+- No N-body interactions, moons, collisions or live task integrations.
+- Dust, lensing and galaxy rotation are not implemented. Diffuse galaxy glow
+  is an approximate smooth prototype, not a detailed dust-attenuated renderer.
+- Camera flights are navigation aids, not physical spacecraft or warp simulations.
+- Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
+
+## Organisation
+
+Folders follow logical code ownership, not individual source files. Cross-cutting
+setup stays in `development.md`; plans/history stay separate from current behaviour.
+Each topic has one owning explanation, linked from related guides. Paths beginning
+with `crates/`, `scripts/` or `web/` are repository-relative; shorter source paths
+are relative to the crate named by their guide. Source code remains authoritative
+for implementation details.

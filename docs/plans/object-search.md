@@ -1,11 +1,14 @@
-# Object search · implementation plan
+# Object search · implementation history and future work
 
-Status: Sessions 1 to 4 done (registry, query, engine, relationships,
-native worker, client wiring, developer API and CLI, UI kit and object
-browser, the browser's search worker; see
-[galaxy model](galaxy-model.md#object-search) and `AGENTS.md`). Next: polish
-the object browser's look and UX. Fold this note into the design notes as
-each part lands.
+This is the original implementation plan, with completed-session notes,
+historical measurements and future ideas. Future-tense descriptions and UI
+proposals below are not a specification of the current application.
+
+For current behaviour, read [object search](../simulation/search.md),
+[the object browser](../client/ui/browser.md) and
+[the developer API and CLI](../client/developer-api.md). Sessions 1 to 4
+were completed; subsequent browser styling and interaction changes are
+documented in the browser and UI-kit guides, not this history.
 
 ## Goal
 
@@ -314,7 +317,7 @@ galactic centre while a search runs (`ns perf`).
    - `UiCommand::Search` (and `ns search --show`) opens the browser with
      its query.
 4. Update `scripts/test-browser.mjs` (icon positions included), `AGENTS.md`,
-   `docs/galaxy-model.md`, `docs/controls.md` and the project structure.
+   the simulation, client controls and project-structure documentation.
 
 Done when the same query built in the UI and typed in the CLI gives
 identical results. Until Session 4 the browser build's window explains that

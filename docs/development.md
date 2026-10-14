@@ -16,9 +16,14 @@ also provides graphical smoke tests and screenshot-based bug reports.
   `npm install --prefix tools/browser playwright-core`.
 
 See [the README](../README.md) for native and browser launch commands.
+`./scripts/run.sh` builds and starts both processes, cleaning up the backend
+on client exit. It enables the [native developer API](client/developer-api.md)
+by default; `NIGHT_SKY_API=0 ./scripts/run.sh` disables it for that run.
+`./scripts/build-web.sh` builds WebGL 2 WASM into `web/dist/`.
 `./scripts/dev-web.sh` builds the browser client and starts the server with the
 HTML and worker entry points linked to their sources. Refresh for changes to
 those files; rerun the script after Rust changes.
+Both workers load the `sim-worker` WASM in separate instances.
 
 ## Project structure
 
@@ -45,7 +50,13 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
   src/objects.rs     ObjectRef: stable identities for inspection and search
   src/search/        Object registry, query model, search engine, runner and native thread
 crates/sim-worker/   Generation-only WASM for the browser's star and search workers
-docs/               Development and design notes
+docs/               Explanations grouped by simulation, client, shared and server
+  simulation/        Galaxy, stars, planetary systems, orbits and search
+  client/            Navigation, streaming, rendering and developer tooling
+    ui/              Scene interface, object browser and shared UI kit
+  shared/            Lists/tasks and their relationship to generated bodies
+  server/            Demo backend and serving behaviour
+  plans/             Implementation history and future proposals
 scripts/            Launch, build and verification commands
 assets/             Reserved project assets
 data/               Local logs, fixtures and screenshots (ignored)
@@ -59,9 +70,9 @@ Large test blocks live in sibling `tests.rs` files. Shaders are beside their Rus
 modules; internal asset paths are relative to the loading `.rs` file. Keep both
 native and WASM configurations working when moving code.
 
-The [UI kit guide](ui-kit.md) describes module ownership, shared interaction
+The [UI kit guide](client/ui/kit.md) describes module ownership, shared interaction
 rules and how to add controls without duplicating theme or animation logic.
-The [object browser notes](object-browser.md) cover query controls, filters,
+The [object browser notes](client/ui/browser.md) cover query controls, filters,
 range editors and responsive results. The debug console uses a thin
 `ui/terminal.rs` adapter over the same kit, not a second widget implementation.
 
@@ -69,19 +80,20 @@ Runtime files and build output stay in the project. Rust toolchains and Cargo's
 dependency cache use their normal user-level locations. Set
 `CARGO_HOME="$PWD/.cargo-home"` to isolate future dependency downloads if needed.
 
-## Backend and logs
+Keep native threading/reqwest and browser fetch/timers behind target-specific
+code. Bevy, big_space and bevy_egui are pinned as a compatible set; check
+compatibility before upgrading any one. No global desktop or Cargo
+configuration changes are needed.
 
-The server serves only `web/dist/` and the built-in demo galaxy. It binds to
-`127.0.0.1:4321` by default. `SPACE_BIND` overrides the listening address;
-`SPACE_ROOT` overrides the project root used to locate `web/dist/`. Binding to a
-non-loopback address exposes the service to that network, so configure access
-controls and HTTPS separately for a public deployment.
+## Backend
 
-- `GET /health`: service health.
-- `GET /galaxy`: demo snapshot, with ETags and HTTP 304 for unchanged data.
-- The native client polls every two seconds. It can run alone with
-  `cargo run --locked -p space-client`, retaining demo data when no backend is available.
-- `scripts/run.sh` writes backend output to `data/server.log`.
+See [the galaxy backend](server/backend.md) for serving, configuration, polling
+and network exposure. It serves demo data and the web build, not the native
+client's developer API.
+
+## Logs and bug reports
+
+- Backend output: `data/server.log`.
 - Client events: `data/logs/client.log`; previous session: `client.previous.log`.
 - Panics: `data/logs/crash-*.log`, with backtraces.
 - Debug window, `tools` tab, **save bug report**: matching `bug-*.log` and `.png`
@@ -126,6 +138,10 @@ specialised checks default to port 4322, so set `SPACE_URL` explicitly when need
 The native smoke test requires a desktop session and saves eighteen screenshots
 under `data/`: system views, tracking, galaxy travel, pagination, constellation
 framing, camera flights and realistic lighting at both compression extremes.
+These include a 50-task pagination fixture, mid-flight list/page jumps, and
+seven realistic captures: at 0 stops, system at 100%/0% compression, lit planet,
+constellation and star at both compression settings; then corona structure
+at -16 stops and 0% compression.
 Set `SPACE_SMOKE_TASKS=1400` for a larger constellation fixture. The browser smoke
 test covers startup, navigation, resize, static-file isolation and a 50-task
 fixture through `window.space`. The breadcrumb test covers remote selection,
@@ -133,4 +149,4 @@ inspection without travel and narrow viewports, saving captures under `data/logs
 
 The user runs performance benchmarks in their own focused window. Agents read
 results rather than launching benchmarks. Routes, baselines and output files are
-documented in [Galaxy model: Benchmarks](galaxy-model.md#benchmarks).
+documented in [Performance benchmarks](client/benchmarks.md).

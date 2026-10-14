@@ -3,6 +3,8 @@
 Both clients use the same egui interface over the 3D scene. The visual direction
 is precision: compact controls, consistent spacing and restrained accent motion,
 without changing the simulator's layout into a sidebar or HTML overlay.
+See [the object browser](browser.md) for its use in query editing and results,
+and [the scene interface](interface.md) for HUD and inspector behaviour.
 
 ## Structure and ownership
 
@@ -119,5 +121,5 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 6. Add egui regressions for geometry, long presses, theme feedback and stable
    IDs. Larger feature test suites live beside their modules in `tests.rs`.
 7. Run `./scripts/check.sh` and `./scripts/build-web.sh`. Refresh the browser
-   to load rebuilt WASM. See [Development](development.md#checks) for optional
-   graphical checks and [Object browser](object-browser.md) for its controls.
+   to load rebuilt WASM. See [Development](../../development.md#checks) for optional
+   graphical checks and [Object browser](browser.md) for its controls.
