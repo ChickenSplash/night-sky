@@ -1,5 +1,4 @@
-//! The **Add filter** picker: types, then properties of the kinds left, then
-//! relationships; and the editor for one filter's values.
+//! Registry-driven filter picker with inline expandable value editors.
 use super::filters::{self, Slot};
 use crate::ui::kit::{self, Theme};
 use bevy_egui::egui::{self, Color32};
@@ -9,6 +8,8 @@ use space_simulation::search::{Filter, Query, Test};
 pub struct Picker {
     find: String,
     editor: Option<Editor>,
+    drafts: Vec<(Editor, bool)>,
+    kinds: Vec<(usize, String, bool, bool)>,
     /// Focus the find field on the first frame.
     fresh: bool,
 }
@@ -30,6 +31,8 @@ impl Picker {
         Self {
             find: String::new(),
             editor: None,
+            drafts: Vec::new(),
+            kinds: Vec::new(),
             fresh: true,
         }
     }
@@ -139,21 +142,10 @@ pub fn show(ctx: &egui::Context, theme: &Theme, picker: &mut Option<Picker>, que
             ui.add_space(kit::SPACING);
             match &mut state.editor {
                 Some(editor) => {
-                    let (done, back) = edit(ui, theme, editor, query);
-                    close |= done;
-                    if back {
-                        state.editor = None;
-                    }
+                    close |= edit(ui, theme, editor, query);
                 }
                 None => {
-                    if let Some(next) = choose(ui, theme, state, query) {
-                        match next {
-                            Next::Close => close = true,
-                            Next::Edit(slot, property) => {
-                                state.editor = Some(Editor::new(query, slot, property));
-                            }
-                        }
-                    }
+                    close |= choose(ui, theme, state, query);
                 }
             }
         });
@@ -171,11 +163,6 @@ fn editor_title(editor: &Editor) -> String {
     }
 }
 
-enum Next {
-    Close,
-    Edit(Slot, usize),
-}
-
 /// What a property's values look like, beside its name in the list.
 fn shape(index: usize) -> String {
     let property = &PROPERTIES[index];
@@ -189,7 +176,7 @@ fn shape(index: usize) -> String {
 }
 
 /// The list of everything a filter can be.
-fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Query) -> Option<Next> {
+fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Query) -> bool {
     let find = kit::field(
         ui,
         theme,
@@ -206,7 +193,7 @@ fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Quer
     let wanted = |label: &str, id: &str| {
         needle.is_empty() || label.to_lowercase().contains(&needle) || id.contains(&needle)
     };
-    let mut next = None;
+    let mut done = false;
     kit::ScrollArea::vertical()
         .id_salt("filter-picker-list")
         .scroll_source(kit::SCROLL_SOURCE)
@@ -220,9 +207,7 @@ fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Quer
             if !properties.is_empty() {
                 group(ui, theme, "Properties");
                 for index in properties {
-                    if kit::item(ui, theme, PROPERTIES[index].label, &shape(index)).clicked() {
-                        next = Some(Next::Edit(Slot::Own, index));
-                    }
+                    done |= property_row(ui, theme, state, query, Slot::Own, index);
                 }
             }
             for relation in filters::offered_relations(query) {
@@ -250,28 +235,76 @@ fn choose(ui: &mut egui::Ui, theme: &Theme, state: &mut Picker, query: &mut Quer
                 group(ui, theme, r.label);
                 if kinds.len() > 1 {
                     for kind in kinds {
-                        if kit::item(
-                            ui,
-                            theme,
-                            &format!("{} {}", r.label, kind.label.to_lowercase()),
-                            "type",
-                        )
-                        .clicked()
-                        {
-                            filters::set_related_kind(query, relation, kind.id);
-                            next = Some(Next::Close);
-                        }
+                        let position = state
+                            .kinds
+                            .iter()
+                            .position(|(r, id, _, _)| *r == relation && id == kind.id)
+                            .unwrap_or_else(|| {
+                                state.kinds.push((relation, kind.id.into(), false, false));
+                                state.kinds.len() - 1
+                            });
+                        let (_, _, open, chosen) = &mut state.kinds[position];
+                        ui.push_id(("related-kind", relation, kind.id), |ui| {
+                            kit::expandable(
+                                ui,
+                                theme,
+                                &format!("{} {}", r.label, kind.label.to_lowercase()),
+                                "type",
+                                open,
+                                |ui| {
+                                    if kit::choice(ui, theme, kind.label, *chosen) {
+                                        *chosen = !*chosen;
+                                    }
+                                    if kit::primary_button(ui, theme, "Add filter", *chosen)
+                                        .clicked()
+                                    {
+                                        filters::set_related_kind(query, relation, kind.id);
+                                        done = true;
+                                    }
+                                },
+                            );
+                        });
                     }
                 }
                 for index in properties {
-                    let label = format!("{} · {}", r.label, PROPERTIES[index].label);
-                    if kit::item(ui, theme, &label, &shape(index)).clicked() {
-                        next = Some(Next::Edit(slot, index));
-                    }
+                    done |= property_row(ui, theme, state, query, slot, index);
                 }
             }
         });
-    next
+    done
+}
+
+fn property_row(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    state: &mut Picker,
+    query: &mut Query,
+    slot: Slot,
+    property: usize,
+) -> bool {
+    let position = state
+        .drafts
+        .iter()
+        .position(|(editor, _)| editor.slot == slot && editor.property == property)
+        .unwrap_or_else(|| {
+            state
+                .drafts
+                .push((Editor::new(query, slot, property), false));
+            state.drafts.len() - 1
+        });
+    let (editor, open) = &mut state.drafts[position];
+    ui.push_id((format!("{slot:?}"), property), |ui| {
+        kit::expandable(
+            ui,
+            theme,
+            &editor_title(editor),
+            &shape(property),
+            open,
+            |ui| edit(ui, theme, editor, query),
+        )
+        .unwrap_or(false)
+    })
+    .inner
 }
 
 fn group(ui: &mut egui::Ui, theme: &Theme, text: &str) {
@@ -280,9 +313,8 @@ fn group(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     ui.add_space(kit::SPACING);
 }
 
-/// The editor for one filter. Returns whether it was applied, and whether
-/// to go back to the list.
-fn edit(ui: &mut egui::Ui, theme: &Theme, editor: &mut Editor, query: &mut Query) -> (bool, bool) {
+/// The editor for one filter. Returns whether it was applied.
+fn edit(ui: &mut egui::Ui, theme: &Theme, editor: &mut Editor, query: &mut Query) -> bool {
     let property = &PROPERTIES[editor.property];
     match property.values {
         Values::Choice { options } => {
@@ -337,7 +369,6 @@ fn edit(ui: &mut egui::Ui, theme: &Theme, editor: &mut Editor, query: &mut Query
         kit::note(ui, theme, reason);
     }
     let mut done = false;
-    let mut back = false;
     ui.horizontal(|ui| {
         let label = if editor.existing {
             "Update filter"
@@ -357,11 +388,8 @@ fn edit(ui: &mut egui::Ui, theme: &Theme, editor: &mut Editor, query: &mut Query
             );
             done = true;
         }
-        if !editor.existing && kit::button(ui, theme, "Back").clicked() {
-            back = true;
-        }
     });
-    (done, back)
+    done
 }
 
 /// Property-specific exploration spans, not physical or query validation bounds.
@@ -392,6 +420,84 @@ fn slider_span(property: &str) -> Option<kit::RangeSlider> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_property_editors_apply_only_on_add_and_keep_the_picker_list() {
+        for property in filters::offered_properties(&Query::default(), Slot::Own) {
+            let ctx = egui::Context::default();
+            let mut query = Query::default();
+            let mut state = Picker::new();
+            state.find = PROPERTIES[property].id.into();
+            state.fresh = false;
+            let mut editor = Editor::new(&query, Slot::Own, property);
+            match PROPERTIES[property].values {
+                Values::Choice { options } => editor.chosen.push(options[0].0.into()),
+                Values::Flag => editor.flag = Some(true),
+                Values::Range { .. } => editor.range.min = "2".into(),
+            }
+            let expected = editor.test().unwrap();
+            state.drafts.push((editor, true));
+            let mut frame = |time, events| {
+                let mut done = false;
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(700.0, 900.0),
+                        )),
+                        time: Some(time),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            ui.set_width(460.0);
+                            done = choose(ui, &Theme::GAME, &mut state, &mut query);
+                        });
+                    },
+                );
+                (done, output)
+            };
+            frame(0.0, vec![]);
+            let (done, output) = frame(0.3, vec![]);
+            assert!(!done);
+            let texts: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some(text),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                texts
+                    .iter()
+                    .any(|text| text.galley.text().eq_ignore_ascii_case("Properties"))
+            );
+            assert!(!texts.iter().any(|text| text.galley.text() == "Back"));
+            let button = texts
+                .iter()
+                .find(|text| text.galley.text() == "Add filter")
+                .expect("expanded row must contain its own Add filter button");
+            let pos = button.pos + button.galley.size() * 0.5;
+            let press = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(0.31, vec![egui::Event::PointerMoved(pos), press(true)]);
+            assert!(frame(0.32, vec![press(false)]).0);
+            assert!(
+                state.editor.is_none(),
+                "inline controls must not replace the list"
+            );
+            assert_eq!(
+                filters::filter(&query, Slot::Own, property).unwrap().test,
+                expected
+            );
+        }
+    }
 
     #[test]
     fn every_numeric_property_has_a_valid_slider_configuration() {

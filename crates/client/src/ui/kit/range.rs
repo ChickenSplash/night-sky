@@ -1,5 +1,5 @@
 //! Optional numeric endpoints and an optional two-handle slider in one field.
-use super::interact::{focus_input_padding, held_click, input_underline};
+use super::interact::{focus_input_padding, held_click, input_edges};
 use super::{SPACING, Theme};
 use bevy_egui::egui::{self, Align2, Rect, Sense, Ui, pos2, vec2};
 
@@ -225,7 +225,7 @@ fn endpoint(
 }
 
 /// The two text edits, units and optional slider share one background and
-/// one animated underline. Text remains editable even when the range is invalid.
+/// animated end edges. Text remains editable even when the range is invalid.
 pub fn range_field(
     ui: &mut Ui,
     theme: &Theme,
@@ -328,7 +328,7 @@ pub fn range_field(
             theme.dim,
         );
     }
-    input_underline(
+    input_edges(
         ui,
         theme,
         outer,

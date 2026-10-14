@@ -1,6 +1,6 @@
-//! Removable filter chips with independent edit/remove feedback and layout motion.
-use super::interact::{ANIMATION_SECONDS, control_sense, ease_out, held_click, input_underline};
-use super::{SPACING, Theme, TooltipExt};
+//! Removable chips with unified end edges, independent remove tint and layout motion.
+use super::interact::{control_sense, held_click, hover_amount, input_edges};
+use super::{SPACING, Theme, TooltipExt, animated_rect};
 use bevy_egui::egui::{self, Color32, Rect, Sense, Ui, pos2, vec2};
 
 /// What happened to a removable chip.
@@ -8,54 +8,80 @@ use bevy_egui::egui::{self, Color32, Rect, Sense, Ui, pos2, vec2};
 pub struct Pill {
     /// Its text was clicked.
     pub open: bool,
-    /// Its `×` was clicked and its exit animation has finished.
+    /// Its `×` was clicked. The collection retains the outgoing visual.
     pub remove: bool,
 }
 
-/// A square filter chip with separate edit and remove actions.
-pub fn pill(ui: &mut Ui, theme: &Theme, label: &str) -> Pill {
-    let id = ui.id().with(("pill", label));
-    let removal_id = id.with("removal");
-    let appearance_id = id.with("appearance");
-    let now = ui.input(|input| input.time);
-    let frame = ui.ctx().cumulative_frame_nr();
-    let appeared = ui.data_mut(|data| {
-        let (start, previous) = data
-            .get_temp::<(f64, u64)>(appearance_id)
-            .unwrap_or((now, frame));
-        let start = if frame > previous + 1 { now } else { start };
-        data.insert_temp(appearance_id, (start, frame));
-        ease_out(((now - start) / f64::from(ANIMATION_SECONDS)).clamp(0.0, 1.0) as f32)
-    });
-    if appeared < 1.0 {
-        ui.ctx().request_repaint();
-    }
-    let removal = ui.data_mut(|data| {
-        let removal = data.get_temp::<(f64, u64)>(removal_id);
-        // Replacing a query must not leave stale removal state when re-added.
-        if removal.is_some_and(|(_, previous)| frame > previous + 1) {
-            data.remove::<(f64, u64)>(removal_id);
-            None
-        } else {
-            removal
+struct Entry<K> {
+    key: K,
+    label: String,
+    serial: u64,
+}
+
+/// Animated chip collection. Reconcile the current values on every frame:
+/// callers never remove visuals themselves, so every disappearance animates.
+pub struct Pills<K> {
+    entries: Vec<Entry<K>>,
+    serial: u64,
+}
+
+impl<K> Default for Pills<K> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            serial: 0,
         }
-    });
-    let remaining = removal.map_or(1.0, |(start, _)| {
-        1.0 - ease_out(((now - start) / f64::from(ANIMATION_SECONDS)).clamp(0.0, 1.0) as f32)
-    });
-    if removal.is_some() && remaining <= 0.0 {
-        ui.data_mut(|data| {
-            data.remove::<(f64, u64)>(removal_id);
-            data.remove::<(f64, u64)>(appearance_id);
-        });
-        return Pill {
-            open: false,
-            remove: true,
-        };
     }
-    if let Some((start, _)) = removal {
-        ui.data_mut(|data| data.insert_temp(removal_id, (start, frame)));
-        ui.ctx().request_repaint();
+}
+
+impl<K: Clone + PartialEq> Pills<K> {
+    /// Draw in an owning wrapping row. Returns actions only for current chips;
+    /// removed or relabelled entries remain clipped and disabled until folded.
+    pub fn show(&mut self, ui: &mut Ui, theme: &Theme, values: &[(K, String)]) -> Vec<(K, Pill)> {
+        for (key, label) in values {
+            if !self
+                .entries
+                .iter()
+                .any(|entry| &entry.key == key && &entry.label == label)
+            {
+                self.entries.push(Entry {
+                    key: key.clone(),
+                    label: label.clone(),
+                    serial: self.serial,
+                });
+                self.serial += 1;
+            }
+        }
+        let mut actions = Vec::new();
+        self.entries.retain(|entry| {
+            let present = values
+                .iter()
+                .any(|(key, label)| key == &entry.key && label == &entry.label);
+            let id = ui.id().with(("pill", entry.serial));
+            let (response, finished) = pill(ui, theme, id, &entry.label, present);
+            if present && (response.open || response.remove) {
+                ui.ctx().request_repaint();
+                actions.push((entry.key.clone(), response));
+            }
+            !finished
+        });
+        actions
+    }
+}
+
+/// One retained visual, only callable by the animation-owning collection.
+fn pill(ui: &mut Ui, theme: &Theme, id: egui::Id, label: &str, present: bool) -> (Pill, bool) {
+    let hidden = Rect::from_min_size(egui::Pos2::ZERO, vec2(0.0, 1.0));
+    let shown = Rect::from_min_size(egui::Pos2::ZERO, vec2(1.0, 1.0));
+    let amount = animated_rect(
+        ui,
+        id.with("presence"),
+        hidden,
+        if present { shown } else { hidden },
+    )
+    .width();
+    if amount <= 0.0 {
+        return (Pill::default(), !present);
     }
     let font = theme.font.id();
     let text = ui
@@ -66,10 +92,9 @@ pub fn pill(ui: &mut Ui, theme: &Theme, label: &str) -> Pill {
         .layout_no_wrap("×".into(), font, Color32::PLACEHOLDER);
     let height = text.size().y.max(ui.spacing().interact_size.y) + theme.input_padding().sum().y;
     let width = text.size().x + cross.size().x + 4.0 * SPACING;
-    let (visible, _) =
-        ui.allocate_exact_size(vec2(width * appeared * remaining, height), Sense::hover());
+    let (visible, _) = ui.allocate_exact_size(vec2(width * amount, height), Sense::hover());
     if visible.width() <= 0.0 {
-        return Pill::default();
+        return (Pill::default(), !present);
     }
     let rect = Rect::from_min_size(visible.min, vec2(width, height));
     let split = rect.right() - cross.size().x - 2.0 * SPACING;
@@ -78,38 +103,43 @@ pub fn pill(ui: &mut Ui, theme: &Theme, label: &str) -> Pill {
     let open = held_click(ui.interact(
         body.intersect(visible),
         id.with("open"),
-        control_sense(removal.is_none()),
-    ))
-    .on_hover_cursor(egui::CursorIcon::PointingHand);
+        control_sense(present),
+    ));
+    let open = if present {
+        open.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        open
+    };
     let remove = held_click(ui.interact(
         close.intersect(visible),
         id.with("remove"),
-        control_sense(removal.is_none()),
-    ))
-    .on_hover_cursor(egui::CursorIcon::PointingHand)
-    .on_hover_text_themed(theme, "Remove");
+        control_sense(present),
+    ));
+    let remove = if present {
+        remove
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text_themed(theme, "Remove")
+    } else {
+        remove
+    };
     let clip = ui.clip_rect();
     ui.set_clip_rect(clip.intersect(visible));
     let painter = ui.painter();
     painter.rect_filled(rect, 0, theme.input_fill());
-    input_underline(
+    input_edges(
         ui,
         theme,
-        body,
-        open.id,
-        open.hovered() || open.is_pointer_button_down_on() || open.has_focus(),
+        visible,
+        id,
+        present
+            && (open.hovered()
+                || open.is_pointer_button_down_on()
+                || open.has_focus()
+                || remove.hovered()
+                || remove.is_pointer_button_down_on()
+                || remove.has_focus()),
     );
-    let destructive = Theme {
-        accent: Theme::DESTRUCTIVE,
-        ..*theme
-    };
-    let removal_hover = input_underline(
-        ui,
-        &destructive,
-        close,
-        remove.id,
-        remove.hovered() || remove.is_pointer_button_down_on() || remove.has_focus(),
-    );
+    let removal_hover = hover_amount(ui, &remove, present);
     painter.galley(
         pos2(rect.left() + SPACING, rect.center().y - text.size().y / 2.0),
         text,
@@ -121,12 +151,14 @@ pub fn pill(ui: &mut Ui, theme: &Theme, label: &str) -> Pill {
         theme.text.lerp_to_gamma(Theme::DESTRUCTIVE, removal_hover),
     );
     ui.set_clip_rect(clip);
-    if remove.clicked() {
-        ui.data_mut(|data| data.insert_temp(removal_id, (now, frame)));
-        ui.ctx().request_repaint();
-    }
-    Pill {
-        open: open.clicked(),
-        remove: false,
-    }
+    (
+        Pill {
+            open: present && open.clicked(),
+            remove: present && remove.clicked(),
+        },
+        false,
+    )
 }
+
+#[cfg(test)]
+mod tests;

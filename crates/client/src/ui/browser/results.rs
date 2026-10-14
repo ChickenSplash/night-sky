@@ -123,7 +123,7 @@ fn radius_text(browser: &Browser) -> String {
     }
 }
 
-/// One line on how the search is going, and a bar while it runs.
+/// Status text, inside the progress bar while a search runs.
 fn status(ui: &mut egui::Ui, browser: &mut Browser, entry: Option<&Entry>) {
     let theme = &THEME;
     let count = |n: usize| match n {
@@ -170,7 +170,9 @@ fn status(ui: &mut egui::Ui, browser: &mut Browser, entry: Option<&Entry>) {
     } else {
         ("".into(), None)
     };
-    if !text.is_empty() {
+    if let Some(done) = bar {
+        kit::progress(ui, theme, done, &text);
+    } else if !text.is_empty() {
         ui.add(
             egui::Label::new(
                 egui::RichText::new(text)
@@ -179,9 +181,6 @@ fn status(ui: &mut egui::Ui, browser: &mut Browser, entry: Option<&Entry>) {
             )
             .truncate(),
         );
-    }
-    if let Some(done) = bar {
-        kit::progress(ui, theme, done);
     }
 }
 

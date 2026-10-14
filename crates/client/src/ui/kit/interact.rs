@@ -10,7 +10,7 @@ pub const SCROLL_SOURCE: egui::scroll_area::ScrollSource = egui::scroll_area::Sc
     mouse_wheel: true,
 };
 
-/// One timing and easing curve for hover edges and input underlines.
+/// One timing and easing curve for row and control edges.
 pub(super) const ANIMATION_SECONDS: f32 = 0.18;
 
 pub(super) fn ease_out(progress: f32) -> f32 {
@@ -214,22 +214,18 @@ pub(super) fn focus_input_padding(ui: &Ui, response: &egui::Response, outer: Rec
     }
 }
 
-/// Shared hover/focus underline: expands from the centre and retracts to it.
-pub(super) fn input_underline(
-    ui: &Ui,
-    theme: &Theme,
-    rect: Rect,
-    id: egui::Id,
-    active: bool,
-) -> f32 {
+/// Shared hover/focus end edges: grow vertically from the centre and retract.
+pub(super) fn input_edges(ui: &Ui, theme: &Theme, rect: Rect, id: egui::Id, active: bool) -> f32 {
     let amount = animate_highlight(ui, id, active);
-    growing_edge(
-        ui,
-        theme,
-        Rect::from_min_max(pos2(rect.left(), rect.bottom() - 2.0), rect.max),
-        amount,
-        false,
-    );
+    for x in [rect.left(), rect.right() - 2.0] {
+        growing_edge(
+            ui,
+            theme,
+            Rect::from_min_size(pos2(x, rect.top()), vec2(2.0, rect.height())),
+            amount,
+            true,
+        );
+    }
     amount
 }
 

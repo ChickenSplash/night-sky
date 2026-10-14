@@ -7,7 +7,7 @@ pub const VERSION: u32 = 1;
 pub const DEFAULT_LIMIT: u32 = 50;
 pub const MAX_LIMIT: u32 = 1_000;
 pub const DEFAULT_RADIUS_LY: f64 = 50.0;
-pub const MAX_RADIUS_LY: f64 = 1_000.0;
+pub const MAX_RADIUS_LY: f64 = 10_000.0;
 
 /// Where a search is centred is not part of the query: the same query can be
 /// sent from anywhere (see `SearchRequest`).

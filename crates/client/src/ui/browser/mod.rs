@@ -33,6 +33,8 @@ pub struct Browser {
     /// The text of the query last sent, so any change sends it again.
     sent: Option<String>,
     picker: Option<picker::Picker>,
+    /// Keeps outgoing chip visuals alive for every kind of query change.
+    chip_list: kit::Pills<Chip>,
     inspector: crate::ui::inspector::Cache,
 }
 
@@ -155,7 +157,6 @@ impl Browser {
 
     fn body(&mut self, ui: &mut egui::Ui, view: &View, out: &mut Vec<UiCommand>) {
         let theme = &THEME;
-        self.chips(ui);
         let search = kit::field(
             ui,
             theme,
@@ -171,6 +172,7 @@ impl Browser {
             kit::note(ui, theme, error);
         }
         self.scope(ui, view, out);
+        self.chips(ui);
         ui.add_space(kit::SPACING);
         results::show(ui, self, view, out);
     }
@@ -178,15 +180,12 @@ impl Browser {
     fn chips(&mut self, ui: &mut egui::Ui) {
         let theme = &THEME;
         ui.horizontal_wrapped(|ui| {
-            if kit::primary_button(ui, theme, "+ Add filter", true).clicked() {
-                self.picker = Some(picker::Picker::new());
-            }
             self.type_choice(ui);
             let chips = filters::chips(&self.query)
                 .into_iter()
-                .filter(|(chip, _)| !matches!(chip, Chip::Kinds));
-            for (chip, label) in chips {
-                let pill = kit::pill(ui, theme, &label);
+                .filter(|(chip, _)| !matches!(chip, Chip::Kinds))
+                .collect::<Vec<_>>();
+            for (chip, pill) in self.chip_list.show(ui, theme, &chips) {
                 if pill.remove {
                     filters::remove(&mut self.query, &chip);
                 } else if pill.open {
@@ -198,20 +197,11 @@ impl Browser {
                     });
                 }
             }
-            let size = kit::button_size(ui, theme, "Reset filters");
-            let remaining = ui.available_size_before_wrap().x;
-            // Use the remaining row when it fits, otherwise wrap a full-width
-            // slot so the reset action stays at the right of the final row.
-            let width = if remaining >= size.x { remaining } else { ui.max_rect().width() };
-            ui.allocate_ui_with_layout(egui::vec2(width, size.y),
-                egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if kit::destructive_button(ui, theme, "Reset filters")
-                        .on_hover_text_themed(theme, "Clears search text, Type and all filters. Restores Within to 50 ly and Show to 50.")
-                        .clicked() {
-                        self.reset();
-                    }
-                });
         });
+    }
+
+    fn can_reset(&self) -> bool {
+        self.query != Query::default() || !self.text.is_empty()
     }
 
     fn type_choice(&mut self, ui: &mut egui::Ui) {
@@ -291,14 +281,29 @@ impl Browser {
             {
                 self.query.scope = Scope::Within { radius_ly: radius };
             }
+            kit::number_field(ui, theme, "Show", &mut self.query.limit, 1..=MAX_LIMIT, "");
             if let Some(key) = &here {
                 let chosen = matches!(&self.query.scope, Scope::System { id } if id == key);
                 if kit::choice(ui, theme, "This system", chosen) {
                     self.query.scope = Scope::System { id: key.clone() };
                 }
             }
-            kit::number_field(ui, theme, "Show", &mut self.query.limit, 1..=MAX_LIMIT, "");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if kit::primary_button(ui, theme, "+ Add filter", true).clicked() {
+                self.picker = Some(picker::Picker::new());
+            }
+            let reset = self.can_reset();
+            let size = kit::button_size(ui, theme, "Refresh");
+            let required = size.x + if reset {
+                kit::button_size(ui, theme, "Reset").x + kit::SPACING
+            } else { 0.0 };
+            let remaining = ui.available_size_before_wrap().x;
+            let width = if remaining >= required { remaining } else { ui.max_rect().width() };
+            ui.allocate_ui_with_layout(egui::vec2(width, size.y), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if reset && kit::destructive_button(ui, theme, "Reset")
+                    .on_hover_text_themed(theme, "Clears search text, Type and all filters. Restores Within to 50 ly and Show to 50.")
+                    .clicked() {
+                    self.reset();
+                }
                 if kit::button(ui, theme, "Refresh")
                     .on_hover_text_themed(theme, "Distances are from where you searched. Refresh searches again from where you are now.")
                     .clicked()

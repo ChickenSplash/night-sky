@@ -62,7 +62,7 @@ pub fn tab(ui: &mut Ui, label: &str, open: bool) -> bool {
     kit::tab(ui, &THEME, label, open)
 }
 
-/// `grep text`: a one-line text field, underlined.
+/// `grep text`: a one-line text field with animated end edges.
 pub fn input(ui: &mut Ui, prompt: &str, text: &mut String, width: f32) -> egui::Response {
     kit::input(ui, &THEME, prompt, text, width)
 }

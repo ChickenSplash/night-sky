@@ -62,7 +62,7 @@ const fn font(size: f32, mono: bool) -> Font {
 impl Theme {
     /// Shared feedback colour for close, remove and reset actions.
     pub const DESTRUCTIVE: Color32 = Color32::from_rgb(240, 100, 100);
-    /// Faint row highlights and idle scrollbars share this accent strength.
+    /// Faint rows, idle scrollbars and progress remainders share this strength.
     pub const SUBTLE_ACCENT_OPACITY: f32 = 0.12;
     /// The debug console: a translucent black window after the desktop's
     /// Hyprland windows, with a light grey border and text-mode controls.
@@ -111,7 +111,7 @@ impl Theme {
         title: font(21.0, false),
     };
 
-    /// Faint lines: rules, dividers and unfocused underlines.
+    /// Faint lines: rules and dividers.
     pub fn line(&self) -> Color32 {
         self.dim.gamma_multiply(0.4)
     }

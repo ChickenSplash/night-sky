@@ -1,5 +1,5 @@
 //! Button-styled dropdowns with shared easing for width, arrow and menu motion.
-use super::interact::{ANIMATION_SECONDS, control_sense, ease_out, held_click, input_underline};
+use super::interact::{ANIMATION_SECONDS, control_sense, ease_out, held_click, input_edges};
 use super::{SCROLL_SOURCE, SPACING, Theme, animated_rect, list_row};
 use bevy_egui::egui::{self, Align2, Rect, pos2, vec2};
 
@@ -75,18 +75,8 @@ pub fn dropdown(
                 galley,
                 theme.text,
             );
-        let rotation = egui::emath::Rot2::from_angle(amount * std::f32::consts::PI);
-        let points = [
-            vec2(-arrow_width * 0.5, -arrow_width * 0.25),
-            vec2(0.0, arrow_width * 0.25),
-            vec2(arrow_width * 0.5, -arrow_width * 0.25),
-        ]
-        .map(|offset| arrow_center + rotation * offset);
-        ui.painter()
-            .line_segment([points[0], points[1]], (1.0, theme.dim));
-        ui.painter()
-            .line_segment([points[1], points[2]], (1.0, theme.dim));
-        input_underline(ui, theme, rect, id, response.hovered());
+        arrow(ui, theme, arrow_center, amount);
+        input_edges(ui, theme, rect, id, response.hovered());
         let mut picked = None;
         if amount > 0.0 {
             let width = options
@@ -170,6 +160,16 @@ pub fn dropdown(
         picked
     })
     .inner
+}
+
+pub(super) fn arrow(ui: &egui::Ui, theme: &Theme, center: egui::Pos2, amount: f32) {
+    let rotation = egui::emath::Rot2::from_angle(amount * std::f32::consts::PI);
+    let points = [vec2(-3.0, -1.5), vec2(0.0, 1.5), vec2(3.0, -1.5)]
+        .map(|offset| center + rotation * offset);
+    ui.painter()
+        .line_segment([points[0], points[1]], (1.0, theme.dim));
+    ui.painter()
+        .line_segment([points[1], points[2]], (1.0, theme.dim));
 }
 
 #[cfg(test)]
@@ -310,8 +310,8 @@ mod tests {
         let idle_open = frame(0.5, "Type: Star", vec![]);
         assert!(menu(&idle_open).is_some());
         assert!(!idle_open.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::epaint::Shape::Rect(line) if line.fill == theme.accent && line.rect.height() == 2.0 && (line.rect.width() - rect.width()).abs() < 0.01)),
-            "an open menu must not retain the button underline without hover");
+            egui::epaint::Shape::Rect(line) if line.fill == theme.accent && line.rect.width() == 2.0 && (line.rect.top() - rect.top()).abs() < 0.01)),
+            "an open menu must not retain the button edges without hover");
         frame(
             0.51,
             "Type: Star",

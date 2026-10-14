@@ -5,6 +5,7 @@
 //! dragging, and scroll areas that never steal a control's press. Scene text
 //! uses `halo`.
 mod dropdown;
+mod expandable;
 mod facts;
 pub mod halo;
 mod interact;
@@ -19,11 +20,12 @@ mod widgets;
 mod window;
 
 pub use dropdown::dropdown;
+pub use expandable::expandable;
 pub use facts::{facts, facts_with_details};
 pub use interact::SCROLL_SOURCE;
 pub use motion::animated_rect;
 pub use number::number_field;
-pub use pill::pill;
+pub use pill::Pills;
 #[cfg(test)]
 pub use range::parse_range_end;
 pub use range::{NumericRange, RangeField, RangeInput, RangeScale, RangeSlider, range_field};
