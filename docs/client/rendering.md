@@ -1,10 +1,10 @@
 # Realistic rendering
 
-Design notes for body lighting, manual exposure, compression and HDR sprites.
+How body lighting, manual exposure, compression and HDR sprites work.
 Paths starting with `crates/` are repository-relative; other client paths are
 relative to `crates/client/src/`. Shaders live beside
-their modules in `render/` or `stars/`. See [agent rules](../AGENTS.md) and
-[galaxy model](galaxy-model.md) for streaming, point rendering and diffuse glow.
+their modules in `render/` or `stars/`. See [star streaming](streaming.md) and
+[galactic rendering](galactic-rendering.md) for point rendering and diffuse glow.
 
 ## Pipeline and light inputs
 
@@ -118,3 +118,20 @@ their modules in `render/` or `stars/`. See [agent rules](../AGENTS.md) and
   with the 3D camera (without tone mapping), or it presents a stale frame.
 - The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh
   with its 1e22 far plane. WebGL 2 never draws indirectly anyway.
+
+## Precision, scale and wireframes
+
+- `big_space` supplies a grid-cell floating origin. Render positions subtract
+  the camera in double precision before conversion to GPU floats. Bevy's
+  reverse-Z perspective depth and a distance-adjusted near plane support
+  changing scale; this is not a logarithmic depth buffer.
+- Divide render positions and radii by `CameraPose::render_scale()` (displayed
+  camera about 1,000 units from target). Raw metres push clip-space values
+  to about 1e13, making the gizmo line shader drop or fragment segments.
+- Planets retain physical radii in every presentation mode. Wireframes use
+  procedural latitude/longitude lines, not native polygon wireframe mode.
+  Pick line density from on-screen radius: dense rings on small bodies merge
+  into blobs.
+- Wireframe bodies use gizmos; realistic bodies use pooled per-body mesh
+  entities. Galactic stars use custom GPU batches. Further body batching
+  remains future work.

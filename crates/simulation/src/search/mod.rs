@@ -1,6 +1,6 @@
 //! Object search: one query model and engine for every front end (the
 //! in-game browser, the `ns` CLI, and later a query builder and the ship's
-//! navigator). See `docs/object-search-plan.md`.
+//! navigator). See `docs/simulation/search.md`.
 mod engine;
 pub mod query;
 pub mod registry;
