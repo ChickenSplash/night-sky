@@ -1,0 +1,124 @@
+# Flight simulator · alpha plan
+
+A proposal, not a description of the current application. Camera flights today
+are navigation aids, not physical spacecraft (see [navigation](../client/navigation.md)).
+
+## Goal
+
+- Walk around inside a ship as a character and use its consoles, starting with
+  navigation.
+- Realistic physics, but easy for a new player to pick up and explore straight away.
+- **Core loop:** spawn in deep space, warp to a system in about a minute,
+  warp to a planet and settle into orbit, then warp on to the next. Every
+  trip takes roughly 20 to 60 seconds, whatever its length.
+
+## Principles
+
+- **Plausible physics.** Real gravity from every nearby body, so the ship can
+  orbit anything. No invented forces beyond the warp drive's documented rules.
+- **Two drives:**
+  - **Warp drive (Alcubierre):** used for every trip, in-system or interstellar.
+  - **Sublight drive (fusion torch, about 1 g):** only for fine-tuning and
+    settling into orbit.
+- **Layered control.** Autopilot is enough for a new player. Assists and full
+  manual control are optional depth.
+- **Time warp is optional.** The loop must never need fast-forward.
+- Existing invariants still apply: f64 physics, deterministic generation,
+  stable body identities and both client targets.
+
+## Warp drive rules
+
+These are the drive's known theoretical limits, used as game rules:
+
+- **Plot, then engage.** The course is fixed before engaging; there is no
+  steering inside the bubble. This fits "click a target, autopilot".
+- **Minimum safe distance.** The bubble cannot form or collapse too close to a
+  body (inside or just above its atmosphere). Engaging from orbit is allowed,
+  so the ship warps straight out of one orbit and into the next.
+- **Trip time is roughly constant.** Speed builds after departure and falls near
+  masses, so short and long trips both take about 20 to 60 seconds.
+- **Velocity matched on drop-out.** The bubble moves space, not the ship, so it
+  hands the ship off at the target's velocity (planet or star), at a safe
+  distance and in a rough orbit. A realistic 1 g drive would otherwise need 30
+  to 60 minutes to match a planet's 10 to 50 km/s.
+
+## Phases
+
+### 0 · Star velocities
+
+- Give every star an orbital velocity around the galaxy, drawn from its seed
+  (the epicycle approximation: guiding radius, rotation-curve speed, radial
+  wobble and vertical oscillation).
+- Velocities only: stars do not move yet, so cells and streaming are unchanged.
+- Needed so interstellar warp can match the destination star's velocity.
+- **Done when:** any star and any body can report position and velocity at a given time.
+
+Moons are not a prerequisite. Nested motion already exists through planets
+around stars and barycentre hosts in multiple systems; moons extend it later.
+
+### 1 · The ship as a body
+
+- An engine-independent ship model in `crates/simulation`: f64 position,
+  velocity and orientation in the current star's frame.
+- Gravity summed from nearby bodies at their analytic (Kepler) positions. The
+  ship is a test particle and pulls on nothing.
+- Fixed-substep numerical integration.
+- In ship mode the ship owns the position, and the camera follows it, instead
+  of `Navigation::eye`. This is the main architectural change; design it deliberately.
+- A chase camera, plus ship state and commands through the developer API and `ns`.
+- **Done when:** a test orbit runs 100 laps with negligible energy drift, on
+  both targets.
+
+### 2 · Trajectory prediction and thrust
+
+- A predicted trajectory line ahead of the ship. This is the most important
+  usability feature: it makes orbital mechanics readable.
+- Basic sublight throttle and pointing.
+- **Done when:** a manual burn visibly reshapes the predicted orbit.
+
+### 3 · Warp drive
+
+- In-system first (planet to planet), then interstellar on top of the existing
+  galaxy travel and streaming.
+- Course plotting, minimum safe distance, trip-length speed scaling and
+  velocity-matched drop-out, as in the rules above.
+- **Done when:** the core loop runs end to end from the CLI.
+
+### 4 · Orbit autopilot
+
+- After drop-out, a short sublight burn (seconds to a minute) circularises the orbit.
+- Close-range correction only; no interplanetary transfer planning.
+- **Done when:** "go to planet" ends in a stable orbit with no player input.
+
+### 5 · Layered controls
+
+- **Autopilot:** pick a target; everything else is handled.
+- **Assisted:** prograde, retrograde, circularise, hold orbit, match target.
+- **Manual:** assists off.
+
+### 6 · Walking inside the ship
+
+- First person in a grey-box interior, simulated in the ship's own local frame
+  so it stays steady at any galactic position.
+- Collisions from a physics crate (`avian3d` or `bevy_rapier`), after checking
+  compatibility with the pinned Bevy, big_space and bevy_egui set.
+- Fixed deck gravity for the alpha.
+- The nav console opens the existing navigation UI full-screen on interaction.
+- **Done when:** the whole loop is playable on foot from the console. This is the alpha.
+
+## Later
+
+- Time warp, with coasting ships propagated analytically ("on rails") and
+  numerical integration only while thrusting.
+- Live UI on in-world screens (render to texture).
+- Thrust gravity, fuel and delta-v limits, crashing into bodies.
+- Proper ship models.
+- Moving stars over limited time spans (galaxy rotation stage 2): cells loaded
+  by rotating back to stars' birth cells, with padding for wobble.
+
+## Open questions
+
+- Ship size and style: small shuttle or Expanse-style tower?
+- Fuel limits, or unlimited for the alpha?
+- Can the ship crash?
+- Thrust gravity or artificial deck gravity in the long run?

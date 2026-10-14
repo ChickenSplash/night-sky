@@ -70,6 +70,8 @@ The shared native/browser client in `crates/client`, with browser workers in
 
 - [Object search](plans/object-search.md): original plan, completed sessions,
   historical measurements and future ideas. This is not the current UI specification.
+- [Flight simulator](plans/flight-sim.md): alpha proposal for a walkable ship with
+  warp and sublight drives, real gravity and layered autopilot.
 
 ## Current limitations
 
