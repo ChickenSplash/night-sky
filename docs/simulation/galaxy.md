@@ -131,9 +131,6 @@ its component (`crates/simulation/src/kinematics.rs`):
 - The thin disc's age-velocity relation needs the system's age
   (`system_age_gyr`): a multiple's comes from the draw its companions use, and
   a single star whose draw never needed one gets it from its `{key}:age` seed.
-- Home moves at circular speed plus the Sun's peculiar motion (11.1 km/s
-  inward, 12.24 along rotation, 7.25 north; Schönrich et al. 2010), so nearby
-  stars move tens of km/s relative to it, as around the Sun.
 - Legacy page stars without a component move as thin-disc stars. Companions
   share their system's velocity; their orbits about the barycentre are separate.
 

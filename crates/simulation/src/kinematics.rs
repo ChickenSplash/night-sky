@@ -15,9 +15,6 @@ const G: f64 = 4.300_917e-3;
 /// Asymmetric drift: a disc population lags circular rotation by σ_R²/k
 /// (Dehnen & Binney 1998).
 const DRIFT_KMS: f64 = 80.0;
-/// The Sun's motion relative to circular rotation (Schönrich et al. 2010):
-/// toward the centre, along rotation and north.
-const SOLAR_PECULIAR_KMS: [f64; 3] = [11.1, 12.24, 7.25];
 
 /// The galaxy's circular speed from a spherical mass model: the black hole,
 /// Plummer spheres for the nuclear cluster and disc, a Hernquist bar and
@@ -127,18 +124,6 @@ impl GalaxyModel {
         let [radial, along, vertical] = sigma.map(|s| s * rng.normal());
         compose(p, radial, mean + along, vertical)
     }
-
-    /// Home's velocity: circular rotation plus the Sun's own motion.
-    pub fn home_velocity_kms(&self) -> [f64; 3] {
-        let p = self.home_pc;
-        let [inward, along, north] = SOLAR_PECULIAR_KMS;
-        compose(
-            p,
-            -inward,
-            self.circular_speed_kms(p[0].hypot(p[2])) + along,
-            north,
-        )
-    }
 }
 
 /// Radial (outward), rotational and vertical parts in the galaxy's axes.
@@ -170,10 +155,6 @@ pub fn system_velocity_kms(key: &str, position_pc: [f64; 3]) -> [f64; 3] {
 mod tests {
     use super::*;
     use std::f64::consts::TAU;
-
-    fn length(v: [f64; 3]) -> f64 {
-        v.iter().map(|c| c * c).sum::<f64>().sqrt()
-    }
 
     #[test]
     fn the_rotation_curve_rises_then_stays_flat() {
@@ -213,13 +194,6 @@ mod tests {
         assert!(forward[2] * inner.cos() - forward[0] * inner.sin() > 0.0);
         // So the outer part of an arm must lie at smaller φ, behind.
         assert!(outer < inner, "{inner} {outer}");
-    }
-
-    #[test]
-    fn home_moves_like_the_sun() {
-        let galaxy = GalaxyModel::milky_way();
-        let v = galaxy.home_velocity_kms();
-        assert!(v[2] > 230.0 && v[0] < -10.0 && v[1] > 5.0, "{v:?}");
     }
 
     fn sample(galaxy: &GalaxyModel, component: Component, p: [f64; 3], age: f64) -> Vec<[f64; 3]> {
@@ -304,17 +278,6 @@ mod tests {
         assert_ne!(
             a,
             galaxy.star_velocity_kms("g1.2.4", Component::ThinDisc, galaxy.home_pc, 4.0)
-        );
-        // Nearby stars move tens of km/s relative to home, as around the Sun.
-        let home = galaxy.home_velocity_kms();
-        let relative: Vec<f64> = sample(&galaxy, Component::ThinDisc, galaxy.home_pc, 5.0)
-            .iter()
-            .map(|v| length(std::array::from_fn(|i| v[i] - home[i])))
-            .collect();
-        assert!(
-            (30.0..70.0).contains(&mean(&relative)),
-            "{}",
-            mean(&relative)
         );
     }
 }

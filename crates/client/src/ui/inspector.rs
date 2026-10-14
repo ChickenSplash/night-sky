@@ -231,18 +231,10 @@ fn velocity_kms(key: &str, position_ly: DVec3) -> [f64; 3] {
     space_simulation::kinematics::system_velocity_kms(key, position_pc.to_array())
 }
 
-/// Speed around the galaxy, and relative to home, where nearby stars move
-/// tens of km/s as they do around the Sun.
 fn motion_facts(info: &mut Info, velocity: [f64; 3]) {
-    let home = DVec3::from_array(GalaxyModel::milky_way().home_velocity_kms());
-    let velocity_vector = DVec3::from_array(velocity);
     info.fact(
         "Galactic velocity",
-        format!("{:.0} km/s", velocity_vector.length()),
-    );
-    info.fact(
-        "Relative to home",
-        format!("{:.0} km/s", (velocity_vector - home).length()),
+        format!("{:.0} km/s", DVec3::from_array(velocity).length()),
     );
     info.velocity_kms = Some(velocity);
 }
@@ -653,7 +645,7 @@ mod tests {
                 assert!(
                     info.rows
                         .iter()
-                        .any(|(label, _)| label == "Relative to home")
+                        .any(|(label, _)| label == "Galactic velocity")
                 );
             }
             assert_eq!(exported["facts"].as_array().unwrap().len(), info.rows.len());
