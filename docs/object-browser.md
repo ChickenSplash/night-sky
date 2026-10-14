@@ -7,21 +7,31 @@ and browser clients draw the same egui controls, using the
 
 ## Search and filter controls
 
-- The first row starts with **+ Add filter** and **Type**, followed by filter
-  chips. **Reset filters** sits at the right of the final wrapped row. If it
-  cannot fit beside the chips, it wraps to a new row, still right-aligned.
+- The search box comes first. Below it, the controls run **Within**, **Show**,
+  **This system** (when available), then **+ Add filter**, with **Refresh**
+  and **Reset** right-aligned. **Reset** sits to the right of **Refresh** and
+  appears only when the query or search-box text differs from the defaults.
+  Controls wrap when needed on narrow windows.
+- **Type** and filter chips always start on a separate row below those controls.
 - Reset retains its full behaviour: clears designation/search text, Type,
   property filters and relationships, and restores Within to 50 ly and Show
-  to 50. Its opaque tooltip explains this. Its underline is destructive red.
+  to 50. Its opaque tooltip explains this. Its animated end edges are destructive red.
 - Type lists available result kinds from the search registry. **All types**
   removes explicit kind/family restrictions, but other filters can still
   narrow the kinds that match. Selecting one kind removes incompatible
   property filters and relationships.
 - Queries from the CLI can contain a family or several kinds. Type displays
   that combination rather than pretending a single menu option is selected.
-- A chip's text opens its editor. Its separate `×` action removes it after
-  the shared exit animation completes. Text/edit feedback remains the theme
-  accent; the remove glyph and its underline use the same red as window close.
+- A chip's text opens its editor. Its separate `×` action removes the filter
+  immediately, retaining a non-interactive visual until its exit animation
+  completes. The shared chip collection reconciles the query each frame, so
+  Reset, incompatible Type changes, search text, incoming search/clear commands
+  and edited chip values all get the same entrance and exit animation.
+  Re-adding a chip mid-exit reverses from its current width without a snap.
+  Hovering either half lights two theme
+  accent edges at the outside ends of the whole chip, with no inner edges.
+  The remove glyph alone eases to the same red as window close when hovered
+  or pressed; its hit area has no separate red edges.
 - Designation or ID text keeps the existing filters. Full `ns search` syntax
   replaces the query. Search-box text commits on Enter; invalid text is
   explained without replacing the last valid query.
@@ -46,7 +56,7 @@ and browser clients draw the same egui controls, using the
   its text for replacement. Clicking the digits keeps normal caret placement
   and text selection.
 - Result counts are whole numbers from 1 to 1,000. Distances allow decimals,
-  must be positive and are capped at 1,000 ly, following the query's bounds.
+  must be positive and are capped at 10,000 ly, following the query's bounds.
 - Out-of-range counts and distances above the maximum are clamped. Invalid
   text, fractional counts and nonpositive distances revert to the last value.
 - Reset and incoming search commands update the displayed values.
@@ -60,8 +70,17 @@ and browser clients draw the same egui controls, using the
   Already-used properties are not offered as new filters; edit their chips.
 - Menu items have no vertical gaps. Group headings use breathing room rather
   than divider lines, and there is no helper footer.
+- Each item expands its controls directly beneath its row, keeping the picker
+  list visible. Reveal and collapse use the shared 0.18-second cubic ease-out;
+  the thin down arrow rotates upwards when open and back down when closed.
+  Open rows retain the table's selected-row highlight even away from the pointer;
+  clicking closed returns them to ordinary hover feedback.
+  Draft values survive folding a row. Expanded controls have only **Add filter**,
+  with no Back button or second window. Existing chips still open their editor.
 - The list can grow to 560 logical pixels high, capped against viewport height
   with space for the header, search field and padding. Short lists shrink.
+  The modal resets its available height each frame so the list is not limited
+  by an inherited modal size or a previously shorter editor/search result.
 - Every numeric property uses the shared **Min / Max** field, unit and
   two-handle slider. Blank endpoints mean unbounded. At least one endpoint is
   needed to add a filter; the minimum cannot exceed the maximum.
@@ -87,7 +106,7 @@ and browser clients draw the same egui controls, using the
 
 - The button width, small thin arrow rotation and menu reveal/close all use
   the shared 0.18-second cubic ease-out.
-- The underline is hover-only, not a persistent open-state indicator.
+- The animated end edges are hover-only, not a persistent open-state indicator.
 - Menus are opaque and edge-to-edge, without frame padding or inter-item gaps.
   The selected item uses the same row highlight as the result table.
 - The full content geometry is kept stable during reveal, including the
@@ -98,6 +117,11 @@ and browser clients draw the same egui controls, using the
   is disabled while the closing animation finishes.
 
 ## Results table
+
+- Running searches show their status text inside a square progress bar. The
+  completed portion uses the full theme accent; the remainder uses the same
+  12%-strength accent as idle scrollbars. Text switches to dark ink over the
+  fill for contrast. Searches without a known fraction show a moving band.
 
 - Result clicks change application selection without travelling. Highlighting
   follows `Navigation::selection`, including selection and deselection from
@@ -136,7 +160,8 @@ Paths below are relative to `crates/client/src/`:
 - `ui/kit/number.rs`: shared labelled numeric field.
 - `ui/kit/range.rs`: range text, sliders, mapping and precision.
 - `ui/kit/pill.rs`: removable animated filter chips.
-- `ui/kit/dropdown.rs`: animated Type dropdown and its menu.
+- `ui/kit/dropdown.rs`: animated Type dropdown and shared arrow painter.
+- `ui/kit/expandable.rs`: inline animated picker rows and clipped control reveal.
 - `ui/kit/widgets.rs` and `interact.rs`: controls, rows and shared feedback.
 - `ui/kit/motion.rs`: retargetable layout animation.
 - `ui/kit/scroll.rs`: native scrolling with animated accent opacity.

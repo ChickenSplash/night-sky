@@ -1,5 +1,5 @@
 //! A prefix, editable number and optional unit inside one shared frame.
-use super::interact::{focus_input_padding, input_underline};
+use super::interact::{focus_input_padding, input_edges};
 use super::{SPACING, Theme};
 use bevy_egui::egui::{self, Ui, emath::Numeric};
 use std::ops::RangeInclusive;
@@ -104,7 +104,7 @@ pub fn number_field<Num: Numeric>(
     let mut response = shown.inner;
     let outer = shown.response.rect;
     focus_input_padding(ui, &response, outer, &edit.text);
-    input_underline(
+    input_edges(
         ui,
         theme,
         outer,
@@ -187,7 +187,7 @@ mod tests {
                                 &Theme::GAME,
                                 "Within",
                                 &mut value,
-                                f64::MIN_POSITIVE..=1000.0,
+                                f64::MIN_POSITIVE..=space_simulation::search::query::MAX_RADIUS_LY,
                                 "ly",
                             );
                             rect = response.rect;
@@ -227,8 +227,10 @@ mod tests {
 
     #[test]
     fn distances_allow_decimals_but_not_invalid_numbers() {
-        let range = f64::MIN_POSITIVE..=1000.0;
+        let range = f64::MIN_POSITIVE..=space_simulation::search::query::MAX_RADIUS_LY;
         assert_eq!(committed("12.5", &range), Some(12.5));
+        assert_eq!(committed("10000", &range), Some(10_000.0));
+        assert_eq!(committed("10001", &range), Some(10_000.0));
         for text in ["", "no", "NaN", "inf"] {
             assert_eq!(committed(text, &range), None);
         }

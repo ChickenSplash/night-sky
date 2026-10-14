@@ -10,12 +10,211 @@ fn property(id: &str) -> usize {
 }
 
 #[test]
-fn reset_filters_stays_on_the_right_of_the_last_row_and_preserves_full_reset() {
+fn every_query_replacement_animates_outgoing_chips() {
+    for cause in [
+        "reset",
+        "type",
+        "search text",
+        "clear command",
+        "search command",
+        "edit",
+    ] {
+        let ctx = egui::Context::default();
+        kit::plain_style(&ctx);
+        let mut app = App::new();
+        app.add_message::<UiCommand>().add_plugins(BrowserPlugin);
+        let query = Query::parse("temperature_k=3000..9000 radius_solar=0.1..2").unwrap();
+        let labels = filters::chips(&query)
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect::<Vec<_>>();
+        app.world_mut().resource_mut::<Browser>().query = query;
+        let frame = |app: &mut App, time| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 600.0),
+                    )),
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        app.world_mut().resource_mut::<Browser>().chips(ui);
+                    });
+                },
+            )
+        };
+        let clip = |output: &egui::FullOutput, label: &str| {
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                    Some(shape.clip_rect)
+                }
+                _ => None,
+            })
+        };
+        frame(&mut app, 0.0);
+        let full = frame(&mut app, 0.2);
+        match cause {
+            "clear command" | "search command" => {
+                let command = if cause == "clear command" {
+                    UiCommand::ClearSearch
+                } else {
+                    UiCommand::Search {
+                        query: "kind=planet within_ly=50".into(),
+                    }
+                };
+                app.world_mut().write_message(command);
+                app.update();
+            }
+            _ => {
+                let mut browser = app.world_mut().resource_mut::<Browser>();
+                match cause {
+                    "reset" => browser.reset(),
+                    "type" => filters::set_kind(&mut browser.query, "planet"),
+                    "search text" => {
+                        browser.text = "kind=planet within_ly=50".into();
+                        browser.read_text();
+                    }
+                    "edit" => {
+                        browser.query =
+                            Query::parse("temperature_k=4000..8000 radius_solar=0.2..3").unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        frame(&mut app, 0.21);
+        let exiting = frame(&mut app, 0.3);
+        for label in &labels {
+            let old = clip(&full, label).unwrap();
+            let now = clip(&exiting, label)
+                .unwrap_or_else(|| panic!("{cause} dropped {label} without an exit"));
+            assert!(
+                now.width() > 0.0 && now.width() < old.width(),
+                "{cause}: {label} must shrink"
+            );
+        }
+        let gone = frame(&mut app, 0.41);
+        for label in &labels {
+            assert!(
+                clip(&gone, label).is_none(),
+                "{cause}: {label} must finish exiting"
+            );
+        }
+    }
+}
+
+#[test]
+fn search_controls_precede_a_separate_chip_row_with_optional_system_scope() {
+    for width in [1000.0, 480.0, 350.0] {
+        for at_system in [false, true] {
+            let ctx = egui::Context::default();
+            kit::plain_style(&ctx);
+            let searches = Searches::default();
+            let nav = Navigation {
+                arrived: at_system,
+                visit: Some(crate::Visit::Generated(Box::new(
+                    crate::galaxy_nav::generated("g78040000.2.854", bevy::math::DVec3::ZERO)
+                        .unwrap(),
+                ))),
+                ..Default::default()
+            };
+            let universe = Universe(space_shared::Galaxy {
+                source: String::new(),
+                systems: vec![],
+            });
+            let field = crate::stars::stream::Starfield::default();
+            let mut browser = Browser {
+                query: Query::parse("kind=star temperature_k=3000..9000").unwrap(),
+                ..Default::default()
+            };
+            let mut output = None;
+            for frame in 0..3 {
+                output = Some(ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 800.0),
+                        )),
+                        time: Some(f64::from(frame) * 0.2),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            browser.body(
+                                ui,
+                                &View {
+                                    searches: &searches,
+                                    nav: &nav,
+                                    universe: &universe,
+                                    field: &field,
+                                },
+                                &mut vec![],
+                            );
+                        });
+                    },
+                ));
+            }
+            let output = output.unwrap();
+            let text = |label: &str| {
+                output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+            };
+            let search = text("Designation or ID, or ns search text…").unwrap();
+            let within = text("Within:").unwrap();
+            let show = text("Show:").unwrap();
+            let add = text("+ Add filter").unwrap();
+            let refresh = text("Refresh").unwrap();
+            let kind = text("Type: Star").unwrap();
+            assert!(within.top() > search.bottom());
+            assert!(kind.top() > add.bottom().max(refresh.bottom()));
+            assert_eq!(text("This system").is_some(), at_system);
+            if width == 1000.0 {
+                let preceding = if at_system {
+                    text("This system").unwrap()
+                } else {
+                    show
+                };
+                assert!(add.left() > preceding.right());
+                assert!((add.center().y - preceding.center().y).abs() < 1.0);
+                if at_system {
+                    assert!(preceding.left() > show.right());
+                }
+            }
+            let chips = filters::chips(&browser.query);
+            let chip = text(
+                &chips
+                    .iter()
+                    .find(|(chip, _)| matches!(chip, Chip::Filter { .. }))
+                    .unwrap()
+                    .1,
+            )
+            .unwrap();
+            assert!(chip.top() > add.bottom().max(refresh.bottom()));
+            let reset = text("Reset").unwrap();
+            assert!(reset.left() > refresh.right());
+            assert!((reset.center().y - refresh.center().y).abs() < 1.0);
+        }
+    }
+}
+
+#[test]
+fn reset_stays_right_of_refresh_and_disappears_after_full_reset() {
     for width in [1000.0, 480.0, 350.0] {
         for query in [Query::default(), Query::parse("kind=star temperature_k=3000..9000 radius_solar=0.1..2 mass_solar=0.08..5 system.multiple=no").unwrap()] {
             let ctx = egui::Context::default();
             kit::plain_style(&ctx);
             let mut browser = Browser { query, text: "unfinished search".into(), text_error: Some("test error".into()), ..Default::default() };
+            let searches = Searches::default();
+            let nav = Navigation::default();
+            let universe = Universe(space_shared::Galaxy { source: String::new(), systems: vec![] });
+            let field = crate::stars::stream::Starfield::default();
             browser.query.scope = Scope::Within { radius_ly: 123.0 };
             browser.query.limit = 123;
             let time = std::cell::Cell::new(0.0);
@@ -28,14 +227,14 @@ fn reset_filters_stays_on_the_right_of_the_last_row_and_preserves_full_reset() {
                 }, |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         right.set(ui.max_rect().right());
-                        browser.chips(ui);
+                        browser.scope(ui, &View { searches: &searches, nav: &nav, universe: &universe, field: &field }, &mut vec![]);
                     });
                 })
             };
             for _ in 0..10 { frame(&mut browser, vec![]); }
             let output = frame(&mut browser, vec![]);
             let reset = output.shapes.iter().find_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) if text.galley.text() == "Reset filters" => Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
+                egui::epaint::Shape::Text(text) if text.galley.text() == "Reset" => Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
                 _ => None,
             }).unwrap();
             assert!((reset.right() + 10.0 - right.get()).abs() < 1.0, "reset must align to the row's right edge at width {width}: {reset:?}, right {}", right.get());
@@ -50,8 +249,41 @@ fn reset_filters_stays_on_the_right_of_the_last_row_and_preserves_full_reset() {
             }
             assert_eq!(browser.query, Query::default());
             assert!(browser.text.is_empty() && browser.text_error.is_none());
+            let output = frame(&mut browser, vec![]);
+            assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::epaint::Shape::Text(text) if text.galley.text() == "Reset")));
         }
     }
+}
+
+#[test]
+fn reset_is_available_for_each_nondefault_search_control() {
+    assert!(!Browser::default().can_reset());
+    for query in [
+        "within_ly=51",
+        "limit=51",
+        "kind=star",
+        "family=stars",
+        "temperature_k=3000..",
+        "system.multiple=yes",
+        "system=g78040000.2.854",
+    ] {
+        assert!(
+            Browser {
+                query: Query::parse(query).unwrap(),
+                ..Default::default()
+            }
+            .can_reset(),
+            "{query}"
+        );
+    }
+    assert!(
+        Browser {
+            text: "unfinished designation".into(),
+            ..Default::default()
+        }
+        .can_reset()
+    );
 }
 
 #[test]
@@ -199,12 +431,7 @@ fn type_dropdown_selects_registry_kinds_and_cleans_incompatible_filters() {
     };
     frame(&mut browser, vec![]);
     let output = frame(&mut browser, vec![]).0;
-    let add = text_position(&output, "+ Add filter", true);
     let dropdown = text_position(&output, "Type: Planet", false);
-    assert!(
-        dropdown.x > add.x,
-        "Type belongs to the right of Add filter"
-    );
     click(&mut browser, dropdown);
     let output = frame(&mut browser, vec![]).0;
     for kind in space_simulation::search::registry::KINDS
@@ -283,6 +510,48 @@ fn filter_picker_no_longer_offers_top_level_types() {
     );
     assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
         egui::epaint::Shape::Text(text) if text.galley.text().contains("Results match every filter"))));
+}
+
+#[test]
+fn filter_picker_uses_a_tall_list_and_stays_inside_small_viewports() {
+    for height in [800.0, 480.0] {
+        let ctx = egui::Context::default();
+        kit::plain_style(&ctx);
+        let mut state = Some(picker::Picker::new());
+        let mut query = Query::default();
+        let mut painted = false;
+        for _ in 0..4 {
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, height),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| picker::show(ctx, &THEME, &mut state, &mut query),
+            );
+            let list = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.text() == "Star class" => {
+                    Some(shape.clip_rect)
+                }
+                _ => None,
+            });
+            // The first frame measures the modal without painting it.
+            if let Some(list) = list {
+                painted = true;
+                let list = list.shrink(ctx.style().visuals.clip_rect_margin);
+                let expected = 560.0_f32.min(height - 160.0);
+                assert!(
+                    (list.height() - expected).abs() < 3.0,
+                    "picker list should use {expected} px, got {}",
+                    list.height()
+                );
+                assert!(list.top() >= 0.0 && list.bottom() <= height);
+            }
+        }
+        assert!(painted, "picker list must be painted");
+    }
 }
 
 #[test]

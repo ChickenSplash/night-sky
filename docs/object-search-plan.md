@@ -25,7 +25,7 @@ each part lands.
 - **The registry is data.** Kinds and properties are declared once; the UI,
   CLI and builder read them.
 - **A scope is required.** Searches run around an origin within a radius
-  (at most 1,000 ly), never over the whole generated galaxy. Exact
+  (at most 10,000 ly), never over the whole generated galaxy. Exact
   designation lookups are the one exception: they need no scan.
 - **Complete and deterministic.** Results never depend on the magnitude
   limit, streaming progress, thread count or which front end asked. The same
@@ -82,7 +82,7 @@ Serde, versioned.
     `system=` without a dot is still the scope.
   - Each relationship is given once, one level deep; nesting
     (`orbits.system.`) is left for later.
-- `scope`: `Within { radius_ly }` (at most 1,000 ly) or `System { id }`.
+- `scope`: `Within { radius_ly }` (at most 10,000 ly) or `System { id }`.
   The origin is not part of the query, so the same query (and its `ns`
   text) works from anywhere: `SearchRequest { id, query, origin, work_cap }`
   carries it. It is fixed when the request is sent: a position today (the
@@ -384,7 +384,7 @@ searching runs in the desktop app.
 - **Threads:** several natively for large cells; one in the browser.
 - **Work:** counted in stars and cells, never time; a cap per request.
 - **Origin:** in the request, not the query.
-- **Scope:** within a radius of the search origin (at most 1,000 ly, with a
+- **Scope:** within a radius of the search origin (at most 10,000 ly, with a
   limit and work cap), or one system; no pre-built galaxy-wide index.
 - **Origin fixed** when the request is sent; the browser offers Refresh.
 - **Sort:** distance only, ties by ID.

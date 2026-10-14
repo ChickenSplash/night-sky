@@ -221,7 +221,7 @@ fn refusals_give_a_reason() {
     refused("planet_class=lava", "is one of dwarf, rocky");
     refused("multiple=maybe", "yes or no");
     refused("radius_km=big", "needs a number");
-    refused("within_ly=1001", "at most 1000");
+    refused("within_ly=10001", "at most 10000");
     refused("within_ly=0", "above 0");
     refused("limit=0", "limit must be 1 to 1000");
     refused("kind=planet kind=star", "given twice");
@@ -245,6 +245,25 @@ fn refusals_give_a_reason() {
     assert!(query.check().unwrap_err().contains("at least one end"));
     query.filters[0].test = Test::Is(true);
     assert!(query.check().unwrap_err().contains("needs a range"));
+}
+
+#[test]
+fn search_radius_accepts_ten_thousand_light_years_in_text_and_json() {
+    for radius_ly in [1001.0, 9999.5, 10_000.0] {
+        let query = Query::parse(&format!("within_ly={radius_ly}")).unwrap();
+        query.check().unwrap();
+        let json = serde_json::to_string(&query).unwrap();
+        let restored: Query = serde_json::from_str(&json).unwrap();
+        restored.check().unwrap();
+        assert_eq!(restored.scope, Scope::Within { radius_ly });
+    }
+    for radius_ly in [10_000.1, 10_001.0, f64::INFINITY, f64::NAN, 0.0, -1.0] {
+        let query = Query {
+            scope: Scope::Within { radius_ly },
+            ..Query::default()
+        };
+        assert!(query.check().is_err(), "radius {radius_ly} must be refused");
+    }
 }
 
 #[test]

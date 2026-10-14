@@ -12,9 +12,144 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
 }
 
 #[test]
+fn control_end_edges_ease_vertically_from_the_centre_in_both_directions() {
+    let ctx = egui::Context::default();
+    let theme = super::Theme::GAME;
+    let frame = |time, active| {
+        let mut bounds = Rect::NOTHING;
+        let output = ctx.run(
+            egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(120.0, 40.0), egui::Sense::hover());
+                    bounds = rect;
+                    super::interact::input_edges(
+                        ui,
+                        &theme,
+                        rect,
+                        ui.id().with("edge-test"),
+                        active,
+                    );
+                });
+            },
+        );
+        let edges = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Rect(rect) if rect.fill == theme.accent => Some(rect.rect),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for (index, edge) in edges.iter().enumerate() {
+            assert_eq!(edge.width(), 2.0);
+            assert_eq!(edge.center().y, bounds.center().y);
+            assert_eq!(
+                edge.left(),
+                if index == 0 {
+                    bounds.left()
+                } else {
+                    bounds.right() - 2.0
+                }
+            );
+        }
+        edges
+    };
+    assert!(frame(0.0, false).is_empty());
+    frame(0.01, true);
+    let entering = frame(0.1, true);
+    let full = frame(0.3, true);
+    assert_eq!(full.len(), 2);
+    assert_eq!(full[0].height(), 40.0);
+    assert!(entering[0].height() > 0.0 && entering[0].height() < 40.0);
+    frame(0.31, false);
+    let leaving = frame(0.4, false);
+    assert_eq!(leaving.len(), 2);
+    assert!(leaving[0].height() > 0.0 && leaving[0].height() < 40.0);
+    assert!(frame(0.6, false).is_empty());
+}
+
+#[test]
+fn progress_bars_share_scrollbar_colours_and_keep_text_inside() {
+    for width in [120.0, 600.0] {
+        for done in [Some(-0.5), Some(0.5), Some(1.5), None] {
+            let ctx = egui::Context::default();
+            let theme = super::Theme::GAME;
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 300.0))),
+                    time: Some(1.0),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.set_width(width);
+                        super::progress(
+                            ui,
+                            &theme,
+                            done,
+                            "Searching within 10,000 ly · 12 results so far",
+                        );
+                    });
+                },
+            );
+            let background = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Rect(rect)
+                        if rect.fill
+                            == theme
+                                .accent
+                                .gamma_multiply(super::Theme::SUBTLE_ACCENT_OPACITY) =>
+                    {
+                        assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO);
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .expect("progress remainder must use the idle scrollbar accent");
+            assert_eq!(background.height(), theme.row);
+            let fill = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Rect(rect) if rect.fill == theme.accent => Some(rect.rect),
+                    _ => None,
+                })
+                .expect("progress fill must use the full-strength accent");
+            assert!(background.contains_rect(fill));
+            assert_eq!(fill.height(), background.height());
+            if let Some(done) = done {
+                assert!((fill.width() - background.width() * done.clamp(0.0, 1.0)).abs() < 0.01);
+            }
+            let texts = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some((text, shape.clip_rect)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(!texts.is_empty());
+            for (text, clip) in texts {
+                assert!(
+                    background.contains_rect(Rect::from_min_size(text.pos, text.galley.size()))
+                );
+                assert!(background.contains_rect(clip));
+            }
+        }
+    }
+}
+
+#[test]
 fn filter_removal_and_reset_use_red_feedback_without_recolouring_normal_actions() {
     let ctx = egui::Context::default();
     let theme = super::Theme::GAME;
+    let chips = std::cell::RefCell::new(super::Pills::default());
     let frame = |time, pointer| {
         ctx.run(
             egui::RawInput {
@@ -26,7 +161,9 @@ fn filter_removal_and_reset_use_red_feedback_without_recolouring_normal_actions(
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        super::pill(ui, &theme, "Example filter");
+                        chips
+                            .borrow_mut()
+                            .show(ui, &theme, &[(0, "Example filter".into())]);
                         super::destructive_button(ui, &theme, "Reset");
                     });
                 });
@@ -48,34 +185,76 @@ fn filter_removal_and_reset_use_red_feedback_without_recolouring_normal_actions(
             })
             .unwrap()
     };
-    let colour_count = |output: egui::FullOutput, colour| {
+    let colour_count = |output: &egui::FullOutput, colour| {
         output
             .shapes
             .iter()
             .filter(|shape| {
                 matches!(&shape.shape,
-        egui::epaint::Shape::Rect(rect) if rect.fill == colour && rect.rect.height() == 2.0)
+        egui::epaint::Shape::Rect(rect) if rect.fill == colour && rect.rect.width() == 2.0)
             })
             .count()
     };
     frame(0.32, position("×"));
+    let close_hover = frame(0.6, position("×"));
+    assert_eq!(colour_count(&close_hover, super::Theme::DESTRUCTIVE), 0);
+    assert_eq!(colour_count(&close_hover, theme.accent), 2);
+    assert!(close_hover.shapes.iter().any(|shape| matches!(&shape.shape,
+        egui::epaint::Shape::Text(text) if text.galley.text() == "×"
+            && text.fallback_color == super::Theme::DESTRUCTIVE)));
+    let chip = close_hover
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Rect(rect)
+                if rect.fill == theme.input_fill() && rect.rect.contains(position("×")) =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let edges = |output: &egui::FullOutput| {
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Rect(rect)
+                    if rect.fill == theme.accent && rect.rect.width() == 2.0 =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let lit = edges(&close_hover);
     assert_eq!(
-        colour_count(frame(0.6, position("×")), super::Theme::DESTRUCTIVE),
-        1
+        lit[0],
+        Rect::from_min_size(chip.min, vec2(2.0, chip.height()))
     );
-    frame(0.61, outside);
+    assert_eq!(
+        lit[1],
+        Rect::from_min_size(
+            pos2(chip.right() - 2.0, chip.top()),
+            vec2(2.0, chip.height())
+        )
+    );
+    // Moving between the hit regions keeps one shared animation fully lit.
+    assert_eq!(edges(&frame(0.61, position("Example filter"))), lit);
+    frame(0.62, outside);
     frame(0.9, outside);
     frame(0.91, position("Reset"));
     assert_eq!(
-        colour_count(frame(1.2, position("Reset")), super::Theme::DESTRUCTIVE),
-        1
+        colour_count(&frame(1.2, position("Reset")), super::Theme::DESTRUCTIVE),
+        2
     );
     frame(1.21, outside);
     frame(1.5, outside);
     frame(1.51, position("Example filter"));
     assert_eq!(
-        colour_count(frame(1.8, position("Example filter")), theme.accent),
-        1
+        colour_count(&frame(1.8, position("Example filter")), theme.accent),
+        2
     );
 }
 
@@ -158,7 +337,7 @@ fn shared_fact_rows_are_contiguous_without_changing_surrounding_spacing() {
 }
 
 #[test]
-fn selected_choices_keep_their_underlines_without_hover_or_focus() {
+fn selected_choices_keep_their_end_edges_without_hover_or_focus() {
     let ctx = egui::Context::default();
     let theme = super::Theme::GAME;
     let frame = |time, chosen| {
@@ -178,32 +357,32 @@ fn selected_choices_keep_their_underlines_without_hover_or_focus() {
             },
         )
     };
-    let underlines = |output: egui::FullOutput| {
+    let edges = |output: egui::FullOutput| {
         output
             .shapes
             .into_iter()
             .filter_map(|shape| match shape.shape {
                 egui::epaint::Shape::Rect(rect)
-                    if rect.fill == theme.accent && rect.rect.height() == 2.0 =>
+                    if rect.fill == theme.accent && rect.rect.width() == 2.0 =>
                 {
-                    Some(rect.rect.width())
+                    Some(rect.rect.height())
                 }
                 _ => None,
             })
             .collect::<Vec<_>>()
     };
-    assert!(underlines(frame(0.0, false)).is_empty());
+    assert!(edges(frame(0.0, false)).is_empty());
     frame(0.01, true);
-    let appearing = underlines(frame(0.1, true));
-    assert_eq!(appearing.len(), 2);
-    let selected = underlines(frame(0.3, true));
-    assert_eq!(selected.len(), 2);
+    let appearing = edges(frame(0.1, true));
+    assert_eq!(appearing.len(), 4);
+    let selected = edges(frame(0.3, true));
+    assert_eq!(selected.len(), 4);
     assert!(selected[0] > appearing[0]);
     frame(0.31, false);
-    let leaving = underlines(frame(0.4, false));
-    assert_eq!(leaving.len(), 2);
+    let leaving = edges(frame(0.4, false));
+    assert_eq!(leaving.len(), 4);
     assert!(leaving[0] < selected[0]);
-    assert!(underlines(frame(0.6, false)).is_empty());
+    assert!(edges(frame(0.6, false)).is_empty());
 }
 
 #[test]
@@ -1178,7 +1357,7 @@ fn scrollbars_are_square_full_width_accent_handles_without_tracks() {
 }
 
 #[test]
-fn inputs_share_square_backgrounds_and_focus_underlines() {
+fn inputs_share_square_backgrounds_and_focus_end_edges() {
     for numeric in [false, true] {
         let ctx = egui::Context::default();
         let theme = super::Theme::GAME;
@@ -1202,7 +1381,7 @@ fn inputs_share_square_backgrounds_and_focus_underlines() {
         frame(true);
         frame(false);
         let focused = frame(false);
-        for (output, expected_edges) in [(idle, 0), (focused, 1)] {
+        for (output, expected_edges) in [(idle, 0), (focused, 2)] {
             let mut backgrounds = 0;
             let mut edges = 0;
             for shape in output.shapes {
@@ -1212,7 +1391,7 @@ fn inputs_share_square_backgrounds_and_focus_underlines() {
                         assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO);
                         assert_eq!(rect.stroke, egui::Stroke::NONE);
                     }
-                    if rect.fill == theme.accent && rect.rect.height() == 2.0 {
+                    if rect.fill == theme.accent && rect.rect.width() == 2.0 {
                         edges += 1;
                     }
                 }
@@ -1251,7 +1430,9 @@ fn input_buttons_match_the_number_fields_height() {
 fn filter_chips_reveal_and_remove_with_eased_horizontal_sweeps() {
     let ctx = egui::Context::default();
     let theme = super::Theme::GAME;
-    let frame = |time, events| {
+    let mut chips = super::Pills::default();
+    let mut values = vec![(0, "Planet radius".into())];
+    let mut frame = |time, events| {
         let mut result = super::pill::Pill::default();
         let output = ctx.run(
             egui::RawInput {
@@ -1261,7 +1442,15 @@ fn filter_chips_reveal_and_remove_with_eased_horizontal_sweeps() {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    result = super::pill(ui, &theme, "Planet radius");
+                    result = chips
+                        .show(ui, &theme, &values)
+                        .into_iter()
+                        .next()
+                        .map(|(_, action)| action)
+                        .unwrap_or_default();
+                    if result.remove {
+                        values.clear();
+                    }
                 });
             },
         );
@@ -1284,11 +1473,12 @@ fn filter_chips_reveal_and_remove_with_eased_horizontal_sweeps() {
     let pos = pos2(full.right() - 10.0, full.center().y);
     frame(0.29, vec![egui::Event::PointerMoved(pos)]);
     frame(0.30, vec![button(pos, true)]);
-    assert!(!frame(0.31, vec![button(pos, false)]).0.remove);
-    let (result, visible) = frame(0.40, vec![]);
+    assert!(frame(0.31, vec![button(pos, false)]).0.remove);
+    frame(0.32, vec![]);
+    let (result, visible) = frame(0.41, vec![]);
     assert!(!result.remove);
     let (full, clip) = visible.unwrap();
     assert!(clip.width() < full.width() * 0.5);
     assert_eq!(clip.left(), full.left());
-    assert!(frame(0.51, vec![]).0.remove);
+    assert!(frame(0.52, vec![]).1.is_none());
 }

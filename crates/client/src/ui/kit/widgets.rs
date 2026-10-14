@@ -1,11 +1,11 @@
 //! Headings, notes, switches, buttons, text fields and list rows.
 //! Text-mode themes draw controls as text (`[ button ]`); framed themes draw
 //! outlines. Every control shares `interact`'s hover and press light.
-use super::Theme;
 use super::interact::{
     Highlight, control_sense, focus_input_padding, held_click, highlight, hover_amount,
-    input_underline, row,
+    input_edges, row,
 };
+use super::{SPACING, Theme};
 use bevy_egui::egui::{self, Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 
 /// A faint full-width line.
@@ -324,7 +324,7 @@ fn flat_button(
         theme.input_fill()
     };
     ui.painter().rect_filled(rect, 0, fill);
-    input_underline(
+    input_edges(
         ui,
         theme,
         rect,
@@ -402,7 +402,7 @@ pub fn choice(ui: &mut Ui, theme: &Theme, label: &str, chosen: bool) -> bool {
     flat_button(ui, theme, label, chosen, true, chosen).clicked()
 }
 
-/// `grep text`: a one-line text field after a prompt, underlined.
+/// `grep text`: a one-line text field after a prompt, with animated end edges.
 pub fn input(
     ui: &mut Ui,
     theme: &Theme,
@@ -467,7 +467,7 @@ pub fn field(
         ),
     );
     focus_input_padding(ui, &response, rect, text);
-    input_underline(
+    input_edges(
         ui,
         theme,
         rect,
@@ -500,8 +500,14 @@ pub fn list_row(
 }
 
 /// A row in a menu: a label, and dim text such as a unit at the right.
-pub fn item(ui: &mut Ui, theme: &Theme, label: &str, detail: &str) -> egui::Response {
-    let (rect, response, hover) = row(ui, theme, theme.row + 6.0, true);
+pub fn item(
+    ui: &mut Ui,
+    theme: &Theme,
+    label: &str,
+    detail: &str,
+    selected: bool,
+) -> egui::Response {
+    let (rect, response, hover) = list_row(ui, theme, theme.row + 6.0, selected);
     let painter = ui.painter();
     painter.text(
         pos2(rect.left() + theme.inset, rect.center().y),
@@ -520,16 +526,21 @@ pub fn item(ui: &mut Ui, theme: &Theme, label: &str, detail: &str) -> egui::Resp
     response
 }
 
-/// A thin bar: `Some` share done, or `None` for a moving band while the
-/// amount is unknown.
-pub fn progress(ui: &mut Ui, theme: &Theme, done: Option<f32>) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 2.0), Sense::hover());
+/// A square accent bar with inset status text: `Some` share done, or `None`
+/// for a moving band while the amount is unknown.
+pub fn progress(ui: &mut Ui, theme: &Theme, done: Option<f32>, text: &str) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), theme.row), Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 1, theme.line());
+    painter.rect_filled(
+        rect,
+        0,
+        theme.accent.gamma_multiply(Theme::SUBTLE_ACCENT_OPACITY),
+    );
     let lit = match done {
-        Some(share) => {
-            Rect::from_min_size(rect.min, vec2(rect.width() * share.clamp(0.0, 1.0), 2.0))
-        }
+        Some(share) => Rect::from_min_size(
+            rect.min,
+            vec2(rect.width() * share.clamp(0.0, 1.0), rect.height()),
+        ),
         None => {
             let time = ui.input(|input| input.time) as f32;
             let width = rect.width() * 0.25;
@@ -541,5 +552,19 @@ pub fn progress(ui: &mut Ui, theme: &Theme, done: Option<f32>) {
             )
         }
     };
-    painter.rect_filled(lit, 1, theme.accent);
+    painter.rect_filled(lit, 0, theme.accent);
+    let mut job =
+        egui::text::LayoutJob::simple_singleline(text.to_owned(), theme.small.id(), theme.text);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((rect.width() - 2.0 * SPACING).max(0.0));
+    let galley = painter.layout_job(job);
+    let position = rect.center() - galley.size() * 0.5;
+    let clip = ui.clip_rect().intersect(rect);
+    painter
+        .with_clip_rect(clip)
+        .galley(position, galley.clone(), theme.text);
+    // Dark ink over the full-strength accent keeps the text readable as the
+    // fill advances through it. The unfilled part retains normal theme text.
+    painter
+        .with_clip_rect(clip.intersect(lit))
+        .galley_with_override_text_color(position, galley, theme.fill.to_opaque());
 }

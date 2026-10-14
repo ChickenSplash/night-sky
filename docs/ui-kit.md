@@ -31,8 +31,10 @@ readouts; extending an object should extend that source, not duplicate it.
 - `Theme::GAME`: player-facing windows and modal controls.
 - `Theme::TERMINAL`: debug console, with monospace text-mode controls.
 - `Theme::DESTRUCTIVE`: shared red feedback for close, chip removal and reset.
-- `Theme::SUBTLE_ACCENT_OPACITY`: 0.12, shared by row backgrounds and idle
-  scrollbars. It is a gamma-multiplied accent tint, not a separate blue.
+- `Theme::SUBTLE_ACCENT_OPACITY`: 0.12, shared by row backgrounds, idle
+  scrollbars and progress-bar remainders. It is a gamma-multiplied accent tint,
+  not a separate blue. Progress bars use square full-accent fills and keep
+  their status text inside, with contrasting ink over the filled portion.
 - `SPACING`: 10 logical pixels. Windows, inputs and scroll handles are square;
   row highlight corners still come from their theme.
 - `plain_style` installs the global base style. Windows, dropdowns and modals
@@ -56,11 +58,24 @@ on a drag. `held_click` preserves ordinary click-on-release behaviour during
 long presses and slow frames. Only dedicated window resize/header handles,
 range sliders and HUD controls consume movement.
 
-Input underlines expand from and retract towards their centre. Removable chips
-have independent edit/remove hit regions and delayed removal until their exit
-animation finishes. The Type dropdown shares the same curve for button width,
+Buttons, search fields, number fields, range components and dropdowns use two
+2 px vertical accent edges instead of bottom underlines, matching table rows.
+The edges grow from and retract towards their vertical centre with the shared
+easing, retaining existing hover, focus, held-press and selection behaviour.
+Removable chips share whole-chip accent edges across both hit regions; only
+the remove glyph turns red on hover or held press. They have independent
+edit/remove hit regions. `kit::Pills` owns their visual lifecycle: callers pass
+the current keyed labels every frame, never manually discard rendered chips.
+All additions, removals and label replacements animate through the same
+retargetable motion, including changes made outside the chips. Outgoing visuals
+are non-interactive; re-adding mid-exit reverses without snapping. The raw chip
+painter is private so callers cannot accidentally bypass this behaviour.
+The Type dropdown shares the same curve for button width,
 arrow rotation and menu reveal. `animated_rect` in `motion.rs` retargets layout
 motion from its current displayed rectangle, including mid-animation resizing.
+Inline filter rows use `expandable` with the same arrow painter and reveal
+curve. Their clipped bodies reserve only the animated height and cannot accept
+actions while opening or closing; caller-owned drafts survive folding.
 
 Scene halo text is a separate lightweight overlay, not a framed kit widget.
 Keep its existing scene-specific appearance and pointer-capture behaviour.
