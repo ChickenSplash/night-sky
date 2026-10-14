@@ -42,6 +42,35 @@ These are the drive's known theoretical limits, used as game rules:
   distance and in a rough orbit. A realistic 1 g drive would otherwise need 30
   to 60 minutes to match a planet's 10 to 50 km/s.
 
+## Craft (man-made objects)
+
+The ship is the first of a general family of man-made objects: ships,
+stations, rovers and probes. Build the shared model once, with the ship as its
+only member in the alpha.
+
+- **Live, not generated.** Natural objects come from seeds; craft are state
+  that changes every step. They have stable IDs of their own and never shift
+  any generated object.
+- **One object type.** A single `ObjectRef::Craft { id }` with a craft kind
+  (ship, station, rover, probe), rather than a variant per kind. Selection,
+  inspector, breadcrumbs, actions and `ns inspect` then work for every kind.
+- **A parent frame and a motion mode.** Each craft is positioned relative to a
+  parent (a star system, a planet or a planet's surface), and moves in one of
+  three ways:
+  - **Free:** numerically integrated under gravity and thrust (a flying ship).
+  - **On rails:** a fixed analytic orbit (a station, or a coasting ship under
+    time warp).
+  - **Surface:** latitude, longitude and heading on a rotating body (a rover).
+- **Galactic position and velocity** from the parent chain, so distance,
+  search scope and warp matching treat craft like any other object.
+- **Fully in the object browser.** A "Craft" family in the search registry
+  with kinds `ship`, `station`, `rover` and `probe`, and properties such as
+  speed and parent. Existing relationships apply (`orbits.planet_class=...`).
+  The search engine merges live craft from a separate source with its
+  generated results, since craft are not in the procedural walk.
+- **Picking:** craft are few, so clicks test their markers directly rather
+  than through star picking.
+
 ## Phases
 
 ### 0 · Star velocities ✅ Done
@@ -63,11 +92,18 @@ around stars and barycentre hosts in multiple systems; moons extend it later.
 - Start here: planet and barycentre orbital velocities (the derivative of
   their Kepler positions), so any body reports position and velocity at a
   given time.
-- An engine-independent ship model in `crates/simulation`: f64 position,
-  velocity and orientation in the current star's frame.
+- The [craft](#craft-man-made-objects) model in `crates/simulation`, engine
+  independent: ID, kind, parent frame, motion mode, f64 position, velocity and
+  orientation. Only the ship and the free mode are needed now.
 - Gravity summed from nearby bodies at their analytic (Kepler) positions. The
   ship is a test particle and pulls on nothing.
-- Fixed-substep numerical integration.
+- Fixed-step numerical integration on the main thread, independent of frame
+  rate: each frame runs as many fixed steps as real time allows, caps catch-up
+  after long stalls, and blends between the last two states when rendering.
+- The ship as a selectable `ObjectRef::Craft`: inspector facts (speed, parent,
+  altitude), breadcrumbs, actions such as "Follow ship", and click picking.
+- The ship in the object browser and `ns search`: the Craft family and the
+  live-craft source merged into search results.
 - In ship mode the ship owns the position, and the camera follows it, instead
   of `Navigation::eye`. This is the main architectural change; design it deliberately.
 - A chase camera, plus ship state and commands through the developer API and `ns`.
@@ -114,7 +150,10 @@ around stars and barycentre hosts in multiple systems; moons extend it later.
 ## Later
 
 - Time warp, with coasting ships propagated analytically ("on rails") and
-  numerical integration only while thrusting.
+  numerical integration only while thrusting. Rails assume one dominant body
+  (spheres of influence), a deliberate simplification of the summed gravity.
+- More craft: stations on rails, rovers on planet surfaces, probes. The craft
+  model and browser integration already cover them.
 - Live UI on in-world screens (render to texture).
 - Thrust gravity, fuel and delta-v limits, crashing into bodies.
 - Proper ship models.
@@ -127,3 +166,6 @@ around stars and barycentre hosts in multiple systems; moons extend it later.
 - Fuel limits, or unlimited for the alpha?
 - Can the ship crash?
 - Thrust gravity or artificial deck gravity in the long run?
+- Where craft state is saved: locally per client, or on the backend?
+- Are some stations generated from seeds (part of the galaxy), or are all
+  craft placed or built by the player?
