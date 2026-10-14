@@ -76,9 +76,19 @@ only member in the alpha.
   serializable model in `crates/shared`, so client and server agree on it.
   - The backend owns which craft exist, their owners and their last saved
     state, and shares them with every client.
-  - Each client flies its own ship and reports its state a few times a
-    second; other clients show it by extrapolating from the last report.
-    Server-checked physics is not needed for a rudimentary multiplayer.
+  - First, each client flies its own ship and reports its state a few times
+    a second; other clients show it by extrapolating from the last report.
+  - The goal is server-authoritative physics: clients send only their inputs,
+    the server runs every ship, and clients predict their own ship and
+    correct it from the server's state. Phase 1 keeps this path open:
+    - Physics in `crates/simulation`, with no engine types, so the server
+      can run the same code.
+    - Ships move only through input commands (thrust, attitude) applied at
+      fixed steps, never by direct state edits, so inputs can be sent instead.
+    - A fixed step rate shared by client and server.
+    - Native and WASM may differ in the last digits of sin, cos and powers,
+      so correction must tolerate small differences rather than expect
+      bit-identical results.
   - Live updates need a push channel (WebSockets in Axum); the two-second
     `/galaxy` poll is too slow for moving craft.
   - With no backend, the native client keeps its craft in memory, as it
@@ -114,6 +124,8 @@ around stars and barycentre hosts in multiple systems; moons extend it later.
 - Fixed-step numerical integration on the main thread, independent of frame
   rate: each frame runs as many fixed steps as real time allows, caps catch-up
   after long stalls, and blends between the last two states when rendering.
+- The ship changes only through input commands applied at fixed steps, so a
+  server can later run it from the same inputs.
 - The ship as a selectable `ObjectRef::Craft`: inspector facts (speed, parent,
   altitude), breadcrumbs, actions such as "Follow ship", and click picking.
 - The ship in the object browser and `ns search`: the Craft family and the
@@ -170,6 +182,8 @@ around stars and barycentre hosts in multiple systems; moons extend it later.
   model and browser integration already cover them.
 - Craft saved on the backend, then rudimentary multiplayer: other players'
   ships shown live through a WebSocket channel.
+- Then server-authoritative multiplayer: the server runs all craft from
+  players' inputs, with client prediction and correction.
 - Live UI on in-world screens (render to texture).
 - Thrust gravity, fuel and delta-v limits, crashing into bodies.
 - Proper ship models.
