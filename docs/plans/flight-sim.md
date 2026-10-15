@@ -164,7 +164,8 @@ come later, with the layered controls.
   player would, so a server can run it too:
   - It turns towards a target direction using only the ship's own turning
     thrusters, speeding up and then braking in time to stop on target without
-    overshooting.
+    overshooting from rest; an existing spin can make overshoot physically
+    unavoidable within the available thruster limits.
   - Targets are worked out again each step: prograde, retrograde, normal,
     anti-normal, radial in and out (relative to the body the ship orbits), a
     body, or a fixed direction in the system's axes.
@@ -187,7 +188,7 @@ come later, with the layered controls.
 - The inspector shows throttle, spin and autopilot mode.
 - **Done when:** from the CLI alone, the ship points prograde, burns, stops
   its rotation and points at a body, settling on each target without
-  overshoot; autopilot tests pass on both targets.
+  overshoot from rest; autopilot tests pass on both targets.
 
 Checkpoints, each committed and checked on both targets:
 
@@ -196,9 +197,10 @@ Checkpoints, each committed and checked on both targets:
    inputs. Tests: spin stays constant without input, thrust follows the
    orientation, a ship without a reverse drive refuses negative throttle,
    and the 100-lap energy test still passes.
-2. **Pointing autopilot** (`crates/simulation`): the controller, every target,
+2. ✅ **Pointing autopilot** (`crates/simulation`): the controller, every target,
    roll hold and "up", "stop rotation" and release. Tests: it settles without
-   overshoot from awkward starts, tracks prograde around a whole orbit, and a
+   overshoot from rest at awkward angles, recovers from initial spin,
+   tracks prograde around a whole orbit, and a
    weaker ship turns more slowly.
 3. **The client and the CLI:** the client applies inputs and the autopilot at
    each fixed step, holds the time rate while thrusting or turning, and

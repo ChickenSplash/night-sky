@@ -16,6 +16,9 @@ use crate::{EARTH_SOLAR, SUN_GM, State};
 /// Fixed simulation time per physics step, shared by every client and server.
 pub const STEP_SECONDS: f64 = 1.0 / 20.0;
 
+mod attitude;
+pub use attitude::{AttitudePilot, PointTarget};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CraftKind {
@@ -130,6 +133,8 @@ pub struct Craft {
     pub spin: [f64; 3],
     #[serde(default)]
     pub thrusters: Thrusters,
+    #[serde(default)]
+    pub autopilot: AttitudePilot,
     /// Simulation time `motion` describes, in seconds.
     pub seconds: f64,
     pub input: Input,
@@ -143,6 +148,11 @@ pub struct Craft {
 pub trait Gravity {
     /// Acceleration in metres per second squared at `position`, in metres.
     fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3];
+    /// A named body, or the dominant body when no ID is supplied. Guidance
+    /// needs velocity as well as position; gravity-only fields may omit it.
+    fn reference(&self, _id: Option<&str>, _position: [f64; 3], _seconds: f64) -> Option<State> {
+        None
+    }
 }
 
 impl Craft {
@@ -156,6 +166,7 @@ impl Craft {
             orientation: [0.0, 0.0, 0.0, 1.0],
             spin: [0.0; 3],
             thrusters: Thrusters::default(),
+            autopilot: AttitudePilot::default(),
             seconds,
             input: Input::default(),
             gravity: None,
@@ -182,6 +193,9 @@ impl Craft {
             return Err("ship has no reverse drive");
         }
         self.input.controls = controls;
+        if controls.rotation != [0.0; 3] {
+            self.release();
+        }
         Ok(())
     }
 
@@ -201,9 +215,8 @@ impl Craft {
             .to_array()
     }
 
-    fn turn(&mut self) {
-        let acceleration = DVec3::from_array(self.input.controls.rotation)
-            * DVec3::from_array(self.thrusters.angular);
+    fn turn(&mut self, rotation: [f64; 3]) {
+        let acceleration = DVec3::from_array(rotation) * DVec3::from_array(self.thrusters.angular);
         let midpoint = DVec3::from_array(self.spin) + acceleration * (STEP_SECONDS / 2.0);
         if midpoint != DVec3::ZERO {
             self.orientation = (DQuat::from_array(self.orientation)
@@ -225,7 +238,8 @@ impl Craft {
     /// orbital energy from drifting over many laps.
     pub fn step(&mut self, gravity: &impl Gravity) {
         let thrust = self.thrust();
-        self.turn();
+        let rotation = self.guidance(gravity);
+        self.turn(rotation);
         let end_thrust = self.thrust();
         let Motion::Free(state) = &mut self.motion;
         let half = STEP_SECONDS / 2.0;
@@ -374,6 +388,15 @@ impl Field {
 }
 
 impl Gravity for Field {
+    fn reference(&self, id: Option<&str>, position: [f64; 3], seconds: f64) -> Option<State> {
+        let bodies = self.bodies(seconds);
+        let body = match id {
+            Some(id) => bodies.iter().find(|body| body.id == id),
+            None => self.dominant(&bodies, position),
+        }?;
+        Some(body.state)
+    }
+
     fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3] {
         let mut sum = [0.0; 3];
         let members = crate::member_positions(&self.system, self.page, seconds);

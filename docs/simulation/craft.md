@@ -45,6 +45,37 @@ uses the starting and ending attitudes.
 These controls are implemented in the simulation. Client/CLI integration is
 still pending; the existing CLI keeps its frame-axis acceleration command.
 
+### Attitude guidance (simulation)
+
+`point` engages a persistent pointing autopilot; `stop_rotation` brakes spin
+without changing linear velocity or throttle, and `release` returns to manual
+rotation. A nonzero manual rotation input also releases the autopilot. Manual
+throttle and translation do not cancel pointing. The autopilot is serialized
+with the craft, including its roll reference.
+
+Each fixed step resolves prograde/retrograde from velocity relative to the
+dominant body, radial in/out from relative position, and normal/anti-normal
+from their cross product. A body target follows its instantaneous position;
+a vector target is fixed in system axes. `Field` supplies the same analytic
+body states used elsewhere. A missing body or degenerate direction (zero
+relative speed, for example) makes guidance brake spin and retry next step.
+
+Pointing uses the shortest quaternion error, a bounded desired angular rate,
+and per-axis acceleration limited by the real turning thrusters. It never
+sets attitude or spin directly. A damped approach slows near the target;
+rest-to-target turns settle without overshoot in the regression tests. An
+arbitrary initial spin may make overshoot physically unavoidable, and a
+rapidly moving target may outrun a weak ship's turning capability. Disabled
+axes cannot be controlled. Moving targets are tracked with a small lag, not
+by instant alignment.
+
+Without an explicit up vector, the desired attitude is parallel transported
+as the direction changes, preserving roll without a world-up pole. An
+explicit up vector fixes roll by its projection perpendicular to the nose.
+When that projection vanishes, guidance retains transported roll until up
+becomes usable again. Linear acceleration in g does not determine rotational
+performance: the independent angular limits are in rad/s².
+
 ## Gravity
 
 A craft feels the summed pull of every star and planet of its system, each at
