@@ -22,6 +22,104 @@ impl Gravity for Nothing {
 
 const EARTH_GM: f64 = EARTH_SOLAR * SUN_GM;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn body_drives_and_fine_thrusters_follow_attitude() {
+    for axis in 0..3 {
+        let mut craft = ship(State::default());
+        craft.orientation = DQuat::from_rotation_y(0.8).to_array();
+        let mut translation = [0.0; 3];
+        translation[axis] = -0.4;
+        craft
+            .control(Controls {
+                translation,
+                ..Controls::default()
+            })
+            .unwrap();
+        craft.advance(&Nothing, 2.0, 40);
+        let expected = DQuat::from_array(craft.orientation)
+            * DVec3::from_array(translation)
+            * craft.thrusters.fine
+            * craft.seconds;
+        assert!(DVec3::from_array(craft.state().velocity).distance(expected) < 1e-10);
+    }
+    for throttle in [-1.0, 0.5, 1.0] {
+        let mut craft = ship(State::default());
+        craft.orientation = DQuat::from_rotation_x(0.7).to_array();
+        craft
+            .control(Controls {
+                throttle,
+                ..Controls::default()
+            })
+            .unwrap();
+        craft.step(&Nothing);
+        let expected = DQuat::from_array(craft.orientation)
+            * -DVec3::Z
+            * throttle
+            * craft.thrusters.forward
+            * STEP_SECONDS;
+        assert!(DVec3::from_array(craft.state().velocity).distance(expected) < 1e-10);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn spin_persists_and_turning_uses_each_body_axis() {
+    for axis in 0..3 {
+        let mut craft = ship(State::default());
+        let mut rotation = [0.0; 3];
+        rotation[axis] = 0.5;
+        craft
+            .control(Controls {
+                rotation,
+                ..Controls::default()
+            })
+            .unwrap();
+        for _ in 0..40 {
+            craft.step(&Nothing);
+        }
+        let expected = DVec3::from_array(rotation) * 0.1 * 2.0;
+        assert!(DVec3::from_array(craft.spin).distance(expected) < 1e-12);
+        craft.control(Controls::default()).unwrap();
+        let spin = craft.spin;
+        let start = DQuat::from_array(craft.orientation);
+        for _ in 0..2000 {
+            craft.step(&Nothing);
+        }
+        assert_eq!(craft.spin, spin);
+        let expected = start * DQuat::from_scaled_axis(DVec3::from_array(spin) * 100.0);
+        assert!(DQuat::from_array(craft.orientation).dot(expected).abs() > 1.0 - 1e-12);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn commands_refuse_invalid_inputs_without_changing_state() {
+    let mut craft = ship(State::default());
+    craft.thrusters.reverse = 0.0;
+    let original = craft.input;
+    for throttle in [-1.0, 2.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            craft
+                .control(Controls {
+                    throttle,
+                    ..Controls::default()
+                })
+                .is_err()
+        );
+        assert_eq!(craft.input, original);
+    }
+    // Fine backward translation is independent of the optional reverse drive.
+    craft
+        .control(Controls {
+            translation: [0.0, 0.0, 1.0],
+            ..Controls::default()
+        })
+        .unwrap();
+    craft.step(&Nothing);
+    assert!(craft.state().velocity[2] > 0.0);
+}
+
 fn ship(state: State) -> Craft {
     let frame = Frame::System {
         star: "test".into(),

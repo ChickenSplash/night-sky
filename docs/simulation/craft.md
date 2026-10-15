@@ -14,8 +14,10 @@ of their own (`craft-1`), and they never shift any generated object. See the
 | `frame` | What the position is measured from: a star system, by its page star's ID |
 | `motion` | How it moves; only `Free` (integrated) exists yet |
 | `seconds` | The simulation time its state describes |
-| `input` | What it is told to do, held until changed: thrust in m/s², frame axes |
-| `orientation` | A unit quaternion; nothing turns it yet |
+| `input` | Persistent throttle, translation and rotation fractions; legacy frame-axis thrust remains for the current CLI |
+| `orientation` | Unit quaternion mapping body axes to system axes |
+| `spin` | Body-local angular velocity in rad/s, without passive damping |
+| `thrusters` | Per-ship main, reverse, fine and angular acceleration limits |
 
 A system frame uses the same origin and axes as the bodies' orbits: metres
 from the page's outermost barycentre, in its plane axes (see
@@ -24,6 +26,24 @@ from the page's outermost barycentre, in its plane axes (see
 The model is serde-serializable and engine independent, so a server can run
 the same code. A craft changes only through its input, applied at fixed
 steps, never by editing its state, apart from placing it when it is built.
+
+### Body-axis control (simulation)
+
+Body axes are +X right, +Y up and -Z forward. Rotation inputs are right-handed
+about X (pitch), Y (yaw) and Z (roll). Each input is a finite fraction in
+[-1, 1], validated atomically by `control`. Negative throttle uses the reverse
+drive and is refused when that drive is disabled. Fine translation remains
+available independently. Main and fine thrust add together.
+
+Default main and reverse drives deliver 9.80665 m/s²; fine translation delivers
+0.980665 m/s² per axis. Turning delivers 0.1 rad/s² per axis, an independent
+angular limit, not a linear acceleration in g. There is no inertia or fuel
+model yet. With no rotation input, spin persists. A midpoint angular step
+updates and normalizes the quaternion; thrust in the two Verlet half-kicks
+uses the starting and ending attitudes.
+
+These controls are implemented in the simulation. Client/CLI integration is
+still pending; the existing CLI keeps its frame-axis acceleration command.
 
 ## Gravity
 

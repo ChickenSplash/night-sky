@@ -191,7 +191,7 @@ come later, with the layered controls.
 
 Checkpoints, each committed and checked on both targets:
 
-1. **Thrusters and rotation in the physics** (`crates/simulation`): per-ship
+1. ✅ **Thrusters and rotation in the physics** (`crates/simulation`): per-ship
    thruster settings, spin, thrust along the ship's axes, and the three
    inputs. Tests: spin stays constant without input, thrust follows the
    orientation, a ship without a reverse drive refuses negative throttle,

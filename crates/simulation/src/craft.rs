@@ -7,6 +7,7 @@
 //!   its system at their analytic positions. A craft pulls on nothing.
 //! - A craft changes only through its `Input`, applied at every step, so a
 //!   server can run the same craft from the same inputs.
+use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 use space_shared::{Planet, StarSystem};
 
@@ -78,6 +79,41 @@ pub enum Motion {
 pub struct Input {
     /// Thrust acceleration in metres per second squared, in frame axes.
     pub thrust: [f64; 3],
+    #[serde(default)]
+    pub controls: Controls,
+}
+
+/// Body axes: +X right, +Y up, -Z forward. Rotation is right-handed about
+/// X (pitch), Y (yaw), Z (roll). Commands persist until replaced.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Controls {
+    pub throttle: f64,
+    /// Right, up, back, each in [-1, 1]. Independent fine thrusters.
+    pub translation: [f64; 3],
+    /// Pitch, yaw, roll, each in [-1, 1].
+    pub rotation: [f64; 3],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Thrusters {
+    /// Main and reverse acceleration in m/s²; zero disables a drive.
+    pub forward: f64,
+    pub reverse: f64,
+    pub fine: f64,
+    /// Angular acceleration in rad/s² about each body axis. This is not g:
+    /// a future inertia model can derive it from torque and hull geometry.
+    pub angular: [f64; 3],
+}
+
+impl Default for Thrusters {
+    fn default() -> Self {
+        Self {
+            forward: 9.80665,
+            reverse: 9.80665,
+            fine: 0.980665,
+            angular: [0.1; 3],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,6 +125,11 @@ pub struct Craft {
     pub motion: Motion,
     /// Attitude as a unit quaternion (x, y, z, w) in frame axes.
     pub orientation: [f64; 4],
+    /// Body-local angular velocity, rad/s. No passive damping.
+    #[serde(default)]
+    pub spin: [f64; 3],
+    #[serde(default)]
+    pub thrusters: Thrusters,
     /// Simulation time `motion` describes, in seconds.
     pub seconds: f64,
     pub input: Input,
@@ -113,6 +154,8 @@ impl Craft {
             frame,
             motion: Motion::Free(State::default()),
             orientation: [0.0, 0.0, 0.0, 1.0],
+            spin: [0.0; 3],
+            thrusters: Thrusters::default(),
             seconds,
             input: Input::default(),
             gravity: None,
@@ -125,6 +168,52 @@ impl Craft {
         }
     }
 
+    /// Accept a complete manual input atomically, rejecting unsupported or
+    /// non-finite commands instead of silently clipping them.
+    pub fn control(&mut self, controls: Controls) -> Result<(), &'static str> {
+        if !std::iter::once(&controls.throttle)
+            .chain(controls.translation.iter())
+            .chain(controls.rotation.iter())
+            .all(|x| x.is_finite() && (-1.0..=1.0).contains(x))
+        {
+            return Err("controls must be finite fractions in [-1, 1]");
+        }
+        if controls.throttle < 0.0 && self.thrusters.reverse <= 0.0 {
+            return Err("ship has no reverse drive");
+        }
+        self.input.controls = controls;
+        Ok(())
+    }
+
+    fn thrust(&self) -> [f64; 3] {
+        let c = self.input.controls;
+        if c.throttle == 0.0 && c.translation == [0.0; 3] {
+            return self.input.thrust;
+        }
+        let drive = if c.throttle >= 0.0 {
+            self.thrusters.forward
+        } else {
+            self.thrusters.reverse
+        };
+        let local =
+            DVec3::from_array(c.translation) * self.thrusters.fine - DVec3::Z * c.throttle * drive;
+        (DQuat::from_array(self.orientation) * local + DVec3::from_array(self.input.thrust))
+            .to_array()
+    }
+
+    fn turn(&mut self) {
+        let acceleration = DVec3::from_array(self.input.controls.rotation)
+            * DVec3::from_array(self.thrusters.angular);
+        let midpoint = DVec3::from_array(self.spin) + acceleration * (STEP_SECONDS / 2.0);
+        if midpoint != DVec3::ZERO {
+            self.orientation = (DQuat::from_array(self.orientation)
+                * DQuat::from_scaled_axis(midpoint * STEP_SECONDS))
+            .normalize()
+            .to_array();
+        }
+        self.spin = (DVec3::from_array(self.spin) + acceleration * STEP_SECONDS).to_array();
+    }
+
     /// Place the craft, as when it is built or loaded.
     pub fn place(&mut self, state: State, seconds: f64) {
         self.motion = Motion::Free(state);
@@ -135,9 +224,11 @@ impl Craft {
     /// One fixed step: kick, drift, kick (velocity Verlet), which keeps
     /// orbital energy from drifting over many laps.
     pub fn step(&mut self, gravity: &impl Gravity) {
+        let thrust = self.thrust();
+        self.turn();
+        let end_thrust = self.thrust();
         let Motion::Free(state) = &mut self.motion;
         let half = STEP_SECONDS / 2.0;
-        let thrust = self.input.thrust;
         let before = self
             .gravity
             .unwrap_or_else(|| gravity.acceleration(state.position, self.seconds));
@@ -148,7 +239,7 @@ impl Craft {
         self.seconds += STEP_SECONDS;
         let after = gravity.acceleration(state.position, self.seconds);
         for i in 0..3 {
-            state.velocity[i] += (after[i] + thrust[i]) * half;
+            state.velocity[i] += (after[i] + end_thrust[i]) * half;
         }
         self.gravity = Some(after);
     }
