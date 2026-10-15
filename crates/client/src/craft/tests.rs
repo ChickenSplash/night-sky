@@ -44,6 +44,77 @@ fn drawn_attitude_interpolates_on_the_same_step_as_position() {
 }
 
 #[test]
+fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
+    use bevy::math::{DQuat, DVec3};
+    use space_simulation::craft::{AttitudePilot, PointTarget};
+    fn advance(app: &mut App, steps: usize) {
+        for _ in 0..steps {
+            app.world_mut().resource_mut::<Clock>().0.seconds += STEP_SECONDS;
+            app.update();
+        }
+    }
+    fn error(app: &App) -> f64 {
+        let live = &app.world().resource::<Fleet>().craft[0];
+        let AttitudePilot::Point { target, .. } = &live.craft.autopilot else {
+            panic!("not pointing");
+        };
+        let direction = target
+            .direction(live.craft.state(), live.craft.seconds, &live.field)
+            .unwrap();
+        (DQuat::from_array(live.craft.orientation) * -DVec3::Z)
+            .angle_between(DVec3::from_array(direction.to_array()))
+    }
+    let mut app = app();
+    let (_, _, body) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(body.clone()),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let steer = |order| UiCommand::SteerCraft { id: None, order };
+    send(
+        &mut app,
+        steer(Order::Point {
+            target: PointTarget::Prograde,
+            up: None,
+        }),
+    );
+    advance(&mut app, 1000);
+    assert!(error(&app) < 0.004);
+    let speed = |app: &App| {
+        let live = &app.world().resource::<Fleet>().craft[0];
+        let (state, dominant) = live.surroundings(live.craft.seconds);
+        distance(relative(state, dominant.unwrap().state).velocity, [0.0; 3])
+    };
+    let before = speed(&app);
+    send(&mut app, steer(Order::Throttle { value: 0.5 }));
+    advance(&mut app, 200);
+    assert!(speed(&app) > before + 20.0);
+    send(&mut app, steer(Order::Cut));
+    advance(&mut app, 200);
+    assert!(
+        app.world().resource::<Fleet>().craft[0]
+            .craft
+            .spin
+            .iter()
+            .all(|v| v.abs() < 1e-6)
+    );
+    send(
+        &mut app,
+        steer(Order::Point {
+            target: PointTarget::Body(body),
+            up: None,
+        }),
+    );
+    advance(&mut app, 1200);
+    assert!(error(&app) < 0.004);
+}
+
+#[test]
 fn body_orders_validate_and_patch_inputs_without_cancelling_pointing() {
     use space_simulation::craft::{AttitudePilot, PointTarget};
     let mut app = app();

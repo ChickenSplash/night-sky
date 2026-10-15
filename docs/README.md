@@ -82,8 +82,8 @@ The shared native/browser client in `crates/client`, with browser workers in
   but stars do not move around the galaxy. Diffuse galaxy glow
   is an approximate smooth prototype, not a detailed dust-attenuated renderer.
 - Camera flights are navigation aids, not physical spacecraft or warp simulations.
-  Craft are simulated and can be followed closely, but are spawned and
-  thrusted only from the CLI so far: no in-app controls, trajectory
+  Craft have six-axis CLI flight and pointing assists, and can be followed
+  closely, but no in-app piloting controls, trajectory
   prediction, warp, saving or collisions yet.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 

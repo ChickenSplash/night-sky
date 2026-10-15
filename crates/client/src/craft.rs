@@ -353,6 +353,14 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
         .iter()
         .map(|live| {
             let (state, dominant) = live.surroundings(seconds);
+            let target_direction = match &live.craft.autopilot {
+                space_simulation::craft::AttitudePilot::Point { target, .. } => target
+                    .direction(live.craft.state(), live.craft.seconds, &live.field)
+                    .map(|v| v.to_array()),
+                _ => None,
+            };
+            let forward = bevy::math::DQuat::from_array(live.craft.orientation) * -bevy::math::DVec3::Z;
+            let pointing_error_deg = target_direction.map(|v| forward.angle_between(bevy::math::DVec3::from_array(v)).to_degrees());
             let around = dominant.map(|body| {
                 let relative = relative(state, body.state);
                 let orbit = space_simulation::craft::Elements::of(relative, body.gm);
@@ -372,7 +380,8 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 "speed_kms": distance(state.velocity, [0.0; 3]) / 1_000.0,
                 "input": live.craft.input, "around": around,
                 "orientation_xyzw": live.craft.orientation,
-                "forward": (bevy::math::DQuat::from_array(live.craft.orientation) * -bevy::math::DVec3::Z).to_array(),
+                "forward": forward.to_array(),
+                "target_direction": target_direction, "pointing_error_deg": pointing_error_deg,
                 "up": (bevy::math::DQuat::from_array(live.craft.orientation) * bevy::math::DVec3::Y).to_array(),
                 "spin_rads": live.craft.spin,
                 "thrusters": live.craft.thrusters,

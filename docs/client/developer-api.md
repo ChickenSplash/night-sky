@@ -173,6 +173,9 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   attitude pilot state. `around` includes altitude, relative speed and
   instantaneous two-body orbital elements, not a predicted trajectory.
   `held_clock` indicates physics catch-up; `step_seconds` is the fixed step.
+  While pointing, `target_direction` and `pointing_error_deg` report the
+  resolved direction and nose error at the latest physics step; they are
+  null outside pointing mode or when its target is undefined.
 - Steering defaults to the selected ship, or the only ship. Use `--id` to
   disambiguate. Throttle and axis inputs persist as fractions in [-1,1]. Each
   `translate` or `rotate` replaces its three axes, zeroing omitted axes;

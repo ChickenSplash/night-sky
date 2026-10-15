@@ -143,7 +143,7 @@ picking, "Follow ship" from 200 m, `ns ship`) and in search. See
 - **Done when:** a test orbit runs 100 laps with negligible energy drift, on
   both targets.
 
-### 2 · Full ship control
+### 2 · Full ship control ✅ Done
 
 The ship can be flown on every axis, entirely from the CLI. In-app controls
 come later, with the layered controls.
@@ -175,8 +175,8 @@ come later, with the layered controls.
 - **Time rate.** While the ship is thrusting or turning, the clock is held to
   a low rate (start at 10× real time, tune in play), so a burn is never spread
   over hours of simulation in one frame.
-- **Facing is visible:** a nose marker or a simple pointed shape instead of
-  the plain cube, until proper ship models.
+- **Facing is visible:** a 30 m cuboid with a pyramid nose and wings on its
+  bottom edges, until proper ship models.
 - **A reorganised `ns ship`,** grouped by what is being done:
   - `spawn`, `despawn`, `list`, `follow`.
   - `state`: orientation, spin, velocity, throttle, autopilot mode, orbit
@@ -209,8 +209,16 @@ Checkpoints, each committed and checked on both targets:
 4. ✅ **Visible facing:** a 30 m long wireframe cuboid with a pyramid nose
    and wings rooted on the bottom edges, drawn with the orientation blended
    between steps like the position.
-5. **Done when, run live,** then the docs (craft, developer API, limitations)
+5. ✅ **Done when, run live,** then the docs (craft, developer API, limitations)
    and the phase marked done.
+
+Verified through the live CLI: point prograde, burn, brake spin, point at the
+moving planet and align a fixed direction with an up vector. Manual fine
+translation and all turning axes, the manoeuvre time cap and refusal of
+reverse throttle on a ship without that drive were also exercised. The
+winged test hull was inspected on screen. Native/WASM checks cover the
+simulation; native client regression tests cover the command-to-physics
+pipeline. Browser rendering has not been visually tested for this phase.
 
 ### 3 · Trajectory prediction
 
