@@ -229,9 +229,57 @@ pipeline. Browser rendering has not been visually tested for this phase.
   within a per-frame budget. Redone when the inputs change and live during a
   burn.
 - Drawn relative to the body the ship orbits, so an orbit shows as a closed
-  ellipse rather than a spiral smeared along the planet's own path.
+  near-ellipse rather than a spiral smeared along the planet's own path.
+  Perturbations from other bodies remain visible; closure is not guaranteed.
+  In multiple systems the reference can be a component star or a nested
+  barycentre, not simply the strongest-pulling star. Selection follows the
+  stellar hierarchy with conservative influence/stability boundaries and a
+  switching margin. These are display/reference heuristics, not changes to
+  the summed gravitational forces, and do not certify a stable orbit.
+- Keep the whole prediction relative to its current reference, subtracting
+  that reference's future position at each sample and anchoring the result
+  at its present position. Mark predicted reference exits/encounters; switch
+  the displayed reference when the ship actually crosses the boundary.
+  Do not splice differently referenced segments in the first version.
 - Apoapsis and periapsis in the inspector and `ns ship state`.
 - **Done when:** a burn from the CLI visibly reshapes the predicted orbit.
+
+Checkpoints, each committed and checked on both targets:
+
+1. **Hierarchical orbit references** (`crates/simulation`): planets, individual
+   stars and nested barycentres, with position, velocity and effective mass.
+   Use the existing system hierarchy and stellar stability/influence zones
+   to choose a useful local reference, expanding to enclosing pairs outside
+   component regions; retain the current reference through a switching
+   margin. Planet selection starts with the existing Hill-sphere heuristic.
+   Keep reference selection separate from gravity sources: a barycentre is
+   not an extra gravitating body. Test circumstellar, circumbinary and nested
+   triple cases, plus boundary hysteresis. Share the reference with craft
+   readouts and orbital pointing assists so they describe the same orbit.
+2. **Bounded coast predictor** (`crates/simulation`): copy the current
+   translational state and predict with all propulsion off, under every
+   actual star and planet on its analytic path. Share the force model and
+   Verlet integration, with a prediction-only timestep policy. Bound the
+   horizon, work and sample count; use about one estimated period for bound
+   paths and a finite horizon for escapes/undefined periods. Check accuracy
+   against fine fixed-step runs, especially at periapsis and encounters.
+   Return the achieved horizon and any truncation, never imply a partial
+   calculation is a complete orbit. Do not modify the real ship or clock.
+3. **Client prediction scheduling:** budget work across frames on native and
+   WASM, refresh from current state during flight and burns, and invalidate
+   on orders, despawn or reference changes. Discard obsolete work, retain a
+   clearly aged last result while updating, and prevent refreshes from
+   starving completion. Test pause, high time rates and multiple craft.
+4. **Trajectory and events:** draw the selected ship's path camera-relatively
+   in f64 before GPU conversion, in the fixed reference chosen above. Show
+   reference name, predicted influence exits/encounters and prediction age /
+   horizon. Distinguish sampled predicted apsides from existing instantaneous
+   two-body estimates, including in `ns ship state` and the inspector.
+   Test planet and barycentre anchoring, switching and close/far render scales.
+5. **End-to-end verification and docs:** from the CLI, make a burn and verify
+   that the coast path reshapes, then check a planetary escape, a
+   circumbinary orbit and reference switching. Run the full native/WASM
+   checks, update craft/rendering/developer API docs and mark the phase done.
 
 ### 4 · Warp drive
 
