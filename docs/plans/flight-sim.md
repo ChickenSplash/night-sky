@@ -189,6 +189,26 @@ come later, with the layered controls.
   its rotation and points at a body, settling on each target without
   overshoot; autopilot tests pass on both targets.
 
+Checkpoints, each committed and checked on both targets:
+
+1. **Thrusters and rotation in the physics** (`crates/simulation`): per-ship
+   thruster settings, spin, thrust along the ship's axes, and the three
+   inputs. Tests: spin stays constant without input, thrust follows the
+   orientation, a ship without a reverse drive refuses negative throttle,
+   and the 100-lap energy test still passes.
+2. **Pointing autopilot** (`crates/simulation`): the controller, every target,
+   roll hold and "up", "stop rotation" and release. Tests: it settles without
+   overshoot from awkward starts, tracks prograde around a whole orbit, and a
+   weaker ship turns more slowly.
+3. **The client and the CLI:** the client applies inputs and the autopilot at
+   each fixed step, holds the time rate while thrusting or turning, and
+   carries the reorganised `ns ship`, its developer API commands, the
+   `ns ship state` readout and the inspector facts.
+4. **Visible facing:** the nose marker or pointed shape, drawn with the
+   orientation blended between steps like the position.
+5. **Done when, run live,** then the docs (craft, developer API, limitations)
+   and the phase marked done.
+
 ### 3 · Trajectory prediction
 
 - A predicted trajectory line ahead of the ship. This is the most important
