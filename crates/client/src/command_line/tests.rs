@@ -47,6 +47,16 @@ fn every_usage_parses() {
             parse(r#"{"type":"inspect_object","inspection":{"source":"location","object":{"kind":"galaxy"}}}"#).expect("nested inspection uses the documented JSON command route");
             continue;
         }
+        if usage.name == "spawn_ship" {
+            // A speed or a velocity, not both.
+            for line in [
+                "spawn_ship id 400 7.5",
+                "spawn_ship id 400 velocity_kms=[0,7.5,0]",
+            ] {
+                parse(line).unwrap_or_else(|err| panic!("{line}: {err}"));
+            }
+            continue;
+        }
         let args: Vec<_> = usage
             .fields
             .iter()
@@ -64,6 +74,7 @@ fn every_usage_parses() {
                 "threads" => "4",
                 "work_cap_millions" => "100",
                 "query" => "kind=planet within_ly=20",
+                "thrust" => "[0,0,1]",
                 _ => "id",
             })
             .collect();

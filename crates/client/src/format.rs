@@ -47,6 +47,16 @@ pub fn au_text(au: f64) -> String {
     }
 }
 
+/// A distance in km, grouped in thousands, with a decimal when small.
+pub fn km_text(km: f64) -> String {
+    if km.abs() < 1_000.0 {
+        format!("{km:.1} km")
+    } else {
+        let sign = if km < 0.0 { "-" } else { "" };
+        format!("{sign}{} km", grouped(km.abs().round() as usize))
+    }
+}
+
 pub fn rotation_text(hours: f64) -> String {
     if hours >= 48.0 {
         period_text(hours / 24.0)

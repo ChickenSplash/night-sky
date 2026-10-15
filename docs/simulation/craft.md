@@ -69,3 +69,38 @@ still comes from every body.
 
 The craft tests run natively and, through `wasm-bindgen-test-runner` under
 Node, as WebAssembly (`./scripts/check.sh`).
+
+## In the client
+
+The client keeps live craft in `craft::Fleet` (`crates/client/src/craft.rs`),
+in memory only: nothing is saved or shared yet.
+
+- **Stepping:** `craft::step` runs after the clock advances each frame and
+  steps every craft until it reaches the clock, at most
+  `MAX_STEPS_PER_FRAME` (1,000, about 50 s of simulation time) per frame.
+  A craft that cannot keep up **holds the clock** back to its own time, so
+  bodies and craft never disagree; the time HUD then reads `· held by craft`.
+  At the default 1 day/s, time runs at roughly 3,000 times real time with a
+  ship present. Pausing stops craft too.
+- **Drawing:** a craft is drawn between its last two steps, blended to the
+  clock's time, as a wireframe cube of its true size (30 m) plus a marker
+  and label. Only craft in the visited system, on the page their frame names,
+  are drawn, picked or followed.
+- **Spawning** (`spawn_ship`): above a planet, star or barycentre, or a system
+  by its key (its star, or outermost barycentre). Its system must be loaded,
+  visited or charted. The ship starts on the body's far side from the body's
+  own parent, in the plane of the body's orbit and turning the same way:
+  circular by default, or at a given prograde speed, or a given velocity in
+  the system's axes. Speeds are relative to the body.
+- **Selection and following:** `Selection::Craft` and `ObjectRef::Craft`.
+  Clicking a craft's marker selects it; a second click, **Follow ship** or
+  `fly_to_craft` follows it from the closest zoom (20,000 km), visiting its
+  system first if needed. The selection trail puts a craft below the planet
+  it is around, else its system's star.
+- **Inspector:** type, system, the body it is around, altitude, speed and
+  two-body periapsis, apoapsis and period around that body (`Elements`,
+  which ignore every other body), and thrust. These change every frame, so
+  craft facts are never cached.
+
+A close chase camera, where the ship rather than `Navigation::eye` owns the
+camera position, is the next step in the plan.

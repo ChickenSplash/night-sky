@@ -8,7 +8,7 @@ fn selection_trail_is_remote_and_inspector_falls_back_when_a_location_disappears
     let planet = &galaxy.systems[1].planets[0];
     nav.select(Some(Selection::Planet(planet.id.clone())));
     let location = trail(&nav, &galaxy);
-    let selected = selection_trail(&nav, &galaxy);
+    let selected = selection_trail(&nav, &galaxy, crate::craft::Now::none());
     assert_eq!(location.last().unwrap().level, Level::Star);
     assert_eq!(selected.last().unwrap().object, planet_ref(planet));
     assert_eq!(
@@ -119,7 +119,10 @@ fn physical_planet_location_is_independent_of_selection() {
     nav.select(Some(Selection::Planet(planet.id.clone())));
     assert_eq!(trail(&nav, &galaxy).last().unwrap().level, Level::Star);
     assert_eq!(
-        selection_trail(&nav, &galaxy).last().unwrap().level,
+        selection_trail(&nav, &galaxy, crate::craft::Now::none())
+            .last()
+            .unwrap()
+            .level,
         Level::Planet
     );
     nav.location_planet = Some(planet.id.clone());
@@ -213,14 +216,14 @@ fn a_companions_planet_is_reached_through_the_barycentre_and_its_star() {
     );
     nav.location_planet = None;
     nav.select(Some(Selection::Planet(planet.id.clone())));
-    let selected = selection_trail(&nav, &galaxy);
+    let selected = selection_trail(&nav, &galaxy, crate::craft::Now::none());
     assert_eq!(
         selected.iter().map(|c| &c.label).collect::<Vec<_>>(),
         expected.iter().collect::<Vec<_>>()
     );
     // Each crumb describes its own object.
     let fact = |object: &ObjectRef, label: &str| {
-        crate::ui::inspector::describe(object, &galaxy, None)
+        crate::ui::inspector::describe(object, &galaxy, None, crate::craft::Now::none())
             .rows
             .into_iter()
             .find(|(l, _)| l == label)

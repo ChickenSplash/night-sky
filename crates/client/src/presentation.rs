@@ -118,6 +118,18 @@ impl Navigation {
             (self.distance * 0.35).clamp(crate::scene::MIN_SPEED, crate::scene::MAX_SPEED);
     }
 
+    /// Follow the selected craft from the closest zoom, in simulation mode.
+    /// It must be in the visited system (`craft::followed`).
+    pub fn follow_craft(&mut self) {
+        self.presentation_mode = PresentationMode::Simulation;
+        self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);
+        self.following = true;
+        self.fly = true;
+        self.distance = crate::scene::MIN_DISTANCE;
+        self.move_speed =
+            (self.distance * 0.35).clamp(crate::scene::MIN_SPEED, crate::scene::MAX_SPEED);
+    }
+
     pub fn show_page(&mut self, page: u32, lists: &Galaxy) {
         let Some(system) = self
             .system(lists)

@@ -138,6 +138,30 @@ buttons also export follow-up `InspectObject` to preserve the list tab. Task
 links export a URL and no app commands; CLI reads never open them. These reads
 do not select or move the camera and use the normal snapshot refresh rate.
 
+## Craft
+
+`ns ship` drives live craft through the same `POST /command` path and reads
+them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
+
+```sh
+./scripts/ns ship spawn --body g78040000.2.813/2 --altitude 400
+./scripts/ns ship spawn --altitude 400 --speed 9      # prograde, km/s
+./scripts/ns ship spawn --altitude 400 --velocity 0,7.5,0
+./scripts/ns ship state craft-1
+./scripts/ns ship thrust 0,0,1 --id craft-1           # m/s², system axes
+./scripts/ns ship follow craft-1
+./scripts/ns ship despawn                             # every craft
+```
+
+- `spawn` defaults to the selected planet or star, else the visited system,
+  and prints the new ship's state once a later snapshot shows it.
+- `state` gives position and velocity in the system frame, the body it is
+  `around` with altitude and relative speed, its input, and whether craft
+  `held_clock` this frame. `step_seconds` is the fixed physics step.
+- The commands are `spawn_ship`, `despawn_craft`, `set_thrust`,
+  `select_craft` and `fly_to_craft`; vectors in typed form are JSON lists
+  without spaces, such as `set_thrust [0,0,1]`.
+
 ## Object search
 
 - `GET /catalogue` lists kinds, families, properties, relationships and syntax.

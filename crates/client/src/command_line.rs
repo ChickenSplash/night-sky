@@ -1,6 +1,7 @@
 //! Typed commands: `set_presentation_mode table`, `set_display option=orbits on=false`, or
 //! a `UiCommand` as JSON. Arguments fill a command's fields in order, or by
-//! name; quote values with spaces, or IDs that look like numbers.
+//! name; quote values with spaces, or IDs that look like numbers. Vectors
+//! are JSON lists without spaces: `set_thrust [0,0,1]`.
 //!
 //! Lines come from the debug window's terminal tab or, natively, from the
 //! terminal that started the app, as `Typed` messages. `run` handles both the
@@ -53,6 +54,7 @@ fn run(
     universe: Res<crate::Universe>,
     nav: Res<crate::Navigation>,
     field: Res<crate::stars::stream::Starfield>,
+    fleet: Res<crate::craft::Fleet>,
 ) {
     for Typed {
         line,
@@ -80,7 +82,7 @@ fn run(
                 Ok(())
             }
             line => parse(line).and_then(|command| {
-                command.check(&universe.0, &nav, &field)?;
+                command.check(&universe.0, &nav, &field, &fleet)?;
                 commands.write(command);
                 Ok(())
             }),
@@ -144,7 +146,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 25] = [
+pub const USAGE: [Usage; 30] = [
     Usage {
         name: "pick_star",
         fields: &["id"],
@@ -198,7 +200,32 @@ pub const USAGE: [Usage; 25] = [
     Usage {
         name: "follow",
         fields: &[],
-        about: "Follow the selected planet",
+        about: "Follow the selected planet or craft",
+    },
+    Usage {
+        name: "spawn_ship",
+        fields: &["body", "altitude_km", "speed_kms", "velocity_kms"],
+        about: "Place a ship above a body (planet, star or system ID; default the selection), in a circular orbit unless given a prograde speed or a [x,y,z] velocity, km/s relative to the body",
+    },
+    Usage {
+        name: "despawn_craft",
+        fields: &["id"],
+        about: "Remove a craft by ID, or every craft without one",
+    },
+    Usage {
+        name: "set_thrust",
+        fields: &["thrust", "id"],
+        about: "Hold a craft's thrust as [x,y,z] m/s² in its system's axes, up to 100; the selected or only craft without an ID",
+    },
+    Usage {
+        name: "select_craft",
+        fields: &["id"],
+        about: "Select a craft by ID without travelling",
+    },
+    Usage {
+        name: "fly_to_craft",
+        fields: &["id"],
+        about: "Fly to a craft by ID and follow it",
     },
     Usage {
         name: "up",
@@ -329,9 +356,12 @@ fn parse_unchecked(line: &str) -> Result<UiCommand, String> {
                 .next()
                 .ok_or_else(|| format!("Too many arguments. Usage: {}", synopsis(usage)))?,
         };
-        // Numbers and booleans as such; anything else, or quoted, is text.
+        // Numbers, booleans and [x,y,z] lists as such; anything else, or
+        // quoted, is text.
         let value = match serde_json::from_str(&arg.value) {
-            Ok(value @ (Value::Number(_) | Value::Bool(_))) if !arg.quoted => value,
+            Ok(value @ (Value::Number(_) | Value::Bool(_) | Value::Array(_))) if !arg.quoted => {
+                value
+            }
             _ => arg.value.as_str().into(),
         };
         object.insert((*field).into(), value);

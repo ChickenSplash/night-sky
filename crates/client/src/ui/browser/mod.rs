@@ -79,6 +79,7 @@ pub struct View<'a> {
     pub nav: &'a Navigation,
     pub universe: &'a Universe,
     pub field: &'a crate::stars::stream::Starfield,
+    pub craft: crate::craft::Now<'a>,
 }
 
 pub fn window(ctx: &egui::Context, browser: &mut Browser, view: View, out: &mut Vec<UiCommand>) {

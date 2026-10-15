@@ -320,6 +320,51 @@ pub fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
 }
 
+/// The two-body orbit a state relative to one body would follow alone,
+/// ignoring every other body: for readouts, not for motion.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Elements {
+    /// Specific orbital energy, J/kg; negative when bound.
+    pub energy: f64,
+    pub eccentricity: f64,
+    gm: f64,
+}
+
+impl Elements {
+    pub fn of(relative: State, gm: f64) -> Self {
+        let [r, v] = [relative.position, relative.velocity];
+        let radius = distance(r, [0.0; 3]);
+        let speed2 = v.iter().map(|x| x * x).sum::<f64>();
+        let energy = speed2 / 2.0 - gm / radius;
+        // The eccentricity vector, which stays exact for circular orbits.
+        let along = (0..3).map(|i| r[i] * v[i]).sum::<f64>();
+        let e: [f64; 3] =
+            std::array::from_fn(|i| ((speed2 - gm / radius) * r[i] - along * v[i]) / gm);
+        let eccentricity = distance(e, [0.0; 3]);
+        Self {
+            energy,
+            eccentricity,
+            gm,
+        }
+    }
+
+    /// Semi-major axis in metres, when bound.
+    pub fn semi_major(&self) -> Option<f64> {
+        (self.energy < 0.0 && self.eccentricity < 1.0).then(|| -self.gm / (2.0 * self.energy))
+    }
+
+    /// Nearest and farthest distances from the body's centre, when bound.
+    pub fn apsides(&self) -> Option<[f64; 2]> {
+        let a = self.semi_major()?;
+        Some([a * (1.0 - self.eccentricity), a * (1.0 + self.eccentricity)])
+    }
+
+    pub fn period(&self) -> Option<f64> {
+        let a = self.semi_major()?;
+        Some(std::f64::consts::TAU * (a.powi(3) / self.gm).sqrt())
+    }
+}
+
 /// Speed of a circular orbit `radius_m` from a body's centre.
 pub fn circular_speed(gm: f64, radius_m: f64) -> f64 {
     (gm / radius_m).sqrt()

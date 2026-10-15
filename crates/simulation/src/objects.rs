@@ -22,4 +22,8 @@ pub enum ObjectRef {
     Planet {
         id: String,
     },
+    /// A man-made object of any kind (`craft::CraftKind`), by its own ID.
+    Craft {
+        id: String,
+    },
 }

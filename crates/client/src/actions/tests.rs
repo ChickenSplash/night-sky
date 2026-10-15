@@ -81,10 +81,15 @@ fn an_unstreamed_generated_planet_can_be_selected_by_id() {
     assert_eq!(nav(&app).selection, Some(Selection::Planet(id.clone())));
     assert!(nav(&app).visit.is_none());
     let galaxy = &app.world().resource::<Universe>().0;
-    let trail = crate::ui::breadcrumb::selection_trail(nav(&app), galaxy);
+    let trail =
+        crate::ui::breadcrumb::selection_trail(nav(&app), galaxy, crate::craft::Now::none());
     assert_eq!(trail.last().unwrap().label, system.planets[0].designation);
-    let info =
-        crate::ui::inspector::describe(&crate::objects::ObjectRef::Planet { id }, galaxy, None);
+    let info = crate::ui::inspector::describe(
+        &crate::objects::ObjectRef::Planet { id },
+        galaxy,
+        None,
+        crate::craft::Now::none(),
+    );
     assert_eq!(info.title, system.planets[0].designation);
     assert!(info.rows.iter().any(|(label, _)| label == "Mass"));
 }
@@ -194,6 +199,7 @@ fn check_refuses_exactly_the_commands_apply_would_ignore() {
             &app.world().resource::<Universe>().0,
             nav(app),
             app.world().resource::<crate::stars::stream::Starfield>(),
+            app.world().resource::<crate::craft::Fleet>(),
         )
     };
     let state = |app: &App| {
@@ -301,6 +307,7 @@ fn run(galaxy: space_shared::Galaxy, commands: Vec<UiCommand>) -> App {
         .init_resource::<Clock>()
         .init_resource::<crate::stars::stream::Starfield>()
         .init_resource::<crate::render::debug::RenderDebug>()
+        .init_resource::<crate::craft::Fleet>()
         .add_systems(Update, apply);
     send(&mut app, commands);
     app

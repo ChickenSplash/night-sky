@@ -122,7 +122,7 @@ fn time_control_click_pauses_but_a_multi_frame_drag_does_not() {
                 events,
                 ..Default::default()
             },
-            |ctx| time_controls(ctx, rect, &clock, &mut drag, &mut commands),
+            |ctx| time_controls(ctx, rect, &clock, false, &mut drag, &mut commands),
         );
         if !commands.is_empty() {
             assert!(
@@ -464,9 +464,10 @@ fn text_huds_share_edge_padding_and_bottom_baseline() {
                         &galaxy,
                         &crate::stars::stream::Starfield::default(),
                         &mut inspector,
+                        crate::craft::Now::none(),
                         &mut commands,
                     );
-                    time_controls(ctx, rect, &clock, &mut drag, &mut commands);
+                    time_controls(ctx, rect, &clock, false, &mut drag, &mut commands);
                     speed_readout(ctx, rect, 1000.0, 0.0, &mut speed_drag, &mut commands);
                     magnitude_control(ctx, rect, 6.5, &mut magnitude_drag, &mut commands);
                 },
@@ -542,6 +543,7 @@ fn floating_inspector_grows_after_tab_changes_and_wraps_in_a_narrow_viewport() {
                         &galaxy,
                         &crate::stars::stream::Starfield::default(),
                         &mut inspector,
+                        crate::craft::Now::none(),
                         &mut commands,
                     );
                 },
@@ -611,6 +613,7 @@ fn floating_inspector_expands_instead_of_scrolling() {
                     &galaxy,
                     &crate::stars::stream::Starfield::default(),
                     &mut inspector,
+                    crate::craft::Now::none(),
                     &mut commands,
                 )
             },

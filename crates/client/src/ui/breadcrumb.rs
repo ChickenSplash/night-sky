@@ -59,6 +59,7 @@ pub enum Level {
     /// A pair within a multiple system.
     Barycentre,
     Planet,
+    Craft,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,11 +146,37 @@ pub fn up(nav: &Navigation, galaxy: &Galaxy) -> Option<UiCommand> {
     None
 }
 
-pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
+/// The selected object's hierarchy. A craft hangs below the planet it
+/// orbits, else below its system's star.
+pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy, now: crate::craft::Now) -> Vec<Crumb> {
     let Some(selection) = &nav.selection else {
         return Vec::new();
     };
     let object = selection.object();
+    let ObjectRef::Craft { id } = &object else {
+        return object_trail(nav, galaxy, object);
+    };
+    let Some(live) = now.get(id) else {
+        return Vec::new();
+    };
+    let parent = match live.surroundings(now.seconds).1 {
+        Some(body) if body.kind == space_simulation::craft::BodyKind::Planet => {
+            ObjectRef::Planet { id: body.id }
+        }
+        _ => ObjectRef::Star {
+            id: live.star().to_owned(),
+        },
+    };
+    let mut trail = object_trail(nav, galaxy, parent);
+    trail.push(Crumb {
+        level: Level::Craft,
+        label: live.craft.name.clone(),
+        object,
+    });
+    trail
+}
+
+fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Crumb> {
     let star = match &object {
         ObjectRef::Star { id } => id.as_str(),
         ObjectRef::Planet { id } => match objects::parent_star(id) {
@@ -257,6 +284,7 @@ pub fn text(trail: &[Crumb]) -> String {
 
 /// Draws the trail as free-floating text at the top left of the 3D view,
 /// under any window.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ctx: &egui::Context,
     rect: egui::Rect,
@@ -264,6 +292,7 @@ pub fn show(
     galaxy: &Galaxy,
     field: &crate::stars::stream::Starfield,
     inspector: &mut crate::ui::inspector::Cache,
+    now: crate::craft::Now,
     out: &mut Vec<crate::actions::UiCommand>,
 ) {
     egui::Area::new(egui::Id::new("breadcrumb"))
@@ -277,7 +306,7 @@ pub fn show(
             ui.spacing_mut().interact_size.y = 0.0;
             ui.set_max_width((rect.width() - HUD_PADDING * 2.0).max(1.0));
             let location = trail(nav, galaxy);
-            let selected = selection_trail(nav, galaxy);
+            let selected = selection_trail(nav, galaxy, now);
             let active = active_inspection(nav, galaxy, &location, &selected);
             for (source, title, trail) in [
                 (TrailSource::Location, "Location", &location),
@@ -319,7 +348,7 @@ pub fn show(
             ui.add_space(HUD_LINE_GAP);
             // Natural content height: no scrolling, scrollbar or reserved
             // bottom strip. Long information can use the whole left side.
-            crate::ui::inspector::show(ui, &active, nav, galaxy, field, inspector, out);
+            crate::ui::inspector::show(ui, &active, nav, galaxy, field, inspector, now, out);
         });
     // Background areas are excluded by egui's normal pointer-area test.
     if let Some(area) = ctx.memory(|memory| memory.area_rect(egui::Id::new("breadcrumb"))) {

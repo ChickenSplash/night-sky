@@ -172,3 +172,37 @@ fn a_ship_orbits_a_planet_moving_around_its_star() {
         Some(BodyKind::Star)
     );
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn elements_give_the_apsides_and_period_of_an_orbit() {
+    let r = 7e6;
+    let circular = Elements::of(
+        State {
+            position: [r, 0.0, 0.0],
+            velocity: [0.0, 0.0, circular_speed(EARTH_GM, r)],
+        },
+        EARTH_GM,
+    );
+    let [low, high] = circular.apsides().unwrap();
+    assert!((low / r - 1.0).abs() < 1e-12 && (high / r - 1.0).abs() < 1e-12);
+    assert!((circular.period().unwrap() - TAU * (r.powi(3) / EARTH_GM).sqrt()).abs() < 1e-6);
+    // Faster at periapsis: the far side swings out; escape speed and beyond is unbound.
+    let fast = Elements::of(
+        State {
+            position: [r, 0.0, 0.0],
+            velocity: [0.0, 0.0, circular_speed(EARTH_GM, r) * 1.2],
+        },
+        EARTH_GM,
+    );
+    let [low, high] = fast.apsides().unwrap();
+    assert!((low / r - 1.0).abs() < 1e-12 && high > 2.0 * r);
+    let escape = Elements::of(
+        State {
+            position: [r, 0.0, 0.0],
+            velocity: [0.0, 0.0, circular_speed(EARTH_GM, r) * 1.5],
+        },
+        EARTH_GM,
+    );
+    assert_eq!(escape.apsides(), None);
+}

@@ -235,6 +235,32 @@ class CliTests(unittest.TestCase):
         result = self.run_cli("--json", "catalogue")
         self.assertEqual(json.loads(result.stdout)["kinds"][0]["id"], "planet")
 
+    def test_ship_actions_send_app_commands_and_read_craft(self):
+        for args, expected in [
+            (("ship", "spawn", "--body", "g1.2.3/2", "--altitude", "400", "--speed", "7.5"),
+             {"type": "spawn_ship", "altitude_km": 400.0, "body": "g1.2.3/2", "speed_kms": 7.5}),
+            (("ship", "spawn", "--altitude", "400", "--velocity", "0,7.5,0"),
+             {"type": "spawn_ship", "altitude_km": 400.0, "velocity_kms": [0.0, 7.5, 0.0]}),
+            (("ship", "thrust", "0,0,1", "--id", "craft-1"),
+             {"type": "set_thrust", "thrust": [0.0, 0.0, 1.0], "id": "craft-1"}),
+            (("ship", "follow", "craft-1"), {"type": "fly_to_craft", "id": "craft-1"}),
+            (("ship", "despawn"), {"type": "despawn_craft", "id": None}),
+        ]:
+            result = self.run_cli(*args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            post = [r for r in self.server.requests if r[0] == "POST"][-1]
+            self.assertEqual(post[1], "/command")
+            self.assertEqual(json.loads(post[2]), expected)
+        result = self.run_cli("ship", "state")
+        self.assertEqual(self.server.requests[-1][1], "/state/craft")
+        for args, message in [
+            (("ship", "thrust", "0,1"), "thrust is x,y,z"),
+            (("ship", "spawn", "--altitude", "1", "--speed", "1", "--velocity", "1,0,0"), "not both"),
+        ]:
+            result = self.run_cli(*args)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(message, result.stderr)
+
     def test_watch_stops_on_interrupt(self):
         globals_ = NS["main"].__globals__
         with mock.patch.dict(globals_, {"request": mock.Mock(return_value=1)}):

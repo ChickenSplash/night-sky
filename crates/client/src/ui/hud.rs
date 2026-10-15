@@ -78,6 +78,7 @@ pub(super) fn time_controls(
     ctx: &egui::Context,
     rect: egui::Rect,
     clock: &SimulationClock,
+    held: bool,
     drag_start: &mut Option<f64>,
     out: &mut Vec<UiCommand>,
 ) {
@@ -99,6 +100,9 @@ pub(super) fn time_controls(
                 let mut label = rate_text(clock.rate);
                 if clock.paused {
                     label.push_str(" · paused");
+                } else if held {
+                    // Craft physics cannot step this fast: time waits for it.
+                    label.push_str(" · held by craft");
                 }
                 let response = halo_text(ui, &label, egui::Sense::click_and_drag(), |response| {
                     if response.hovered() || response.dragged() || response.has_focus() {

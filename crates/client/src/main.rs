@@ -1,5 +1,6 @@
 mod actions;
 mod command_line;
+mod craft;
 mod devtools;
 mod flight;
 mod format;
@@ -104,6 +105,7 @@ fn main() {
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
+    .init_resource::<craft::Fleet>()
     .init_resource::<devtools::DevTools>()
     .init_resource::<devtools::core_load::CoreLoad>()
     .init_resource::<devtools::gpu_test::GpuTest>()
@@ -116,6 +118,7 @@ fn main() {
             receive_galaxy,
             actions::apply,
             tick,
+            craft::step,
             scene::controls,
             #[cfg(not(target_arch = "wasm32"))]
             devtools::core_load::run,

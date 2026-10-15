@@ -48,7 +48,41 @@ pub enum UiCommand {
     FlyToPlanet {
         planet: String,
     },
+    /// Follow the selected planet or craft.
     Follow,
+    /// Place a new ship above a body: a planet, star or barycentre ID, or a
+    /// system's key; the selected body, else the visited system, without one.
+    /// It starts in a circular orbit unless given a prograde speed or a
+    /// velocity, both relative to the body and in km/s.
+    SpawnShip {
+        #[serde(default)]
+        body: Option<String>,
+        altitude_km: f64,
+        #[serde(default)]
+        speed_kms: Option<f64>,
+        #[serde(default)]
+        velocity_kms: Option<[f64; 3]>,
+    },
+    /// Remove a craft, or every craft without an ID.
+    DespawnCraft {
+        #[serde(default)]
+        id: Option<String>,
+    },
+    /// Hold a craft's thrust, in m/s² in its system's axes: the selected
+    /// craft, else the only one, without an ID.
+    SetThrust {
+        thrust: [f64; 3],
+        #[serde(default)]
+        id: Option<String>,
+    },
+    /// Select a craft by ID without moving the camera.
+    SelectCraft {
+        id: String,
+    },
+    /// Fly to a craft and follow it, visiting its system first.
+    FlyToCraft {
+        id: String,
+    },
     /// Reframe a tracked planet's system, else clear selection or climb the trail.
     Up,
     SetPaused {
@@ -161,6 +195,36 @@ impl UiCommand {
                 within("stops", *stops, crate::render::exposure::STOPS)
             }
             UiCommand::SetCompression { amount } => within("amount", *amount, 0.0..=1.0),
+            UiCommand::SpawnShip {
+                altitude_km,
+                speed_kms,
+                velocity_kms,
+                ..
+            } => {
+                within("altitude_km", *altitude_km, 0.0..=1e10)?;
+                if let Some(speed) = speed_kms {
+                    within("speed_kms", *speed, 0.0..=10_000.0)?;
+                }
+                if let Some(velocity) = velocity_kms
+                    && !velocity
+                        .iter()
+                        .all(|v| v.is_finite() && v.abs() <= 10_000.0)
+                {
+                    return Err("velocity_kms must be three numbers, each within ±10000".into());
+                }
+                if speed_kms.is_some() && velocity_kms.is_some() {
+                    return Err("Give speed_kms or velocity_kms, not both".into());
+                }
+                Ok(())
+            }
+            UiCommand::SetThrust { thrust, .. } => {
+                let size = thrust.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if size.is_finite() {
+                    within("thrust", size, 0.0..=crate::craft::MAX_THRUST)
+                } else {
+                    Err("thrust must be three finite numbers".into())
+                }
+            }
             UiCommand::Search { query } => {
                 space_simulation::search::Query::parse(query).and_then(|query| query.check())
             }
@@ -195,6 +259,7 @@ impl UiCommand {
         galaxy: &space_shared::Galaxy,
         nav: &Navigation,
         field: &crate::stars::stream::Starfield,
+        fleet: &crate::craft::Fleet,
     ) -> Result<(), String> {
         let list = |id: &str| {
             galaxy
@@ -216,6 +281,11 @@ impl UiCommand {
                     "Star `{id}` is not loaded, visited or a list's system"
                 ))
             }
+        };
+        let craft = |id: &str| {
+            fleet
+                .get(id)
+                .ok_or_else(|| format!("No craft `{id}`. Craft are under `state craft`."))
         };
         let visiting = || {
             nav.system(galaxy)
@@ -250,7 +320,7 @@ impl UiCommand {
             UiCommand::Inspect { planet: id } => planet(id),
             UiCommand::InspectObject { inspection } => {
                 let location = crate::ui::breadcrumb::trail(nav, galaxy);
-                let selected = crate::ui::breadcrumb::selection_trail(nav, galaxy);
+                let selected = crate::ui::breadcrumb::selection_trail(nav, galaxy, fleet.latest());
                 if crate::ui::breadcrumb::holds(nav, galaxy, inspection, &location, &selected) {
                     Ok(())
                 } else {
@@ -282,13 +352,82 @@ impl UiCommand {
                     None => Err(format!("Planet `{id}` names no star")),
                 }
             }
-            UiCommand::Follow => nav
-                .selected_planet(galaxy)
-                .map(|_| ())
-                .ok_or_else(|| "Select a planet in the visited system first".into()),
+            UiCommand::Follow => {
+                if nav.selected_planet(galaxy).is_some()
+                    || crate::craft::followed(nav, galaxy, fleet, 0.0).is_some()
+                {
+                    Ok(())
+                } else {
+                    Err("Select a planet or craft in the visited system first".into())
+                }
+            }
+            UiCommand::SpawnShip { body, .. } => {
+                self.check_values()?;
+                let body = spawn_body(body.as_deref(), nav, galaxy).ok_or_else(|| {
+                    "Give a body, or select one or visit a system first".to_owned()
+                })?;
+                crate::craft::locate_body(galaxy, nav, field, &body).map(|_| ())
+            }
+            UiCommand::DespawnCraft { id } => match id {
+                Some(id) => craft(id).map(|_| ()),
+                None if fleet.craft.is_empty() => Err("There are no craft".into()),
+                None => Ok(()),
+            },
+            UiCommand::SetThrust { id, .. } => {
+                self.check_values()?;
+                thrust_target(id.as_deref(), nav, fleet).map(|_| ())
+            }
+            UiCommand::SelectCraft { id } => craft(id).map(|_| ()),
+            UiCommand::FlyToCraft { id } => {
+                let live = craft(id)?;
+                let here = nav
+                    .system(galaxy)
+                    .is_some_and(|system| crate::objects::star_id(system, nav.page) == live.star());
+                if here { Ok(()) } else { star(live.star()) }
+            }
             _ => self.check_values(),
         }
     }
+}
+
+/// The body a ship spawns at: the one given, else the selected planet or
+/// star, else the planet the camera is at, else the visited system.
+fn spawn_body(
+    body: Option<&str>,
+    nav: &Navigation,
+    galaxy: &space_shared::Galaxy,
+) -> Option<String> {
+    if let Some(body) = body {
+        return Some(body.to_owned());
+    }
+    match &nav.selection {
+        Some(Selection::Planet(id)) => return Some(id.clone()),
+        Some(Selection::Star(star)) => return Some(star.id.clone()),
+        _ => {}
+    }
+    nav.location_planet.clone().or_else(|| {
+        nav.system(galaxy)
+            .map(|system| crate::objects::star_id(system, nav.page))
+    })
+}
+
+/// The craft a thrust command steers: the one named, else the selected
+/// craft, else the only craft.
+fn thrust_target(
+    id: Option<&str>,
+    nav: &Navigation,
+    fleet: &crate::craft::Fleet,
+) -> Result<String, String> {
+    let id = match (id, nav.selected_craft(), fleet.craft.as_slice()) {
+        (Some(id), ..) | (None, Some(id), _) => id,
+        (None, None, [only]) => &only.craft.id,
+        (None, None, []) => return Err("There are no craft".into()),
+        (None, None, _) => return Err("Give a craft ID or select a craft".into()),
+    };
+    fleet
+        .get(id)
+        .map(|live| live.craft.id.clone())
+        .ok_or_else(|| format!("No craft `{id}`"))
 }
 
 fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
@@ -331,6 +470,7 @@ pub fn apply(
     mut clock: ResMut<Clock>,
     field: Res<crate::stars::stream::Starfield>,
     mut debug: ResMut<crate::render::debug::RenderDebug>,
+    mut fleet: ResMut<crate::craft::Fleet>,
 ) {
     let galaxy = &universe.0;
     let list = |id: &str| galaxy.systems.iter().position(|s| s.id == id);
@@ -382,7 +522,8 @@ pub fn apply(
             }
             UiCommand::InspectObject { inspection } => {
                 let location = crate::ui::breadcrumb::trail(&nav, galaxy);
-                let selected = crate::ui::breadcrumb::selection_trail(&nav, galaxy);
+                let selected =
+                    crate::ui::breadcrumb::selection_trail(&nav, galaxy, fleet.at(clock.0.seconds));
                 if crate::ui::breadcrumb::holds(&nav, galaxy, inspection, &location, &selected) {
                     nav.inspection = Some(inspection.clone());
                 }
@@ -419,9 +560,75 @@ pub fn apply(
                     nav.focus_selected(galaxy);
                 }
             }
-            UiCommand::Follow => nav.focus_selected(galaxy),
+            UiCommand::Follow => {
+                if crate::craft::followed(&nav, galaxy, &fleet, clock.0.seconds).is_some() {
+                    nav.follow_craft();
+                } else {
+                    nav.focus_selected(galaxy);
+                }
+            }
+            UiCommand::SpawnShip {
+                body,
+                altitude_km,
+                speed_kms,
+                velocity_kms,
+            } => {
+                let launch = match (speed_kms, velocity_kms) {
+                    (Some(speed), _) => crate::craft::Launch::Speed(speed * 1_000.0),
+                    (_, Some(velocity)) => {
+                        crate::craft::Launch::Velocity(velocity.map(|v| v * 1_000.0))
+                    }
+                    _ => crate::craft::Launch::Circular,
+                };
+                let spawned = spawn_body(body.as_deref(), &nav, galaxy)
+                    .ok_or_else(|| "nothing to spawn at".to_owned())
+                    .and_then(|body| crate::craft::locate_body(galaxy, &nav, &field, &body))
+                    .and_then(|(system, page, body)| {
+                        let altitude = altitude_km * 1_000.0;
+                        fleet.spawn(system, page, &body, altitude, launch, clock.0.seconds)
+                    });
+                match spawned {
+                    Ok(id) => nav.select(Some(Selection::Craft(id))),
+                    Err(err) => warn!(target: "craft", "Cannot spawn a ship: {err}"),
+                }
+            }
+            UiCommand::DespawnCraft { id } => {
+                fleet.despawn(id.as_deref());
+                if nav
+                    .selected_craft()
+                    .is_some_and(|selected| fleet.get(selected).is_none())
+                {
+                    nav.select(None);
+                }
+            }
+            UiCommand::SetThrust { thrust, id } => {
+                if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
+                    && let Some(live) = fleet.get_mut(&id)
+                {
+                    live.craft.input.thrust = *thrust;
+                }
+            }
+            UiCommand::SelectCraft { id } => {
+                if fleet.get(id).is_some() {
+                    nav.select(Some(Selection::Craft(id.clone())));
+                }
+            }
+            UiCommand::FlyToCraft { id } => {
+                if let Some(live) = fleet.get(id) {
+                    let star = live.star().to_owned();
+                    let here = nav
+                        .system(galaxy)
+                        .is_some_and(|system| crate::objects::star_id(system, nav.page) == star);
+                    if here || crate::galaxy_nav::visit_star(&mut nav, galaxy, &field, &star) {
+                        nav.select(Some(Selection::Craft(id.clone())));
+                        nav.follow_craft();
+                    }
+                }
+            }
             UiCommand::Up => {
-                if nav.following && nav.selected_planet(galaxy).is_some() {
+                if nav.following
+                    && (nav.selected_planet(galaxy).is_some() || nav.selected_craft().is_some())
+                {
                     nav.frame(galaxy);
                 } else if nav.selection.is_some() {
                     nav.select(None);

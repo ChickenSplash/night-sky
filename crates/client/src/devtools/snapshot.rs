@@ -58,7 +58,12 @@ pub(super) fn publish(
     mut snapshot: ResMut<Snapshot>,
     mut metrics: ResMut<StreamMetrics>,
     field: Res<Starfield>,
-    scene: (Res<Universe>, Res<Navigation>, Res<Clock>),
+    scene: (
+        Res<Universe>,
+        Res<Navigation>,
+        Res<Clock>,
+        Res<crate::craft::Fleet>,
+    ),
     camera: (Res<CameraPose>, Res<CameraRig>),
     render: (
         Res<RenderDebug>,
@@ -89,11 +94,12 @@ pub(super) fn publish(
         return;
     }
     let snapshot_start = Instant::now();
-    let (universe, nav, clock) = scene;
+    let (universe, nav, clock, fleet) = scene;
+    let now = fleet.at(clock.0.seconds);
     let (pose, rig) = camera;
     let (debug, diagnostics, searches, browser) = render;
     let trail = crate::ui::breadcrumb::trail(&nav, &universe.0);
-    let selection_trail = crate::ui::breadcrumb::selection_trail(&nav, &universe.0);
+    let selection_trail = crate::ui::breadcrumb::selection_trail(&nav, &universe.0, now);
     let inspection =
         crate::ui::breadcrumb::active_inspection(&nav, &universe.0, &trail, &selection_trail);
     let readout = crate::ui::inspector::readout(
@@ -102,6 +108,7 @@ pub(super) fn publish(
         &universe.0,
         &field,
         &mut snapshot.inspector,
+        now,
     );
     let position_pc = crate::search::camera_pc(&rig, &pose);
     let gpu: Vec<Value> = diagnostics
@@ -137,6 +144,8 @@ pub(super) fn publish(
         "inspector": readout,
         "page": nav.page, "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,
+        // Live craft for `ns ship`; their facts are also in the inspector.
+        "craft": crate::craft::readout(&fleet, clock.0.seconds),
         "display": {
             "orbits": nav.orbits, "labels": nav.labels,
             "markers": nav.markers, "velocity_marker": nav.velocity_marker,
@@ -278,6 +287,7 @@ mod tests {
         .insert_resource(Universe(space_simulation::demo_galaxy()))
         .insert_resource(Navigation::default())
         .insert_resource(Clock::default())
+        .init_resource::<crate::craft::Fleet>()
         .insert_resource(CameraPose::default())
         .insert_resource(CameraRig::default())
         .insert_resource(RenderDebug::default())

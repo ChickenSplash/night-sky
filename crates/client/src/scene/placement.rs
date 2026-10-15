@@ -31,6 +31,7 @@ pub fn place_camera(
     mut nav: ResMut<Navigation>,
     mut rig: ResMut<CameraRig>,
     mut pose: ResMut<CameraPose>,
+    fleet: Res<crate::craft::Fleet>,
     grids: Query<&Grid>,
     mut camera: Query<
         (
@@ -47,15 +48,20 @@ pub fn place_camera(
     if nav.fly || nav.following || nav.presentation_mode != PresentationMode::Simulation {
         nav.eye = None;
     }
+    let craft = crate::craft::followed(&nav, &universe.0, &fleet, clock.0.seconds);
     if nav.following
-        && let Some(followed) = nav.system(&universe.0).and_then(|system| {
-            let planet = system.planets.get(nav.selected_planet(&universe.0)?)?;
-            Some(DVec3::from_array(planet_position(
-                system,
-                planet,
-                clock.0.seconds,
-            )))
-        })
+        && let Some(followed) = craft
+            .map(|state| DVec3::from_array(state.position))
+            .or_else(|| {
+                nav.system(&universe.0).and_then(|system| {
+                    let planet = system.planets.get(nav.selected_planet(&universe.0)?)?;
+                    Some(DVec3::from_array(planet_position(
+                        system,
+                        planet,
+                        clock.0.seconds,
+                    )))
+                })
+            })
     {
         nav.target = followed;
     }

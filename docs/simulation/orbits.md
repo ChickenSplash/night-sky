@@ -130,6 +130,7 @@ Keplerian two-body relations, subject to the fixed-orbit assumptions above.
 
 This is not an N-body simulation. Collisions, relativistic effects and physical
 warp travel are not implemented. Camera flights are navigation aids, not
-simulated spacecraft trajectories.
+simulated spacecraft trajectories; [craft](craft.md) are integrated
+separately, as test particles in these bodies' gravity.
 Planet generation and stability prescriptions are described in
 [planetary systems](planetary-systems.md).

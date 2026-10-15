@@ -60,10 +60,12 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 ## Selection and picking
 
 - `Navigation::selection` is the one clicked object: `Selection::Star` (stable
-  star ID) or `Selection::Planet` (stable planet ID, including remote systems).
+  star ID), `Selection::Planet` (stable planet ID, including remote systems)
+  or `Selection::Craft` (a live craft's ID, see [craft](../simulation/craft.md#in-the-client)).
   Selecting one replaces the other; `Navigation::select` keeps following only
   from planet to planet. A second click activates it: a star is visited, a
-  planet followed.
+  planet or craft followed. Following a craft targets its blended position
+  each frame (`craft::followed`), from the closest zoom.
 - Esc while following reframes the system and clears selection; otherwise it
   clears selection, or with nothing selected goes up physically. Leaving a
   system keeps either selection and stops tracking.

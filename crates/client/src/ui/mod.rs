@@ -55,15 +55,17 @@ pub fn draw_ui(
         Res<CameraRig>,
         Res<CameraPose>,
         Res<crate::stars::stream::Starfield>,
+        Res<crate::craft::Fleet>,
     ),
     mut hud: Local<Hud>,
 ) {
     let (mut contexts, mut writer, mut tools, mut browser, searches) = interaction;
     let (markers, velocity) = overlay;
-    let (rig, pose, starfield) = camera_state;
+    let (rig, pose, starfield, fleet) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
+    let now = fleet.at(clock.0.seconds);
     if !hud.styled {
         kit::plain_style(ctx);
         hud.styled = true;
@@ -92,6 +94,7 @@ pub fn draw_ui(
             nav: &nav,
             universe: &universe,
             field: &starfield,
+            craft: now,
         },
         &mut out,
     );
@@ -116,7 +119,14 @@ pub fn draw_ui(
         ),
         ..default()
     });
-    time_controls(ctx, rect, &clock.0, &mut hud.time_drag_start, &mut out);
+    time_controls(
+        ctx,
+        rect,
+        &clock.0,
+        fleet.held,
+        &mut hud.time_drag_start,
+        &mut out,
+    );
     speed_readout(
         ctx,
         rect,
@@ -149,6 +159,7 @@ pub fn draw_ui(
         &universe.0,
         &starfield,
         &mut hud.inspector,
+        now,
         &mut out,
     );
     writer.write_batch(out);

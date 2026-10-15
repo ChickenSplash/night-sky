@@ -2,6 +2,7 @@
 use crate::{
     Navigation,
     actions::{GalaxyReference, UiCommand},
+    craft::Now,
     objects::{self, ObjectRef},
     presentation::PresentationMode,
     stars::stream::Starfield,
@@ -27,15 +28,19 @@ impl Cache {
         self.key = None;
     }
 
-    /// A star's facts include its motion once its position is known.
+    /// A star's facts include its motion once its position is known. A
+    /// craft's change every frame, so are never kept.
     pub(crate) fn get(
         &mut self,
         object: &ObjectRef,
         galaxy: &Galaxy,
         position_ly: Option<DVec3>,
+        now: Now,
     ) -> &Info {
-        if self.key.as_ref() != Some(&(object.clone(), position_ly)) {
-            self.info = describe(object, galaxy, position_ly);
+        if self.key.as_ref() != Some(&(object.clone(), position_ly))
+            || matches!(object, ObjectRef::Craft { .. })
+        {
+            self.info = describe(object, galaxy, position_ly, now);
             self.key = Some((object.clone(), position_ly));
         }
         &self.info
@@ -75,7 +80,7 @@ pub(crate) fn position_ly(
 }
 
 /// `position_ly` is the system's, from home, when known.
-pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>) -> Info {
+pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>, now: Now) -> Info {
     use crate::format::{luminosity_text, mass_text, period_text, rotation_text, star_radius_text};
     let mut info = Info::default();
     match object {
@@ -217,6 +222,12 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>)
                 }
             }
         }
+        ObjectRef::Craft { id } => {
+            if let Some(live) = now.get(id) {
+                (info.title, info.rows) = crate::craft::facts(live, galaxy, now.seconds);
+                info.note = "Player-made · simulated live".into();
+            }
+        }
     }
     if info.title.is_empty() {
         info.title = "Object unavailable".into();
@@ -308,6 +319,7 @@ pub fn actions(
     nav: &Navigation,
     galaxy: &Galaxy,
     field: &Starfield,
+    now: Now,
 ) -> Vec<Action> {
     let visited_star = nav
         .location(galaxy)
@@ -401,6 +413,22 @@ pub fn actions(
                 command: UiCommand::FlyToPlanet { planet: id.clone() },
             }]
         }
+        ObjectRef::Craft { id } => {
+            let Some(live) = now.get(id) else {
+                return Vec::new();
+            };
+            let here = nav
+                .system(galaxy)
+                .is_some_and(|system| objects::star_id(system, nav.page) == live.star());
+            if !here && !crate::galaxy_nav::reachable(nav, galaxy, field, live.star()) {
+                return Vec::new();
+            }
+            vec![Action {
+                label: format!("Follow {}", live.craft.kind.label().to_lowercase()),
+                current: nav.following && nav.selected_craft() == Some(id.as_str()),
+                command: UiCommand::FlyToCraft { id: id.clone() },
+            }]
+        }
     }
 }
 
@@ -464,10 +492,11 @@ pub fn readout(
     galaxy: &Galaxy,
     field: &Starfield,
     cache: &mut Cache,
+    now: Now,
 ) -> serde_json::Value {
     use serde_json::json;
     let position = position_ly(&inspection.object, nav, galaxy, field);
-    let info = cache.get(&inspection.object, galaxy, position);
+    let info = cache.get(&inspection.object, galaxy, position, now);
     let export = |action: Action, group: &str| {
         json!({
             "label": action.label, "current": action.current, "available": true,
@@ -483,7 +512,7 @@ pub fn readout(
         );
     }
     buttons.extend(
-        actions(&inspection.object, nav, galaxy, field)
+        actions(&inspection.object, nav, galaxy, field, now)
             .into_iter()
             .map(|action| export(action, "navigation")),
     );
@@ -516,6 +545,7 @@ fn action_text(ui: &mut egui::Ui, action: &Action) -> bool {
     .clicked()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
     inspection: &Inspection,
@@ -523,10 +553,11 @@ pub fn show(
     galaxy: &Galaxy,
     field: &Starfield,
     cache: &mut Cache,
+    now: Now,
     out: &mut Vec<UiCommand>,
 ) {
     let object = &inspection.object;
-    cache.get(object, galaxy, position_ly(object, nav, galaxy, field));
+    cache.get(object, galaxy, position_ly(object, nav, galaxy, field), now);
     let width = ui.available_width().min(480.0);
     halo_wrapped_text(ui, &cache.info.title, width, CURRENT);
     ui.scope(|ui| {
@@ -560,7 +591,7 @@ pub fn show(
     if !cache.info.note.is_empty() {
         halo_wrapped_text(ui, &cache.info.note, width, LINK);
     }
-    let actions = actions(object, nav, galaxy, field);
+    let actions = actions(object, nav, galaxy, field, now);
     // Stepping through a list keeps its tab, though selecting or visiting a
     // star would otherwise move the inspector to it.
     let step = |out: &mut Vec<UiCommand>, command: UiCommand| {
@@ -612,6 +643,11 @@ mod tests {
         let galaxy = space_simulation::demo_galaxy();
         let nav = Navigation::default();
         let field = Starfield::default();
+        let fleet = crate::craft::Fleet::default();
+        let now = Now {
+            fleet: &fleet,
+            seconds: 0.0,
+        };
         let system = &galaxy.systems[0];
         let star = objects::star_id(system, 0);
         let mut objects = vec![
@@ -632,11 +668,12 @@ mod tests {
         let mut cache = Cache::default();
         for object in objects {
             let inspection = inspection(object.clone());
-            let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache);
+            let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
             let info = describe(
                 &object,
                 &galaxy,
                 position_ly(&object, &nav, &galaxy, &field),
+                now,
             );
             assert_eq!(exported["title"], info.title);
             // A list page's star is located, so its motion is known.
@@ -661,7 +698,10 @@ mod tests {
                 .iter()
                 .filter(|button| button["group"] == "navigation")
                 .collect();
-            for (button, action) in buttons.iter().zip(actions(&object, &nav, &galaxy, &field)) {
+            for (button, action) in buttons
+                .iter()
+                .zip(actions(&object, &nav, &galaxy, &field, now))
+            {
                 assert_eq!(button["label"], action.label);
                 assert_eq!(button["current"], action.current);
                 assert_eq!(button["available"], true);
@@ -669,7 +709,10 @@ mod tests {
                     crate::command_line::parse(&button["commands"][0].to_string()).unwrap();
                 assert_eq!(parsed, action.command);
             }
-            assert_eq!(buttons.len(), actions(&object, &nav, &galaxy, &field).len());
+            assert_eq!(
+                buttons.len(),
+                actions(&object, &nav, &galaxy, &field, now).len()
+            );
         }
     }
 
@@ -678,11 +721,16 @@ mod tests {
         let mut galaxy = space_simulation::demo_galaxy();
         let nav = Navigation::default();
         let field = Starfield::default();
+        let fleet = crate::craft::Fleet::default();
+        let now = Now {
+            fleet: &fleet,
+            seconds: 0.0,
+        };
         let inspection = inspection(ObjectRef::List {
             id: galaxy.systems[0].id.clone(),
         });
         let mut cache = Cache::default();
-        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache);
+        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
         let systems: Vec<_> = exported["actions"]
             .as_array()
             .unwrap()
@@ -703,12 +751,12 @@ mod tests {
         }
         galaxy.systems[0].name = "Updated list".into();
         assert_eq!(
-            readout(&inspection, &nav, &galaxy, &field, &mut cache)["title"],
+            readout(&inspection, &nav, &galaxy, &field, &mut cache, now)["title"],
             exported["title"]
         );
         cache.invalidate();
         assert_eq!(
-            readout(&inspection, &nav, &galaxy, &field, &mut cache)["title"],
+            readout(&inspection, &nav, &galaxy, &field, &mut cache, now)["title"],
             "Updated list"
         );
     }
@@ -718,6 +766,11 @@ mod tests {
         let mut galaxy = space_simulation::demo_galaxy();
         let nav = Navigation::default();
         let field = Starfield::default();
+        let fleet = crate::craft::Fleet::default();
+        let now = Now {
+            fleet: &fleet,
+            seconds: 0.0,
+        };
         let planet = galaxy.systems[0]
             .planets
             .iter_mut()
@@ -728,13 +781,13 @@ mod tests {
             id: planet.id.clone(),
         });
         let mut cache = Cache::default();
-        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache);
+        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
         let link = &exported["actions"][0];
         assert_eq!(link["kind"], "link");
         assert_eq!(link["url"], "https://example.com/task");
         assert_eq!(link["commands"], serde_json::json!([]));
         let unreachable = inspection_for_unreachable();
-        let exported = readout(&unreachable, &nav, &galaxy, &field, &mut cache);
+        let exported = readout(&unreachable, &nav, &galaxy, &field, &mut cache, now);
         assert_eq!(exported["actions"], serde_json::json!([]));
     }
 

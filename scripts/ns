@@ -76,6 +76,27 @@ def parser():
     search.add_argument("--timeout", type=interval, default=120.0, help="seconds to wait (default 120)")
     sub.add_parser("searches", help="list the searches the app keeps, newest first, without results")
     sub.add_parser("catalogue", help="what a search can name: kinds, families, properties and relationships")
+    ship = sub.add_parser("ship", help="spawn, read, steer and remove ships (craft)")
+    ships = ship.add_subparsers(dest="ship", required=True)
+    spawn = ships.add_parser(
+        "spawn", help="place a ship above a body, by default in a circular orbit",
+        description="The body is a planet, star or barycentre ID, or a system's key; without --body, "
+        "the selected planet or star, else the visited system. Its system must be loaded. Speeds and "
+        "velocities are relative to the body, in km/s; a speed is prograde.",
+        epilog="example: ns ship spawn --body 'g1.2.3/2' --altitude 400")
+    spawn.add_argument("--body", help="body ID (default: the selection, else the visited system)")
+    spawn.add_argument("--altitude", type=float, required=True, help="km above the surface")
+    spawn.add_argument("--speed", type=float, help="prograde speed in km/s instead of circular")
+    spawn.add_argument("--velocity", help="x,y,z km/s in the system's axes instead of circular")
+    state = ships.add_parser("state", help="position, velocity, the body it is around, altitude and input")
+    state.add_argument("id", nargs="?", help="one craft (default: all)")
+    thrust = ships.add_parser("thrust", help="hold thrust as x,y,z m/s² in the system's axes (0,0,0 stops)")
+    thrust.add_argument("vector", help="x,y,z, e.g. 0,0,1")
+    thrust.add_argument("--id", help="craft ID (default: the selected or only craft)")
+    follow = ships.add_parser("follow", help="fly to a craft and follow it")
+    follow.add_argument("id")
+    despawn = ships.add_parser("despawn", help="remove a craft, or all of them")
+    despawn.add_argument("id", nargs="?", help="one craft (default: all)")
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
     watch.add_argument("target", choices=("state", "perf"))
     watch.add_argument("path", nargs="?", default="", help="optional nested path")
@@ -275,6 +296,66 @@ def searches_text(entries):
         for e in entries) or "no searches yet"
 
 
+def vector(text, name):
+    try:
+        values = [float(part) for part in text.split(",")]
+    except ValueError:
+        values = []
+    if len(values) != 3:
+        raise RuntimeError(f"{name} is x,y,z, e.g. 0,7.5,0")
+    return values
+
+
+def ship_command(args):
+    """The app command for a ship action, or None for a read."""
+    if args.ship == "spawn":
+        command = {"type": "spawn_ship", "altitude_km": args.altitude}
+        if args.body:
+            command["body"] = args.body
+        if args.speed is not None and args.velocity:
+            raise RuntimeError("give --speed or --velocity, not both")
+        if args.speed is not None:
+            command["speed_kms"] = args.speed
+        if args.velocity:
+            command["velocity_kms"] = vector(args.velocity, "--velocity")
+        return command
+    if args.ship == "thrust":
+        command = {"type": "set_thrust", "thrust": vector(args.vector, "thrust")}
+        if args.id:
+            command["id"] = args.id
+        return command
+    if args.ship == "follow":
+        return {"type": "fly_to_craft", "id": args.id}
+    if args.ship == "despawn":
+        return {"type": "despawn_craft", "id": args.id}
+    return None
+
+
+def ship(args):
+    command = ship_command(args)
+    if command is None:
+        craft = request(args.port, endpoint("state", "craft"))
+        if args.id:
+            found = [entry for entry in craft["craft"] if entry["id"] == args.id]
+            if not found:
+                raise RuntimeError(f"no craft `{args.id}`")
+            return found[0]
+        return craft
+    sent = time.time() * 1000
+    result = request(args.port, "/command", json.dumps(command).encode("utf-8"))
+    if args.ship == "spawn" and result.get("status") == "accepted":
+        # The new ship is selected: report it from the first later snapshot.
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            state = request(args.port, endpoint("state"))
+            selection = state.get("selection") or {}
+            if state.get("sampled_unix_ms", 0) > sent and selection.get("kind") == "craft":
+                found = [entry for entry in state["craft"]["craft"] if entry["id"] == selection["id"]]
+                return dict(result, craft=found[0]) if found else result
+            time.sleep(0.1)
+    return result
+
+
 def lists(state):
     return [{"id": entry["id"], "name": entry["name"], "tasks": entry["tasks"],
              "systems": [system["star"] for system in entry["systems"]]} for entry in state]
@@ -315,6 +396,9 @@ def main(argv=None):
                 output(value, True)
             else:
                 print(searches_text(value) if args.action == "searches" else catalogue_text(value), flush=True)
+            return 0
+        elif args.action == "ship":
+            output(ship(args), args.json)
             return 0
         elif args.action == "lists":
             output(lists(request(args.port, endpoint("state", "lists"))), args.json)

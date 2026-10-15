@@ -76,6 +76,8 @@ hover blue, `CURRENT` when already showing the view:
   stars, **Constellation view** (`UiCommand::VisitStar`).
 - Planet: **Fly to planet** (`FlyToPlanet`, visiting its star then following,
   like a second click).
+- Craft: **Follow ship** (`FlyToCraft`, visiting its system first if needed).
+  Craft facts are recomputed every frame rather than cached.
 
 Stars are reachable by ID if mapped, visited, charted by the shown search, or
 streamed. Unreachable actions are hidden, not disabled. The read-only
@@ -89,7 +91,8 @@ same facts/actions without selecting or travelling.
   (two decimals, seconds/minutes/hours/days/years per real second).
 - Click rate to pause; drag horizontally for logarithmic adjustment from
   real time to 100 years/s (400 logical pixels for the full range). Dragging
-  preserves pause state, with `· paused` beside the retained rate. There is
+  preserves pause state, with `· paused` beside the retained rate, or
+  `· held by craft` while craft physics cannot keep up with it. There is
   no bottom panel, preset ladder or separate speed editor.
 - Bottom-left `ui::hud::speed_readout` uses the same two-line layout: measured
   velocity above draggable set speed. Horizontal drag adjusts logarithmically

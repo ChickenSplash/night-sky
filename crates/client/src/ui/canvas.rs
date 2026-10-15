@@ -6,7 +6,7 @@ use crate::actions::UiCommand;
 use crate::presentation::PresentationMode;
 use crate::{
     Navigation,
-    scene::{CameraPose, CameraRig, CameraVelocity, Markers},
+    scene::{CameraPose, CameraRig, CameraVelocity, Marked, Markers},
 };
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::egui;
@@ -95,7 +95,10 @@ pub(super) fn canvas_overlay(
         let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
         let radius = (marker.radius / scale).max(7.0);
         let hovered = pointer.is_some_and(|p| rect.contains(p) && p.distance(point) < radius + 8.0);
-        let selected = nav.selected_planet(galaxy) == Some(marker.planet);
+        let selected = match &marker.object {
+            Marked::Planet(index) => nav.selected_planet(galaxy) == Some(*index),
+            Marked::Craft(id) => nav.selected_craft() == Some(id.as_str()),
+        };
         if selected || hovered {
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }
@@ -141,15 +144,22 @@ pub(super) fn canvas_overlay(
             // Labels sit over star glare in tables and close-ups.
             crate::ui::kit::halo::halo_galley(&painter, egui::pos2(x, y), text, tint);
         }
-        // A second click on the selected planet follows it.
+        // A second click on the selected planet or craft follows it.
         if hovered && click {
             click = false;
             if selected {
                 out.push(UiCommand::Follow);
-            } else if let Some(planet) = system.and_then(|s| s.planets.get(marker.planet)) {
-                out.push(UiCommand::Inspect {
-                    planet: planet.id.clone(),
-                });
+            } else {
+                match &marker.object {
+                    Marked::Planet(index) => {
+                        if let Some(planet) = system.and_then(|s| s.planets.get(*index)) {
+                            out.push(UiCommand::Inspect {
+                                planet: planet.id.clone(),
+                            });
+                        }
+                    }
+                    Marked::Craft(id) => out.push(UiCommand::SelectCraft { id: id.clone() }),
+                }
             }
         }
     }

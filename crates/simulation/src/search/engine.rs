@@ -777,7 +777,7 @@ pub(crate) fn evaluate(
             ObjectRef::Star { id } | ObjectRef::Planet { id } | ObjectRef::Barycentre { id } => {
                 id.clone()
             }
-            ObjectRef::List { id } => id.clone(),
+            ObjectRef::List { id } | ObjectRef::Craft { id } => id.clone(),
             ObjectRef::Galaxy => String::new(),
         };
         Hit {

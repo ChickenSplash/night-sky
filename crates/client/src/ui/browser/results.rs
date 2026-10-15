@@ -320,6 +320,9 @@ fn list_content(
                         space_simulation::objects::ObjectRef::Planet { id } => {
                             out.push(UiCommand::Inspect { planet: id.clone() });
                         }
+                        space_simulation::objects::ObjectRef::Craft { id } => {
+                            out.push(UiCommand::SelectCraft { id: id.clone() });
+                        }
                         _ => {}
                     }
                 }
@@ -329,6 +332,7 @@ fn list_content(
                         view.nav,
                         &view.universe.0,
                         view.field,
+                        view.craft,
                     )
                     .into_iter()
                     .next()
@@ -350,7 +354,9 @@ fn detail(
     let theme = &THEME;
     let galaxy = &view.universe.0;
     let position = crate::ui::inspector::position_ly(&result.object, view.nav, galaxy, view.field);
-    let info = browser.inspector.get(&result.object, galaxy, position);
+    let info = browser
+        .inspector
+        .get(&result.object, galaxy, position, view.craft);
     kit::eyebrow(ui, theme, "Selected");
     let title = if info.title.is_empty() {
         &result.name
@@ -371,7 +377,8 @@ fn detail(
         .font(theme.small.id())
         .color(theme.dim),
     );
-    let actions = crate::ui::inspector::actions(&result.object, view.nav, galaxy, view.field);
+    let actions =
+        crate::ui::inspector::actions(&result.object, view.nav, galaxy, view.field, view.craft);
     ui.horizontal_wrapped(|ui| {
         for (index, action) in actions.iter().enumerate() {
             let response = if index == 0 {
@@ -387,7 +394,8 @@ fn detail(
             space_simulation::objects::ObjectRef::Star { id }
             | space_simulation::objects::ObjectRef::Barycentre { id }
             | space_simulation::objects::ObjectRef::Planet { id }
-            | space_simulation::objects::ObjectRef::List { id } => id.clone(),
+            | space_simulation::objects::ObjectRef::List { id }
+            | space_simulation::objects::ObjectRef::Craft { id } => id.clone(),
             space_simulation::objects::ObjectRef::Galaxy => String::new(),
         };
         if kit::link(ui, theme, "Copy ID")
@@ -397,7 +405,9 @@ fn detail(
             ui.ctx().copy_text(id);
         }
     });
-    let info = browser.inspector.get(&result.object, galaxy, position);
+    let info = browser
+        .inspector
+        .get(&result.object, galaxy, position, view.craft);
     let rows: Vec<(&str, String)> = info
         .rows
         .iter()

@@ -22,6 +22,8 @@ pub enum Selection {
     Star(galaxy_nav::PickedStar),
     /// Stable planet ID, even when its parent system is not visited.
     Planet(String),
+    /// A live craft, by its own ID (`craft::Fleet`).
+    Craft(String),
 }
 
 impl Selection {
@@ -35,6 +37,7 @@ impl Selection {
                 id: star.id.clone(),
             },
             Self::Planet(id) => objects::ObjectRef::Planet { id: id.clone() },
+            Self::Craft(id) => objects::ObjectRef::Craft { id: id.clone() },
         }
     }
 }
@@ -196,6 +199,13 @@ impl Navigation {
                 .planets
                 .iter()
                 .position(|planet| planet.id == *id),
+            _ => None,
+        }
+    }
+
+    pub fn selected_craft(&self) -> Option<&str> {
+        match &self.selection {
+            Some(Selection::Craft(id)) => Some(id),
             _ => None,
         }
     }

@@ -18,17 +18,27 @@ use space_simulation::{
 };
 use std::f64::consts::TAU;
 
-/// A planet's label and hit target. Stars have none: they are picked from the
-/// streamed galaxy like any other star.
+/// A planet's or craft's label and hit target. Stars have none: they are
+/// picked from the streamed galaxy like any other star.
 #[derive(Clone)]
 pub struct Marker {
     pub point: Vec2,
     pub radius: f32,
     pub label: String,
     pub colour: [u8; 3],
-    /// Index into the visited system's planets.
-    pub planet: usize,
+    pub object: Marked,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Marked {
+    /// Index into the visited system's planets.
+    Planet(usize),
+    /// A craft's ID.
+    Craft(String),
+}
+
+/// Craft are drawn in one colour, apart from any task's.
+pub const CRAFT_COLOUR: [u8; 3] = [140, 225, 255];
 
 #[derive(Resource, Default)]
 pub struct Markers(pub Vec<Marker>);
@@ -434,7 +444,47 @@ impl Canvas<'_> {
                     radius: pixels.unwrap_or(6.0).max(5.0),
                     label: planet.label().to_owned(),
                     colour: planet.colour(),
-                    planet: index,
+                    object: Marked::Planet(index),
+                });
+            }
+        }
+    }
+}
+
+impl Canvas<'_> {
+    /// Each craft of the page as a wireframe cube at its true size, turned to
+    /// its attitude, and its marker. Only orbital positions have craft.
+    fn craft(&self, gizmos: &mut Gizmos, fleet: &crate::craft::Fleet, markers: &mut Vec<Marker>) {
+        if self.pose.layout > 0.0 {
+            return;
+        }
+        for live in crate::craft::shown_here(fleet, self.system, self.pose.page) {
+            let state = live.state_at(self.seconds);
+            let centre = self.world(self.frame * DVec3::from_array(state.position));
+            let half = self.units(crate::craft::SHIP_SIZE_M / 2.0);
+            let [x, y, z, w] = live.craft.orientation;
+            let turn = (self.frame * DQuat::from_xyzw(x, y, z, w)).as_quat();
+            let pixels = self.pixels(centre, half);
+            if pixels.is_some_and(|p| p >= 1.0) {
+                let corner = |i: u8| {
+                    let sign = |bit: u8| if i & bit == 0 { -1.0 } else { 1.0 };
+                    centre + turn * Vec3::new(sign(1), sign(2), sign(4)) * half
+                };
+                for a in 0..8u8 {
+                    for bit in [1, 2, 4] {
+                        if a & bit == 0 {
+                            gizmos.line(corner(a), corner(a | bit), colour(CRAFT_COLOUR));
+                        }
+                    }
+                }
+            }
+            if let Some(point) = self.screen(centre) {
+                markers.push(Marker {
+                    point,
+                    radius: pixels.unwrap_or(0.0).max(5.0),
+                    label: live.craft.name.clone(),
+                    colour: CRAFT_COLOUR,
+                    object: Marked::Craft(live.craft.id.clone()),
                 });
             }
         }
@@ -451,6 +501,7 @@ pub fn draw(
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
     mut markers: ResMut<Markers>,
     light: (ResMut<Lights>, Res<Photometry>),
+    fleet: Res<crate::craft::Fleet>,
 ) {
     let (mut lights, photometry) = light;
     markers.0.clear();
@@ -490,5 +541,6 @@ pub fn draw(
     if planets_shown {
         canvas.stars(&mut gizmos, &mut lights);
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
+        canvas.craft(&mut gizmos, &fleet, markers);
     }
 }

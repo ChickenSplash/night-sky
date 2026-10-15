@@ -150,6 +150,7 @@ fn search_controls_precede_a_separate_chip_row_with_optional_system_scope() {
                                     nav: &nav,
                                     universe: &universe,
                                     field: &field,
+                                    craft: crate::craft::Now::none(),
                                 },
                                 &mut vec![],
                             );
@@ -227,7 +228,7 @@ fn reset_stays_right_of_refresh_and_disappears_after_full_reset() {
                 }, |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         right.set(ui.max_rect().right());
-                        browser.scope(ui, &View { searches: &searches, nav: &nav, universe: &universe, field: &field }, &mut vec![]);
+                        browser.scope(ui, &View { searches: &searches, nav: &nav, universe: &universe, field: &field, craft: crate::craft::Now::none() }, &mut vec![]);
                     });
                 })
             };
@@ -319,6 +320,7 @@ fn table_headers_match_shared_section_heading_typography() {
                                 nav: &nav,
                                 universe: &universe,
                                 field: &field,
+                                craft: crate::craft::Now::none(),
                             },
                         );
                     });
@@ -674,6 +676,7 @@ fn opening_browser_keeps_its_height_stable_and_inside_the_viewport() {
                         nav: &nav,
                         universe: &universe,
                         field: &field,
+                        craft: crate::craft::Now::none(),
                     },
                     &mut Vec::new(),
                 );
@@ -733,6 +736,7 @@ fn results_scrollbar_only_appears_when_rows_overflow() {
                             nav: &nav,
                             universe: &universe,
                             field: &field,
+                            craft: crate::craft::Now::none(),
                         },
                     );
                 });
@@ -792,6 +796,7 @@ fn result_rows_follow_scene_selection_and_emit_selection_commands() {
                             nav,
                             universe: &universe,
                             field: &field,
+                            craft: crate::craft::Now::none(),
                         },
                     );
                 });
@@ -928,6 +933,7 @@ fn animated_result_panes_never_expand_their_parent_viewport() {
                             nav: &nav,
                             universe: &universe,
                             field: &field,
+                            craft: crate::craft::Now::none(),
                         },
                         &mut Vec::new(),
                     );

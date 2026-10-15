@@ -18,7 +18,7 @@ for implementation details.
 | Galaxy populations and procedural cells | `crates/simulation` | [Galaxy](docs/simulation/galaxy.md) |
 | Star types, evolution and companions | `crates/simulation` | [Stars](docs/simulation/stars.md) |
 | Planet generation and motion | `crates/simulation` | [Planetary systems](docs/simulation/planetary-systems.md), [orbits](docs/simulation/orbits.md) |
-| Craft model, gravity and integration | `crates/simulation/src/craft.rs` | [Craft](docs/simulation/craft.md) |
+| Craft model, gravity, integration and live craft | `crates/simulation/src/craft.rs`, client `craft.rs` | [Craft](docs/simulation/craft.md) |
 | Object registry, queries and search | `crates/simulation/src/search`, client `search/` | [Search](docs/simulation/search.md) |
 | Lists, pages, tasks and wire models | `crates/shared`, simulation and client | [Information overlay](docs/shared/information-overlay.md) |
 | Visits, selection, camera and presentation | Client `navigation.rs`, `scene/`, `galaxy_nav.rs`, `presentation.rs` | [Navigation](docs/client/navigation.md) |
