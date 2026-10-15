@@ -57,6 +57,22 @@ numerically, but the orbit being evaluated is an analytical two-body solution,
 not a numerical force integration. Eccentricity makes actual motion faster
 near periapsis and slower near apoapsis even though $M$ advances uniformly.
 
+### Velocity
+
+Velocity is the exact time derivative of that position, not a difference of
+two positions. Differentiating Kepler's equation gives
+$\dot E = (2\pi/P)/(1-e\cos E)$, so in the orbit's own plane:
+
+$$
+\dot x = -a\sin E\,\dot E, \qquad \dot z = a\sqrt{1-e^2}\cos E\,\dot E
+$$
+
+rotated into the system frame like the position (`orbit_state`). Barycentre
+members and planets add their parents' velocities exactly as they add
+positions (`member_state`, `member_states`, `planet_state`). Earth's orbit
+gives about 29.8 km/s. The [flight simulator](../plans/flight-sim.md) needs
+these for gravity at moving bodies and for velocities relative to them.
+
 ### Worked example
 
 Around a one-solar-mass host, a circular 1 AU orbit takes about one year. With
