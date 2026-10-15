@@ -452,7 +452,7 @@ impl Canvas<'_> {
 }
 
 impl Canvas<'_> {
-    /// Each craft of the page as a wireframe cube at its true size, turned to
+    /// Each craft of the page as a test hull at its true size, turned to
     /// its attitude, and its marker. Only orbital positions have craft.
     fn craft(&self, gizmos: &mut Gizmos, fleet: &crate::craft::Fleet, markers: &mut Vec<Marker>) {
         if self.pose.layout > 0.0 {
@@ -461,21 +461,18 @@ impl Canvas<'_> {
         for live in crate::craft::shown_here(fleet, self.system, self.pose.page) {
             let state = live.state_at(self.seconds);
             let centre = self.world(self.frame * DVec3::from_array(state.position));
-            let half = self.units(crate::craft::SHIP_SIZE_M / 2.0);
-            let [x, y, z, w] = live.craft.orientation;
-            let turn = (self.frame * DQuat::from_xyzw(x, y, z, w)).as_quat();
+            let half = self.units(crate::craft::SHIP_RADIUS_M);
+            let turn = (self.frame * live.orientation_at(self.seconds)).as_quat();
             let pixels = self.pixels(centre, half);
             if pixels.is_some_and(|p| p >= 1.0) {
-                let corner = |i: u8| {
-                    let sign = |bit: u8| if i & bit == 0 { -1.0 } else { 1.0 };
-                    centre + turn * Vec3::new(sign(1), sign(2), sign(4)) * half
+                let vertex = |i: usize| {
+                    centre
+                        + turn
+                            * DVec3::from_array(crate::craft::HULL_VERTICES[i]).as_vec3()
+                            * self.units(1.0)
                 };
-                for a in 0..8u8 {
-                    for bit in [1, 2, 4] {
-                        if a & bit == 0 {
-                            gizmos.line(corner(a), corner(a | bit), colour(CRAFT_COLOUR));
-                        }
-                    }
+                for (a, b) in crate::craft::HULL_EDGES {
+                    gizmos.line(vertex(a), vertex(b), colour(CRAFT_COLOUR));
                 }
             }
             if let Some(point) = self.screen(centre) {

@@ -139,8 +139,11 @@ in memory only: nothing is saved or shared yet.
   manual coasting restores the requested rate. The HUD's `held by craft`
   covers either this manoeuvre cap or the catch-up hold.
 - **Drawing:** a craft is drawn between its last two steps, blended to the
-  clock's time, as a wireframe cube of its true size (30 m) plus a marker
-  and label. Only craft in the visited system, on the page their frame names,
+  clock's time, with shortest-arc quaternion interpolation for attitude.
+  The placeholder is a 30 m long wireframe cuboid with a pyramid nose (-Z)
+  and two wings rooted on its bottom edge (-Y), plus a marker and label.
+  Forward and top are distinguishable without model assets. Only craft in
+  the visited system, on the page their frame names,
   are drawn, picked or followed.
 - **Spawning** (`spawn_ship`): above a planet, star or barycentre, or a system
   by its key (its star, or outermost barycentre). Its system must be loaded,

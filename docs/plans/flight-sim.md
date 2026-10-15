@@ -206,8 +206,9 @@ Checkpoints, each committed and checked on both targets:
    each fixed step, holds the time rate while thrusting or turning, and
    carries the reorganised `ns ship`, its developer API commands, the
    `ns ship state` readout and the inspector facts.
-4. **Visible facing:** the nose marker or pointed shape, drawn with the
-   orientation blended between steps like the position.
+4. ✅ **Visible facing:** a 30 m long wireframe cuboid with a pyramid nose
+   and wings rooted on the bottom edges, drawn with the orientation blended
+   between steps like the position.
 5. **Done when, run live,** then the docs (craft, developer API, limitations)
    and the phase marked done.
 

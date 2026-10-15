@@ -12,6 +12,8 @@ use space_simulation::{
 
 mod control;
 pub use control::Order;
+mod shape;
+pub use shape::{HULL_EDGES, HULL_VERTICES};
 
 /// Safe requested-time ceiling during manoeuvres, without changing the
 /// user's clock setting. Returning to quiet coasting restores that setting.
@@ -22,8 +24,10 @@ pub const MANOEUVRE_RATE: f64 = 10.0;
 /// than the craft falling behind the bodies.
 pub const MAX_STEPS_PER_FRAME: usize = 1_000;
 
-/// A ship's size, drawn as a cube until it has a model.
+/// Nose-to-tail length of the test hull, in metres.
 pub const SHIP_SIZE_M: f64 = 30.0;
+/// Conservative sphere around the test hull, for projection and picking.
+pub const SHIP_RADIUS_M: f64 = 18.0;
 
 /// The follow camera's distance when it starts following a craft, in metres.
 pub const FOLLOW_M: f64 = 200.0;
@@ -72,17 +76,29 @@ pub struct Live {
     pub field: Field,
     /// The state one step before `craft`'s, blended with it when drawn.
     previous: State,
+    previous_orientation: [f64; 4],
     /// Its system's position, in parsecs from the galactic centre, where
     /// search measures its distance from.
     pub system_pc: [f64; 3],
 }
 
 impl Live {
+    fn share_at(&self, seconds: f64) -> f64 {
+        ((seconds - (self.craft.seconds - STEP_SECONDS)) / STEP_SECONDS).clamp(0.0, 1.0)
+    }
+
+    /// Shortest-arc attitude interpolation, on the same timeline as position.
+    pub fn orientation_at(&self, seconds: f64) -> bevy::math::DQuat {
+        bevy::math::DQuat::from_array(self.previous_orientation).slerp(
+            bevy::math::DQuat::from_array(self.craft.orientation),
+            self.share_at(seconds),
+        )
+    }
+
     /// Where the craft is at `seconds`, between its last two steps.
     pub fn state_at(&self, seconds: f64) -> State {
         let current = self.craft.state();
-        let share =
-            ((seconds - (self.craft.seconds - STEP_SECONDS)) / STEP_SECONDS).clamp(0.0, 1.0);
+        let share = self.share_at(seconds);
         let blend =
             |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * share);
         State {
@@ -223,6 +239,7 @@ impl Fleet {
         craft.place(state, seconds);
         info!(target: "craft", "Spawned {id} {:.0} km above {body}", altitude / 1_000.0);
         self.craft.push(Live {
+            previous_orientation: craft.orientation,
             craft,
             field,
             previous: state,
@@ -316,6 +333,7 @@ pub fn step(mut clock: ResMut<Clock>, mut fleet: ResMut<Fleet>) {
         let mut steps = 0;
         while live.craft.seconds < until && steps < MAX_STEPS_PER_FRAME {
             live.previous = live.craft.state();
+            live.previous_orientation = live.craft.orientation;
             live.craft.step(&live.field);
             steps += 1;
         }

@@ -2,6 +2,48 @@ use super::*;
 use crate::actions::UiCommand;
 
 #[test]
+fn test_hull_has_a_forward_nose_and_low_mounted_wings_inside_its_pick_bound() {
+    use bevy::math::DVec3;
+    for vertex in HULL_VERTICES {
+        assert!(DVec3::from_array(vertex).length() <= SHIP_RADIUS_M);
+    }
+    let nose = HULL_VERTICES[8];
+    assert_eq!(nose, [0.0, 0.0, -SHIP_SIZE_M / 2.0]);
+    assert!(HULL_VERTICES[..8].iter().all(|v| v[2] > nose[2]));
+    for tip in &HULL_VERTICES[9..] {
+        assert_eq!(tip[1], -3.0);
+        assert!(tip[0].abs() > 4.0);
+    }
+    for (a, b) in HULL_EDGES {
+        assert!(a < HULL_VERTICES.len() && b < HULL_VERTICES.len() && a != b);
+    }
+}
+
+#[test]
+fn drawn_attitude_interpolates_on_the_same_step_as_position() {
+    use bevy::math::{DQuat, DVec3};
+    let (system, page, body) = planet_system();
+    let mut fleet = Fleet::default();
+    let id = fleet
+        .spawn(system, page, &body, 400_000.0, Launch::Circular, 0.0)
+        .unwrap();
+    let live = fleet.get_mut(&id).unwrap();
+    live.previous_orientation = DQuat::IDENTITY.to_array();
+    // The opposite quaternion sign must still take the shortest rotation.
+    live.craft.orientation = (-DQuat::from_rotation_y(1.0)).to_array();
+    live.craft.seconds = STEP_SECONDS;
+    let halfway = live.orientation_at(STEP_SECONDS / 2.0);
+    assert!((halfway * -DVec3::Z).distance(DQuat::from_rotation_y(0.5) * -DVec3::Z) < 1e-12);
+    assert!(live.orientation_at(-1.0).dot(DQuat::IDENTITY).abs() > 1.0 - 1e-12);
+    assert!(
+        live.orientation_at(1.0)
+            .dot(DQuat::from_rotation_y(1.0))
+            .abs()
+            > 1.0 - 1e-12
+    );
+}
+
+#[test]
 fn body_orders_validate_and_patch_inputs_without_cancelling_pointing() {
     use space_simulation::craft::{AttitudePilot, PointTarget};
     let mut app = app();
