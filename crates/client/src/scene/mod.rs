@@ -54,7 +54,8 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
             },
             Projection::Perspective(PerspectiveProjection {
                 near: 1000.0,
-                far: 1e22,
+                // Past the galaxy even at a close follow camera's render scale.
+                far: 1e30,
                 fov: 50.0_f32.to_radians(),
                 ..default()
             }),

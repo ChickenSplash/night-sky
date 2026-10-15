@@ -37,8 +37,14 @@ impl CameraPose {
     /// GPU clip-space values stay small at every zoom level (perspective is
     /// scale-invariant, so the image does not change).
     pub fn render_scale(&self) -> f64 {
-        self.scale_distance.max(20_000_000.0) / 1000.0
+        self.scale_distance.max(scale_floor(self.distance)) / 1000.0
     }
+}
+
+/// The least scale distance, in metres. Only a craft's follow camera zooms
+/// closer than `MIN_DISTANCE`, and then the floor comes down with it.
+pub fn scale_floor(distance: f64) -> f64 {
+    distance.clamp(1.0, super::MIN_DISTANCE)
 }
 
 #[derive(Resource, Default)]

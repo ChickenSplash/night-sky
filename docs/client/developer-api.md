@@ -42,6 +42,9 @@ guessing commands or fields:
 250 ms, with process ID/sample time. Root responses omit history by default;
 either accepts `?history=1` for bounded per-frame history.
 
+`/state/clock` gives simulation `seconds`, `rate` (simulated seconds per
+real second, before any hold by craft) and `paused`.
+
 Nested reads use a generic JSON-pointer resolver: `/state/camera`,
 `/state/debug/split_multiples`, `/perf/latest/split/preparation_ms`.
 `/perf/<path>` selects directly inside the performance object without the root

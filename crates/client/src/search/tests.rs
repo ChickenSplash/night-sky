@@ -24,6 +24,7 @@ fn requests_are_kept_by_id_refused_and_cancelled() {
             query("kind=star within_ly=10"),
             home,
             DEFAULT_WORK_CAP,
+            &[],
         )
         .unwrap();
     let other = hub
@@ -32,11 +33,12 @@ fn requests_are_kept_by_id_refused_and_cancelled() {
             query("kind=planet within_ly=10 limit=3"),
             home,
             DEFAULT_WORK_CAP,
+            &[],
         )
         .unwrap();
     assert_ne!(near, other);
     assert!(
-        hub.submit(Asker::Api, query("kind=moon"), home, DEFAULT_WORK_CAP)
+        hub.submit(Asker::Api, query("kind=moon"), home, DEFAULT_WORK_CAP, &[])
             .unwrap_err()
             .contains("not generated")
     );
@@ -46,6 +48,7 @@ fn requests_are_kept_by_id_refused_and_cancelled() {
             query("TS 1-0-999999999999"),
             home,
             DEFAULT_WORK_CAP,
+            &[],
         )
         .unwrap();
     let near = wait_for(&hub, near);
@@ -60,6 +63,7 @@ fn requests_are_kept_by_id_refused_and_cancelled() {
             query("within_ly=50"),
             [0.0; 3],
             DEFAULT_WORK_CAP,
+            &[],
         )
         .unwrap();
     hub.cancel(centre);
@@ -69,7 +73,7 @@ fn requests_are_kept_by_id_refused_and_cancelled() {
     assert!(summaries.iter().all(|e| e.results.is_none()));
     // Only a bounded number are kept.
     for _ in 0..KEPT {
-        hub.submit(Asker::Api, query("TS 1-0-999999999999"), home, 1)
+        hub.submit(Asker::Api, query("TS 1-0-999999999999"), home, 1, &[])
             .unwrap();
     }
     assert_eq!(hub.summaries(true).unwrap().len(), KEPT);
@@ -90,11 +94,11 @@ fn live_craft_are_found_by_kind_name_and_among_generated_objects() {
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
     fleet.get_mut(&ship).unwrap().system_pc = home;
     let hub = Hub::new(2);
-    *hub.live.lock().unwrap() = live_objects(&fleet, &galaxy, 0.0);
+    let live = live_objects(&fleet, &galaxy, 0.0);
     let search = |text: &str| {
         let query = Query::parse(text).unwrap();
         let id = hub
-            .submit(Asker::Api, query, home, DEFAULT_WORK_CAP)
+            .submit(Asker::Api, query, home, DEFAULT_WORK_CAP, &live)
             .unwrap();
         wait_for(&hub, id).results.unwrap()
     };

@@ -60,7 +60,8 @@ fn vertex(star: Star) -> Output {
     var out: Output;
     let world = draw.origin.xyz + star.position * draw.origin.w;
     var clip = view.clip_from_world * vec4(world, 1.0);
-    let distance_pc = length(world - view.world_position) * globals.settings.x;
+    // Scaled before squaring, as in `starfield.wgsl`.
+    let distance_pc = length((world - view.world_position) * globals.settings.x);
     let ratio = star.luminosity / max(distance_pc * distance_pc, 1e-16);
     out.position = vec4(2.0, 2.0, 0.0, 1.0);
     if clip.w <= 0.0 || distance_pc < draw.near.x * length(star.position) || hidden(star)

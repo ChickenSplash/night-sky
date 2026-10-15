@@ -106,8 +106,9 @@ them (`search::live`).
 
 - A query naming only live kinds (`kind=ship`, `family=craft`) finishes in
   the engine at once without walking any cells.
-- The client publishes its craft to the `Hub` each frame as `LiveObject`s:
-  kind, name, altitude and speed relative to the body it is around (the
+- The client builds its craft as `LiveObject`s only when a request is sent,
+  on the main thread (`search::live_now`; the developer API queues its
+  requests there, as it does commands): kind, name, altitude and speed relative to the body it is around (the
   `altitude_km` and `speed_kms` properties), that body's ID for `orbits`,
   and its system's key and position.
 - When a request is sent, `live::matching` tests those objects against the

@@ -94,9 +94,12 @@ in memory only: nothing is saved or shared yet.
   the system's axes. Speeds are relative to the body.
 - **Selection and following:** `Selection::Craft` and `ObjectRef::Craft`.
   Clicking a craft's marker selects it; a second click, **Follow ship** or
-  `fly_to_craft` follows it from the closest zoom (20,000 km), visiting its
-  system first if needed. The selection trail puts a craft below the planet
-  it is around, else its system's star.
+  `fly_to_craft` follows it from 200 m, visiting its system first if needed.
+  The camera follows a craft as it follows a planet, but may zoom to 50 m
+  instead of 20,000 km, and the render scale comes down with it (see
+  [navigation](../client/navigation.md#camera-frames-and-controls)). The
+  selection trail puts a craft below the planet it is around, else its
+  system's star.
 - **Search:** ships are found in the object browser and `ns search` like
   any object (`kind=ship`, `family=craft`, `altitude_km`, `speed_kms`,
   `orbits.…`, or by name); see [live objects](search.md#live-objects).
@@ -105,5 +108,6 @@ in memory only: nothing is saved or shared yet.
   which ignore every other body), and thrust. These change every frame, so
   craft facts are never cached.
 
-A close chase camera, where the ship rather than `Navigation::eye` owns the
-camera position, is the next step in the plan.
+What is seen (streaming, render precision, the visited system) stays
+camera-based even while following; what the ship does (gravity, altitude,
+thrust) stays craft-based. A ship cannot leave its system yet.

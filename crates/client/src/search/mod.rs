@@ -139,15 +139,18 @@ pub struct SearchPlugin;
 
 impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Searches>().add_systems(
-            Update,
-            (
-                poll,
-                apply.after(crate::actions::apply),
-                publish_live.after(crate::craft::step),
-            ),
-        );
+        app.init_resource::<Searches>()
+            .add_systems(Update, (poll, apply.after(crate::actions::apply)));
     }
+}
+
+/// The craft as they are now, for a request about to be sent.
+pub fn live_now(
+    fleet: &crate::craft::Fleet,
+    universe: &crate::Universe,
+    clock: &crate::Clock,
+) -> Vec<LiveObject> {
+    crate::craft::live_objects(fleet, &universe.0, clock.0.seconds)
 }
 
 /// Takes in the service's updates, and refreshes the shown request's copy
@@ -166,18 +169,6 @@ fn poll(mut searches: ResMut<Searches>, mut nav: ResMut<crate::Navigation>) {
     if let Some(entry) = searches.hub.newer(id, since) {
         chart(&mut nav, &entry);
         searches.shown_entry = Some(entry);
-    }
-}
-
-/// Hands the hub this frame's craft, which new requests match against.
-fn publish_live(
-    searches: Res<Searches>,
-    fleet: Res<crate::craft::Fleet>,
-    universe: Res<crate::Universe>,
-    clock: Res<crate::Clock>,
-) {
-    if let Ok(mut objects) = searches.hub.live.try_lock() {
-        *objects = crate::craft::live_objects(&fleet, &universe.0, clock.0.seconds);
     }
 }
 
@@ -201,7 +192,13 @@ fn apply(
     mut searches: ResMut<Searches>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
+    scene: (
+        Res<crate::craft::Fleet>,
+        Res<crate::Universe>,
+        Res<crate::Clock>,
+    ),
 ) {
+    let (fleet, universe, clock) = scene;
     for command in commands.read() {
         match command {
             UiCommand::Search { query } => {
@@ -213,7 +210,11 @@ fn apply(
                 }
                 let origin = camera_pc(&rig, &pose);
                 let cap = searches.work_cap;
-                searches.shown = searches.hub.submit(Asker::Game, query, origin, cap).ok();
+                let live = live_now(&fleet, &universe, &clock);
+                searches.shown = searches
+                    .hub
+                    .submit(Asker::Game, query, origin, cap, &live)
+                    .ok();
             }
             UiCommand::ClearSearch => {
                 if let Some(old) = searches.shown {
@@ -275,8 +276,6 @@ fn summary(entry: &Entry) -> String {
 pub struct Hub {
     service: Mutex<Service>,
     store: Mutex<VecDeque<Entry>>,
-    /// The app's live objects, such as craft, as of its last frame.
-    pub live: Mutex<Vec<LiveObject>>,
     next: AtomicU64,
     /// For requests that do not give one (`set_search`).
     work_cap: AtomicU64,
@@ -287,7 +286,6 @@ impl Hub {
         Self {
             service: Mutex::new(Service::spawn(threads)),
             store: Mutex::new(VecDeque::new()),
-            live: Mutex::new(Vec::new()),
             next: AtomicU64::new(1),
             work_cap: AtomicU64::new(DEFAULT_WORK_CAP),
         }
@@ -302,13 +300,15 @@ impl Hub {
         self.work_cap.store(cap, Ordering::Relaxed);
     }
 
-    /// Checks and sends a query; its ID, or why it was refused.
+    /// Checks and sends a query, matching it against the app's live objects
+    /// (`live_now`) as they are when it is sent; its ID, or why it was refused.
     pub fn submit(
         &self,
         asker: Asker,
         query: Query,
         origin_pc: [f64; 3],
         work_cap: u64,
+        live: &[LiveObject],
     ) -> Result<u64, String> {
         let text = query.to_text();
         if let Err(reason) = query.check() {
@@ -318,11 +318,7 @@ impl Hub {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let [x, y, z] = origin_pc;
         info!(target: TARGET, "#{id} {asker:?}: {text} · from {x:.1} {y:.1} {z:.1} pc");
-        let hits = self
-            .live
-            .lock()
-            .map(|objects| live::matching(&query, origin_pc, &objects))
-            .unwrap_or_default();
+        let hits = live::matching(&query, origin_pc, live);
         // A live object's name or ID is no catalogue designation: it is
         // found here, without the engine.
         let found_live = !query.text.is_empty() && !hits.is_empty();

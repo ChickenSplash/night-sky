@@ -162,7 +162,9 @@ pub fn place_camera(
         + pose.eye / PC_METRES;
     pose.scale_distance = proximity_scale_distance(&field, eye_pc, shown.distance, &mut metrics);
     if nav.arrived {
-        pose.scale_distance = pose.scale_distance.min(pose.eye.length().max(20_000_000.0));
+        pose.scale_distance = pose
+            .scale_distance
+            .min(pose.eye.length().max(super::scale_floor(shown.distance)));
     }
     pose.layout = shown.layout;
     let Ok((mut transform, mut cell, parent, mut projection, mut camera)) = camera.single_mut()
@@ -196,5 +198,5 @@ pub(super) fn proximity_scale_distance(
         .map_or(selected_range, |(distance, ..)| {
             selected_range.min(distance * PC_METRES)
         })
-        .max(20_000_000.0)
+        .max(super::scale_floor(selected_range))
 }

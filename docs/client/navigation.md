@@ -65,7 +65,7 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   Selecting one replaces the other; `Navigation::select` keeps following only
   from planet to planet. A second click activates it: a star is visited, a
   planet or craft followed. Following a craft targets its blended position
-  each frame (`craft::followed`), from the closest zoom.
+  each frame (`craft::followed`), from 200 m.
 - Esc while following reframes the system and clears selection; otherwise it
   clears selection, or with nothing selected goes up physically. Leaving a
   system keeps either selection and stops tracking.
@@ -115,7 +115,10 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   Hand projections (picking, overlays, table framing) use
   `Navigation::tan_half_fov`, never a fixed 50°.
 - Shift + scroll (either Shift key) zooms from 20,000 km to 40,000 ly;
-  plain scroll adjusts movement speed independently.
+  plain scroll adjusts movement speed independently. Following a craft, it
+  zooms to 50 m (`scene::closest`), and the render scale floor
+  (`scene::scale_floor`) comes down with the zoom, so a 30 m hull stays past
+  the near plane. Leaving the craft keeps the zoom; it can only widen.
 
 Render scaling, floating-origin precision and depth are described in
 [realistic rendering](rendering.md#precision-scale-and-wireframes).

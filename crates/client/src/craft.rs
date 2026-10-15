@@ -18,6 +18,11 @@ pub const MAX_STEPS_PER_FRAME: usize = 1_000;
 /// A ship's size, drawn as a cube until it has a model.
 pub const SHIP_SIZE_M: f64 = 30.0;
 
+/// The follow camera's distance when it starts following a craft, and its
+/// closest zoom, in metres.
+pub const FOLLOW_M: f64 = 200.0;
+pub const CLOSEST_M: f64 = 50.0;
+
 /// Thrust the developer command accepts, in metres per second squared.
 pub const MAX_THRUST: f64 = 100.0;
 

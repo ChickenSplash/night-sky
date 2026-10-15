@@ -33,6 +33,15 @@ enum Job {
     /// terminal's, and refused with the reason if it would do nothing.
     Command(String, Verdict),
     Capture(mpsc::SyncSender<Value>),
+    /// A checked query, sent from the main thread so it matches the craft
+    /// as they are then; replies with its ID.
+    Search(SearchJob, mpsc::SyncSender<Result<u64, String>>),
+}
+
+struct SearchJob {
+    query: space_simulation::search::Query,
+    origin_pc: [f64; 3],
+    work_cap: u64,
 }
 
 #[derive(Resource)]
@@ -123,6 +132,7 @@ fn receive(
     scene: (Res<Universe>, Res<Navigation>, Res<Clock>),
     camera: (Res<CameraRig>, Res<CameraPose>),
     field: Res<Starfield>,
+    search: (Res<crate::search::Searches>, Res<crate::craft::Fleet>),
 ) {
     let Ok(receiver) = api.receiver.lock() else {
         return;
@@ -157,6 +167,18 @@ fn receive(
                     "png": report.map(|path| path.with_extension("png").display().to_string()),
                     "note": "The report is saved synchronously; the PNG is written by the renderer a frame or two later.",
                 }));
+            }
+            Job::Search(job, reply) => {
+                let (universe, _, clock) = &scene;
+                let (searches, fleet) = &search;
+                let live = crate::search::live_now(fleet, universe, clock);
+                let _ = reply.try_send(searches.hub.submit(
+                    Asker::Api,
+                    job.query,
+                    job.origin_pc,
+                    job.work_cap,
+                    &live,
+                ));
             }
         }
     }
@@ -322,17 +344,42 @@ fn handle(
                 let published = shared.lock().ok().and_then(|cached| cached.clone())?;
                 serde_json::from_value(published.state["camera"]["position_pc"].clone()).ok()
             };
-            let submitted = search_request(body.trim(), camera, hub.work_cap()).and_then(
-                |(query, origin, cap)| {
-                    let text = query.to_text();
-                    let id = hub.submit(Asker::Api, query, origin, cap)?;
-                    Ok(json!({"id": id, "status": "running", "query": text,
-                        "origin_pc": origin, "work_cap": cap}))
-                },
-            );
-            match submitted {
-                Ok(body) => respond(request, 202, body),
-                Err(error) => respond(request, 400, json!({"error": error})),
+            let (query, origin_pc, work_cap) =
+                match search_request(body.trim(), camera, hub.work_cap()) {
+                    Ok(checked) => checked,
+                    Err(error) => {
+                        respond(request, 400, json!({"error": error}));
+                        return;
+                    }
+                };
+            let text = query.to_text();
+            let (reply, sent) = mpsc::sync_channel(1);
+            let job = SearchJob {
+                query,
+                origin_pc,
+                work_cap,
+            };
+            if queue.try_send(Job::Search(job, reply)).is_err() {
+                respond(
+                    request,
+                    503,
+                    json!({"error": "Command queue full or app unavailable"}),
+                );
+                return;
+            }
+            match sent.recv_timeout(wait) {
+                Ok(Ok(id)) => respond(
+                    request,
+                    202,
+                    json!({"id": id, "status": "running", "query": text,
+                        "origin_pc": origin_pc, "work_cap": work_cap}),
+                ),
+                Ok(Err(error)) => respond(request, 400, json!({"error": error})),
+                Err(_) => respond(
+                    request,
+                    202,
+                    json!({"status": "queued", "query": text, "note": "No main-thread reply within 2 seconds. The search may still be sent; GET /search lists those kept."}),
+                ),
             }
         }
         (&Method::Get, path) if path.starts_with("/search/") => {
@@ -674,7 +721,28 @@ mod tests {
     fn search_endpoints_submit_read_cancel_and_refuse() {
         let server = Server::http((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
-        let api = start(server, Arc::new(Mutex::new(None)), hub(), REPLY_WAIT).unwrap();
+        let hub = hub();
+        let api =
+            Arc::new(start(server, Arc::new(Mutex::new(None)), hub.clone(), REPLY_WAIT).unwrap());
+        // Stands in for the main thread, which sends searches with no craft.
+        let done = Arc::new(AtomicBool::new(false));
+        let main_thread = {
+            let (api, done) = (api.clone(), done.clone());
+            std::thread::spawn(move || {
+                while !done.load(Ordering::Relaxed) {
+                    let job = api
+                        .receiver
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_millis(10));
+                    if let Ok(Job::Search(job, reply)) = job {
+                        let sent =
+                            hub.submit(Asker::Api, job.query, job.origin_pc, job.work_cap, &[]);
+                        reply.send(sent).unwrap();
+                    }
+                }
+            })
+        };
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
             .timeout(Duration::from_secs(5))
@@ -766,6 +834,8 @@ mod tests {
                 .status(),
             405
         );
+        done.store(true, Ordering::Relaxed);
+        main_thread.join().unwrap();
         drop(api);
     }
 
@@ -937,6 +1007,8 @@ mod tests {
             .insert_resource(CameraRig::default())
             .insert_resource(CameraPose::default())
             .insert_resource(Starfield::default())
+            .init_resource::<crate::search::Searches>()
+            .init_resource::<crate::craft::Fleet>()
             .add_systems(PreUpdate, receive);
         let (reply, _verdicts) = mpsc::sync_channel(10);
         for _ in 0..10 {

@@ -203,7 +203,7 @@ fn commands_spawn_select_follow_steer_and_remove_ships() {
     assert!(too_hard.check_values().is_err());
     send(&mut app, UiCommand::FlyToCraft { id: id.clone() });
     let nav = app.world().resource::<Navigation>();
-    assert!(nav.following && nav.fly && nav.distance == crate::scene::MIN_DISTANCE);
+    assert!(nav.following && nav.fly && nav.distance == FOLLOW_M);
     send(&mut app, UiCommand::Up);
     assert!(!app.world().resource::<Navigation>().following);
     send(&mut app, UiCommand::SelectCraft { id: id.clone() });

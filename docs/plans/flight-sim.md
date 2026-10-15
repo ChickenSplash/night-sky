@@ -111,12 +111,12 @@ only member in the alpha.
 Moons are not a prerequisite. Nested motion already exists through planets
 around stars and barycentre hosts in multiple systems; moons extend it later.
 
-### 1 · The ship as a body (in progress)
+### 1 · The ship as a body ✅ Done
 
-Done so far: body velocities, the craft model with fixed-step gravity
-(tested on both targets), the ship in the engine (cube, selection,
-inspector, breadcrumbs, picking, "Follow ship", `ns ship`) and in search. Ship
-mode and the chase camera are next. See [craft](../simulation/craft.md).
+Body velocities, the craft model with fixed-step gravity (tested on both
+targets), the ship in the engine (cube, selection, inspector, breadcrumbs,
+picking, "Follow ship" from 200 m, `ns ship`) and in search. See
+[craft](../simulation/craft.md).
 
 - Start here: planet and barycentre orbital velocities (the derivative of
   their Kepler positions), so any body reports position and velocity at a
@@ -135,9 +135,11 @@ mode and the chase camera are next. See [craft](../simulation/craft.md).
   altitude), breadcrumbs, actions such as "Follow ship", and click picking.
 - The ship in the object browser and `ns search`: the Craft family and the
   live-craft source merged into search results.
-- In ship mode the ship owns the position, and the camera follows it, instead
-  of `Navigation::eye`. This is the main architectural change; design it deliberately.
-- A chase camera, plus ship state and commands through the developer API and `ns`.
+- The camera follows the ship as it follows a planet, close enough to see a
+  30 m hull: the zoom and render scale go below their 20,000 km floors only
+  while following a craft. Streaming, precision and the visited system stay
+  camera-based; the ship's own facts (gravity, altitude) stay craft-based.
+- Ship state and commands through the developer API and `ns`.
 - **Done when:** a test orbit runs 100 laps with negligible energy drift, on
   both targets.
 
@@ -154,6 +156,9 @@ mode and the chase camera are next. See [craft](../simulation/craft.md).
   galaxy travel and streaming.
 - Course plotting, minimum safe distance, trip-length speed scaling and
   velocity-matched drop-out, as in the rules above.
+- The ship's frame changes as it travels (galactic in deep space, then the
+  destination star's). Following tracks it across frames, and the visited
+  system switches to the ship's while following.
 - **Done when:** the core loop runs end to end from the CLI.
 
 ### 4 · Orbit autopilot
@@ -171,7 +176,8 @@ mode and the chase camera are next. See [craft](../simulation/craft.md).
 ### 6 · Walking inside the ship
 
 - First person in a grey-box interior, simulated in the ship's own local frame
-  so it stays steady at any galactic position.
+  so it stays steady at any galactic position. The cockpit view is following
+  at zero distance, turned with the ship's orientation.
 - Collisions from a physics crate (`avian3d` or `bevy_rapier`), after checking
   compatibility with the pinned Bevy, big_space and bevy_egui set.
 - Fixed deck gravity for the alpha.

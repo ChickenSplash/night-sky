@@ -85,11 +85,13 @@ fn vertex(star: Star) -> Output {
     var out: Output;
     let world = draw.origin.xyz + star.position * draw.origin.w;
     var clip = view.clip_from_world * vec4(world, 1.0);
-    let distance_pc = length(world - view.world_position) * globals.settings.x;
+    // Scaled before squaring: a close follow camera's render units are small
+    // enough that galactic distances would overflow.
+    let distance_pc = length((world - view.world_position) * globals.settings.x);
     // Luminosity over squared distance is linear in apparent flux, so the
     // magnitude cutoff and brightness need no logarithm (`population.rs`).
     let ratio = star.luminosity / max(distance_pc * distance_pc, 1e-16);
-    // The far plane is 1e22 render units; reject bodies behind the camera.
+    // Reject bodies behind the camera.
     if clip.w <= 0.0 || distance_pc < draw.near.x * length(star.position) || hidden(star)
         || split(star, distance_pc) || ratio < globals.settings.y || globals.debug.x > 0.5 {
         clip = vec4(2.0, 2.0, 0.0, 1.0);

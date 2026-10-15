@@ -341,6 +341,34 @@ fn streamed_star_tightens_render_scale_before_system_handoff_at_max_range() {
 }
 
 #[test]
+fn only_a_followed_craft_brings_the_zoom_and_render_scale_close() {
+    let mut nav = Navigation {
+        distance: 1e9,
+        ..default()
+    };
+    assert_eq!(closest(&nav), MIN_DISTANCE);
+    nav.selection = Some(crate::Selection::Craft("craft-1".into()));
+    nav.following = true;
+    assert_eq!(closest(&nav), crate::craft::CLOSEST_M);
+    // Once it stops following, the camera may zoom out but no closer.
+    nav.following = false;
+    nav.distance = 200.0;
+    assert_eq!(closest(&nav), 200.0);
+    // A hull at the closest zoom sits well past the 0.01-unit near plane.
+    let pose = CameraPose {
+        distance: crate::craft::CLOSEST_M,
+        scale_distance: crate::craft::CLOSEST_M,
+        ..default()
+    };
+    assert!(crate::craft::CLOSEST_M / pose.render_scale() > 100.0);
+    let wide = CameraPose {
+        distance: 1e9,
+        ..default()
+    };
+    assert_eq!(wide.render_scale(), MIN_DISTANCE / 1000.0);
+}
+
+#[test]
 fn speed_scroll_is_independent_of_range_and_bounded() {
     let mut nav = Navigation::default();
     let range = nav.distance;
