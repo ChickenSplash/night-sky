@@ -7,8 +7,10 @@ struct Settings { viewport: vec4<f32>, scale: vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var glow_sampler: sampler;
 struct Vertex { @location(0) position: vec3<f32> }
 @vertex fn vertex(v: Vertex) -> @builtin(position) vec4<f32> {
-    // At the far plane, so nearer bodies still hide the glow.
-    return vec4(v.position.xy, 0.000001, 1.0);
+    // At the far plane itself (reverse Z), so every body and line hides the
+    // glow. Any depth above zero would draw it over geometry farther than
+    // near / depth, which a close follow camera puts at planets and orbits.
+    return vec4(v.position.xy, 0.0, 1.0);
 }
 @fragment fn fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = (position.xy - settings.viewport.xy) / settings.viewport.zw;

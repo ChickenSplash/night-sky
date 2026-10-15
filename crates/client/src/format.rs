@@ -15,6 +15,19 @@ pub fn speed_label(metres_per_second: f64) -> String {
     format!("{value:.2} {unit}")
 }
 
+/// A camera range: metres, then km, AU from 0.1 AU, and ly from 0.01 ly.
+pub fn distance_label(metres: f64) -> String {
+    if metres >= 0.01 * LY_METRES {
+        format!("{:.3} ly", metres / LY_METRES)
+    } else if metres >= 0.1 * AU_METRES {
+        format!("{:.3} AU", metres / AU_METRES)
+    } else if metres >= 1000.0 {
+        km_text(metres / 1000.0)
+    } else {
+        format!("{metres:.1} m")
+    }
+}
+
 const JUPITER_MASSES: f64 = 317.83;
 
 pub fn mass_text(earths: f64) -> String {

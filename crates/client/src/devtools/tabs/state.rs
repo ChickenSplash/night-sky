@@ -6,7 +6,6 @@ use crate::ui::terminal;
 use crate::{Clock, Navigation, Selection, Universe, Visit};
 use bevy::prelude::*;
 use bevy_egui::egui;
-use space_simulation::{AU_METRES, LY_METRES};
 
 pub fn state(
     ui: &mut egui::Ui,
@@ -18,11 +17,7 @@ pub fn state(
 ) {
     let galaxy = &universe.0;
     let ly = |v: bevy::math::DVec3| format!("{:+.3}  {:+.3}  {:+.3}", v.x, v.y, v.z);
-    let range = if pose.distance > LY_METRES * 0.01 {
-        format!("{:.3} ly", pose.distance / LY_METRES)
-    } else {
-        format!("{:.4} AU", pose.distance / AU_METRES)
-    };
+    let range = crate::format::distance_label(pose.distance);
     terminal::heading(ui, "camera");
     terminal::facts(
         ui,

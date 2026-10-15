@@ -390,6 +390,15 @@ fn speed_units_follow_the_distance_ladder() {
 }
 
 #[test]
+fn camera_range_climbs_from_metres_to_light_years() {
+    use crate::format::distance_label;
+    assert_eq!(distance_label(50.0), "50.0 m");
+    assert_eq!(distance_label(20_000_000.0), "20,000 km");
+    assert_eq!(distance_label(20.0 * AU_METRES), "20.000 AU");
+    assert_eq!(distance_label(2.0 * LY_METRES), "2.000 ly");
+}
+
+#[test]
 fn free_look_holds_the_eye_still_and_turns_past_both_poles() {
     let mut nav = Navigation {
         target: DVec3::new(2.0, 3.0, -5.0) * AU_METRES,
