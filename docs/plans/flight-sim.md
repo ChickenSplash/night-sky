@@ -143,14 +143,66 @@ picking, "Follow ship" from 200 m, `ns ship`) and in search. See
 - **Done when:** a test orbit runs 100 laps with negligible energy drift, on
   both targets.
 
-### 2 · Trajectory prediction and thrust
+### 2 · Full ship control
+
+The ship can be flown on every axis, entirely from the CLI. In-app controls
+come later, with the layered controls.
+
+- **Thrusters, set per ship** so later ships can differ:
+  - Main drive forward at about 1 g, on a throttle from zero to full.
+  - Reverse drive, on by default but optional per ship.
+  - Fine thrusters at about 0.1 g, moving the ship forward and back, up and
+    down, left and right, and turning it in pitch, yaw and roll.
+- **Rotation in the physics.** The ship stores its spin as well as its
+  orientation, turns a little each fixed step, and thrust acts along the
+  ship's own axes, not the system's. Turning thrusters set how fast the spin
+  changes; mass and inertia modelling can wait.
+- **Inputs stay fixed-step commands:** throttle (negative for the reverse
+  drive, refused on a ship without one), translation on three axes and
+  rotation on three axes, each a fraction of the thruster's limit.
+- **Pointing autopilot,** in `crates/simulation`, producing the same inputs a
+  player would, so a server can run it too:
+  - It turns towards a target direction using only the ship's own turning
+    thrusters, speeding up and then braking in time to stop on target without
+    overshooting.
+  - Targets are worked out again each step: prograde, retrograde, normal,
+    anti-normal, radial in and out (relative to the body the ship orbits), a
+    body, or a fixed direction in the system's axes.
+  - Roll is held as it is, or lined up with a given "up" direction.
+  - "Stop rotation" is the same controller with zero spin as its target.
+  - A manual rotation command releases it.
+- **Time rate.** While the ship is thrusting or turning, the clock is held to
+  a low rate (start at 10× real time, tune in play), so a burn is never spread
+  over hours of simulation in one frame.
+- **Facing is visible:** a nose marker or a simple pointed shape instead of
+  the plain cube, until proper ship models.
+- **A reorganised `ns ship`,** grouped by what is being done:
+  - `spawn`, `despawn`, `list`, `follow`.
+  - `state`: orientation, spin, velocity, throttle, autopilot mode, orbit
+    and altitude.
+  - `throttle <-1..1>`, `translate --forward --up --right`,
+    `rotate --pitch --yaw --roll`.
+  - `point prograde | retrograde | normal | antinormal | radial-in |
+    radial-out | body <id> | vector x,y,z`, `stop`, `release`.
+- The inspector shows throttle, spin and autopilot mode.
+- **Done when:** from the CLI alone, the ship points prograde, burns, stops
+  its rotation and points at a body, settling on each target without
+  overshoot; autopilot tests pass on both targets.
+
+### 3 · Trajectory prediction
 
 - A predicted trajectory line ahead of the ship. This is the most important
   usability feature: it makes orbital mechanics readable.
-- Basic sublight throttle and pointing.
-- **Done when:** a manual burn visibly reshapes the predicted orbit.
+- Predicted from the ship's current state as if it coasts, with bodies on
+  their Kepler paths, using the same gravity and integrator at a coarser step
+  within a per-frame budget. Redone when the inputs change and live during a
+  burn.
+- Drawn relative to the body the ship orbits, so an orbit shows as a closed
+  ellipse rather than a spiral smeared along the planet's own path.
+- Apoapsis and periapsis in the inspector and `ns ship state`.
+- **Done when:** a burn from the CLI visibly reshapes the predicted orbit.
 
-### 3 · Warp drive
+### 4 · Warp drive
 
 - In-system first (planet to planet), then interstellar on top of the existing
   galaxy travel and streaming.
@@ -161,19 +213,22 @@ picking, "Follow ship" from 200 m, `ns ship`) and in search. See
   system switches to the ship's while following.
 - **Done when:** the core loop runs end to end from the CLI.
 
-### 4 · Orbit autopilot
+### 5 · Orbit autopilot
 
 - After drop-out, a short sublight burn (seconds to a minute) circularises the orbit.
 - Close-range correction only; no interplanetary transfer planning.
 - **Done when:** "go to planet" ends in a stable orbit with no player input.
 
-### 5 · Layered controls
+### 6 · Layered controls
 
+- In-app piloting: a piloting state where the keys fly the ship instead of
+  the camera, with a key layout for all six axes and the throttle.
 - **Autopilot:** pick a target; everything else is handled.
-- **Assisted:** prograde, retrograde, circularise, hold orbit, match target.
+- **Assisted:** the pointing assists from phase 2, plus circularise, hold
+  orbit and match target.
 - **Manual:** assists off.
 
-### 6 · Walking inside the ship
+### 7 · Walking inside the ship
 
 - First person in a grey-box interior, simulated in the ship's own local frame
   so it stays steady at any galactic position. The cockpit view is following
