@@ -95,8 +95,7 @@ in memory only: nothing is saved or shared yet.
 - **Selection and following:** `Selection::Craft` and `ObjectRef::Craft`.
   Clicking a craft's marker selects it; a second click, **Follow ship** or
   `fly_to_craft` follows it from 200 m, visiting its system first if needed.
-  The camera follows a craft as it follows a planet, but may zoom to 50 m
-  instead of 20,000 km, and the render scale comes down with it (see
+  The camera follows a craft as it follows a planet (see
   [navigation](../client/navigation.md#camera-frames-and-controls)). The
   selection trail puts a craft below the planet it is around, else its
   system's star.

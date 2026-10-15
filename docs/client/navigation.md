@@ -114,11 +114,10 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   set in the render tab (`UiCommand::SetFov`) or Shift + left-drag (up narrows).
   Hand projections (picking, overlays, table framing) use
   `Navigation::tan_half_fov`, never a fixed 50°.
-- Shift + scroll (either Shift key) zooms from 20,000 km to 40,000 ly;
-  plain scroll adjusts movement speed independently. Following a craft, it
-  zooms to 50 m (`scene::closest`), and the render scale floor
-  (`scene::scale_floor`) comes down with the zoom, so a 30 m hull stays past
-  the near plane. Leaving the craft keeps the zoom; it can only widen.
+- Shift + scroll (either Shift key) zooms from 1 m to 40,000 ly, whatever is
+  followed or in view; plain scroll adjusts movement speed independently.
+  Below 20,000 km the render scale floor (`scene::scale_floor`) comes down
+  with the zoom, so what is zoomed on stays past the near plane.
 
 Render scaling, floating-origin precision and depth are described in
 [realistic rendering](rendering.md#precision-scale-and-wireframes).

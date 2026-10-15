@@ -227,7 +227,7 @@ physically evolving atmosphere.
   with the 3D camera (without tone mapping), or it presents a stale frame.
 - The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh
   with its 1e30 far plane. WebGL 2 never draws indirectly anyway. The far
-  plane lies past the galaxy even at a craft follow camera's render scale.
+  plane lies past the galaxy even at the closest zoom's render scale.
 
 ## Precision, scale and wireframes
 
@@ -238,10 +238,10 @@ physically evolving atmosphere.
 - Divide render positions and radii by `CameraPose::render_scale()` (displayed
   camera about 1,000 units from target). Raw metres push clip-space values
   to about 1e13, making the gizmo line shader drop or fragment segments.
-  The scale's floor is 20,000 km of range, lower only while following a
-  craft (`scene::scale_floor`). Shaders then scale galactic offsets to
-  parsecs before squaring them, as a squared distance in render units would
-  overflow f32.
+  The scale's floor is 20,000 km of range, or the zoom when closer
+  (`scene::scale_floor`, down to 1 m). Shaders scale galactic offsets to
+  parsecs before squaring them, as at small scales a squared distance in
+  render units would overflow f32.
 - Planets retain physical radii in every presentation mode. Wireframes use
   procedural latitude/longitude lines, not native polygon wireframe mode.
   Pick line density from on-screen radius: dense rings on small bodies merge

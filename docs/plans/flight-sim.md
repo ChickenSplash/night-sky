@@ -136,8 +136,8 @@ picking, "Follow ship" from 200 m, `ns ship`) and in search. See
 - The ship in the object browser and `ns search`: the Craft family and the
   live-craft source merged into search results.
 - The camera follows the ship as it follows a planet, close enough to see a
-  30 m hull: the zoom and render scale go below their 20,000 km floors only
-  while following a craft. Streaming, precision and the visited system stay
+  30 m hull: the zoom goes down to 1 m anywhere, and the render scale with
+  it. Streaming, precision and the visited system stay
   camera-based; the ship's own facts (gravity, altitude) stay craft-based.
 - Ship state and commands through the developer API and `ns`.
 - **Done when:** a test orbit runs 100 laps with negligible energy drift, on

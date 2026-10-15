@@ -41,10 +41,13 @@ impl CameraPose {
     }
 }
 
-/// The least scale distance, in metres. Only a craft's follow camera zooms
-/// closer than `MIN_DISTANCE`, and then the floor comes down with it.
+/// Scale distance used from this zoom out, in metres. A closer zoom brings
+/// the floor down with it, so what is zoomed on stays past the near plane.
+const SCALE_FLOOR: f64 = 20_000_000.0;
+
+/// The least scale distance at a zoom, in metres.
 pub fn scale_floor(distance: f64) -> f64 {
-    distance.clamp(1.0, super::MIN_DISTANCE)
+    distance.clamp(super::MIN_DISTANCE, SCALE_FLOOR)
 }
 
 #[derive(Resource, Default)]
