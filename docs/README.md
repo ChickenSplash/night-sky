@@ -28,6 +28,8 @@ Engine-independent models in `crates/simulation`:
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
   nearest-first search, completeness and native/browser execution.
+- [Craft](simulation/craft.md): the man-made object model, gravity from every
+  body, and fixed-step integration.
 
 ## Client
 

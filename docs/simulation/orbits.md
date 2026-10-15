@@ -70,7 +70,7 @@ $$
 rotated into the system frame like the position (`orbit_state`). Barycentre
 members and planets add their parents' velocities exactly as they add
 positions (`member_state`, `member_states`, `planet_state`). Earth's orbit
-gives about 29.8 km/s. The [flight simulator](../plans/flight-sim.md) needs
+gives about 29.8 km/s. [Craft](craft.md) need
 these for gravity at moving bodies and for velocities relative to them.
 
 ### Worked example

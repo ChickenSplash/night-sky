@@ -1,4 +1,5 @@
 pub mod cells;
+pub mod craft;
 pub mod galaxy;
 pub mod kinematics;
 pub mod light;
@@ -140,13 +141,7 @@ pub fn member_state(system: &StarSystem, page: u32, id: &str, seconds: f64) -> S
 /// Every star of a page, in `stars_on` order, where `member_position` puts
 /// it, solving each pair's orbit once rather than once per star below it.
 pub fn star_positions(system: &StarSystem, page: u32, seconds: f64) -> Vec<[f64; 3]> {
-    let placed = place_members(
-        system,
-        page,
-        [0.0; 3],
-        |orbit, mass| position(orbit, mass, seconds),
-        |base, relative, share| std::array::from_fn(|i| base[i] + relative[i] * share),
-    );
+    let placed = member_positions(system, page, seconds);
     system
         .stars_on(page)
         .map(|star| find(&placed, &star.id).unwrap_or([0.0; 3]))
@@ -165,6 +160,21 @@ pub fn member_states(system: &StarSystem, page: u32, seconds: f64) -> Vec<(&str,
     );
     if let Some(root) = system.root(page) {
         placed.push((root, State::default()));
+    }
+    placed
+}
+
+/// `member_states` without velocities.
+fn member_positions(system: &StarSystem, page: u32, seconds: f64) -> Vec<(&str, [f64; 3])> {
+    let mut placed = place_members(
+        system,
+        page,
+        [0.0; 3],
+        |orbit, mass| position(orbit, mass, seconds),
+        |base, relative, share| std::array::from_fn(|i| base[i] + relative[i] * share),
+    );
+    if let Some(root) = system.root(page) {
+        placed.push((root, [0.0; 3]));
     }
     placed
 }
