@@ -144,7 +144,9 @@ pub(super) fn publish(
         "inspector": readout,
         "page": nav.page, "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,
-        "clock": {"seconds": clock.0.seconds, "rate": clock.0.rate, "paused": clock.0.paused},
+        "clock": {"seconds": clock.0.seconds, "rate": clock.0.rate,
+            "effective_rate": if clock.0.paused { 0.0 } else { fleet.safe_rate(clock.0.rate) },
+            "paused": clock.0.paused},
         // Live craft for `ns ship`; their facts are also in the inspector.
         "craft": crate::craft::readout(&fleet, clock.0.seconds),
         "display": {

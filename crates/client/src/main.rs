@@ -164,8 +164,11 @@ fn main() {
     app.run();
 }
 
-fn tick(time: Res<Time>, mut clock: ResMut<Clock>) {
+fn tick(time: Res<Time>, mut clock: ResMut<Clock>, fleet: Res<craft::Fleet>) {
+    let requested = clock.0.rate;
+    clock.0.rate = fleet.safe_rate(requested);
     clock.0.advance(time.delta_secs_f64());
+    clock.0.rate = requested;
 }
 
 fn receive_galaxy(inbox: Res<Inbox>, mut universe: ResMut<Universe>, mut nav: ResMut<Navigation>) {

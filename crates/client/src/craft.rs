@@ -10,6 +10,13 @@ use space_simulation::{
     craft::{Body, Craft, CraftKind, Field, Frame, STEP_SECONDS, circular_speed, distance},
 };
 
+mod control;
+pub use control::Order;
+
+/// Safe requested-time ceiling during manoeuvres, without changing the
+/// user's clock setting. Returning to quiet coasting restores that setting.
+pub const MANOEUVRE_RATE: f64 = 10.0;
+
 /// Steps one frame may run, about a millisecond natively. Past this the
 /// clock waits for the craft, so time runs slower than its set rate rather
 /// than the craft falling behind the bodies.
@@ -111,6 +118,24 @@ pub enum Launch {
 }
 
 impl Fleet {
+    pub fn safe_rate(&self, requested: f64) -> f64 {
+        use space_simulation::craft::AttitudePilot;
+        let active = self.craft.iter().any(|live| {
+            let craft = &live.craft;
+            let input = craft.input;
+            input.thrust != [0.0; 3]
+                || input.controls.throttle != 0.0
+                || input.controls.translation != [0.0; 3]
+                || input.controls.rotation != [0.0; 3]
+                || craft.spin.iter().any(|v| v.abs() > 1e-6)
+                || !matches!(craft.autopilot, AttitudePilot::Manual)
+        });
+        if active {
+            requested.min(MANOEUVRE_RATE)
+        } else {
+            requested
+        }
+    }
     /// The craft at a simulation time.
     pub fn at(&self, seconds: f64) -> Now<'_> {
         Now {
@@ -312,10 +337,14 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
             let (state, dominant) = live.surroundings(seconds);
             let around = dominant.map(|body| {
                 let relative = relative(state, body.state);
+                let orbit = space_simulation::craft::Elements::of(relative, body.gm);
                 json!({
                     "id": body.id,
                     "altitude_km": (distance(relative.position, [0.0; 3]) - body.radius_m) / 1_000.0,
                     "speed_kms": distance(relative.velocity, [0.0; 3]) / 1_000.0,
+                    "orbit": {"eccentricity": orbit.eccentricity,
+                        "apsides_altitude_km": orbit.apsides().map(|r| r.map(|v| (v - body.radius_m) / 1000.0)),
+                        "period_seconds": orbit.period()},
                 })
             });
             json!({
@@ -324,6 +353,12 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 "position_m": state.position, "velocity_ms": state.velocity,
                 "speed_kms": distance(state.velocity, [0.0; 3]) / 1_000.0,
                 "input": live.craft.input, "around": around,
+                "orientation_xyzw": live.craft.orientation,
+                "forward": (bevy::math::DQuat::from_array(live.craft.orientation) * -bevy::math::DVec3::Z).to_array(),
+                "up": (bevy::math::DQuat::from_array(live.craft.orientation) * bevy::math::DVec3::Y).to_array(),
+                "spin_rads": live.craft.spin,
+                "thrusters": live.craft.thrusters,
+                "autopilot": live.craft.autopilot,
             })
         })
         .collect();
@@ -367,6 +402,26 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
             format!("{thrust:.2} m/s²")
         } else {
             "Off".into()
+        },
+    ));
+    rows.push((
+        "Throttle".into(),
+        format!("{:+.1}%", live.craft.input.controls.throttle * 100.0),
+    ));
+    rows.push((
+        "Spin (pitch/yaw/roll)".into(),
+        live.craft
+            .spin
+            .map(|v| format!("{:+.2}", v.to_degrees()))
+            .join(" / ")
+            + " °/s",
+    ));
+    rows.push((
+        "Attitude pilot".into(),
+        match &live.craft.autopilot {
+            space_simulation::craft::AttitudePilot::Manual => "Manual".into(),
+            space_simulation::craft::AttitudePilot::Stop => "Stop rotation".into(),
+            space_simulation::craft::AttitudePilot::Point { target, .. } => format!("{target:?}"),
         },
     ));
     (live.craft.name.clone(), rows)

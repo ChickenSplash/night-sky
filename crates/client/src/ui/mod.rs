@@ -123,7 +123,7 @@ pub fn draw_ui(
         ctx,
         rect,
         &clock.0,
-        fleet.held,
+        fleet.held || fleet.safe_rate(clock.0.rate) < clock.0.rate,
         &mut hud.time_drag_start,
         &mut out,
     );

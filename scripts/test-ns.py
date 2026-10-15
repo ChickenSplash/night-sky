@@ -91,6 +91,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 class CliTests(unittest.TestCase):
+    def test_ship_orders_are_organised_and_translated_to_api_json(self):
+        parser = NS["parser"]()
+        cases = [
+            (["throttle", "-0.5"], {"action": "throttle", "value": -0.5}),
+            (["translate", "--up", "0.2"], {"action": "translate", "right": 0.0, "up": 0.2, "forward": 0.0}),
+            (["rotate", "--roll", "-0.1"], {"action": "rotate", "pitch": 0.0, "yaw": 0.0, "roll": -0.1}),
+            (["point", "prograde"], {"action": "point", "target": {"target": "prograde"}, "up": None}),
+            (["point", "radial-in"], {"action": "point", "target": {"target": "radial_in"}, "up": None}),
+            (["point", "vector", "--up", "0,1,0", "--", "-1,0,0"],
+             {"action": "point", "target": {"target": "vector", "value": [-1.0, 0.0, 0.0]}, "up": [0.0, 1.0, 0.0]}),
+            (["stop"], {"action": "stop"}), (["release"], {"action": "release"}), (["cut"], {"action": "cut"}),
+        ]
+        for words, expected in cases:
+            with self.subTest(words=words):
+                command = NS["ship_command"](parser.parse_args(["ship", *words]))
+                self.assertEqual(command, {"type": "steer_craft", "id": None, "order": expected})
+        for words in (["point", "body"], ["point", "prograde", "extra"], ["point", "vector", "nan,0,0"]):
+            with self.assertRaises(RuntimeError):
+                NS["ship_command"](parser.parse_args(["ship", *words]))
+
     @classmethod
     def setUpClass(cls):
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)

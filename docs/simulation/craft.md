@@ -42,8 +42,9 @@ model yet. With no rotation input, spin persists. A midpoint angular step
 updates and normalizes the quaternion; thrust in the two Verlet half-kicks
 uses the starting and ending attitudes.
 
-These controls are implemented in the simulation. Client/CLI integration is
-still pending; the existing CLI keeps its frame-axis acceleration command.
+These controls are integrated through the client's `steer_craft` orders and
+`ns ship` subcommands. See the [CLI guide](../client/developer-api.md#craft)
+for input persistence, command grouping and examples.
 
 ### Attitude guidance (simulation)
 
@@ -133,6 +134,10 @@ in memory only: nothing is saved or shared yet.
   bodies and craft never disagree; the time HUD then reads `· held by craft`.
   At the default 1 day/s, time runs at roughly 3,000 times real time with a
   ship present. Pausing stops craft too.
+  Drive inputs, spin, or an engaged attitude pilot cap advancement at 10×
+  before physics steps, without overwriting the requested clock rate. Quiet
+  manual coasting restores the requested rate. The HUD's `held by craft`
+  covers either this manoeuvre cap or the catch-up hold.
 - **Drawing:** a craft is drawn between its last two steps, blended to the
   clock's time, as a wireframe cube of its true size (30 m) plus a marker
   and label. Only craft in the visited system, on the page their frame names,
@@ -155,7 +160,8 @@ in memory only: nothing is saved or shared yet.
   `orbits.…`, or by name); see [live objects](search.md#live-objects).
 - **Inspector:** type, system, the body it is around, altitude, speed and
   two-body periapsis, apoapsis and period around that body (`Elements`,
-  which ignore every other body), and thrust. These change every frame, so
+  which ignore every other body), legacy thrust, throttle, spin and attitude
+  pilot. These change every frame, so
   craft facts are never cached.
 
 What is seen (streaming, render precision, the visited system) stays

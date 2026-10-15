@@ -1,6 +1,142 @@
 use super::*;
 use crate::actions::UiCommand;
 
+#[test]
+fn body_orders_validate_and_patch_inputs_without_cancelling_pointing() {
+    use space_simulation::craft::{AttitudePilot, PointTarget};
+    let mut app = app();
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let order = |order| UiCommand::SteerCraft { id: None, order };
+    send(
+        &mut app,
+        order(Order::Point {
+            target: PointTarget::Prograde,
+            up: None,
+        }),
+    );
+    send(&mut app, order(Order::Throttle { value: 0.25 }));
+    send(
+        &mut app,
+        order(Order::Translate {
+            forward: -0.1,
+            up: 0.2,
+            right: -0.3,
+        }),
+    );
+    let craft = &app.world().resource::<Fleet>().craft[0].craft;
+    assert!(matches!(craft.autopilot, AttitudePilot::Point { .. }));
+    assert_eq!(craft.input.controls.throttle, 0.25);
+    assert_eq!(craft.input.controls.translation, [-0.3, 0.2, 0.1]);
+    let before = craft.clone();
+    let mut refused = craft.clone();
+    assert!(
+        Order::Throttle { value: f64::NAN }
+            .apply(&mut refused, None)
+            .is_err()
+    );
+    assert_eq!(refused, before);
+    send(
+        &mut app,
+        order(Order::Rotate {
+            pitch: 0.0,
+            yaw: 0.0,
+            roll: 0.0,
+        }),
+    );
+    assert_eq!(
+        app.world().resource::<Fleet>().craft[0].craft.autopilot,
+        AttitudePilot::Manual
+    );
+    send(&mut app, order(Order::Cut));
+    let craft = &app.world().resource::<Fleet>().craft[0].craft;
+    assert_eq!(craft.input, Default::default());
+    assert_eq!(craft.autopilot, AttitudePilot::Stop);
+    send(&mut app, order(Order::Release));
+    let mut limits = app.world().resource::<Fleet>().craft[0].craft.thrusters;
+    limits.reverse = 0.0;
+    send(&mut app, order(Order::Configure { thrusters: limits }));
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert!(
+        Order::Throttle { value: -0.5 }
+            .apply(&mut live.craft.clone(), Some(&live.field))
+            .is_err()
+    );
+    assert!(
+        Order::Point {
+            target: PointTarget::Body("missing".into()),
+            up: None
+        }
+        .apply(&mut live.craft.clone(), Some(&live.field))
+        .is_err()
+    );
+    let state = readout(app.world().resource::<Fleet>(), 0.0);
+    for key in [
+        "orientation_xyzw",
+        "forward",
+        "up",
+        "spin_rads",
+        "autopilot",
+        "thrusters",
+        "around",
+    ] {
+        assert!(!state["craft"][0][key].is_null(), "{key}");
+    }
+}
+
+#[test]
+fn manoeuvres_cap_the_clock_before_physics_and_preserve_pause_and_requested_rate() {
+    let mut app = app();
+    app.init_resource::<Time>().add_systems(
+        Update,
+        crate::tick.after(crate::actions::apply).before(step),
+    );
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    send(
+        &mut app,
+        UiCommand::SteerCraft {
+            id: None,
+            order: Order::Throttle { value: 0.5 },
+        },
+    );
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs(1));
+    app.update();
+    let clock = &app.world().resource::<Clock>().0;
+    assert_eq!(clock.seconds, 10.0);
+    assert_eq!(clock.rate, 86_400.0);
+    assert!(!app.world().resource::<Fleet>().held);
+    app.world_mut().resource_mut::<Clock>().0.paused = true;
+    app.update();
+    assert_eq!(app.world().resource::<Clock>().0.seconds, 10.0);
+    assert_eq!(app.world().resource::<Fleet>().safe_rate(1.0), 1.0);
+    // A spinning, manually released ship is still unsafe at day-per-second rates.
+    let mut fleet = app.world_mut().resource_mut::<Fleet>();
+    fleet.craft[0].craft.input = Default::default();
+    fleet.craft[0].craft.spin = [0.0, 0.1, 0.0];
+    assert_eq!(fleet.safe_rate(86_400.0), 10.0);
+    fleet.craft[0].craft.spin = [0.0; 3];
+    assert_eq!(fleet.safe_rate(86_400.0), 86_400.0);
+}
+
 fn planet_system() -> (StarSystem, u32, String) {
     let galaxy = space_simulation::demo_galaxy();
     let system = galaxy.systems[0].clone();

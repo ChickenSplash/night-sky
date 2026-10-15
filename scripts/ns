@@ -76,7 +76,13 @@ def parser():
     search.add_argument("--timeout", type=interval, default=120.0, help="seconds to wait (default 120)")
     sub.add_parser("searches", help="list the searches the app keeps, newest first, without results")
     sub.add_parser("catalogue", help="what a search can name: kinds, families, properties and relationships")
-    ship = sub.add_parser("ship", help="spawn, read, steer and remove ships (craft)")
+    ship = sub.add_parser("ship", help="spawn, inspect, drive and point ships",
+        description="Persistent ship inputs, applied in fixed physics steps. Commands default to the "
+        "selected ship, or the only ship; use --id with multiple ships. Body axes: forward is -Z, "
+        "up +Y, right +X. Turning is right-handed about X (pitch), Y (yaw), Z (roll). "
+        "Inputs are fractions in [-1,1]. Manoeuvres limit simulation time to 10x.",
+        epilog="Example: ship point prograde; ship throttle 0.2; ship cut. "
+        "stop brakes spin only; cut cancels all drive inputs and brakes spin; release disables the attitude pilot.")
     ships = ship.add_subparsers(dest="ship", required=True)
     spawn = ships.add_parser(
         "spawn", help="place a ship above a body, by default in a circular orbit",
@@ -88,11 +94,34 @@ def parser():
     spawn.add_argument("--altitude", type=float, required=True, help="km above the surface")
     spawn.add_argument("--speed", type=float, help="prograde speed in km/s instead of circular")
     spawn.add_argument("--velocity", help="x,y,z km/s in the system's axes instead of circular")
-    state = ships.add_parser("state", help="position, velocity, the body it is around, altitude and input")
+    ships.add_parser("list", help="list ship IDs, names, frames and active attitude pilots")
+    state = ships.add_parser("state", help="full position, attitude, spin, inputs, thruster limits and orbit")
     state.add_argument("id", nargs="?", help="one craft (default: all)")
-    thrust = ships.add_parser("thrust", help="hold thrust as x,y,z m/s² in the system's axes (0,0,0 stops)")
+    thrust = ships.add_parser("thrust", help="legacy debug acceleration, x,y,z m/s² in system axes")
     thrust.add_argument("vector", help="x,y,z, e.g. 0,0,1")
     thrust.add_argument("--id", help="craft ID (default: the selected or only craft)")
+    throttle = ships.add_parser("throttle", help="main drive fraction [-1,1]; negative uses reverse, 0 cuts main only")
+    throttle.add_argument("value", type=float)
+    translate = ships.add_parser("translate", help="fine translation fractions; omitted axes reset to zero")
+    for axis in ("forward", "up", "right"):
+        translate.add_argument("--" + axis, type=float, default=0.0)
+    rotate = ships.add_parser("rotate", help="manual turning fractions; releases pointing, omitted axes reset to zero")
+    for axis in ("pitch", "yaw", "roll"):
+        rotate.add_argument("--" + axis, type=float, default=0.0)
+    point = ships.add_parser("point", help="turn to and track an orbital direction, body or fixed system vector")
+    point.add_argument("target", choices=("prograde", "retrograde", "normal", "antinormal", "radial-in", "radial-out", "body", "vector"))
+    point.add_argument("value", nargs="?", help="body ID or x,y,z system direction (use -- before negative vectors)")
+    point.add_argument("--up", help="x,y,z system up direction to align roll; otherwise preserve roll")
+    stop = ships.add_parser("stop", help="brake rotation only, leaving translation and throttle unchanged")
+    release = ships.add_parser("release", help="disable attitude pilot without braking or changing drives")
+    cut = ships.add_parser("cut", help="cut all drives and engage spin braking; does not stop linear motion")
+    configure = ships.add_parser("configure", help="replace thruster limits (m/s² and rad/s²); reverse=0 disables reverse")
+    configure.add_argument("--forward", type=float, required=True)
+    configure.add_argument("--reverse", type=float, required=True)
+    configure.add_argument("--fine", type=float, required=True)
+    configure.add_argument("--angular", required=True, help="pitch,yaw,roll rad/s²")
+    for command in (throttle, translate, rotate, point, stop, release, cut, configure):
+        command.add_argument("--id", help="craft ID (default: selected or only ship)")
     follow = ships.add_parser("follow", help="fly to a craft and follow it")
     follow.add_argument("id")
     despawn = ships.add_parser("despawn", help="remove a craft, or all of them")
@@ -297,17 +326,38 @@ def searches_text(entries):
 
 
 def vector(text, name):
+    import math
     try:
         values = [float(part) for part in text.split(",")]
     except ValueError:
         values = []
-    if len(values) != 3:
+    if len(values) != 3 or not all(math.isfinite(v) for v in values):
         raise RuntimeError(f"{name} is x,y,z, e.g. 0,7.5,0")
     return values
 
 
 def ship_command(args):
     """The app command for a ship action, or None for a read."""
+    if args.ship in ("throttle", "translate", "rotate", "point", "stop", "release", "cut", "configure"):
+        order = {"action": args.ship}
+        if args.ship == "throttle":
+            order["value"] = args.value
+        elif args.ship in ("translate", "rotate"):
+            axes = ("right", "up", "forward") if args.ship == "translate" else ("pitch", "yaw", "roll")
+            order.update({axis: getattr(args, axis) for axis in axes})
+        elif args.ship == "point":
+            needs_value = args.target in ("body", "vector")
+            if needs_value != (args.value is not None):
+                raise RuntimeError("body/vector needs one value; orbital directions take no value")
+            order["target"] = {"target": args.target.replace("-", "_")}
+            # The simulation's serde names have no underscore for antinormal.
+            if needs_value:
+                order["target"]["value"] = vector(args.value, "direction") if args.target == "vector" else args.value
+            order["up"] = vector(args.up, "--up") if args.up else None
+        elif args.ship == "configure":
+            order["thrusters"] = {"forward": args.forward, "reverse": args.reverse,
+                "fine": args.fine, "angular": vector(args.angular, "--angular")}
+        return {"type": "steer_craft", "id": args.id, "order": order}
     if args.ship == "spawn":
         command = {"type": "spawn_ship", "altitude_km": args.altitude}
         if args.body:
@@ -335,6 +385,8 @@ def ship(args):
     command = ship_command(args)
     if command is None:
         craft = request(args.port, endpoint("state", "craft"))
+        if args.ship == "list":
+            return [{key: entry[key] for key in ("id", "name", "frame", "autopilot")} for entry in craft["craft"]]
         if args.id:
             found = [entry for entry in craft["craft"] if entry["id"] == args.id]
             if not found:

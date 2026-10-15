@@ -151,19 +151,51 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 ./scripts/ns ship spawn --altitude 400 --speed 9      # prograde, km/s
 ./scripts/ns ship spawn --altitude 400 --velocity 0,7.5,0
 ./scripts/ns ship state craft-1
-./scripts/ns ship thrust 0,0,1 --id craft-1           # m/s², system axes
+./scripts/ns ship list
+./scripts/ns ship point prograde --id craft-1
+./scripts/ns ship throttle 0.25                      # persistent main throttle
+./scripts/ns ship translate --up 0.1 --right -0.2    # fine thrusters
+./scripts/ns ship rotate --pitch 0.1 --roll -0.2     # manual, releases pointing
+./scripts/ns ship point body g78040000.2.813/2
+./scripts/ns ship point vector --up 0,1,0 -- -1,0,0
+./scripts/ns ship stop                              # brake spin, keep drives
+./scripts/ns ship cut                               # cut all drives, brake spin
+./scripts/ns ship release                           # disengage attitude pilot
+./scripts/ns ship configure --forward 9.80665 --reverse 0 --fine 0.980665 --angular 0.1,0.1,0.1
 ./scripts/ns ship follow craft-1
 ./scripts/ns ship despawn                             # every craft
 ```
 
 - `spawn` defaults to the selected planet or star, else the visited system,
   and prints the new ship's state once a later snapshot shows it.
-- `state` gives position and velocity in the system frame, the body it is
-  `around` with altitude and relative speed, its input, and whether craft
-  `held_clock` this frame. `step_seconds` is the fixed physics step.
-- The commands are `spawn_ship`, `despawn_craft`, `set_thrust`,
-  `select_craft` and `fly_to_craft`; vectors in typed form are JSON lists
-  without spaces, such as `set_thrust [0,0,1]`.
+- `state` gives system-frame position, velocity, quaternion and forward/up
+  vectors; body-local `spin_rads` (pitch/yaw/roll); inputs, thruster limits and
+  attitude pilot state. `around` includes altitude, relative speed and
+  instantaneous two-body orbital elements, not a predicted trajectory.
+  `held_clock` indicates physics catch-up; `step_seconds` is the fixed step.
+- Steering defaults to the selected ship, or the only ship. Use `--id` to
+  disambiguate. Throttle and axis inputs persist as fractions in [-1,1]. Each
+  `translate` or `rotate` replaces its three axes, zeroing omitted axes;
+  throttle, translation and rotation are otherwise independent. Negative
+  throttle needs a reverse drive. Forward is -Z, up +Y, right +X; rotations
+  are right-handed about X/Y/Z. See [craft](../simulation/craft.md).
+- `stop` brakes spin only, not linear velocity or throttle. `cut` zeroes all
+  drive inputs and engages spin braking. `release` disables the attitude
+  pilot but leaves manual drive inputs unchanged. Pointing accepts orbital
+  directions, body IDs within the ship's frame, or system-axis vectors.
+- The API command is `steer_craft` with an `order` object, for example
+  `{"type":"steer_craft","order":{"action":"throttle","value":0.25}}`.
+  It also accepts `translate`, `rotate`, `point`, `stop`, `cut`, `release` and
+  `configure`. `ns ship --help` and each subcommand's help describe arguments.
+  Spawn, despawn, selection and following retain their existing commands.
+- Legacy `ns ship thrust x,y,z` / `set_thrust [x,y,z]` remains a system-axis
+  debug acceleration. A throttle or translate command clears it, and `cut`
+  clears it too. Prefer the body-axis commands for flying.
+- Manoeuvres (drive inputs, spin, or an engaged attitude pilot) cap clock
+  advancement at 10× without changing the requested rate or pause setting.
+  `/state/clock/effective_rate` reports that ceiling (zero while paused),
+  before any further physics catch-up hold. Quiet manual coasting restores
+  the requested rate; release the attitude pilot to allow that restoration.
 
 ## Object search
 

@@ -43,6 +43,11 @@ fn every_command_has_usage() {
 #[test]
 fn every_usage_parses() {
     for usage in &USAGE {
+        if usage.name == "steer_craft" {
+            parse(r#"{"type":"steer_craft","order":{"action":"stop"}}"#)
+                .expect("nested ship orders use the JSON command route");
+            continue;
+        }
         if usage.name == "inspect_object" {
             parse(r#"{"type":"inspect_object","inspection":{"source":"location","object":{"kind":"galaxy"}}}"#).expect("nested inspection uses the documented JSON command route");
             continue;

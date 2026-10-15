@@ -75,6 +75,12 @@ pub enum UiCommand {
         #[serde(default)]
         id: Option<String>,
     },
+    /// Body-axis drive or attitude order, targeting the selected or only ship.
+    SteerCraft {
+        order: crate::craft::Order,
+        #[serde(default)]
+        id: Option<String>,
+    },
     /// Select a craft by ID without moving the camera.
     SelectCraft {
         id: String,
@@ -377,6 +383,11 @@ impl UiCommand {
                 self.check_values()?;
                 thrust_target(id.as_deref(), nav, fleet).map(|_| ())
             }
+            UiCommand::SteerCraft { id, order } => {
+                let id = thrust_target(id.as_deref(), nav, fleet)?;
+                let live = fleet.get(&id).ok_or("No craft")?;
+                order.apply(&mut live.craft.clone(), Some(&live.field))
+            }
             UiCommand::SelectCraft { id } => craft(id).map(|_| ()),
             UiCommand::FlyToCraft { id } => {
                 let live = craft(id)?;
@@ -612,6 +623,14 @@ pub fn apply(
                     && let Some(live) = fleet.get_mut(&id)
                 {
                     live.craft.input.thrust = *thrust;
+                }
+            }
+            UiCommand::SteerCraft { id, order } => {
+                if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
+                    && let Some(live) = fleet.get_mut(&id)
+                    && let Err(err) = order.apply(&mut live.craft, Some(&live.field))
+                {
+                    warn!(target: "craft", "Ship order refused: {err}");
                 }
             }
             UiCommand::SelectCraft { id } => {

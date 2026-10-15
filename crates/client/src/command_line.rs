@@ -146,7 +146,12 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 30] = [
+pub const USAGE: [Usage; 31] = [
+    Usage {
+        name: "steer_craft",
+        fields: &["order", "id"],
+        about: "Ship order JSON: throttle, translate, rotate, point, stop (spin), release, cut (all drives and brake spin), configure; use ns ship --help",
+    },
     Usage {
         name: "pick_star",
         fields: &["id"],

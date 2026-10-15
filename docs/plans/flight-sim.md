@@ -202,7 +202,7 @@ Checkpoints, each committed and checked on both targets:
    overshoot from rest at awkward angles, recovers from initial spin,
    tracks prograde around a whole orbit, and a
    weaker ship turns more slowly.
-3. **The client and the CLI:** the client applies inputs and the autopilot at
+3. ✅ **The client and the CLI:** the client applies inputs and the autopilot at
    each fixed step, holds the time rate while thrusting or turning, and
    carries the reorganised `ns ship`, its developer API commands, the
    `ns ship state` readout and the inspector facts.
