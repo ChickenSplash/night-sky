@@ -9,8 +9,10 @@ measurements and future ideas, not the current UI specification.
 
 ## Registry and query
 
-- `registry` declares kinds (`star`, `system`, `planet`) and properties once.
-  Later kinds are registered but hidden until they have a source. Families
+- `registry` declares kinds (`star`, `system`, `planet`, and `ship` in the
+  Craft family) and properties once. Later kinds are registered but hidden
+  until they have a source: `Cells` for generated objects, `Live` for
+  objects only the client holds (see [live objects](#live-objects)). Families
   are browsing groups, not scientific taxonomy.
 - Types within a kind are properties: `kind=star star_class=m` for a red dwarf,
   `kind=planet planet_class=sub_neptune` for a sub-Neptune. Stellar classes
@@ -48,6 +50,9 @@ measurements and future ideas, not the current UI specification.
   All filters for one relationship must hold for the same related object.
 - `orbits` leads from a planet to its direct host star, or each star in its
   host pair (`Hosted::host_letters`). A pair matches when either star does.
+  From a craft it leads to its dominant body, a planet or star, so
+  `kind=ship orbits.planet_class=gas_giant` works. Planets never orbit
+  planets, so `orbits.kind=planet` narrows results to craft.
 - `system` leads to every other star and planet in the same system, and to
   the system itself (`system.multiple=yes`), never to the object itself.
   `system=` without a dot is system scope, not a relationship.
@@ -93,6 +98,30 @@ measurements and future ideas, not the current UI specification.
   which is replaced on magnitude changes.
 - If that worker fails, the client runs searches in 4 ms frame slices and
   restarts unfinished requests. The perf tab and snapshot report search `mode`.
+
+## Live objects
+
+Craft are live state, not generated from seeds, so the engine never finds
+them (`search::live`).
+
+- A query naming only live kinds (`kind=ship`, `family=craft`) finishes in
+  the engine at once without walking any cells.
+- The client publishes its craft to the `Hub` each frame as `LiveObject`s:
+  kind, name, altitude and speed relative to the body it is around (the
+  `altitude_km` and `speed_kms` properties), that body's ID for `orbits`,
+  and its system's key and position.
+- When a request is sent, `live::matching` tests those objects against the
+  same plan: kinds, filters, relationships (regenerating the orbited body's
+  system for its facts) and scope. A craft's distance is its system's. Text
+  matches a craft's ID or, ignoring case, its name (`Ship 1`); such a request
+  is answered at once without the engine, as craft names are not catalogue
+  designations.
+- `live::merge` merges the matches into every engine update, nearest first,
+  then cuts to the limit. Sorted by a property, the side that property
+  belongs to comes first, as no property applies to both craft and
+  generated objects.
+- Matches are taken once, when the request is sent: a request does not
+  follow craft that move or appear afterwards.
 
 ## Client requests
 

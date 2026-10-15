@@ -407,6 +407,8 @@ fn slider_span(property: &str) -> Option<kit::RangeSlider> {
         "semi_major_au" => (0.01, 1000.0, Logarithmic, None),
         "eccentricity" => (0.0, 1.0, Linear, Some(0.001)),
         "period_days" => (0.1, 1000000.0, Logarithmic, None),
+        "altitude_km" => (1.0, 1e9, Logarithmic, None),
+        "speed_kms" => (0.01, 1000.0, Logarithmic, None),
         _ => return None,
     };
     Some(kit::RangeSlider {

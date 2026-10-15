@@ -35,6 +35,10 @@ pub const FAMILIES: &[Family] = &[
         id: "deep_sky",
         label: "Clusters, nebulae & galaxies",
     },
+    Family {
+        id: "craft",
+        label: "Craft",
+    },
 ];
 
 /// Where a kind's candidates come from in a scope.
@@ -43,6 +47,9 @@ pub const FAMILIES: &[Family] = &[
 pub enum Source {
     /// Cell stars and the systems generated from them.
     Cells,
+    /// Live objects outside the generated galaxy, such as craft, which the
+    /// client merges into results (`live`).
+    Live,
     /// Not generated yet: registered, but hidden and refused.
     None,
 }
@@ -123,6 +130,10 @@ pub const KINDS: &[Kind] = &[
     kind("cluster", "Star cluster", "deep_sky", None, Source::None),
     kind("nebula", "Nebula", "deep_sky", None, Source::None),
     kind("galaxy", "Galaxy", "deep_sky", None, Source::None),
+    kind("ship", "Ship", "craft", Some("planet"), Source::Live),
+    kind("station", "Station", "craft", Some("planet"), Source::None),
+    kind("rover", "Rover", "craft", Some("planet"), Source::None),
+    kind("probe", "Probe", "craft", Some("star"), Source::None),
 ];
 
 /// What a property's filter holds.
@@ -158,6 +169,8 @@ pub(crate) enum Attr {
     PeriodDays,
     Resonant,
     TidallyLocked,
+    AltitudeKm,
+    SpeedKms,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -197,6 +210,7 @@ pub const PLANET_CLASSES: &[(&str, &str)] = &[
 const STAR: &[&str] = &["star"];
 const PLANET: &[&str] = &["planet"];
 const SYSTEM: &[&str] = &["system"];
+const CRAFT: &[&str] = &["ship", "station", "rover", "probe"];
 const NUMBER: Values = Values::Range { integer: false };
 const COUNT: Values = Values::Range { integer: true };
 
@@ -351,6 +365,22 @@ pub const PROPERTIES: &[Property] = &[
         PLANET,
         Attr::TidallyLocked,
     ),
+    property(
+        "altitude_km",
+        "Altitude above the body it is around",
+        Some("km"),
+        NUMBER,
+        CRAFT,
+        Attr::AltitudeKm,
+    ),
+    property(
+        "speed_kms",
+        "Speed relative to the body it is around",
+        Some("km/s"),
+        NUMBER,
+        CRAFT,
+        Attr::SpeedKms,
+    ),
 ];
 
 /// Which link between objects a relationship follows. Only the engine
@@ -358,6 +388,7 @@ pub const PROPERTIES: &[Property] = &[
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Link {
     /// A planet's direct host: its star, or every star of the pair it orbits.
+    /// A craft's dominant body: a planet or star.
     Orbits,
     /// Anything else in the same system, or the system itself.
     System,
@@ -383,8 +414,8 @@ pub const RELATIONS: &[Relation] = &[
     Relation {
         id: "orbits",
         label: "Orbits",
-        subjects: PLANET,
-        targets: STAR,
+        subjects: &["planet", "ship", "station", "rover", "probe"],
+        targets: &["star", "planet"],
         link: Link::Orbits,
     },
     Relation {

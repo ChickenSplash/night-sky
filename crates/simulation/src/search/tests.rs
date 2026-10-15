@@ -182,13 +182,16 @@ fn refusals_give_a_reason() {
     );
     refused(
         "kind=star orbits.star_class=m",
-        "`orbits.` applies to planet, not star",
+        "`orbits.` applies to planet, ship, not star",
     );
     refused(
-        "orbits.radius_km=1..",
-        "`orbits.radius_km` applies to planet, not star",
+        "orbits.planet_count=1..",
+        "`orbits.planet_count` applies to system, not star, planet",
     );
-    refused("orbits.kind=planet", "orbits leads to star, not planet");
+    refused(
+        "orbits.kind=system",
+        "orbits leads to star, planet, not system",
+    );
     refused("system.kind=moon", "Moon are not generated yet");
     refused("system.colour=red", "unknown property `colour`");
     refused("system.star_class=m system.star_class=k", "given twice");
@@ -672,4 +675,117 @@ fn red_dwarf_sub_neptunes_match_a_brute_force_at_50_ly() {
     // More than the limit: the nearest 1,000, so stopping early is tested.
     assert_eq!(results.len(), 1000);
     assert_eq!(results, expected);
+}
+
+/// A ship around the first planet near home with one, and that planet.
+fn live_ship() -> (live::LiveObject, crate::multiple::Hosted) {
+    let (key, cell, component, position_pc, planet) = near_home()
+        .iter()
+        .find_map(|(key, cell, component, at)| {
+            let bodies = crate::population::tiered_bodies(key, *component, cell.level());
+            let planet = bodies.planets.first()?.clone();
+            Some((key.clone(), *cell, *component, *at, planet))
+        })
+        .unwrap();
+    let _ = (cell, component);
+    let ship = live::LiveObject {
+        result: SearchResult {
+            object: ObjectRef::Craft {
+                id: "craft-1".into(),
+            },
+            kind: "ship".into(),
+            name: "Ship 1".into(),
+            class: "Ship".into(),
+            system: key.clone(),
+            distance_ly: 0.0,
+            position_pc,
+        },
+        system_key: key,
+        altitude_km: 400.0,
+        speed_kms: 7.7,
+        orbits: Some(planet.id()),
+    };
+    (ship, planet)
+}
+
+#[test]
+fn live_ships_match_kinds_filters_scopes_text_and_what_they_orbit() {
+    let (ship, planet) = live_ship();
+    let class = super::engine::planet_class(planet.body.class);
+    let other = if class == "dwarf" { "rocky" } else { "dwarf" };
+    let key = ship.system_key.clone();
+    let found = |text: &str| {
+        let query = Query::parse(text).unwrap_or_else(|err| panic!("{text}: {err}"));
+        !live::matching(&query, home(), std::slice::from_ref(&ship)).is_empty()
+    };
+    for text in [
+        "within_ly=15".to_owned(),
+        "kind=ship altitude_km=300..500 speed_kms=7..8".into(),
+        "family=craft".into(),
+        format!("kind=ship system={key}"),
+        format!("orbits.planet_class={class}"),
+        "orbits.kind=planet".into(),
+        "craft-1".into(),
+        "ship 1".into(),
+    ] {
+        assert!(found(&text), "{text}");
+    }
+    for text in [
+        "kind=planet within_ly=15".to_owned(),
+        "altitude_km=500..".into(),
+        format!("orbits.planet_class={other}"),
+        "orbits.kind=star".into(),
+        "craft-2".into(),
+    ] {
+        assert!(!found(&text), "{text}");
+    }
+    let query = Query::parse("kind=ship").unwrap();
+    let far = [(home()[0] + 100.0) * 1.0, home()[1], home()[2]];
+    assert!(live::matching(&query, far, std::slice::from_ref(&ship)).is_empty());
+    // Planets orbit stars, so this names only craft.
+    let refused = Query::parse("kind=planet orbits.kind=planet")
+        .unwrap()
+        .check();
+    assert!(refused.unwrap_err().contains("not planets"));
+    // The engine has no ships to find and finishes at once.
+    let (progress, results) = run(request("kind=ship within_ly=10000"), 1, 1);
+    assert_eq!((progress.state, progress.evaluated), (State::Done, 0));
+    assert!(results.is_empty());
+}
+
+#[test]
+fn live_hits_merge_in_distance_or_property_order() {
+    let (ship, _) = live_ship();
+    let query = Query::parse("within_ly=15 limit=1000").unwrap();
+    let (_, found) = run(request("within_ly=15 limit=1000"), u64::MAX, 1);
+    let hits = live::matching(&query, home(), std::slice::from_ref(&ship));
+    let merged = live::merge(&query, found.clone(), hits.clone());
+    assert_eq!(merged.len(), found.len() + 1);
+    assert!(
+        merged
+            .windows(2)
+            .all(|w| w[0].distance_ly <= w[1].distance_ly)
+    );
+    let limited = Query::parse("within_ly=15 limit=3").unwrap();
+    assert_eq!(live::merge(&limited, found.clone(), hits).len(), 3);
+    // Sorted by a craft property within a system, craft come first.
+    let text = format!("system={} sort=-altitude_km", ship.system_key);
+    let query = Query::parse(&text).unwrap();
+    let (_, found) = run(request(&text), u64::MAX, 1);
+    let mut low = ship.clone();
+    low.altitude_km = 100.0;
+    low.result.object = ObjectRef::Craft {
+        id: "craft-2".into(),
+    };
+    let hits = live::matching(&query, home(), &[low, ship]);
+    let merged = live::merge(&query, found, hits);
+    let ids: Vec<_> = merged
+        .iter()
+        .take(2)
+        .map(|r| match &r.object {
+            ObjectRef::Craft { id } => id.as_str(),
+            _ => "",
+        })
+        .collect();
+    assert_eq!(ids, ["craft-1", "craft-2"]);
 }

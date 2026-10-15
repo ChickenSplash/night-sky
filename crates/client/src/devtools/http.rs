@@ -741,13 +741,13 @@ mod tests {
         assert_eq!(get("/search/999").0, 404);
         assert_eq!(get("/search/x").0, 404);
         assert_eq!(post("/search/999/cancel", "").0, 404);
-        let (status, body) = post("/search", "orbits.radius_km=1..");
+        let (status, body) = post("/search", "orbits.planet_count=1..");
         assert_eq!(status, 400);
         assert!(
             body["error"]
                 .as_str()
                 .unwrap()
-                .contains("applies to planet, not star")
+                .contains("applies to system, not star, planet")
         );
         assert_eq!(
             client

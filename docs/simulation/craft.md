@@ -97,6 +97,9 @@ in memory only: nothing is saved or shared yet.
   `fly_to_craft` follows it from the closest zoom (20,000 km), visiting its
   system first if needed. The selection trail puts a craft below the planet
   it is around, else its system's star.
+- **Search:** ships are found in the object browser and `ns search` like
+  any object (`kind=ship`, `family=craft`, `altitude_km`, `speed_kms`,
+  `orbits.…`, or by name); see [live objects](search.md#live-objects).
 - **Inspector:** type, system, the body it is around, altitude, speed and
   two-body periapsis, apoapsis and period around that body (`Elements`,
   which ignore every other body), and thrust. These change every frame, so

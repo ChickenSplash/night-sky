@@ -7,6 +7,7 @@ use crate::actions::UiCommand;
 use crate::scene::{CameraPose, CameraRig};
 use bevy::prelude::*;
 use serde::Serialize;
+use space_simulation::search::live::{self, LiveHit, LiveObject};
 use space_simulation::search::{
     DEFAULT_WORK_CAP, Origin, Progress, Query, SearchRequest, SearchResult, SearchUpdate, State,
 };
@@ -60,6 +61,9 @@ pub struct Entry {
     /// Counts the updates taken in, so a copy can tell it is out of date.
     #[serde(skip)]
     pub revision: u64,
+    /// Live objects it matched when sent, merged into every update.
+    #[serde(skip)]
+    pub live: Option<(Query, Vec<LiveHit>)>,
 }
 
 impl Entry {
@@ -135,8 +139,14 @@ pub struct SearchPlugin;
 
 impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Searches>()
-            .add_systems(Update, (poll, apply.after(crate::actions::apply)));
+        app.init_resource::<Searches>().add_systems(
+            Update,
+            (
+                poll,
+                apply.after(crate::actions::apply),
+                publish_live.after(crate::craft::step),
+            ),
+        );
     }
 }
 
@@ -156,6 +166,18 @@ fn poll(mut searches: ResMut<Searches>, mut nav: ResMut<crate::Navigation>) {
     if let Some(entry) = searches.hub.newer(id, since) {
         chart(&mut nav, &entry);
         searches.shown_entry = Some(entry);
+    }
+}
+
+/// Hands the hub this frame's craft, which new requests match against.
+fn publish_live(
+    searches: Res<Searches>,
+    fleet: Res<crate::craft::Fleet>,
+    universe: Res<crate::Universe>,
+    clock: Res<crate::Clock>,
+) {
+    if let Ok(mut objects) = searches.hub.live.try_lock() {
+        *objects = crate::craft::live_objects(&fleet, &universe.0, clock.0.seconds);
     }
 }
 
@@ -253,6 +275,8 @@ fn summary(entry: &Entry) -> String {
 pub struct Hub {
     service: Mutex<Service>,
     store: Mutex<VecDeque<Entry>>,
+    /// The app's live objects, such as craft, as of its last frame.
+    pub live: Mutex<Vec<LiveObject>>,
     next: AtomicU64,
     /// For requests that do not give one (`set_search`).
     work_cap: AtomicU64,
@@ -263,6 +287,7 @@ impl Hub {
         Self {
             service: Mutex::new(Service::spawn(threads)),
             store: Mutex::new(VecDeque::new()),
+            live: Mutex::new(Vec::new()),
             next: AtomicU64::new(1),
             work_cap: AtomicU64::new(DEFAULT_WORK_CAP),
         }
@@ -293,6 +318,15 @@ impl Hub {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let [x, y, z] = origin_pc;
         info!(target: TARGET, "#{id} {asker:?}: {text} · from {x:.1} {y:.1} {z:.1} pc");
+        let hits = self
+            .live
+            .lock()
+            .map(|objects| live::matching(&query, origin_pc, &objects))
+            .unwrap_or_default();
+        // A live object's name or ID is no catalogue designation: it is
+        // found here, without the engine.
+        let found_live = !query.text.is_empty() && !hits.is_empty();
+        let results = live::merge(&query, Vec::new(), hits.clone());
         let mut cancel = None;
         if let Ok(mut store) = self.store.lock() {
             store.push_front(Entry {
@@ -301,11 +335,19 @@ impl Hub {
                 query: text,
                 origin_pc,
                 work_cap,
-                progress: Progress::default(),
+                progress: Progress {
+                    state: if found_live {
+                        State::Done
+                    } else {
+                        State::Running
+                    },
+                    ..Progress::default()
+                },
                 error: None,
-                result_count: 0,
-                results: Some(Vec::new()),
+                result_count: results.len(),
+                results: Some(results),
                 revision: 1,
+                live: (!hits.is_empty()).then(|| (query.clone(), hits)),
             });
             if store.len() > KEPT {
                 let at = store
@@ -321,6 +363,9 @@ impl Hub {
         if let Ok(service) = self.service.lock() {
             if let Some(old) = cancel {
                 service.cancel(old);
+            }
+            if found_live {
+                return Ok(id);
             }
             service.submit(SearchRequest {
                 id,
@@ -378,6 +423,10 @@ impl Hub {
                     let finished =
                         entry.progress.state == State::Running && progress.state != State::Running;
                     entry.progress = progress;
+                    let results = match &entry.live {
+                        Some((query, hits)) => live::merge(query, results, hits.clone()),
+                        None => results,
+                    };
                     entry.result_count = results.len();
                     entry.results = Some(results);
                     if finished {

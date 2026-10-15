@@ -75,3 +75,39 @@ fn requests_are_kept_by_id_refused_and_cancelled() {
     assert_eq!(hub.summaries(true).unwrap().len(), KEPT);
     assert!(hub.get(near.id).is_none());
 }
+
+#[test]
+fn live_craft_are_found_by_kind_name_and_among_generated_objects() {
+    use crate::craft::{Fleet, Launch, live_objects};
+    let galaxy = space_simulation::demo_galaxy();
+    let system = galaxy.systems[0].clone();
+    let page = system.first_page();
+    let planet = system.on_page(page).next().unwrap().id.clone();
+    let mut fleet = Fleet::default();
+    let ship = fleet
+        .spawn(system, page, &planet, 400_000.0, Launch::Circular, 0.0)
+        .unwrap();
+    let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
+    fleet.get_mut(&ship).unwrap().system_pc = home;
+    let hub = Hub::new(2);
+    *hub.live.lock().unwrap() = live_objects(&fleet, &galaxy, 0.0);
+    let search = |text: &str| {
+        let query = Query::parse(text).unwrap();
+        let id = hub
+            .submit(Asker::Api, query, home, DEFAULT_WORK_CAP)
+            .unwrap();
+        wait_for(&hub, id).results.unwrap()
+    };
+    let craft = space_simulation::objects::ObjectRef::Craft { id: ship.clone() };
+    for text in ["kind=ship", "family=craft altitude_km=399..401", "Ship 1"] {
+        let results = search(text);
+        assert_eq!(results.len(), 1, "{text}");
+        assert_eq!(results[0].object, craft, "{text}");
+        assert_eq!(results[0].kind, "ship");
+    }
+    assert!(search("kind=ship altitude_km=500..").is_empty());
+    // Nearest first among stars and planets: here, at the origin.
+    let mixed = search("within_ly=10 limit=1000");
+    assert_eq!(mixed[0].object, craft);
+    assert!(mixed.len() > 1);
+}

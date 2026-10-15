@@ -111,7 +111,12 @@ only member in the alpha.
 Moons are not a prerequisite. Nested motion already exists through planets
 around stars and barycentre hosts in multiple systems; moons extend it later.
 
-### 1 · The ship as a body (next)
+### 1 · The ship as a body (in progress)
+
+Done so far: body velocities, the craft model with fixed-step gravity
+(tested on both targets), the ship in the engine (cube, selection,
+inspector, breadcrumbs, picking, "Follow ship", `ns ship`) and in search. Ship
+mode and the chase camera are next. See [craft](../simulation/craft.md).
 
 - Start here: planet and barycentre orbital velocities (the derivative of
   their Kepler positions), so any body reports position and velocity at a

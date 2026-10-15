@@ -4,6 +4,7 @@
 use crate::{Clock, Navigation, objects};
 use bevy::prelude::*;
 use space_shared::{Galaxy, StarSystem};
+use space_simulation::search::{SearchResult, live::LiveObject};
 use space_simulation::{
     EARTH_SOLAR, SUN_GM, SUN_RADIUS_METRES, State,
     craft::{Body, Craft, CraftKind, Field, Frame, STEP_SECONDS, circular_speed, distance},
@@ -61,6 +62,9 @@ pub struct Live {
     pub field: Field,
     /// The state one step before `craft`'s, blended with it when drawn.
     previous: State,
+    /// Its system's position, in parsecs from the galactic centre, where
+    /// search measures its distance from.
+    pub system_pc: [f64; 3],
 }
 
 impl Live {
@@ -194,6 +198,7 @@ impl Fleet {
             craft,
             field,
             previous: state,
+            system_pc: [0.0; 3],
         });
         Ok(id)
     }
@@ -375,6 +380,59 @@ pub fn body_label(live: &Live, galaxy: &Galaxy, body: &Body) -> String {
         &crate::galaxy_nav::label(galaxy, key),
         space_simulation::multiple::member_letters(&body.id),
     )
+}
+
+/// Where a system's star is, in parsecs from the galactic centre, or the
+/// centre itself if it cannot be found.
+pub fn system_pc(
+    nav: &Navigation,
+    galaxy: &Galaxy,
+    field: &crate::stars::stream::Starfield,
+    star: &str,
+) -> [f64; 3] {
+    let Some(picked) = crate::galaxy_nav::selectable_star(nav, galaxy, field, star) else {
+        return [0.0; 3];
+    };
+    let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
+    let ly = picked.position_ly.to_array();
+    std::array::from_fn(|i| home[i] + ly[i] * space_simulation::search::PC_PER_LY)
+}
+
+/// Every craft as search sees it, at `seconds`.
+pub fn live_objects(fleet: &Fleet, galaxy: &Galaxy, seconds: f64) -> Vec<LiveObject> {
+    fleet
+        .craft
+        .iter()
+        .map(|live| {
+            let (state, dominant) = live.surroundings(seconds);
+            let key = space_simulation::multiple::system_key(live.star()).to_owned();
+            let (altitude, speed) = dominant.as_ref().map_or((f64::NAN, f64::NAN), |body| {
+                let relative = relative(state, body.state);
+                let r = distance(relative.position, [0.0; 3]);
+                (
+                    (r - body.radius_m) / 1_000.0,
+                    distance(relative.velocity, [0.0; 3]) / 1_000.0,
+                )
+            });
+            LiveObject {
+                result: SearchResult {
+                    object: objects::ObjectRef::Craft {
+                        id: live.craft.id.clone(),
+                    },
+                    kind: live.craft.kind.name().into(),
+                    name: live.craft.name.clone(),
+                    class: live.craft.kind.label().into(),
+                    system: crate::galaxy_nav::label(galaxy, &key),
+                    distance_ly: 0.0,
+                    position_pc: live.system_pc,
+                },
+                system_key: key,
+                altitude_km: altitude,
+                speed_kms: speed,
+                orbits: dominant.map(|body| body.id),
+            }
+        })
+        .collect()
 }
 
 /// A state relative to another.

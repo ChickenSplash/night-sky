@@ -887,6 +887,7 @@ fn animated_result_panes_never_expand_their_parent_viewport() {
         result_count: hits.len(),
         results: Some(hits.clone()),
         revision: 1,
+        live: None,
     });
     let ctx = egui::Context::default();
     kit::plain_style(&ctx);

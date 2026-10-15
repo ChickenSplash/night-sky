@@ -181,6 +181,7 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 ./scripts/ns searches
 ./scripts/ns search kind=planet planet_class=sub_neptune orbits.star_class=m within_ly=50
 ./scripts/ns search --show kind=star star_class=white_dwarf within_ly=50
+./scripts/ns search kind=ship orbits.planet_class=rocky within_ly=100
 ```
 
 `ns search <words>` waits and prints a table, cancelling on Ctrl+C or timeout.

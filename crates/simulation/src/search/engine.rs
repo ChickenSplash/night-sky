@@ -15,7 +15,7 @@
 //!   time, so a search gives the same results however it is sliced or
 //!   threaded.
 use super::query::{Plan, Query, RelationPlan, Scope, Test};
-use super::registry::{Attr, KINDS, Link, PROPERTIES, RELATIONS, Values};
+use super::registry::{Attr, KINDS, KindSet, Link, PROPERTIES, RELATIONS, Source, Values};
 use crate::cells::{Cell, Need, Sky, StarKey, catalogue_name, cell_star_id, parse_cell_star};
 use crate::galaxy::{COMPONENTS, Component, PC_METRES};
 use crate::multiple::{Bodies, Hosted, member_id, system_key};
@@ -236,7 +236,11 @@ impl Search {
             trim_at: TRIM_AT,
             progress: Progress::default(),
         };
-        if !search.query.text.is_empty() {
+        let generated = KindSet::matching(|k| k.source == Source::Cells);
+        if search.plan.kinds.and(generated).is_empty() {
+            // Only live kinds, such as ships: the client has them all.
+            search.progress.state = State::Done;
+        } else if !search.query.text.is_empty() {
             let (key, target) = resolve(&search.query.text)?;
             search.only(&key, Some(&target))?;
         } else if let Scope::System { id } = &search.query.scope {
@@ -571,12 +575,15 @@ enum Value {
 }
 
 /// What a property can read about one candidate.
-#[derive(Clone, Copy)]
-struct Facts<'a> {
-    star: Option<&'a Star>,
-    planet: Option<(&'a Hosted, f64)>,
-    stars: usize,
-    planets: Option<usize>,
+#[derive(Clone, Copy, Default)]
+pub(super) struct Facts<'a> {
+    pub star: Option<&'a Star>,
+    pub planet: Option<(&'a Hosted, f64)>,
+    pub stars: usize,
+    pub planets: Option<usize>,
+    /// A live craft's altitude in km and speed in km/s, both relative to
+    /// the body it is around.
+    pub craft: Option<[f64; 2]>,
 }
 
 fn value(attr: Attr, facts: Facts) -> Option<Value> {
@@ -602,6 +609,8 @@ fn value(attr: Attr, facts: Facts) -> Option<Value> {
         }
         Attr::Resonant => Value::Flag(planet()?.resonance.is_some()),
         Attr::TidallyLocked => Value::Flag(planet()?.spin.locked),
+        Attr::AltitudeKm => Value::Number(facts.craft?[0]),
+        Attr::SpeedKms => Value::Number(facts.craft?[1]),
     })
 }
 
@@ -615,7 +624,7 @@ enum Subject<'a> {
 
 /// Whether an object of `kind` passes every filter. Every kind left in a
 /// plan has every one of its filters' properties.
-fn all_pass(filters: &[(usize, Test)], kind: &str, facts: Facts) -> bool {
+pub(super) fn all_pass(filters: &[(usize, Test)], kind: &str, facts: Facts) -> bool {
     filters.iter().all(|(i, test)| {
         let property = &PROPERTIES[*i];
         property.kinds.contains(&kind) && passes(test, value(property.attr, facts))
@@ -633,7 +642,7 @@ fn passes(test: &Test, value: Option<Value>) -> bool {
     }
 }
 
-fn sort_value(plan: &Plan, facts: Facts) -> f64 {
+pub(super) fn sort_value(plan: &Plan, facts: Facts) -> f64 {
     let Some((index, _)) = plan.sort else {
         return f64::NAN;
     };
@@ -721,10 +730,9 @@ pub(crate) fn evaluate(
         name.clone()
     };
     let base = Facts {
-        star: None,
-        planet: None,
         stars: stars.len(),
         planets: bodies.as_ref().map(|b| b.planets.len()),
+        ..Facts::default()
     };
     fn with_planet<'a>(base: Facts<'a>, bodies: &'a Bodies, planet: &'a Hosted) -> Facts<'a> {
         Facts {

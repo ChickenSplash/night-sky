@@ -257,9 +257,10 @@ impl Query {
             let narrowed = kinds.and(relation.subject_kinds());
             if narrowed.is_empty() {
                 let chosen: Vec<_> = kinds.ids().collect();
+                let subjects: Vec<_> = relation.subject_kinds().ids().collect();
                 return Err(format!(
                     "`{prefix}` applies to {}, not {}",
-                    relation.subjects.join(", "),
+                    subjects.join(", "),
                     chosen.join(", ")
                 ));
             }
@@ -277,6 +278,13 @@ impl Query {
                 targets = chosen;
             }
             let (targets, filters) = plan_filters(targets, &given.filters, &prefix)?;
+            if relation.link == registry::Link::Orbits && !targets.has("star") {
+                // Planets orbit stars; only craft are around planets.
+                kinds = kinds.and(KindSet(!KindSet::matching(|k| k.id == "planet").0));
+                if kinds.is_empty() {
+                    return Err(format!("`{prefix}kind`: planets orbit stars, not planets"));
+                }
+            }
             relations.push(RelationPlan {
                 relation: index,
                 kinds: targets,
