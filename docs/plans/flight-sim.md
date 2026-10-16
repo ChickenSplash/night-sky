@@ -9,15 +9,19 @@ are navigation aids, not physical spacecraft (see [navigation](../client/navigat
   navigation.
 - Realistic physics, but easy for a new player to pick up and explore straight away.
 - **Core loop:** spawn in deep space, warp to a system in about a minute,
-  warp to a planet and settle into orbit, then warp on to the next. Every
-  trip takes roughly 20 to 60 seconds, whatever its length.
+  warp to a planet and settle into orbit, then warp on to the next. Plotted
+  trips take roughly 20 to 60 seconds, whatever their length.
+- **Free exploration:** fly the warp drive by hand, steering with the nose and
+  choosing speed on one logarithmic scale, from crossing a planet's day side
+  to its night side in seconds to crossing between star systems.
 
 ## Principles
 
 - **Plausible physics.** Real gravity from every nearby body, so the ship can
   orbit anything. No invented forces beyond the warp drive's documented rules.
 - **Two drives:**
-  - **Warp drive (Alcubierre):** used for every trip, in-system or interstellar.
+  - **Warp drive (Alcubierre-inspired):** manual exploration and plotted
+    trips, in-system or interstellar.
   - **Sublight drive (fusion torch, about 1 g):** only for fine-tuning and
     settling into orbit.
 - **Layered control.** Autopilot is enough for a new player. Assists and full
@@ -28,19 +32,81 @@ are navigation aids, not physical spacecraft (see [navigation](../client/navigat
 
 ## Warp drive rules
 
-These are the drive's known theoretical limits, used as game rules:
+The Alcubierre metric motivates the bubble; it is not a proven engineering
+design. Warp is a separate motion mode, not an enormous ordinary acceleration:
+ordinary flight keeps summed gravity and Newtonian thrusters.
 
-- **Plot, then engage.** The course is fixed before engaging; there is no
-  steering inside the bubble. This fits "click a target, autopilot".
-- **Minimum safe distance.** The bubble cannot form or collapse too close to a
-  body (inside or just above its atmosphere). Engaging from orbit is allowed,
-  so the ship warps straight out of one orbit and into the next.
-- **Trip time is roughly constant.** Speed builds after departure and falls near
-  masses, so short and long trips both take about 20 to 60 seconds.
-- **Velocity matched on drop-out.** The bubble moves space, not the ship, so it
-  hands the ship off at the target's velocity (planet or star), at a safe
-  distance and in a rough orbit. A realistic 1 g drive would otherwise need 30
-  to 60 minutes to match a planet's 10 to 50 km/s.
+How the rules compare with the theory:
+
+- **Below light speed, steering is plausible.** The ship can still reach every
+  part of the bubble, and recent slower-than-light bubble models need no
+  negative energy.
+- **Above light speed, steering is a deliberate game rule.** The bubble's front
+  edge is cut off from the ship by a horizon, so in theory a faster-than-light
+  leg would be a committed straight line. The game lets the player steer
+  anyway. This is the one rule bent on top of the issues built into any
+  faster-than-light travel (exotic matter, vast energy, causality, stability).
+- **Matched dropout is as plausible as the drive itself.** The bubble's speed
+  profile can end at any velocity; stopping is one case of it. The change in
+  the ship's momentum and energy is paid for by the drive.
+- **Arrival burst is left out.** Theory predicts particles trapped in a
+  faster-than-light bubble's front wall are released forwards on dropout.
+  It is not simulated in the alpha; it could become a hazard later.
+
+The rules:
+
+- **Manual or plotted.** The player steers by the ship's nose, or a plotted
+  autopilot steers the same drive towards a destination. Looking around moves
+  the camera, not the heading.
+- **Steering.** Pitch and yaw curve the bubble's path; roll turns the ship
+  without changing the direction of travel. No lift, banking force or
+  atmosphere is implied.
+- **One logarithmic speed scale.** Speed up and down in large, even steps from
+  metres per second to interstellar speeds, rather than delicate linear
+  increments. Releasing the control holds the cruise speed. Warp speed and
+  thrust throttle are separate inputs. Exact ranges and ramps are tuning
+  parameters.
+- **Hard safety, always on.** No engaging or travel inside a body or its
+  atmosphere; engaging from orbit is allowed. Each step checks the whole path
+  it covers, including moving bodies, not just its endpoint. Missing body data
+  stops warp at a known-safe position rather than letting it pass through.
+  This is not an assist and cannot be switched off.
+- **Disengage at any time.** Ending bubble travel stops warp motion, not the
+  ship's ordinary velocity or gravity.
+- **Two velocities.** The ship's ordinary velocity is tracked apart from the
+  bubble's motion. Changing reference frame must not change momentum, and
+  bubble motion is never applied as a launch velocity on dropout.
+- **Dropout velocity.** Unmatched, the ship keeps the ordinary velocity it had
+  before engaging. Matched, it takes a chosen body's velocity, optionally plus
+  the sideways speed for a rough orbit. A realistic 1 g drive would otherwise
+  need 30 to 60 minutes to match a planet's 10 to 50 km/s.
+- **Plotted trip time.** About 20 to 60 seconds at 1× simulation time, using a
+  distance-scaled cruise and slower approach. Pause stops travel. Manual trips
+  have no fixed duration.
+
+### Optional warp assists
+
+Each assist is separately switchable, with no hidden dependency between them,
+and a beginner preset turns them all on. They live with the rest of the ship's
+state in `ns ship` and the developer API, so they can later map onto dashboard
+controls. The state shows requested and actual speed, and the reason for any
+limit.
+
+1. **Turn limit.** The turn rate falls as speed rises, so the turning circle
+   grows with speed and the ship cannot loop round absurdly fast. With it off,
+   turning is limited only by the steering input.
+2. **Collision.** When the predicted path would hit a body or pass too close,
+   slow down, or disengage when slowing is not enough. Judge by clearance
+   along the path, closing speed and reaction distance, not just distance to
+   the nearest body's centre, so bodies well off the path do not slow the ship.
+   Speed recovers gradually once the path clears, not with a sudden jump.
+3. **Approach.** With a body selected, the maximum warp speed falls as the
+   ship nears it, and warp disengages at a safe standoff distance. The player
+   keeps steering; turning away does not pull the ship back. An unreachable or
+   unsafe target is reported, never hidden by a teleport.
+
+The assists and the hard safety limit combine predictably: the requested speed
+is capped by every active limit, and the lowest one wins.
 
 ## Craft (man-made objects)
 
@@ -281,33 +347,106 @@ Checkpoints, each committed and checked on both targets:
    circumbinary orbit and reference switching. Run the full native/WASM
    checks, update craft/rendering/developer API docs and mark the phase done.
 
-### 4 · Warp drive
+### 4 · Warp core
 
-- In-system first (planet to planet), then interstellar on top of the existing
-  galaxy travel and streaming.
-- Course plotting, minimum safe distance, trip-length speed scaling and
-  velocity-matched drop-out, as in the rules above.
-- The ship's frame changes as it travels (galactic in deep space, then the
-  destination star's). Following tracks it across frames, and the visited
-  system switches to the ship's while following.
-- **Done when:** the core loop runs end to end from the CLI.
+Straight-line warp along the nose, from the CLI. See the
+[warp drive rules](#warp-drive-rules).
 
-### 5 · Orbit autopilot
+- Warp state in `crates/simulation`, engine independent: engaged or not,
+  requested and actual speed, and the bubble's motion kept apart from the
+  ship's ordinary velocity. Changed only through fixed-step input commands.
+- The logarithmic speed scale, with step up, step down and set commands.
+  Warp speeds are simulation-time speeds; pause stops travel, and warp does
+  not inherit phase 2's manoeuvre time-rate cap.
+- Engage and disengage, with ordinary velocity and gravity carried through.
+- The hard safety limit: swept-path checks against moving bodies, engaging
+  from orbit, and stopping safely when body data is missing.
+- Frame handoffs: in-system first, then system to galaxy and galaxy to system.
+  Position and ordinary velocity transform consistently. Following finds the
+  ship across frames; streaming and the visited system stay camera-based, and
+  the craft requests the data it needs to travel safely.
+- How phase 3's prediction behaves in warp: never show the pre-warp orbit as
+  the current forecast.
+- A `ns ship warp` group and matching developer API commands, with warp state
+  in `ns ship state` and the inspector.
+- No fuel or realistic bubble energy budget in the alpha.
+- **Done when:** from the CLI, warp to another planet and out of the system,
+  then disengage, with no position jumps or passing through bodies, on both
+  targets.
+
+### 5 · Dropout velocity
+
+- Unmatched dropout keeps the ordinary velocity the ship had before warp.
+- Matched dropout sets it to a reference body's velocity (planet, star or
+  barycentre, using phase 3's references), with an optional rough-orbit exit
+  that adds the sideways speed. Matching a planet's motion alone would leave
+  the ship falling towards it.
+- Matching is an explicit command or setting, never silent, and selecting a
+  reference does not change heading.
+- **Done when:** both exits work from the CLI as documented and are visible
+  in `ns ship state`, including a rough orbit after a matched exit.
+
+### 6 · Warp steering and the turn-limit assist
+
+- Pitch and yaw inputs curve the warp path; roll does not change the
+  direction of travel. Engaging handles existing spin safely.
+- Assist 1, the turn limit, switchable in `ns ship`.
+- CLI first. Mouse steering arrives with in-app piloting in phase 11.
+- **Done when:** from the CLI, steer round a planet to its night side, turn
+  towards another planet and leave the system, with the assist on and off.
+
+### 7 · Collision assist
+
+- Assist 2: slow down or disengage ahead of a predicted impact or too-close
+  pass, and recover speed gradually once clear.
+- Test close flybys, small bodies ahead, bodies well off the path and moving
+  targets.
+- **Done when:** flying straight at a planet with the assist on ends safely,
+  passing beside one does not slow the ship needlessly, and with it off only
+  the hard safety limit applies.
+
+### 8 · Approach assist
+
+- Assist 3: with a body selected, the maximum warp speed falls on approach
+  and warp disengages at a safe standoff distance. Shares its speed profile
+  with plotted trips.
+- Unsafe or unreachable targets are reported.
+- **Done when:** steering towards a selected planet by hand ends at the
+  standoff distance without precise speed juggling.
+
+### 9 · Plotted warp autopilot
+
+- Plot and fly a route with the same drive, safety limit and assists as
+  manual flight. Autopilot only adds steering and route management.
+- In-system first, then interstellar. Allows for moving destinations and
+  bodies in the way, and aims for the 20 to 60 second trip profile.
+- Choosing a destination, progress, cancelling and manual takeover through
+  the CLI. A plotted orbital arrival asks for a matched, rough-orbit exit.
+- **Done when:** the core loop runs end to end from the CLI: leave orbit, warp
+  to another planet or system, drop into a rough orbit, then take over or
+  cancel without discontinuities.
+
+### 10 · Orbit autopilot
 
 - After drop-out, a short sublight burn (seconds to a minute) circularises the orbit.
 - Close-range correction only; no interplanetary transfer planning.
 - **Done when:** "go to planet" ends in a stable orbit with no player input.
 
-### 6 · Layered controls
+### 11 · Layered controls
 
 - In-app piloting: a piloting state where the keys fly the ship instead of
   the camera, with a key layout for all six axes and the throttle.
+- Manual warp in the app: mouse steering while held (a flight stick later),
+  warp speed up and down on the logarithmic scale, and looking sideways
+  without steering.
+- The three warp assist toggles, the selected target, requested and actual
+  speed and the reason for any limit.
 - **Autopilot:** pick a target; everything else is handled.
 - **Assisted:** the pointing assists from phase 2, plus circularise, hold
   orbit and match target.
 - **Manual:** assists off.
 
-### 7 · Walking inside the ship
+### 12 · Walking inside the ship
 
 - First person in a grey-box interior, simulated in the ship's own local frame
   so it stays steady at any galactic position. The cockpit view is following
@@ -332,6 +471,9 @@ Checkpoints, each committed and checked on both targets:
 - Live UI on in-world screens (render to texture).
 - Thrust gravity, fuel and delta-v limits, crashing into bodies.
 - Proper ship models.
+- Warp between galaxies, once there is more than one.
+- The warp arrival burst as a hazard, scaling with faster-than-light trip
+  length.
 - Moving stars over limited time spans (galaxy rotation stage 2): cells loaded
   by rotating back to stars' birth cells, with padding for wobble.
 
