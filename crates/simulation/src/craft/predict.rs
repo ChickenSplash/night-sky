@@ -6,8 +6,8 @@
 //! - The whole path is relative to the orbit reference at its start, so an
 //!   orbit closes rather than smearing along the reference's own motion.
 //!   Later reference changes are reported as events, not spliced in.
-//! - Work is bounded: a horizon of about one period when bound, a finite
-//!   one otherwise, and at most `MAX_STEPS` steps, each kept as a sample.
+//! - Work is bounded: a horizon of a little over one period when bound, a
+//!   finite one otherwise, and at most `MAX_STEPS` steps, each kept as a sample.
 //!   `Predictor::run` does a slice of the work at a time.
 use super::*;
 
@@ -18,8 +18,12 @@ const ETA: f64 = 0.005;
 pub const MAX_STEPS: usize = 6_000;
 /// The longest horizon, for very wide orbits.
 const MAX_HORIZON_SECONDS: f64 = 100.0 * crate::YEAR_SECONDS;
-/// Bound paths run this many periods, so the end visibly meets the start.
-const PERIODS: f64 = 1.02;
+/// Bound paths are shown this many periods ahead, so the end visibly meets
+/// the craft.
+pub const PERIODS: f64 = 1.02;
+/// Bound paths are predicted this many periods further, so a whole lap is
+/// still ahead of the craft until a newer prediction replaces this one.
+pub const LEAD: f64 = 0.35;
 /// Unbound paths run until they have gone this many times the reference's
 /// reach, or its distance when the reach is infinite, at the current speed.
 const ESCAPE_REACHES: f64 = 2.0;
@@ -71,6 +75,8 @@ pub struct Prediction {
     pub horizon_seconds: f64,
     /// The planned length is about one period of a bound orbit.
     pub bound: bool,
+    /// The two-body period at the start, when bound.
+    pub period_seconds: Option<f64>,
     /// The start first.
     pub samples: Vec<Sample>,
     pub events: Vec<Event>,
@@ -101,9 +107,21 @@ impl Prediction {
         self.start_seconds + self.achieved_seconds()
     }
 
-    /// Events still ahead at `seconds`, soonest first.
+    /// Where the part shown at `seconds` ends: `PERIODS` laps on when bound,
+    /// so the path closes on the craft without drawing over itself.
+    pub fn shown_end(&self, seconds: f64) -> f64 {
+        let end = self.end_seconds();
+        self.period_seconds
+            .map_or(end, |period| end.min(seconds + period * PERIODS))
+    }
+
+    /// Events still ahead at `seconds` and within the shown part, soonest
+    /// first.
     pub fn upcoming(&self, seconds: f64) -> impl Iterator<Item = &Event> {
-        self.events.iter().filter(move |e| e.seconds() >= seconds)
+        let end = self.shown_end(seconds);
+        self.events
+            .iter()
+            .filter(move |e| (seconds..=end).contains(&e.seconds()))
     }
 
     /// The predicted position relative to the reference at `seconds`, on
@@ -121,10 +139,13 @@ impl Prediction {
         ))
     }
 
-    /// The samples still ahead at `seconds`, soonest first.
+    /// The samples still ahead at `seconds` and within the shown part,
+    /// soonest first.
     pub fn ahead(&self, seconds: f64) -> &[Sample] {
         let first = self.samples.partition_point(|s| s.seconds < seconds);
-        &self.samples[first..]
+        let end = self.shown_end(seconds);
+        let last = self.samples.partition_point(|s| s.seconds <= end);
+        &self.samples[first..last.max(first)]
     }
 }
 
@@ -150,8 +171,9 @@ impl Predictor {
             gravity.orbit_reference(craft.reference.as_deref(), state.position, seconds)?;
         let relative = relative(state, reference.state);
         let orbit = Elements::of(relative, reference.gm);
-        let (horizon_seconds, bound) = match orbit.period() {
-            Some(period) => (period * PERIODS, true),
+        let period_seconds = orbit.period();
+        let (horizon_seconds, bound) = match period_seconds {
+            Some(period) => (period * (PERIODS + LEAD), true),
             None => {
                 let r = distance(relative.position, [0.0; 3]);
                 let reach = if reference.reach_m.is_finite() {
@@ -168,6 +190,7 @@ impl Predictor {
             start_seconds: seconds,
             horizon_seconds: horizon_seconds.min(MAX_HORIZON_SECONDS),
             bound,
+            period_seconds,
             samples: vec![Sample {
                 seconds,
                 position: relative.position,

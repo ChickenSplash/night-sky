@@ -62,7 +62,7 @@ fn a_bound_prediction_matches_fine_steps_and_its_apsides() {
     assert_eq!(prediction.end, Some(End::Horizon));
     assert!(prediction.bound);
     let period = orbit.period().unwrap();
-    assert!((prediction.achieved_seconds() / (period * PERIODS) - 1.0).abs() < 1e-9);
+    assert!((prediction.achieved_seconds() / (period * (PERIODS + LEAD)) - 1.0).abs() < 1e-9);
     assert!(
         prediction.samples.len() < MAX_STEPS / 2,
         "{}",
@@ -214,7 +214,7 @@ fn an_orbit_around_a_moving_planet_closes_relative_to_it() {
     let lap = prediction
         .samples
         .iter()
-        .find(|s| s.seconds - first.seconds >= prediction.horizon_seconds / PERIODS)
+        .find(|s| s.seconds - first.seconds >= prediction.period_seconds.unwrap())
         .unwrap();
     assert!(distance(lap.position, first.position) < 0.01 * r);
     let moved = distance(
@@ -248,4 +248,25 @@ fn an_escape_reports_leaving_the_planet_for_its_star() {
         .unwrap();
     let out = distance(at.position, [0.0; 3]) / hill;
     assert!((1.0 + SWITCH_MARGIN..1.2).contains(&out), "{out}");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_whole_lap_stays_ahead_until_a_refresh_is_due() {
+    let (craft, orbit) = eccentric();
+    let prediction = predict(&craft, &Earth).unwrap();
+    let period = orbit.period().unwrap();
+    assert_eq!(prediction.period_seconds, Some(period));
+    for share in [0.0, 0.2, LEAD - 0.01] {
+        let now = craft.seconds + share * period;
+        let ahead = prediction.ahead(now);
+        let shown = ahead.last().unwrap().seconds - now;
+        // One lap and a little, never more, so it meets the craft without
+        // drawing over itself.
+        assert!(
+            shown >= period && shown <= PERIODS * period,
+            "{share}: {shown}"
+        );
+        assert!(prediction.upcoming(now).all(|e| e.seconds() <= now + shown));
+    }
 }

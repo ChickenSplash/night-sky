@@ -449,7 +449,7 @@ fn prediction_readout(live: &Live, seconds: f64) -> serde_json::Value {
         "bound": p.bound,
         "horizon_seconds": p.horizon_seconds,
         "achieved_seconds": p.achieved_seconds(),
-        "ahead_seconds": (p.end_seconds() - seconds).max(0.0),
+        "ahead_seconds": (p.shown_end(seconds) - seconds).max(0.0),
         "samples": p.samples.len(),
         "end": end,
         "events": events,
@@ -499,7 +499,9 @@ pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
             Some((place(p.position_at(event.seconds())?), mark))
         })
         .collect();
-    if let Some(End::Impact { .. }) = p.end {
+    if let Some(End::Impact { .. }) = p.end
+        && p.end_seconds() <= p.shown_end(seconds)
+    {
         marks.push((place(last.position), PathMark::Impact));
     }
     Some(Path {
@@ -525,14 +527,15 @@ pub enum Upcoming {
     },
 }
 
-/// The prediction's events still ahead at `seconds`: every reference change,
-/// and the next periapsis and apoapsis, soonest first.
+/// The prediction's events in its shown part from `seconds`: every reference
+/// change, and the next periapsis and apoapsis, soonest first.
 pub fn upcoming(live: &Live, p: &Prediction, seconds: f64) -> Vec<Upcoming> {
     use space_simulation::craft::predict::Event;
     let radius = live
         .field
         .reference_by_id(&p.reference, seconds)
         .map_or(0.0, |r| r.radius_m);
+    let end = p.shown_end(seconds);
     let mut previous = p.reference.clone();
     let mut out = Vec::new();
     let (mut periapsis, mut apoapsis) = (false, false);
@@ -541,7 +544,7 @@ pub fn upcoming(live: &Live, p: &Prediction, seconds: f64) -> Vec<Upcoming> {
             Event::Reference { seconds: at, id } => {
                 let exit = live.field.lineage(&previous).contains(id);
                 previous = id.clone();
-                if *at >= seconds {
+                if (seconds..=end).contains(at) {
                     out.push(Upcoming::Reference {
                         exit,
                         seconds: *at,
@@ -552,7 +555,7 @@ pub fn upcoming(live: &Live, p: &Prediction, seconds: f64) -> Vec<Upcoming> {
             Event::Periapsis {
                 seconds: at,
                 distance_m,
-            } if *at >= seconds && !periapsis => {
+            } if (seconds..=end).contains(at) && !periapsis => {
                 periapsis = true;
                 out.push(Upcoming::Apsis {
                     periapsis: true,
@@ -563,7 +566,7 @@ pub fn upcoming(live: &Live, p: &Prediction, seconds: f64) -> Vec<Upcoming> {
             Event::Apoapsis {
                 seconds: at,
                 distance_m,
-            } if *at >= seconds && !apoapsis => {
+            } if (seconds..=end).contains(at) && !apoapsis => {
                 apoapsis = true;
                 out.push(Upcoming::Apsis {
                     periapsis: false,
@@ -657,7 +660,7 @@ fn prediction_facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> Vec<(String, 
             "Prediction".into(),
             format!(
                 "{} ahead, around {}{state}",
-                duration_text((p.end_seconds() - seconds).max(0.0)),
+                duration_text((p.shown_end(seconds) - seconds).max(0.0)),
                 body_label(live, galaxy, &p.reference)
             ),
         ),

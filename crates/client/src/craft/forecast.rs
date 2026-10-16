@@ -14,7 +14,8 @@ pub const STEPS_PER_FRAME: usize = 250;
 #[cfg(target_arch = "wasm32")]
 pub const STEPS_PER_FRAME: usize = 120;
 /// While coasting, start a new prediction once the craft is this share of
-/// the shown one's horizon past its start.
+/// the shown one's period, or horizon when unbound, past its start. Below
+/// `predict::LEAD`, so a bound path is still a whole lap ahead meanwhile.
 const REFRESH_SHARE: f64 = 0.25;
 
 #[derive(Default)]
@@ -83,7 +84,8 @@ impl Forecast {
         if self.shown_key.as_ref() != Some(key) || thrusting(&craft.input) {
             return true;
         }
-        craft.seconds - shown.start_seconds > REFRESH_SHARE * shown.horizon_seconds
+        let length = shown.period_seconds.unwrap_or(shown.horizon_seconds);
+        craft.seconds - shown.start_seconds > REFRESH_SHARE * length
     }
 }
 

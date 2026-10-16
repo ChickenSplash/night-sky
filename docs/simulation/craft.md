@@ -164,8 +164,11 @@ and clock are never touched.
   start reference's state at that sample's time. So an orbit around a planet
   closes relative to it instead of smearing along the planet's own path.
   Perturbations from other bodies still show, and closure is not promised.
-- **Bounded horizon:** about one period (102%) when the two-body orbit around
-  the reference is bound; otherwise until the craft would have gone twice
+- **Bounded horizon:** 137% of the period when the two-body orbit around
+  the reference is bound: 102% is shown ahead of the craft, so the path
+  meets it without drawing over itself (`Prediction::shown_end`), and the
+  35% lead keeps a whole lap ahead until a newer prediction replaces it.
+  Otherwise until the craft would have gone twice
   the reference's reach (its Hill sphere or stable zone) at its current
   speed. At most 100 years, and at most 6,000 steps, each kept as a sample.
 - **How it ended:** the planned horizon, `Truncated` when the step budget ran
@@ -178,7 +181,7 @@ and clock are never touched.
 
 `Predictor` does this in slices of steps, for spreading over frames; slices
 give exactly the same path as one go. Each step costs about 4 µs natively,
-so a lap of about 1,300 steps costs about 5 ms in total.
+so a forecast of about 1,750 steps costs about 7 ms in total.
 
 ## In the client
 
@@ -203,7 +206,8 @@ in memory only: nothing is saved or shared yet.
   so a lap takes several frames. A new prediction starts when there is
   none, when the inputs or orbit reference differ from the shown one's
   (dropping any work begun under the old ones), throughout a burn, and while
-  coasting once the craft is a quarter of the shown horizon past its start.
+  coasting once the craft is a quarter of the shown period (or horizon,
+  when unbound) past its start, inside the 35% lead.
   Work in progress always finishes before another starts, so a burn's
   constant refreshes never starve it. Paused, nothing is redone. `ns ship
   state` reports the shown prediction's reference, age, horizon, how far it
