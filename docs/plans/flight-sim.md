@@ -286,66 +286,40 @@ winged test hull was inspected on screen. Native/WASM checks cover the
 simulation; native client regression tests cover the command-to-physics
 pipeline. Browser rendering has not been visually tested for this phase.
 
-### 3 · Trajectory prediction
+### 3 · Trajectory prediction ✅ Done
 
-- A predicted trajectory line ahead of the ship. This is the most important
-  usability feature: it makes orbital mechanics readable.
-- Predicted from the ship's current state as if it coasts, with bodies on
-  their Kepler paths, using the same gravity and integrator at a coarser step
-  within a per-frame budget. Redone when the inputs change and live during a
-  burn.
-- Drawn relative to the body the ship orbits, so an orbit shows as a closed
-  near-ellipse rather than a spiral smeared along the planet's own path.
-  Perturbations from other bodies remain visible; closure is not guaranteed.
-  In multiple systems the reference can be a component star or a nested
-  barycentre, not simply the strongest-pulling star. Selection follows the
-  stellar hierarchy with conservative influence/stability boundaries and a
-  switching margin. These are display/reference heuristics, not changes to
-  the summed gravitational forces, and do not certify a stable orbit.
-- Keep the whole prediction relative to its current reference, subtracting
-  that reference's future position at each sample and anchoring the result
-  at its present position. Mark predicted reference exits/encounters; switch
-  the displayed reference when the ship actually crosses the boundary.
-  Do not splice differently referenced segments in the first version.
-- Apoapsis and periapsis in the inspector and `ns ship state`.
-- **Done when:** a burn from the CLI visibly reshapes the predicted orbit.
+The selected ship shows where it will go if it coasts, the feature that
+makes orbital mechanics readable. See
+[orbit reference and coast prediction](../simulation/craft.md#orbit-reference).
 
-Checkpoints, each committed and checked on both targets:
+- **Orbit reference:** what the ship's orbit is described around, chosen
+  from the system's hierarchy: the planet whose Hill sphere holds it, else
+  one star or a pair's barycentre by their stable zones, with a switching
+  margin so it does not flicker. A label for readouts, prediction and
+  pointing, never an extra source of gravity.
+- **Coast prediction:** the ship's state copied and coasted under every
+  star and planet with the same integrator, at a coarser adaptive step.
+  Bound orbits are predicted a little over one lap, escapes until past the
+  edge of the sphere of influence; it stops at a surface on impact. The real
+  ship and clock are never touched.
+- **Spread over frames:** a fixed step budget per frame shared by all ships.
+  The last result stays on show, with its age, while a newer one is worked
+  on; it refreshes during burns, on new orders and every quarter lap.
+- **Drawn relative to the reference,** anchored where it is now, so an
+  orbit around a moving planet is one closed loop. Exactly one revolution
+  is shown, joined smoothly to the ship; an orbit really bent by another
+  body is left open. Diamonds mark predicted apsides, reference exits and
+  encounters (amber) and impacts (red).
+- **Readouts:** the inspector and `ns ship state` give the prediction's
+  reference, age and reach, and the next predicted apsides, exits,
+  encounters and impact, apart from the instantaneous two-body estimates.
 
-1. ✅ **Hierarchical orbit references** (`crates/simulation`): planets, individual
-   stars and nested barycentres, with position, velocity and effective mass.
-   Use the existing system hierarchy and stellar stability/influence zones
-   to choose a useful local reference, expanding to enclosing pairs outside
-   component regions; retain the current reference through a switching
-   margin. Planet selection starts with the existing Hill-sphere heuristic.
-   Keep reference selection separate from gravity sources: a barycentre is
-   not an extra gravitating body. Test circumstellar, circumbinary and nested
-   triple cases, plus boundary hysteresis. Share the reference with craft
-   readouts and orbital pointing assists so they describe the same orbit.
-2. ✅ **Bounded coast predictor** (`crates/simulation`): copy the current
-   translational state and predict with all propulsion off, under every
-   actual star and planet on its analytic path. Share the force model and
-   Verlet integration, with a prediction-only timestep policy. Bound the
-   horizon, work and sample count; use about one estimated period for bound
-   paths and a finite horizon for escapes/undefined periods. Check accuracy
-   against fine fixed-step runs, especially at periapsis and encounters.
-   Return the achieved horizon and any truncation, never imply a partial
-   calculation is a complete orbit. Do not modify the real ship or clock.
-3. ✅ **Client prediction scheduling:** budget work across frames on native and
-   WASM, refresh from current state during flight and burns, and invalidate
-   on orders, despawn or reference changes. Discard obsolete work, retain a
-   clearly aged last result while updating, and prevent refreshes from
-   starving completion. Test pause, high time rates and multiple craft.
-4. ✅ **Trajectory and events:** draw the selected ship's path camera-relatively
-   in f64 before GPU conversion, in the fixed reference chosen above. Show
-   reference name, predicted influence exits/encounters and prediction age /
-   horizon. Distinguish sampled predicted apsides from existing instantaneous
-   two-body estimates, including in `ns ship state` and the inspector.
-   Test planet and barycentre anchoring, switching and close/far render scales.
-5. **End-to-end verification and docs:** from the CLI, make a burn and verify
-   that the coast path reshapes, then check a planetary escape, a
-   circumbinary orbit and reference switching. Run the full native/WASM
-   checks, update craft/rendering/developer API docs and mark the phase done.
+Verified live from the CLI: eccentric orbits drawn as one closed loop at
+close and far zoom and at high time rates, a prograde burn reshaping the
+predicted apoapsis, a retrograde burn onto an impact, and an escape (its
+exit marker, after the slow-escape horizon fix, by tests only).
+Circumbinary and nested-triple references and barycentre anchoring are
+covered by tests only, and browser rendering was not visually tested.
 
 ### 4 · Warp core
 
