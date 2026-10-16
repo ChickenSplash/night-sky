@@ -10,6 +10,7 @@
 //!   finite one otherwise, and at most `MAX_STEPS` steps, each kept as a sample.
 //!   `Predictor::run` does a slice of the work at a time.
 use super::*;
+use std::f64::consts::TAU;
 
 /// Step length as a share of the shortest free-fall time sqrt(r³/GM) to any
 /// body: about 1,250 steps per circular orbit.
@@ -18,8 +19,8 @@ const ETA: f64 = 0.005;
 pub const MAX_STEPS: usize = 6_000;
 /// The longest horizon, for very wide orbits.
 const MAX_HORIZON_SECONDS: f64 = 100.0 * crate::YEAR_SECONDS;
-/// Bound paths are shown this many periods ahead, so the end visibly meets
-/// the craft.
+/// Bound paths run at least this many periods, so a whole revolution is
+/// predicted even when other bodies make it a little slower than two-body.
 pub const PERIODS: f64 = 1.02;
 /// Bound paths are predicted this many periods further, so a whole lap is
 /// still ahead of the craft until a newer prediction replaces this one.
@@ -107,12 +108,34 @@ impl Prediction {
         self.start_seconds + self.achieved_seconds()
     }
 
-    /// Where the part shown at `seconds` ends: `PERIODS` laps on when bound,
-    /// so the path closes on the craft without drawing over itself.
+    /// When a bound path, from `seconds`, has swept one whole revolution
+    /// around its reference, interpolated between samples. Measured in angle
+    /// rather than time, so it ends level with the craft however other
+    /// bodies have stretched the lap. None when unbound or not predicted
+    /// that far.
+    pub fn lap_end(&self, seconds: f64) -> Option<f64> {
+        let first = self.samples.first()?;
+        self.period_seconds?;
+        let pole = DVec3::from_array(first.position).cross(DVec3::from_array(first.velocity));
+        let mut previous = (seconds, DVec3::from_array(self.position_at(seconds)?));
+        let mut swept = 0.0;
+        for sample in &self.samples[self.samples.partition_point(|s| s.seconds <= seconds)..] {
+            let here = DVec3::from_array(sample.position);
+            let step = previous.1.cross(here).dot(pole).signum() * previous.1.angle_between(here);
+            if swept + step >= TAU {
+                let share = (TAU - swept) / step;
+                return Some(previous.0 + share * (sample.seconds - previous.0));
+            }
+            swept += step;
+            previous = (sample.seconds, here);
+        }
+        None
+    }
+
+    /// Where the part shown at `seconds` ends: one revolution on when bound,
+    /// so the path meets the craft without drawing over itself.
     pub fn shown_end(&self, seconds: f64) -> f64 {
-        let end = self.end_seconds();
-        self.period_seconds
-            .map_or(end, |period| end.min(seconds + period * PERIODS))
+        self.lap_end(seconds).unwrap_or_else(|| self.end_seconds())
     }
 
     /// Events still ahead at `seconds` and within the shown part, soonest

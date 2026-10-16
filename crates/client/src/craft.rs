@@ -458,7 +458,8 @@ fn prediction_readout(live: &Live, seconds: f64) -> serde_json::Value {
 
 /// The shown prediction still ahead, in the craft's frame, for drawing.
 pub struct Path {
-    /// From the craft where it is drawn now, then each sample still ahead.
+    /// From the craft where it is drawn now, then each sample still ahead,
+    /// and back to the craft when it closes a revolution.
     pub points: Vec<[f64; 3]>,
     pub marks: Vec<([f64; 3], PathMark)>,
     /// Made under the craft's current inputs and reference.
@@ -486,9 +487,20 @@ pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
     let place = |relative: [f64; 3]| std::array::from_fn(|i| anchor[i] + relative[i]);
     let ahead = p.ahead(seconds);
     let last = ahead.last()?;
-    let points = std::iter::once(live.state_at(seconds).position)
+    let here = live.state_at(seconds).position;
+    let mut points: Vec<_> = std::iter::once(here)
         .chain(ahead.iter().map(|s| place(s.position)))
         .collect();
+    let current = live.forecast.current(&live.craft);
+    // A whole revolution ends level with the craft: join it up, so a bound
+    // orbit is one closed loop. An out-of-date one may have drifted, so is
+    // left open.
+    if let Some(end) = p.lap_end(seconds)
+        && current
+    {
+        points.extend(p.position_at(end).map(place));
+        points.push(here);
+    }
     let mut marks: Vec<_> = p
         .upcoming(seconds)
         .filter_map(|event| {
@@ -507,7 +519,7 @@ pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
     Some(Path {
         points,
         marks,
-        current: live.forecast.current(&live.craft),
+        current,
     })
 }
 

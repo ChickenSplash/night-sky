@@ -259,14 +259,14 @@ fn a_whole_lap_stays_ahead_until_a_refresh_is_due() {
     assert_eq!(prediction.period_seconds, Some(period));
     for share in [0.0, 0.2, LEAD - 0.01] {
         let now = craft.seconds + share * period;
-        let ahead = prediction.ahead(now);
-        let shown = ahead.last().unwrap().seconds - now;
-        // One lap and a little, never more, so it meets the craft without
-        // drawing over itself.
-        assert!(
-            shown >= period && shown <= PERIODS * period,
-            "{share}: {shown}"
-        );
-        assert!(prediction.upcoming(now).all(|e| e.seconds() <= now + shown));
+        // One revolution exactly, which for Earth alone is one period, so
+        // the path meets the craft without drawing over itself.
+        let end = prediction.lap_end(now).unwrap();
+        assert!(((end - now) / period - 1.0).abs() < 1e-4, "{share}: {end}");
+        let here = prediction.position_at(now).unwrap();
+        let there = prediction.position_at(end).unwrap();
+        assert!(distance(here, there) < 1_000.0, "{share}");
+        assert!(prediction.ahead(now).last().unwrap().seconds <= end);
+        assert!(prediction.upcoming(now).all(|e| e.seconds() <= end));
     }
 }

@@ -165,9 +165,12 @@ and clock are never touched.
   closes relative to it instead of smearing along the planet's own path.
   Perturbations from other bodies still show, and closure is not promised.
 - **Bounded horizon:** 137% of the period when the two-body orbit around
-  the reference is bound: 102% is shown ahead of the craft, so the path
-  meets it without drawing over itself (`Prediction::shown_end`), and the
-  35% lead keeps a whole lap ahead until a newer prediction replaces it.
+  the reference is bound: 102% so a whole revolution is predicted even when
+  other bodies stretch the lap, and a 35% lead that keeps one ahead until a
+  newer prediction replaces it. Only one revolution is shown: it ends where
+  the path has swept 360° around the reference from the craft
+  (`Prediction::lap_end`), measured in angle rather than time so it ends
+  level with the craft.
   Otherwise until the craft would have gone twice
   the reference's reach (its Hill sphere or stable zone) at its current
   speed. At most 100 years, and at most 6,000 steps, each kept as a sample.
@@ -221,6 +224,9 @@ in memory only: nothing is saved or shared yet.
   are drawn, picked or followed.
 - **Predicted path:** the selected craft's shown prediction is drawn from
   the craft onwards (`craft::predicted_path`), dimmed once it is out of date.
+  A current prediction's whole revolution is joined back to the craft, so a
+  bound orbit is one closed loop; the join covers drift from other bodies
+  since the prediction started, at most a quarter of a lap.
   Its samples are relative to the prediction's reference, so they are added
   to where that reference is now, not where it will be: an orbit around a
   moving planet or barycentre is drawn closed around it. Diamonds mark the
