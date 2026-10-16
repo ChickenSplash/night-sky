@@ -57,7 +57,7 @@ impl Field {
 
     /// Stars and barycentres from the whole system down to `id`, then `id`
     /// itself when it is a planet.
-    fn lineage(&self, id: &str) -> Vec<String> {
+    pub fn lineage(&self, id: &str) -> Vec<String> {
         match self.planets.iter().find(|(p, ..)| p.id == id) {
             Some((planet, ..)) => {
                 let mut chain = self.system.lineage(self.page, &planet.host);

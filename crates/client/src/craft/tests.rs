@@ -310,8 +310,9 @@ fn a_ship_spawns_in_a_prograde_circular_orbit_above_its_planet() {
     };
     assert_eq!(fact("Around"), planet.designation);
     assert_eq!(fact("Altitude"), "400.0 km");
-    assert_eq!(fact("Periapsis"), "400.0 km");
-    assert_eq!(fact("Apoapsis"), "400.0 km");
+    assert_eq!(fact("Two-body periapsis"), "400.0 km");
+    assert_eq!(fact("Two-body apoapsis"), "400.0 km");
+    assert_eq!(fact("Prediction"), "Working…");
 }
 
 #[test]
@@ -571,4 +572,157 @@ fn craft_share_the_budget_and_fast_time_ages_a_forecast() {
     settle(&mut fleet, 100);
     let shown = fleet.craft[0].forecast.shown.as_ref().unwrap();
     assert_eq!(shown.start_seconds, fleet.craft[0].craft.seconds);
+}
+
+#[test]
+fn a_predicted_path_is_anchored_where_its_planet_is_now() {
+    let (system, page, body) = planet_system();
+    let galaxy = space_simulation::demo_galaxy();
+    let mut fleet = Fleet::default();
+    // Slightly eccentric, so it has distinct predicted apsides.
+    let reference = Field::new(system.clone(), page)
+        .reference_by_id(&body, 0.0)
+        .unwrap();
+    let speed = 1.05 * circular_speed(reference.gm, reference.radius_m + 400_000.0);
+    let id = fleet
+        .spawn(
+            system.clone(),
+            page,
+            &body,
+            400_000.0,
+            Launch::Speed(speed),
+            0.0,
+        )
+        .unwrap();
+    settle(&mut fleet, 100);
+    let live = fleet.get_mut(&id).unwrap();
+    let horizon = live.forecast.shown.as_ref().unwrap().horizon_seconds;
+    let until = live.craft.seconds + horizon * 0.3;
+    live.craft.advance(&live.field, until, usize::MAX);
+    live.previous = live.craft.state();
+    let live = fleet.get(&id).unwrap();
+    let p = live.forecast.shown.as_ref().unwrap();
+    let path = predicted_path(live, until).unwrap();
+    assert!(path.current);
+    assert_eq!(path.points[0], live.craft.state().position);
+    // Each later point is the sample relative to the planet, plus where
+    // the planet is now, not where it will be at the sample's time.
+    let planet = system.planets.iter().find(|p| p.id == body).unwrap();
+    let now = space_simulation::planet_position(&system, planet, until);
+    let ahead = p.ahead(until);
+    assert_eq!(path.points.len(), ahead.len() + 1);
+    for (point, sample) in path.points[1..].iter().zip(ahead) {
+        let relative: [f64; 3] = std::array::from_fn(|i| point[i] - now[i]);
+        assert!(distance(relative, sample.position) < 1e-3);
+    }
+    // The planet moves on by far more than the orbit's size meanwhile, so
+    // anchoring at future positions would smear the path.
+    let later = space_simulation::planet_position(&system, planet, p.end_seconds());
+    assert!(distance(later, now) > 10.0 * distance(ahead[0].position, [0.0; 3]));
+    // Predicted apsides, apart from the two-body ones.
+    assert!(path.marks.iter().any(|(_, mark)| *mark == PathMark::Apsis));
+    let (_, rows) = facts(live, &galaxy, until);
+    let labels: Vec<_> = rows.iter().map(|(label, _)| label.as_str()).collect();
+    for label in [
+        "Two-body periapsis",
+        "Two-body apoapsis",
+        "Prediction",
+        "Prediction age",
+        "Predicted periapsis",
+        "Predicted apoapsis",
+    ] {
+        assert!(labels.contains(&label), "{label}: {rows:?}");
+    }
+    let readout = readout(&fleet, until);
+    let events = readout["craft"][0]["prediction"]["events"]
+        .as_array()
+        .unwrap();
+    assert!(events.iter().any(|e| e["event"] == "apoapsis"));
+    assert!(readout["craft"][0]["around"]["two_body_orbit"].is_object());
+}
+
+#[test]
+fn escaping_paths_mark_the_exit_and_pairs_anchor_at_their_barycentre() {
+    let (system, page, body) = planet_system();
+    let galaxy = space_simulation::demo_galaxy();
+    let mut fleet = Fleet::default();
+    let id = fleet
+        .spawn(
+            system.clone(),
+            page,
+            &body,
+            400_000.0,
+            Launch::Speed(20_000.0),
+            0.0,
+        )
+        .unwrap();
+    settle(&mut fleet, 200);
+    let live = fleet.get(&id).unwrap();
+    let path = predicted_path(live, 0.0).unwrap();
+    assert!(
+        path.marks
+            .iter()
+            .any(|(_, mark)| *mark == PathMark::Reference)
+    );
+    let (_, rows) = facts(live, &galaxy, 0.0);
+    let exit = rows.iter().find(|(label, _)| label == "Predicted exit");
+    let star = galaxy_star_label(live, &galaxy);
+    assert!(
+        exit.is_some_and(|(_, text)| text.starts_with(&star)),
+        "{rows:?}"
+    );
+    let events = &readout(&fleet, 0.0)["craft"][0]["prediction"]["events"];
+    assert!(
+        events
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["event"] == "exit")
+    );
+
+    // Far out around a binary, the path is anchored at its barycentre.
+    let (pair_system, pair_page, pair) = galaxy
+        .systems
+        .iter()
+        .find_map(|s| {
+            let page = s
+                .pages()
+                .into_iter()
+                .find(|&page| s.barycentres_on(page).next().is_some())?;
+            Some((s.clone(), page, s.root(page)?.to_owned()))
+        })
+        .expect("a demo multiple system");
+    let mut fleet = Fleet::default();
+    let extent =
+        space_simulation::system_extent_au(&pair_system, pair_page) * space_simulation::AU_METRES;
+    let id = fleet
+        .spawn(
+            pair_system.clone(),
+            pair_page,
+            &pair,
+            3.0 * extent,
+            Launch::Circular,
+            0.0,
+        )
+        .unwrap();
+    settle(&mut fleet, 200);
+    let live = fleet.get(&id).unwrap();
+    let p = live.forecast.shown.as_ref().unwrap();
+    assert_eq!(p.reference, pair);
+    let path = predicted_path(live, 0.0).unwrap();
+    let centre = space_simulation::member_position(&pair_system, pair_page, &pair, 0.0);
+    for (point, sample) in path.points[1..].iter().zip(p.ahead(0.0)) {
+        let relative: [f64; 3] = std::array::from_fn(|i| point[i] - centre[i]);
+        assert!(distance(relative, sample.position) < 1.0);
+    }
+}
+
+fn galaxy_star_label(live: &Live, galaxy: &Galaxy) -> String {
+    let star = live
+        .field
+        .system()
+        .stars_on(live.field.page())
+        .next()
+        .unwrap();
+    body_label(live, galaxy, &star.id)
 }

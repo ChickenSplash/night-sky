@@ -78,12 +78,53 @@ pub struct Prediction {
     pub end: Option<End>,
 }
 
+impl Event {
+    pub fn seconds(&self) -> f64 {
+        match self {
+            Self::Periapsis { seconds, .. }
+            | Self::Apoapsis { seconds, .. }
+            | Self::Reference { seconds, .. } => *seconds,
+        }
+    }
+}
+
 impl Prediction {
     /// How far ahead the samples reach, in seconds.
     pub fn achieved_seconds(&self) -> f64 {
         self.samples
             .last()
             .map_or(0.0, |s| s.seconds - self.start_seconds)
+    }
+
+    /// The simulation time the samples reach.
+    pub fn end_seconds(&self) -> f64 {
+        self.start_seconds + self.achieved_seconds()
+    }
+
+    /// Events still ahead at `seconds`, soonest first.
+    pub fn upcoming(&self, seconds: f64) -> impl Iterator<Item = &Event> {
+        self.events.iter().filter(move |e| e.seconds() >= seconds)
+    }
+
+    /// The predicted position relative to the reference at `seconds`, on
+    /// the cubic between the samples either side.
+    pub fn position_at(&self, seconds: f64) -> Option<[f64; 3]> {
+        let after = self.samples.partition_point(|s| s.seconds < seconds);
+        let b = self.samples.get(after)?;
+        let Some(a) = after.checked_sub(1).map(|i| &self.samples[i]) else {
+            return Some(b.position);
+        };
+        Some(hermite(
+            a,
+            b,
+            (seconds - a.seconds) / (b.seconds - a.seconds),
+        ))
+    }
+
+    /// The samples still ahead at `seconds`, soonest first.
+    pub fn ahead(&self, seconds: f64) -> &[Sample] {
+        let first = self.samples.partition_point(|s| s.seconds < seconds);
+        &self.samples[first..]
     }
 }
 

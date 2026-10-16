@@ -51,6 +51,19 @@ pub fn period_text(days: f64) -> String {
     }
 }
 
+/// A span of simulation time: seconds, minutes, hours, then days or years.
+pub fn duration_text(seconds: f64) -> String {
+    if seconds < 120.0 {
+        format!("{seconds:.0} s")
+    } else if seconds < 7_200.0 {
+        format!("{:.1} min", seconds / 60.0)
+    } else if seconds < 2.0 * 86_400.0 {
+        format!("{:.2} hours", seconds / 3_600.0)
+    } else {
+        period_text(seconds / 86_400.0)
+    }
+}
+
 /// A distance in AU, with more places when small.
 pub fn au_text(au: f64) -> String {
     if au < 10.0 {

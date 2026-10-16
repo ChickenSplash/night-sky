@@ -172,11 +172,14 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   vectors; body-local `spin_rads` (pitch/yaw/roll); inputs, thruster limits and
   attitude pilot state. `around` names the
   [orbit reference](../simulation/craft.md#orbit-reference) and its kind,
-  with altitude, relative speed and instantaneous two-body orbital
+  with altitude, relative speed and instantaneous `two_body_orbit`
   elements. `prediction` describes the shown coast prediction: its
-  reference, `age_seconds` since it started, horizon and `achieved_seconds`,
-  `end` (`horizon`, `truncated` or `impact:<body>`), whether it is `current`
-  for the ship's inputs and reference, and whether a newer one is `updating`.
+  reference, `age_seconds` since it started, horizon, `achieved_seconds` and
+  `ahead_seconds` still ahead, `end` (`horizon`, `truncated` or
+  `impact:<body>`), whether it is `current` for the ship's inputs and
+  reference, and whether a newer one is `updating`. Its `events` list the
+  next sampled periapsis and apoapsis (`altitude_km`) and every predicted
+  `exit` or `encounter` (`to`), each `in_seconds` from now.
   `held_clock` indicates physics catch-up; `step_seconds` is the fixed step.
   While pointing, `target_direction` and `pointing_error_deg` report the
   resolved direction and nose error at the latest physics step; they are

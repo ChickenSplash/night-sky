@@ -55,6 +55,12 @@ pub(super) fn orbit_point(orbit: &Orbit, step: usize, steps: usize) -> DVec3 {
 }
 
 const ORBIT: Color = Color::srgb(0.075, 0.17, 0.25);
+/// A selected craft's predicted coast path, and the same once out of date.
+const TRAJECTORY: Color = Color::srgb(0.45, 0.8, 0.95);
+const TRAJECTORY_STALE: Color = Color::srgb(0.2, 0.32, 0.38);
+/// Where its orbit reference would change, and where it would hit a body.
+const TRAJECTORY_REFERENCE: Color = Color::srgb(0.95, 0.7, 0.3);
+const TRAJECTORY_IMPACT: Color = Color::srgb(0.95, 0.3, 0.25);
 /// Bodies below this on-screen radius, in logical pixels, draw as a single ring.
 const RING_PIXELS: f32 = 6.0;
 const LINK: Color = Color::srgb(0.12, 0.3, 0.4);
@@ -484,6 +490,47 @@ impl Canvas<'_> {
                     object: Marked::Craft(live.craft.id.clone()),
                 });
             }
+            if self.nav.selection == Some(crate::Selection::Craft(live.craft.id.clone())) {
+                self.trajectory(gizmos, live);
+            }
+        }
+    }
+
+    /// The shown coast prediction still ahead, from the craft, relative to
+    /// its reference anchored where that reference is now, with diamonds at
+    /// its apsides and reference changes. Dimmer once the craft's inputs or
+    /// reference have changed since it was made.
+    fn trajectory(&self, gizmos: &mut Gizmos, live: &crate::craft::Live) {
+        use crate::craft::PathMark;
+        let Some(path) = crate::craft::predicted_path(live, self.seconds) else {
+            return;
+        };
+        let place = |local: [f64; 3]| self.world(self.frame * DVec3::from_array(local));
+        let tint = if path.current {
+            TRAJECTORY
+        } else {
+            TRAJECTORY_STALE
+        };
+        gizmos.linestrip(path.points.iter().map(|&p| place(p)), tint);
+        for (local, mark) in path.marks {
+            let colour = match mark {
+                PathMark::Apsis => tint,
+                PathMark::Reference => TRAJECTORY_REFERENCE,
+                PathMark::Impact => TRAJECTORY_IMPACT,
+            };
+            let centre = place(local);
+            let Some(per_pixel) = self.per_pixel(centre) else {
+                continue;
+            };
+            let [right, up] = [self.view.right(), self.view.up()].map(|v| *v * per_pixel * 5.0);
+            let corners = [
+                centre + up,
+                centre + right,
+                centre - up,
+                centre - right,
+                centre + up,
+            ];
+            gizmos.linestrip(corners, colour);
         }
     }
 }

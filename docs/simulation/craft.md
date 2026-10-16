@@ -215,6 +215,14 @@ in memory only: nothing is saved or shared yet.
   Forward and top are distinguishable without model assets. Only craft in
   the visited system, on the page their frame names,
   are drawn, picked or followed.
+- **Predicted path:** the selected craft's shown prediction is drawn from
+  the craft onwards (`craft::predicted_path`), dimmed once it is out of date.
+  Its samples are relative to the prediction's reference, so they are added
+  to where that reference is now, not where it will be: an orbit around a
+  moving planet or barycentre is drawn closed around it. Diamonds mark the
+  predicted apsides, reference changes (amber) and an impact (red). Points
+  are placed in f64 relative to the camera before conversion to render units,
+  so the path holds at any zoom.
 - **Spawning** (`spawn_ship`): above a planet, star or barycentre, or a system
   by its key (its star, or outermost barycentre). Its system must be loaded,
   visited or charted. The ship starts on the body's far side from the body's
@@ -233,9 +241,15 @@ in memory only: nothing is saved or shared yet.
   `orbits.…`, or by name); see [live objects](search.md#live-objects).
 - **Inspector:** type, system, the body it is around, altitude, speed and
   two-body periapsis, apoapsis and period around that body (`Elements`,
-  which ignore every other body), legacy thrust, throttle, spin and attitude
-  pilot. These change every frame, so
-  craft facts are never cached.
+  which ignore every other body), then the shown prediction: its reference,
+  how far ahead it reaches, its age and whether it is out of date or
+  updating, and the next predicted periapsis and apoapsis, exits,
+  encounters and impact, each with the time until it. Predicted apsides
+  come from the sampled path and include every body's pull; the two-body
+  ones are instantaneous estimates. Then legacy thrust, throttle, spin and
+  attitude pilot. These change every frame, so craft facts are never cached.
+- **Spawning picks the reference** at once, so the first prediction is made
+  under it.
 
 What is seen (streaming, render precision, the visited system) stays
 camera-based even while following; what the ship does (gravity, altitude,

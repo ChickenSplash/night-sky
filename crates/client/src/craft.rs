@@ -7,7 +7,10 @@ use space_shared::{Galaxy, StarSystem};
 use space_simulation::search::{SearchResult, live::LiveObject};
 use space_simulation::{
     EARTH_SOLAR, SUN_GM, SUN_RADIUS_METRES, State,
-    craft::{Craft, CraftKind, Field, Frame, Reference, STEP_SECONDS, circular_speed, distance},
+    craft::{
+        Craft, CraftKind, Field, Frame, Reference, STEP_SECONDS, circular_speed, distance,
+        predict::Prediction,
+    },
 };
 
 mod control;
@@ -243,6 +246,9 @@ impl Fleet {
             seconds,
         );
         craft.place(state, seconds);
+        craft.reference = field
+            .select_reference(None, state.position, seconds)
+            .map(|reference| reference.id);
         info!(target: "craft", "Spawned {id} {:.0} km above {body}", altitude / 1_000.0);
         self.craft.push(Live {
             previous_orientation: craft.orientation,
@@ -375,7 +381,7 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                     "id": body.id, "kind": body.kind,
                     "altitude_km": (distance(relative.position, [0.0; 3]) - body.radius_m) / 1_000.0,
                     "speed_kms": distance(relative.velocity, [0.0; 3]) / 1_000.0,
-                    "orbit": {"eccentricity": orbit.eccentricity,
+                    "two_body_orbit": {"eccentricity": orbit.eccentricity,
                         "apsides_altitude_km": orbit.apsides().map(|r| r.map(|v| (v - body.radius_m) / 1000.0)),
                         "period_seconds": orbit.period()},
                 })
@@ -393,7 +399,7 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 "spin_rads": live.craft.spin,
                 "thrusters": live.craft.thrusters,
                 "autopilot": live.craft.autopilot,
-                "prediction": prediction_readout(live),
+                "prediction": prediction_readout(live, seconds),
             })
         })
         .collect();
@@ -401,11 +407,12 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
 }
 
 /// The shown coast prediction, for `ns ship state`.
-fn prediction_readout(live: &Live) -> serde_json::Value {
+fn prediction_readout(live: &Live, seconds: f64) -> serde_json::Value {
+    use serde_json::json;
     use space_simulation::craft::predict::End;
     let forecast = &live.forecast;
     let Some(p) = &forecast.shown else {
-        return serde_json::json!({"updating": forecast.updating()});
+        return json!({"updating": forecast.updating()});
     };
     let end = match &p.end {
         Some(End::Horizon) => "horizon".to_owned(),
@@ -413,22 +420,166 @@ fn prediction_readout(live: &Live) -> serde_json::Value {
         Some(End::Impact { body }) => format!("impact:{body}"),
         None => "running".to_owned(),
     };
-    serde_json::json!({
+    let events: Vec<_> = upcoming(live, p, seconds)
+        .into_iter()
+        .map(|event| match event {
+            Upcoming::Apsis {
+                periapsis,
+                seconds: at,
+                altitude_m,
+            } => json!({
+                "event": if periapsis { "periapsis" } else { "apoapsis" },
+                "in_seconds": at - seconds, "altitude_km": altitude_m / 1_000.0,
+            }),
+            Upcoming::Reference {
+                exit,
+                seconds: at,
+                id,
+            } => json!({
+                "event": if exit { "exit" } else { "encounter" },
+                "in_seconds": at - seconds, "to": id,
+            }),
+        })
+        .collect();
+    json!({
         "reference": p.reference,
-        "age_seconds": live.craft.seconds - p.start_seconds,
+        "age_seconds": seconds - p.start_seconds,
         "current": forecast.current(&live.craft),
         "updating": forecast.updating(),
         "bound": p.bound,
         "horizon_seconds": p.horizon_seconds,
         "achieved_seconds": p.achieved_seconds(),
+        "ahead_seconds": (p.end_seconds() - seconds).max(0.0),
         "samples": p.samples.len(),
         "end": end,
+        "events": events,
     })
+}
+
+/// The shown prediction still ahead, in the craft's frame, for drawing.
+pub struct Path {
+    /// From the craft where it is drawn now, then each sample still ahead.
+    pub points: Vec<[f64; 3]>,
+    pub marks: Vec<([f64; 3], PathMark)>,
+    /// Made under the craft's current inputs and reference.
+    pub current: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathMark {
+    Apsis,
+    Reference,
+    Impact,
+}
+
+/// The shown prediction from `seconds` on. Its samples are relative to its
+/// reference, so they are anchored at where that reference is now: an
+/// orbit around a moving planet is drawn closed around the planet.
+pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
+    use space_simulation::craft::predict::{End, Event};
+    let p = live.forecast.shown.as_ref()?;
+    let anchor = live
+        .field
+        .reference_by_id(&p.reference, seconds)?
+        .state
+        .position;
+    let place = |relative: [f64; 3]| std::array::from_fn(|i| anchor[i] + relative[i]);
+    let ahead = p.ahead(seconds);
+    let last = ahead.last()?;
+    let points = std::iter::once(live.state_at(seconds).position)
+        .chain(ahead.iter().map(|s| place(s.position)))
+        .collect();
+    let mut marks: Vec<_> = p
+        .upcoming(seconds)
+        .filter_map(|event| {
+            let mark = match event {
+                Event::Reference { .. } => PathMark::Reference,
+                _ => PathMark::Apsis,
+            };
+            Some((place(p.position_at(event.seconds())?), mark))
+        })
+        .collect();
+    if let Some(End::Impact { .. }) = p.end {
+        marks.push((place(last.position), PathMark::Impact));
+    }
+    Some(Path {
+        points,
+        marks,
+        current: live.forecast.current(&live.craft),
+    })
+}
+
+/// A predicted event still ahead, as readouts show it.
+pub enum Upcoming {
+    /// Altitude above the prediction reference's surface.
+    Apsis {
+        periapsis: bool,
+        seconds: f64,
+        altitude_m: f64,
+    },
+    /// An exit when the new reference holds the old one, else an encounter.
+    Reference {
+        exit: bool,
+        seconds: f64,
+        id: String,
+    },
+}
+
+/// The prediction's events still ahead at `seconds`: every reference change,
+/// and the next periapsis and apoapsis, soonest first.
+pub fn upcoming(live: &Live, p: &Prediction, seconds: f64) -> Vec<Upcoming> {
+    use space_simulation::craft::predict::Event;
+    let radius = live
+        .field
+        .reference_by_id(&p.reference, seconds)
+        .map_or(0.0, |r| r.radius_m);
+    let mut previous = p.reference.clone();
+    let mut out = Vec::new();
+    let (mut periapsis, mut apoapsis) = (false, false);
+    for event in &p.events {
+        match event {
+            Event::Reference { seconds: at, id } => {
+                let exit = live.field.lineage(&previous).contains(id);
+                previous = id.clone();
+                if *at >= seconds {
+                    out.push(Upcoming::Reference {
+                        exit,
+                        seconds: *at,
+                        id: id.clone(),
+                    });
+                }
+            }
+            Event::Periapsis {
+                seconds: at,
+                distance_m,
+            } if *at >= seconds && !periapsis => {
+                periapsis = true;
+                out.push(Upcoming::Apsis {
+                    periapsis: true,
+                    seconds: *at,
+                    altitude_m: distance_m - radius,
+                });
+            }
+            Event::Apoapsis {
+                seconds: at,
+                distance_m,
+            } if *at >= seconds && !apoapsis => {
+                apoapsis = true;
+                out.push(Upcoming::Apsis {
+                    periapsis: false,
+                    seconds: *at,
+                    altitude_m: distance_m - radius,
+                });
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The inspector's title, facts and note for a craft, live at `seconds`.
 pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String, String)>) {
-    use crate::format::{km_text, period_text, speed_label};
+    use crate::format::{duration_text, km_text, speed_label};
     let (state, reference) = live.surroundings(seconds);
     let mut rows = vec![("Type".to_owned(), live.craft.kind.label().to_owned())];
     let key = space_simulation::multiple::system_key(live.star());
@@ -437,25 +588,22 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
         let relative = relative(state, body.state);
         let r = distance(relative.position, [0.0; 3]);
         let v = distance(relative.velocity, [0.0; 3]);
-        rows.push(("Around".into(), body_label(live, galaxy, &body)));
+        rows.push(("Around".into(), body_label(live, galaxy, &body.id)));
         rows.push(("Altitude".into(), km_text((r - body.radius_m) / 1_000.0)));
         rows.push(("Speed".into(), speed_label(v)));
         let orbit = space_simulation::craft::Elements::of(relative, body.gm);
         match orbit.apsides() {
             Some([low, high]) => {
-                rows.push(("Periapsis".into(), km_text((low - body.radius_m) / 1_000.0)));
-                rows.push(("Apoapsis".into(), km_text((high - body.radius_m) / 1_000.0)));
+                let height = |r: f64| km_text((r - body.radius_m) / 1_000.0);
+                rows.push(("Two-body periapsis".into(), height(low)));
+                rows.push(("Two-body apoapsis".into(), height(high)));
                 let period = orbit.period().unwrap_or(f64::INFINITY);
-                let text = if period < 2.0 * 86_400.0 {
-                    format!("{:.2} hours", period / 3_600.0)
-                } else {
-                    period_text(period / 86_400.0)
-                };
-                rows.push(("Orbital period".into(), text));
+                rows.push(("Two-body period".into(), duration_text(period)));
             }
-            None => rows.push(("Orbit".into(), "Escaping".into())),
+            None => rows.push(("Two-body orbit".into(), "Escaping".into())),
         }
     }
+    rows.extend(prediction_facts(live, galaxy, seconds));
     let thrust = distance(live.craft.input.thrust, [0.0; 3]);
     rows.push((
         "Thrust".into(),
@@ -488,16 +636,96 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
     (live.craft.name.clone(), rows)
 }
 
-/// A body's name: a planet's designation, or a star's with its letters.
-pub fn body_label(live: &Live, galaxy: &Galaxy, body: &Reference) -> String {
+/// The inspector's rows for the shown coast prediction: what it is around,
+/// how far ahead it reaches and how old it is, then what lies ahead on it.
+fn prediction_facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> Vec<(String, String)> {
+    use crate::format::{duration_text, km_text};
+    use space_simulation::craft::predict::End;
+    let forecast = &live.forecast;
+    let Some(p) = &forecast.shown else {
+        return vec![("Prediction".into(), "Working…".into())];
+    };
+    let state = if !forecast.current(&live.craft) {
+        " · out of date"
+    } else if forecast.updating() {
+        " · updating"
+    } else {
+        ""
+    };
+    let mut rows = vec![
+        (
+            "Prediction".into(),
+            format!(
+                "{} ahead, around {}{state}",
+                duration_text((p.end_seconds() - seconds).max(0.0)),
+                body_label(live, galaxy, &p.reference)
+            ),
+        ),
+        (
+            "Prediction age".into(),
+            duration_text((seconds - p.start_seconds).max(0.0)),
+        ),
+    ];
+    for event in upcoming(live, p, seconds) {
+        rows.push(match event {
+            Upcoming::Apsis {
+                periapsis,
+                seconds: at,
+                altitude_m,
+            } => (
+                format!(
+                    "Predicted {}",
+                    if periapsis { "periapsis" } else { "apoapsis" }
+                ),
+                format!(
+                    "{} in {}",
+                    km_text(altitude_m / 1_000.0),
+                    duration_text(at - seconds)
+                ),
+            ),
+            Upcoming::Reference {
+                exit,
+                seconds: at,
+                id,
+            } => (
+                format!("Predicted {}", if exit { "exit" } else { "encounter" }),
+                format!(
+                    "{} in {}",
+                    body_label(live, galaxy, &id),
+                    duration_text(at - seconds)
+                ),
+            ),
+        });
+    }
+    if let Some(End::Impact { body }) = &p.end
+        && p.end_seconds() >= seconds
+    {
+        rows.push((
+            "Predicted impact".into(),
+            format!(
+                "{} in {}",
+                body_label(live, galaxy, body),
+                duration_text(p.end_seconds() - seconds)
+            ),
+        ));
+    }
+    if let Some(End::Truncated) = &p.end {
+        rows.push(("Prediction ends".into(), "Step budget reached".into()));
+    }
+    rows
+}
+
+/// A body's name: a planet's designation, or a star's or pair's with its
+/// letters.
+pub fn body_label(live: &Live, galaxy: &Galaxy, id: &str) -> String {
     let system = live.field.system();
-    if let Some(planet) = system.planets.iter().find(|p| p.id == body.id) {
+    if let Some(planet) = system.planets.iter().find(|p| p.id == id) {
         return planet.designation.clone();
     }
-    let key = space_simulation::multiple::system_key(&body.id);
+    let key = space_simulation::multiple::system_key(id);
     objects::member_label(
         &crate::galaxy_nav::label(galaxy, key),
-        space_simulation::multiple::member_letters(&body.id),
+        space_simulation::multiple::member_letters(id),
     )
 }
 

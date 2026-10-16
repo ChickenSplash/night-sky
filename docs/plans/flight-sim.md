@@ -336,7 +336,7 @@ Checkpoints, each committed and checked on both targets:
    on orders, despawn or reference changes. Discard obsolete work, retain a
    clearly aged last result while updating, and prevent refreshes from
    starving completion. Test pause, high time rates and multiple craft.
-4. **Trajectory and events:** draw the selected ship's path camera-relatively
+4. ✅ **Trajectory and events:** draw the selected ship's path camera-relatively
    in f64 before GPU conversion, in the fixed reference chosen above. Show
    reference name, predicted influence exits/encounters and prediction age /
    horizon. Distinguish sampled predicted apsides from existing instantaneous
