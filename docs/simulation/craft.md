@@ -225,8 +225,10 @@ in memory only: nothing is saved or shared yet.
 - **Predicted path:** the selected craft's shown prediction is drawn from
   the craft onwards (`craft::predicted_path`), dimmed once it is out of date.
   A current prediction's whole revolution is joined back to the craft, so a
-  bound orbit is one closed loop; the join covers drift from other bodies
-  since the prediction started, at most a quarter of a lap.
+  bound orbit is one closed loop, but only when it ends within 1% of the
+  craft's distance from the reference (`Prediction::closing_lap`). A
+  revolution that another body's pull has really bent is left open,
+  showing the changed orbit rather than a join on no path.
   Its samples are relative to the prediction's reference, so they are added
   to where that reference is now, not where it will be: an orbit around a
   moving planet or barycentre is drawn closed around it. Diamonds mark the

@@ -270,3 +270,45 @@ fn a_whole_lap_stays_ahead_until_a_refresh_is_due() {
         assert!(prediction.upcoming(now).all(|e| e.seconds() <= end));
     }
 }
+
+/// Earth with a steady sideways push, standing in for a strong tug from a
+/// moon or passing planet.
+struct Tugged;
+
+impl Gravity for Tugged {
+    fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3] {
+        let mut sum = Earth.acceleration(position, seconds);
+        sum[1] += 0.05;
+        sum
+    }
+    fn reference(&self, id: Option<&str>, position: [f64; 3], seconds: f64) -> Option<State> {
+        Earth.reference(id, position, seconds)
+    }
+    fn orbit_reference(
+        &self,
+        current: Option<&str>,
+        position: [f64; 3],
+        seconds: f64,
+    ) -> Option<Reference> {
+        Earth.orbit_reference(current, position, seconds)
+    }
+    fn closest(&self, position: [f64; 3], seconds: f64) -> Option<Closest> {
+        Earth.closest(position, seconds)
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn only_a_revolution_that_ends_at_the_craft_closes() {
+    let (craft, _) = eccentric();
+    let quiet = predict(&craft, &Earth).unwrap();
+    assert!(quiet.closing_lap(0.0).is_some());
+    // Pushed off course, it still sweeps a revolution, but ends elsewhere.
+    let bent = predict(&craft, &Tugged).unwrap();
+    let end = bent.lap_end(0.0).expect("a revolution");
+    let miss = distance(bent.position_at(end).unwrap(), bent.samples[0].position);
+    let r = distance(bent.samples[0].position, [0.0; 3]);
+    assert!(miss > CLOSE_SHARE * r, "{miss}");
+    assert_eq!(bent.closing_lap(0.0), None);
+    assert_eq!(bent.shown_end(0.0), end);
+}

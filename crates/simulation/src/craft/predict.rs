@@ -25,6 +25,10 @@ pub const PERIODS: f64 = 1.02;
 /// Bound paths are predicted this many periods further, so a whole lap is
 /// still ahead of the craft until a newer prediction replaces this one.
 pub const LEAD: f64 = 0.35;
+/// A revolution closes on the craft when it ends within this share of the
+/// craft's distance from the reference. Past it, other bodies have really
+/// changed the orbit, and joining up would draw a line on no path.
+pub const CLOSE_SHARE: f64 = 0.01;
 /// Unbound paths run until they have gone this many times the reference's
 /// reach, or its distance when the reach is infinite, at the current speed.
 const ESCAPE_REACHES: f64 = 2.0;
@@ -130,6 +134,15 @@ impl Prediction {
             previous = (sample.seconds, here);
         }
         None
+    }
+
+    /// `lap_end`, only when the revolution ends where it began, within
+    /// `CLOSE_SHARE`, so the path may be drawn as one closed loop.
+    pub fn closing_lap(&self, seconds: f64) -> Option<f64> {
+        let end = self.lap_end(seconds)?;
+        let [here, there] = [seconds, end].map(|t| self.position_at(t));
+        let (here, there) = (here?, there?);
+        (distance(here, there) < CLOSE_SHARE * distance(here, [0.0; 3])).then_some(end)
     }
 
     /// Where the part shown at `seconds` ends: one revolution on when bound,

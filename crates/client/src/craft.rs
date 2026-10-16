@@ -492,10 +492,10 @@ pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
         .chain(ahead.iter().map(|s| place(s.position)))
         .collect();
     let current = live.forecast.current(&live.craft);
-    // A whole revolution ends level with the craft: join it up, so a bound
-    // orbit is one closed loop. An out-of-date one may have drifted, so is
-    // left open.
-    if let Some(end) = p.lap_end(seconds)
+    // A whole revolution that ends where the craft is gets joined up, so a
+    // bound orbit is one closed loop. One that other bodies have bent away,
+    // or that is out of date, is left open.
+    if let Some(end) = p.closing_lap(seconds)
         && current
     {
         points.extend(p.position_at(end).map(place));
