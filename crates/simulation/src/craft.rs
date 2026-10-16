@@ -22,6 +22,7 @@ mod attitude;
 pub use attitude::{AttitudePilot, PointTarget};
 mod reference;
 pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
+pub mod predict;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -139,9 +140,9 @@ pub struct Craft {
     pub thrusters: Thrusters,
     #[serde(default)]
     pub autopilot: AttitudePilot,
-    /// What its orbit is described around, by ID, chosen again each
-    /// `REFERENCE_SECONDS` of steps.
-    /// Kept between steps so it switches only past `SWITCH_MARGIN`.
+    /// What its orbit is described around, by ID. Chosen again each
+    /// `REFERENCE_SECONDS` and kept between, so it switches only past
+    /// `SWITCH_MARGIN`.
     #[serde(default)]
     pub reference: Option<String>,
     /// Simulation time `motion` describes, in seconds.
@@ -173,6 +174,21 @@ pub trait Gravity {
     ) -> Option<Reference> {
         None
     }
+    /// The body that sets the pace of motion here: the one with the shortest
+    /// free-fall time. Fields without bodies may omit it.
+    fn closest(&self, _position: [f64; 3], _seconds: f64) -> Option<Closest> {
+        None
+    }
+}
+
+/// The body with the shortest free-fall time from a point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Closest {
+    pub id: String,
+    /// sqrt(r³/GM) in seconds: a circular orbit's period over 2π.
+    pub timescale: f64,
+    /// Whether the point is inside it.
+    pub inside: bool,
 }
 
 impl Craft {
@@ -263,19 +279,18 @@ impl Craft {
         self.turn(rotation);
         let end_thrust = self.thrust();
         let Motion::Free(state) = &mut self.motion;
-        let half = STEP_SECONDS / 2.0;
         let before = self
             .gravity
             .unwrap_or_else(|| gravity.acceleration(state.position, self.seconds));
-        for i in 0..3 {
-            state.velocity[i] += (before[i] + thrust[i]) * half;
-            state.position[i] += state.velocity[i] * STEP_SECONDS;
-        }
+        let after = verlet(
+            state,
+            gravity,
+            self.seconds,
+            STEP_SECONDS,
+            before,
+            [thrust, end_thrust],
+        );
         self.seconds += STEP_SECONDS;
-        let after = gravity.acceleration(state.position, self.seconds);
-        for i in 0..3 {
-            state.velocity[i] += (after[i] + end_thrust[i]) * half;
-        }
         self.gravity = Some(after);
         // Once a simulated second: choosing costs more than the step itself,
         // and no craft crosses a region in a second.
@@ -298,6 +313,28 @@ impl Craft {
         }
         steps
     }
+}
+
+/// One kick, drift, kick step of `dt` from `seconds`, with gravity `before`
+/// at the start and thrust at the start and end. Returns gravity at the end.
+fn verlet(
+    state: &mut State,
+    gravity: &impl Gravity,
+    seconds: f64,
+    dt: f64,
+    before: [f64; 3],
+    thrust: [[f64; 3]; 2],
+) -> [f64; 3] {
+    let half = dt / 2.0;
+    for i in 0..3 {
+        state.velocity[i] += (before[i] + thrust[0][i]) * half;
+        state.position[i] += state.velocity[i] * dt;
+    }
+    let after = gravity.acceleration(state.position, seconds + dt);
+    for i in 0..3 {
+        state.velocity[i] += (after[i] + thrust[1][i]) * half;
+    }
+    after
 }
 
 /// A gravitating star or planet at one instant.
@@ -405,6 +442,22 @@ impl Gravity for Field {
         seconds: f64,
     ) -> Option<Reference> {
         self.select_reference(current, position, seconds)
+    }
+
+    fn closest(&self, position: [f64; 3], seconds: f64) -> Option<Closest> {
+        self.bodies(seconds)
+            .into_iter()
+            .map(|body| {
+                let r = distance(body.state.position, position);
+                let timescale = (r.powi(3) / body.gm).sqrt();
+                (body, r, timescale)
+            })
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(body, r, timescale)| Closest {
+                inside: r < body.radius_m,
+                id: body.id,
+                timescale,
+            })
     }
 
     fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3] {

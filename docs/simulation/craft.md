@@ -146,6 +146,40 @@ it (a pair's stars together), for the two-body readouts below.
 The craft tests run natively and, through `wasm-bindgen-test-runner` under
 Node, as WebAssembly (`./scripts/check.sh`).
 
+## Coast prediction
+
+`craft::predict` forecasts where a craft goes if it coasts from now: a copy
+of its position and velocity, every propulsion input off, under the same
+summed gravity and Verlet kick, drift, kick as real flight. The real craft
+and clock are never touched.
+
+- **Adaptive step:** each step is 0.5% of the shortest free-fall time
+  $\sqrt{r^3/GM}$ to any star or planet, about 1,250 steps per circular
+  orbit, never shorter than a real step. Steps shrink near periapsis and
+  close encounters, and stretch far from everything. With varying steps the
+  integration is no longer symplectic, which does not matter over one
+  forecast: one lap of an eccentric low Earth orbit ends within 2 km of the
+  real fixed steps.
+- **Relative to one reference:** every sample is the craft's state minus the
+  start reference's state at that sample's time. So an orbit around a planet
+  closes relative to it instead of smearing along the planet's own path.
+  Perturbations from other bodies still show, and closure is not promised.
+- **Bounded horizon:** about one period (102%) when the two-body orbit around
+  the reference is bound; otherwise until the craft would have gone twice
+  the reference's reach (its Hill sphere or stable zone) at its current
+  speed. At most 100 years, and at most 6,000 steps, each kept as a sample.
+- **How it ended:** the planned horizon, `Truncated` when the step budget ran
+  out first, or `Impact` at a body's surface. There are no collisions, so
+  the real craft would pass through; the forecast stops there instead.
+- **Events:** sampled periapses and apoapses, where the radial speed changes
+  sign, placed on the cubic between samples; and predicted reference
+  changes, using the same selection and switching margin as the real craft.
+  The path is not re-referenced after one.
+
+`Predictor` does this in slices of steps, for spreading over frames; slices
+give exactly the same path as one go. Each step costs about 4 µs natively,
+so a lap of about 1,300 steps costs about 5 ms in total.
+
 ## In the client
 
 The client keeps live craft in `craft::Fleet` (`crates/client/src/craft.rs`),

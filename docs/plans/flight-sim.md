@@ -322,7 +322,7 @@ Checkpoints, each committed and checked on both targets:
    not an extra gravitating body. Test circumstellar, circumbinary and nested
    triple cases, plus boundary hysteresis. Share the reference with craft
    readouts and orbital pointing assists so they describe the same orbit.
-2. **Bounded coast predictor** (`crates/simulation`): copy the current
+2. ✅ **Bounded coast predictor** (`crates/simulation`): copy the current
    translational state and predict with all propulsion off, under every
    actual star and planet on its analytic path. Share the force model and
    Verlet integration, with a prediction-only timestep policy. Bound the
