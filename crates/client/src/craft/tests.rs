@@ -595,9 +595,37 @@ fn a_predicted_path_is_anchored_where_its_planet_is_now() {
         )
         .unwrap();
     settle(&mut fleet, 100);
+    // A fifth of a lap on, still current, it is one smooth closed loop:
+    // starting and ending at the craft, with no jump on either side of it.
+    let live = fleet.get_mut(&id).unwrap();
+    let period = live
+        .forecast
+        .shown
+        .as_ref()
+        .unwrap()
+        .period_seconds
+        .unwrap();
+    let started = live.craft.seconds;
+    let soon = started + period * 0.2;
+    live.craft.advance(&live.field, soon, usize::MAX);
+    live.previous = live.craft.state();
+    let live = fleet.get(&id).unwrap();
+    let loop_ = predicted_path(live, soon).unwrap();
+    let points = &loop_.points;
+    let here = live.craft.state().position;
+    assert_eq!((points[0], *points.last().unwrap()), (here, here));
+    let step = |i: usize| distance(points[i], points[i + 1]);
+    let longest = (1..points.len() - 3).map(step).fold(0.0, f64::max);
+    for i in [0, points.len() - 3, points.len() - 2] {
+        assert!(
+            step(i) <= 1.5 * longest,
+            "jump at {i}: {} > {longest}",
+            step(i)
+        );
+    }
     let live = fleet.get_mut(&id).unwrap();
     let horizon = live.forecast.shown.as_ref().unwrap().horizon_seconds;
-    let until = live.craft.seconds + horizon * 0.3;
+    let until = started + horizon * 0.3;
     live.craft.advance(&live.field, until, usize::MAX);
     live.previous = live.craft.state();
     let live = fleet.get(&id).unwrap();
@@ -606,14 +634,18 @@ fn a_predicted_path_is_anchored_where_its_planet_is_now() {
     assert!(path.current);
     assert_eq!(path.points[0], live.craft.state().position);
     // Each later point is the sample relative to the planet, plus where
-    // the planet is now, not where it will be at the sample's time.
+    // the planet is now, not where it will be at the sample's time, give
+    // or take the craft's drift from the prediction, eased out.
     let planet = system.planets.iter().find(|p| p.id == body).unwrap();
     let now = space_simulation::planet_position(&system, planet, until);
     let ahead = p.ahead(until);
     assert_eq!(path.points.len(), ahead.len() + 1);
+    let craft: [f64; 3] = std::array::from_fn(|i| path.points[0][i] - now[i]);
+    let drift = distance(craft, p.position_at(until).unwrap());
+    assert!(drift < 1_000.0, "{drift}");
     for (point, sample) in path.points[1..].iter().zip(ahead) {
         let relative: [f64; 3] = std::array::from_fn(|i| point[i] - now[i]);
-        assert!(distance(relative, sample.position) < 1e-3);
+        assert!(distance(relative, sample.position) <= drift + 1e-3);
     }
     // The planet moves on by far more than the orbit's size meanwhile, so
     // anchoring at future positions would smear the path.

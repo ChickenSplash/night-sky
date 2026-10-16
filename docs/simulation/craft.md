@@ -229,6 +229,11 @@ in memory only: nothing is saved or shared yet.
   craft's distance from the reference (`Prediction::closing_lap`). A
   revolution that another body's pull has really bent is left open,
   showing the changed orbit rather than a join on no path.
+  The real craft drifts from an older prediction by metres to hundreds of
+  metres, and a revolution ends up to 1% off where it began. Rather than
+  kink at the craft when seen close up, both differences are spread
+  smoothly along the drawn path, so it starts at the craft and a closed
+  loop ends there too.
   Its samples are relative to the prediction's reference, so they are added
   to where that reference is now, not where it will be: an orbit around a
   moving planet or barycentre is drawn closed around it. Diamonds mark the

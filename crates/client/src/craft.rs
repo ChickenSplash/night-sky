@@ -476,6 +476,12 @@ pub enum PathMark {
 /// The shown prediction from `seconds` on. Its samples are relative to its
 /// reference, so they are anchored at where that reference is now: an
 /// orbit around a moving planet is drawn closed around the planet.
+///
+/// The real craft and an older prediction drift apart by metres, and a
+/// revolution ends a little off where it began, so drawn as it is the path
+/// would kink at the craft when seen close up. Both differences are spread
+/// smoothly along the path instead: it starts at the craft and, when it
+/// closes, ends there too.
 pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
     use space_simulation::craft::predict::{End, Event};
     let p = live.forecast.shown.as_ref()?;
@@ -484,21 +490,26 @@ pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
         .reference_by_id(&p.reference, seconds)?
         .state
         .position;
-    let place = |relative: [f64; 3]| std::array::from_fn(|i| anchor[i] + relative[i]);
     let ahead = p.ahead(seconds);
     let last = ahead.last()?;
     let here = live.state_at(seconds).position;
-    let mut points: Vec<_> = std::iter::once(here)
-        .chain(ahead.iter().map(|s| place(s.position)))
-        .collect();
+    let relative: [f64; 3] = std::array::from_fn(|i| here[i] - anchor[i]);
     let current = live.forecast.current(&live.craft);
-    // A whole revolution that ends where the craft is gets joined up, so a
-    // bound orbit is one closed loop. One that other bodies have bent away,
-    // or that is out of date, is left open.
-    if let Some(end) = p.closing_lap(seconds)
-        && current
-    {
-        points.extend(p.position_at(end).map(place));
+    let closes = p.closing_lap(seconds).filter(|_| current);
+    let gap = |t: f64| -> [f64; 3] {
+        let at = p.position_at(t).unwrap_or(relative);
+        std::array::from_fn(|i| relative[i] - at[i])
+    };
+    let (start, end) = (gap(seconds), closes.map_or([0.0; 3], gap));
+    let span = (p.shown_end(seconds) - seconds).max(f64::MIN_POSITIVE);
+    let place = |t: f64, position: [f64; 3]| -> [f64; 3] {
+        let share = ((t - seconds) / span).clamp(0.0, 1.0);
+        std::array::from_fn(|i| anchor[i] + position[i] + start[i] * (1.0 - share) + end[i] * share)
+    };
+    let mut points: Vec<_> = std::iter::once(here)
+        .chain(ahead.iter().map(|s| place(s.seconds, s.position)))
+        .collect();
+    if closes.is_some() {
         points.push(here);
     }
     let mut marks: Vec<_> = p
@@ -508,13 +519,14 @@ pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
                 Event::Reference { .. } => PathMark::Reference,
                 _ => PathMark::Apsis,
             };
-            Some((place(p.position_at(event.seconds())?), mark))
+            let t = event.seconds();
+            Some((place(t, p.position_at(t)?), mark))
         })
         .collect();
     if let Some(End::Impact { .. }) = p.end
         && p.end_seconds() <= p.shown_end(seconds)
     {
-        marks.push((place(last.position), PathMark::Impact));
+        marks.push((place(last.seconds, last.position), PathMark::Impact));
     }
     Some(Path {
         points,
