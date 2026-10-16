@@ -312,3 +312,23 @@ fn only_a_revolution_that_ends_at_the_craft_closes() {
     assert_eq!(bent.closing_lap(0.0), None);
     assert_eq!(bent.shown_end(0.0), end);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_slow_escape_still_reaches_the_edge_of_the_hill_sphere() {
+    let (field, planet) = planet_field();
+    // Barely unbound: it climbs out far slower than it starts.
+    let craft = around(&field, &planet, 1_000_000.0, 1.42);
+    let prediction = predict(&craft, &field).unwrap();
+    assert!(!prediction.bound);
+    assert!(
+        prediction
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::Reference { .. })),
+        "{:?} after {} days",
+        prediction.end,
+        prediction.achieved_seconds() / 86_400.0
+    );
+    assert_ne!(prediction.end, Some(End::Truncated));
+}

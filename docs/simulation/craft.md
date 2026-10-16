@@ -172,8 +172,9 @@ and clock are never touched.
   (`Prediction::lap_end`), measured in angle rather than time so it ends
   level with the craft.
   Otherwise until the craft would have gone twice
-  the reference's reach (its Hill sphere or stable zone) at its current
-  speed. At most 100 years, and at most 6,000 steps, each kept as a sample.
+  the reference's reach (its Hill sphere or stable zone) at its hyperbolic
+  excess speed $\sqrt{2E}$, the speed it keeps once far away. It is always
+  faster than that, so even a slow escape is predicted past the edge. At most 100 years, and at most 6,000 steps, each kept as a sample.
 - **How it ended:** the planned horizon, `Truncated` when the step budget ran
   out first, or `Impact` at a body's surface. There are no collisions, so
   the real craft would pass through; the forecast stops there instead.

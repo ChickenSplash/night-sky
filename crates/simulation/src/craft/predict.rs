@@ -30,7 +30,8 @@ pub const LEAD: f64 = 0.35;
 /// changed the orbit, and joining up would draw a line on no path.
 pub const CLOSE_SHARE: f64 = 0.01;
 /// Unbound paths run until they have gone this many times the reference's
-/// reach, or its distance when the reach is infinite, at the current speed.
+/// reach, or its distance when the reach is infinite, at the speed they
+/// keep far away. They are always faster than that, so they get there.
 const ESCAPE_REACHES: f64 = 2.0;
 
 /// A predicted state, relative to the prediction's reference at that time.
@@ -217,8 +218,9 @@ impl Predictor {
                 } else {
                     r
                 };
-                let speed = distance(relative.velocity, [0.0; 3]).max(1e-9);
-                (ESCAPE_REACHES * reach.max(r) / speed, false)
+                // Hyperbolic excess speed, sqrt(2E): what climbing out leaves.
+                let excess = (2.0 * orbit.energy.max(0.0)).sqrt().max(1e-9);
+                (ESCAPE_REACHES * reach.max(r) / excess, false)
             }
         };
         let prediction = Prediction {
