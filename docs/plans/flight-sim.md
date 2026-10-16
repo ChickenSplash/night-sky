@@ -331,7 +331,7 @@ Checkpoints, each committed and checked on both targets:
    against fine fixed-step runs, especially at periapsis and encounters.
    Return the achieved horizon and any truncation, never imply a partial
    calculation is a complete orbit. Do not modify the real ship or clock.
-3. **Client prediction scheduling:** budget work across frames on native and
+3. ✅ **Client prediction scheduling:** budget work across frames on native and
    WASM, refresh from current state during flight and burns, and invalidate
    on orders, despawn or reference changes. Discard obsolete work, retain a
    clearly aged last result while updating, and prevent refreshes from

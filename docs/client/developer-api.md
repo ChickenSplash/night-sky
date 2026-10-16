@@ -170,8 +170,13 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   and prints the new ship's state once a later snapshot shows it.
 - `state` gives system-frame position, velocity, quaternion and forward/up
   vectors; body-local `spin_rads` (pitch/yaw/roll); inputs, thruster limits and
-  attitude pilot state. `around` includes altitude, relative speed and
-  instantaneous two-body orbital elements, not a predicted trajectory.
+  attitude pilot state. `around` names the
+  [orbit reference](../simulation/craft.md#orbit-reference) and its kind,
+  with altitude, relative speed and instantaneous two-body orbital
+  elements. `prediction` describes the shown coast prediction: its
+  reference, `age_seconds` since it started, horizon and `achieved_seconds`,
+  `end` (`horizon`, `truncated` or `impact:<body>`), whether it is `current`
+  for the ship's inputs and reference, and whether a newer one is `updating`.
   `held_clock` indicates physics catch-up; `step_seconds` is the fixed step.
   While pointing, `target_direction` and `pointing_error_deg` report the
   resolved direction and nose error at the latest physics step; they are

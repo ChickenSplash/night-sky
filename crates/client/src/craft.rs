@@ -12,6 +12,8 @@ use space_simulation::{
 
 mod control;
 pub use control::Order;
+mod forecast;
+pub use forecast::{Forecast, forecast};
 mod shape;
 pub use shape::{HULL_EDGES, HULL_VERTICES};
 
@@ -80,6 +82,8 @@ pub struct Live {
     /// Its system's position, in parsecs from the galactic centre, where
     /// search measures its distance from.
     pub system_pc: [f64; 3],
+    /// Where it would go if it coasted.
+    pub forecast: Forecast,
 }
 
 impl Live {
@@ -246,6 +250,7 @@ impl Fleet {
             field,
             previous: state,
             system_pc: [0.0; 3],
+            forecast: Forecast::default(),
         });
         Ok(id)
     }
@@ -388,10 +393,37 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 "spin_rads": live.craft.spin,
                 "thrusters": live.craft.thrusters,
                 "autopilot": live.craft.autopilot,
+                "prediction": prediction_readout(live),
             })
         })
         .collect();
     json!({"craft": craft, "held_clock": fleet.held, "step_seconds": STEP_SECONDS})
+}
+
+/// The shown coast prediction, for `ns ship state`.
+fn prediction_readout(live: &Live) -> serde_json::Value {
+    use space_simulation::craft::predict::End;
+    let forecast = &live.forecast;
+    let Some(p) = &forecast.shown else {
+        return serde_json::json!({"updating": forecast.updating()});
+    };
+    let end = match &p.end {
+        Some(End::Horizon) => "horizon".to_owned(),
+        Some(End::Truncated) => "truncated".to_owned(),
+        Some(End::Impact { body }) => format!("impact:{body}"),
+        None => "running".to_owned(),
+    };
+    serde_json::json!({
+        "reference": p.reference,
+        "age_seconds": live.craft.seconds - p.start_seconds,
+        "current": forecast.current(&live.craft),
+        "updating": forecast.updating(),
+        "bound": p.bound,
+        "horizon_seconds": p.horizon_seconds,
+        "achieved_seconds": p.achieved_seconds(),
+        "samples": p.samples.len(),
+        "end": end,
+    })
 }
 
 /// The inspector's title, facts and note for a craft, live at `seconds`.

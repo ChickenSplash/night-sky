@@ -465,3 +465,110 @@ fn commands_spawn_select_follow_steer_and_remove_ships() {
     assert!(app.world().resource::<Fleet>().craft.is_empty());
     assert_eq!(app.world().resource::<Navigation>().selection, None);
 }
+
+/// Forecast until nothing is being worked on, at most `frames` times.
+fn settle(fleet: &mut Fleet, frames: usize) -> usize {
+    for frame in 1..=frames {
+        fleet.forecast(forecast::STEPS_PER_FRAME);
+        if fleet.craft.iter().all(|live| !live.forecast.updating()) {
+            return frame;
+        }
+    }
+    panic!("still forecasting after {frames} frames");
+}
+
+#[test]
+fn forecasts_spread_over_frames_and_hold_while_paused() {
+    let (system, page, body) = planet_system();
+    let mut fleet = Fleet::default();
+    fleet
+        .spawn(system, page, &body, 400_000.0, Launch::Circular, 0.0)
+        .unwrap();
+    fleet.forecast(forecast::STEPS_PER_FRAME);
+    let live = &fleet.craft[0];
+    assert!(live.forecast.updating() && live.forecast.shown.is_none());
+    let frames = settle(&mut fleet, 100);
+    assert!(frames > 2, "one lap takes several frames: {frames}");
+    let shown = fleet.craft[0].forecast.shown.clone().unwrap();
+    assert!(shown.bound && fleet.craft[0].forecast.current(&fleet.craft[0].craft));
+    // Paused, nothing moves, so nothing is redone.
+    for _ in 0..10 {
+        fleet.forecast(forecast::STEPS_PER_FRAME);
+        assert!(!fleet.craft[0].forecast.updating());
+    }
+    assert_eq!(fleet.craft[0].forecast.shown.as_ref(), Some(&shown));
+    let readout = readout(&fleet, 0.0);
+    let prediction = &readout["craft"][0]["prediction"];
+    assert_eq!(prediction["end"], "horizon");
+    assert_eq!(prediction["age_seconds"], 0.0);
+}
+
+#[test]
+fn orders_make_a_forecast_obsolete_and_burns_still_finish_theirs() {
+    let (system, page, body) = planet_system();
+    let mut fleet = Fleet::default();
+    fleet
+        .spawn(system, page, &body, 400_000.0, Launch::Circular, 0.0)
+        .unwrap();
+    settle(&mut fleet, 100);
+    let coasting = fleet.craft[0].forecast.shown.clone().unwrap();
+    let live = &mut fleet.craft[0];
+    Order::Throttle { value: 0.2 }
+        .apply(&mut live.craft, Some(&live.field))
+        .unwrap();
+    fleet.forecast(forecast::STEPS_PER_FRAME);
+    let live = &fleet.craft[0];
+    // The old one stays on show, marked as no longer current.
+    assert!(live.forecast.updating() && !live.forecast.current(&live.craft));
+    assert_eq!(live.forecast.shown.as_ref(), Some(&coasting));
+    // A burn keeps refreshing, yet every refresh finishes.
+    let mut finished = 0;
+    for _ in 0..60 {
+        let live = &mut fleet.craft[0];
+        for _ in 0..20 {
+            live.craft.step(&live.field);
+        }
+        let before = live.forecast.shown.as_ref().map(|p| p.start_seconds);
+        fleet.forecast(forecast::STEPS_PER_FRAME);
+        let after = fleet.craft[0]
+            .forecast
+            .shown
+            .as_ref()
+            .map(|p| p.start_seconds);
+        finished += usize::from(before != after);
+    }
+    assert!(finished >= 3, "{finished}");
+    let live = &fleet.craft[0];
+    assert!(live.forecast.current(&live.craft));
+    let shown = live.forecast.shown.as_ref().unwrap();
+    assert!(shown.start_seconds > coasting.start_seconds);
+}
+
+#[test]
+fn craft_share_the_budget_and_fast_time_ages_a_forecast() {
+    let (system, page, body) = planet_system();
+    let mut fleet = Fleet::default();
+    for height in [400_000.0, 2_000_000.0] {
+        fleet
+            .spawn(system.clone(), page, &body, height, Launch::Circular, 0.0)
+            .unwrap();
+    }
+    settle(&mut fleet, 200);
+    assert!(fleet.craft.iter().all(|live| live.forecast.shown.is_some()));
+    // Most of a lap passes in a few frames: the forecast is redone, and
+    // until then reads as aged.
+    let live = &mut fleet.craft[0];
+    let horizon = live.forecast.shown.as_ref().unwrap().horizon_seconds;
+    let until = live.craft.seconds + horizon * 0.6;
+    live.craft.advance(&live.field, until, usize::MAX);
+    let age = readout(&fleet, until)["craft"][0]["prediction"]["age_seconds"]
+        .as_f64()
+        .unwrap();
+    assert!((age / (horizon * 0.6) - 1.0).abs() < 0.01, "{age}");
+    fleet.forecast(forecast::STEPS_PER_FRAME);
+    assert!(fleet.craft[0].forecast.updating());
+    assert!(!fleet.craft[1].forecast.updating());
+    settle(&mut fleet, 100);
+    let shown = fleet.craft[0].forecast.shown.as_ref().unwrap();
+    assert_eq!(shown.start_seconds, fleet.craft[0].craft.seconds);
+}

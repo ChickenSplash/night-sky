@@ -119,6 +119,7 @@ fn main() {
             actions::apply,
             tick,
             craft::step,
+            craft::forecast,
             scene::controls,
             #[cfg(not(target_arch = "wasm32"))]
             devtools::core_load::run,

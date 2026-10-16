@@ -196,6 +196,18 @@ in memory only: nothing is saved or shared yet.
   before physics steps, without overwriting the requested clock rate. Quiet
   manual coasting restores the requested rate. The HUD's `held by craft`
   covers either this manoeuvre cap or the catch-up hold.
+- **Forecasts:** each craft keeps its last finished
+  [coast prediction](#coast-prediction) (`craft::Forecast`) on show while a
+  newer one is worked on. `craft::forecast` runs after stepping and shares
+  250 prediction steps a frame (120 in WebAssembly) evenly between craft,
+  so a lap takes several frames. A new prediction starts when there is
+  none, when the inputs or orbit reference differ from the shown one's
+  (dropping any work begun under the old ones), throughout a burn, and while
+  coasting once the craft is a quarter of the shown horizon past its start.
+  Work in progress always finishes before another starts, so a burn's
+  constant refreshes never starve it. Paused, nothing is redone. `ns ship
+  state` reports the shown prediction's reference, age, horizon, how far it
+  reached and how it ended, and whether it is current and being updated.
 - **Drawing:** a craft is drawn between its last two steps, blended to the
   clock's time, with shortest-arc quaternion interpolation for attitude.
   The placeholder is a 30 m long wireframe cuboid with a pyramid nose (-Z)
