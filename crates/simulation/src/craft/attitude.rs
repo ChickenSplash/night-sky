@@ -68,7 +68,7 @@ impl Craft {
             AttitudePilot::Manual => return self.input.controls.rotation,
             AttitudePilot::Stop => None,
             AttitudePilot::Point { target, .. } => {
-                target.direction(self.state(), self.seconds, field)
+                target.direction(self.state(), self.seconds, field, self.reference.as_deref())
             }
         };
         let current = DQuat::from_array(self.orientation);
@@ -115,15 +115,23 @@ impl Craft {
 }
 
 impl PointTarget {
-    /// Resolve against the body's instantaneous state, not its spawn-time state.
-    pub fn direction(&self, state: State, seconds: f64, field: &impl Gravity) -> Option<DVec3> {
+    /// Resolve against the body's instantaneous state, not its spawn-time
+    /// state. Orbital directions are relative to `orbit`, the craft's orbit
+    /// reference, or one chosen here when it has none yet.
+    pub fn direction(
+        &self,
+        state: State,
+        seconds: f64,
+        field: &impl Gravity,
+        orbit: Option<&str>,
+    ) -> Option<DVec3> {
         if let Self::Vector(v) = self {
             return unit(*v);
         }
         let id = if let Self::Body(id) = self {
             Some(id.as_str())
         } else {
-            None
+            orbit
         };
         let body = field.reference(id, state.position, seconds)?;
         let radial = DVec3::from_array(state.position) - DVec3::from_array(body.position);

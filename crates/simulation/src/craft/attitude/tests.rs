@@ -139,7 +139,7 @@ fn every_target_uses_relative_position_and_velocity() {
     ] {
         assert!(
             target
-                .direction(state, 0.0, &field)
+                .direction(state, 0.0, &field, None)
                 .unwrap()
                 .distance(expected)
                 < 1e-12
@@ -147,7 +147,7 @@ fn every_target_uses_relative_position_and_velocity() {
     }
     assert!(
         PointTarget::Body("missing".into())
-            .direction(state, 0.0, &field)
+            .direction(state, 0.0, &field, None)
             .is_none()
     );
 }

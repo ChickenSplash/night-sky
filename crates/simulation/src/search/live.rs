@@ -18,7 +18,7 @@ pub struct LiveObject {
     pub system_key: String,
     pub altitude_km: f64,
     pub speed_kms: f64,
-    /// The planet or star it is around, by ID.
+    /// The planet, star or barycentre it is around, by ID.
     pub orbits: Option<String>,
 }
 
@@ -77,7 +77,7 @@ pub fn matching(query: &Query, origin_pc: [f64; 3], objects: &[LiveObject]) -> V
         .collect()
 }
 
-/// Whether the star or planet `id` passes `test`, given its kind and facts.
+/// Whether the star, pair or planet `id` passes `test`, given its kind and facts.
 fn around(id: &str, test: impl Fn(&str, Facts) -> bool) -> bool {
     let key = system_key(id);
     let Some((cell, component, _)) = parse_cell_star(key) else {
@@ -89,14 +89,25 @@ fn around(id: &str, test: impl Fn(&str, Facts) -> bool) -> bool {
         planets: Some(bodies.planets.len()),
         ..Facts::default()
     };
-    if let Some(star) = bodies.stars.iter().find(|s| s.id == id) {
-        return test(
+    let star_passes = |star| {
+        test(
             "star",
             Facts {
                 star: Some(star),
                 ..base
             },
-        );
+        )
+    };
+    if let Some(star) = bodies.stars.iter().find(|s| s.id == id) {
+        return star_passes(star);
+    }
+    // Around a pair, as for planets: any of its stars.
+    if let Some(pair) = bodies.barycentres.iter().find(|b| b.id == id) {
+        return bodies
+            .stars
+            .iter()
+            .filter(|s| pair.component.contains(s.component.as_str()))
+            .any(star_passes);
     }
     bodies
         .planets

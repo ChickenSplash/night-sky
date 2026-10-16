@@ -15,9 +15,13 @@ use crate::{EARTH_SOLAR, SUN_GM, State};
 
 /// Fixed simulation time per physics step, shared by every client and server.
 pub const STEP_SECONDS: f64 = 1.0 / 20.0;
+/// Simulation time between choices of a craft's orbit reference.
+pub const REFERENCE_SECONDS: f64 = 1.0;
 
 mod attitude;
 pub use attitude::{AttitudePilot, PointTarget};
+mod reference;
+pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -135,6 +139,11 @@ pub struct Craft {
     pub thrusters: Thrusters,
     #[serde(default)]
     pub autopilot: AttitudePilot,
+    /// What its orbit is described around, by ID, chosen again each
+    /// `REFERENCE_SECONDS` of steps.
+    /// Kept between steps so it switches only past `SWITCH_MARGIN`.
+    #[serde(default)]
+    pub reference: Option<String>,
     /// Simulation time `motion` describes, in seconds.
     pub seconds: f64,
     pub input: Input,
@@ -148,9 +157,20 @@ pub struct Craft {
 pub trait Gravity {
     /// Acceleration in metres per second squared at `position`, in metres.
     fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3];
-    /// A named body, or the dominant body when no ID is supplied. Guidance
-    /// needs velocity as well as position; gravity-only fields may omit it.
+    /// A named star, barycentre or planet, or the orbit reference here when
+    /// no ID is supplied. Guidance needs velocity as well as position;
+    /// gravity-only fields may omit it.
     fn reference(&self, _id: Option<&str>, _position: [f64; 3], _seconds: f64) -> Option<State> {
+        None
+    }
+    /// The orbit reference for a craft here, keeping `current` within the
+    /// switching margin. Fields without a hierarchy may omit it.
+    fn orbit_reference(
+        &self,
+        _current: Option<&str>,
+        _position: [f64; 3],
+        _seconds: f64,
+    ) -> Option<Reference> {
         None
     }
 }
@@ -167,6 +187,7 @@ impl Craft {
             spin: [0.0; 3],
             thrusters: Thrusters::default(),
             autopilot: AttitudePilot::default(),
+            reference: None,
             seconds,
             input: Input::default(),
             gravity: None,
@@ -256,6 +277,15 @@ impl Craft {
             state.velocity[i] += (after[i] + end_thrust[i]) * half;
         }
         self.gravity = Some(after);
+        // Once a simulated second: choosing costs more than the step itself,
+        // and no craft crosses a region in a second.
+        let position = state.position;
+        let second = |t: f64| (t / REFERENCE_SECONDS).floor();
+        if self.reference.is_none() || second(self.seconds) != second(self.seconds - STEP_SECONDS) {
+            self.reference = gravity
+                .orbit_reference(self.reference.as_deref(), position, self.seconds)
+                .map(|reference| reference.id);
+        }
     }
 
     /// Step until the craft is at or past `until`, at most `max_steps` times.
@@ -294,6 +324,8 @@ pub struct Field {
     page: u32,
     stars: Vec<(String, f64, f64)>,
     planets: Vec<(Planet, f64, f64, f64)>,
+    /// Each pair member's stable zone radius, in metres.
+    zones: Vec<(String, f64)>,
 }
 
 impl Field {
@@ -317,11 +349,13 @@ impl Field {
                 )
             })
             .collect();
+        let zones = Self::zones(&system, page);
         Self {
             system,
             page,
             stars,
             planets,
+            zones,
         }
     }
 
@@ -353,48 +387,24 @@ impl Field {
         });
         stars.chain(planets).collect()
     }
-
-    /// The body a craft here mostly answers to: the nearest planet whose
-    /// Hill sphere holds it, else the star pulling hardest. `bodies` are this
-    /// field's, in `bodies` order.
-    pub fn dominant<'a>(&self, bodies: &'a [Body], position: [f64; 3]) -> Option<&'a Body> {
-        let planet = bodies
-            .iter()
-            .skip(self.stars.len())
-            .zip(&self.planets)
-            .filter(|(body, (planet, gm, _, host))| {
-                let periapsis = planet.orbit.semi_major_au
-                    * (1.0 - planet.orbit.eccentricity)
-                    * crate::AU_METRES;
-                let hill = periapsis * (gm / (3.0 * host * SUN_GM)).cbrt();
-                distance(body.state.position, position) < hill
-            })
-            .map(|(body, _)| body)
-            .min_by(|a, b| {
-                distance(a.state.position, position)
-                    .total_cmp(&distance(b.state.position, position))
-            });
-        planet.or_else(|| {
-            bodies
-                .iter()
-                .filter(|body| body.kind == BodyKind::Star)
-                .max_by(|a, b| {
-                    let pull =
-                        |body: &Body| body.gm / distance(body.state.position, position).powi(2);
-                    pull(a).total_cmp(&pull(b))
-                })
-        })
-    }
 }
 
 impl Gravity for Field {
     fn reference(&self, id: Option<&str>, position: [f64; 3], seconds: f64) -> Option<State> {
-        let bodies = self.bodies(seconds);
-        let body = match id {
-            Some(id) => bodies.iter().find(|body| body.id == id),
-            None => self.dominant(&bodies, position),
+        let reference = match id {
+            Some(id) => self.reference_by_id(id, seconds),
+            None => self.select_reference(None, position, seconds),
         }?;
-        Some(body.state)
+        Some(reference.state)
+    }
+
+    fn orbit_reference(
+        &self,
+        current: Option<&str>,
+        position: [f64; 3],
+        seconds: f64,
+    ) -> Option<Reference> {
+        self.select_reference(current, position, seconds)
     }
 
     fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3] {

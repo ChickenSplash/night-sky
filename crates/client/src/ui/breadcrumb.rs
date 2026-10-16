@@ -160,7 +160,7 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy, now: crate::craft::Now
         return Vec::new();
     };
     let parent = match live.surroundings(now.seconds).1 {
-        Some(body) if body.kind == space_simulation::craft::BodyKind::Planet => {
+        Some(body) if body.kind == space_simulation::craft::ReferenceKind::Planet => {
             ObjectRef::Planet { id: body.id }
         }
         _ => ObjectRef::Star {

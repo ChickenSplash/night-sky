@@ -747,6 +747,31 @@ fn live_ships_match_kinds_filters_scopes_text_and_what_they_orbit() {
         .unwrap()
         .check();
     assert!(refused.unwrap_err().contains("not planets"));
+    // Around a pair, a ship orbits each of its stars, as planets do.
+    let pair = near_home().iter().find_map(|(key, cell, component, at)| {
+        let bodies = crate::population::tiered_bodies(key, *component, cell.level());
+        let pair = bodies.barycentres.first()?.clone();
+        Some((key.clone(), *at, pair, bodies.stars))
+    });
+    let (key, position_pc, pair, stars) = pair.unwrap();
+    let ship = live::LiveObject {
+        result: SearchResult {
+            position_pc,
+            ..ship.result.clone()
+        },
+        system_key: key,
+        orbits: Some(pair.id.clone()),
+        ..ship
+    };
+    let class = |star: &space_shared::Star| super::engine::star_class(star);
+    let member = stars.iter().find(|s| pair.component.contains(&s.component));
+    let query = Query::parse(&format!("orbits.star_class={}", class(member.unwrap()))).unwrap();
+    assert_eq!(
+        live::matching(&query, home(), std::slice::from_ref(&ship)).len(),
+        1
+    );
+    let query = Query::parse("orbits.kind=planet").unwrap();
+    assert!(live::matching(&query, home(), std::slice::from_ref(&ship)).is_empty());
     // The engine has no ships to find and finishes at once.
     let (progress, results) = run(request("kind=ship within_ly=10000"), 1, 1);
     assert_eq!((progress.state, progress.evaluated), (State::Done, 0));

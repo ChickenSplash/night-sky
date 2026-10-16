@@ -55,7 +55,7 @@ throttle and translation do not cancel pointing. The autopilot is serialized
 with the craft, including its roll reference.
 
 Each fixed step resolves prograde/retrograde from velocity relative to the
-dominant body, radial in/out from relative position, and normal/anti-normal
+[orbit reference](#orbit-reference), radial in/out from relative position, and normal/anti-normal
 from their cross product. A body target follows its instantaneous position;
 a vector target is fixed in system axes. `Field` supplies the same analytic
 body states used elsewhere. A missing body or degenerate direction (zero
@@ -97,10 +97,34 @@ Inside a body, the pull is that of a uniform sphere, $GM r/R^3$, falling to
 zero at the centre. This only keeps the maths finite: there are no collisions
 yet, so a craft can pass straight through a planet.
 
-The **dominant body** (shown as the craft's parent) is the nearest planet
-whose Hill sphere holds the craft, $r_H = q\,\sqrt[3]{m/3M}$ at the planet's
-periapsis $q$, otherwise the star pulling hardest. It is a label: gravity
-still comes from every body.
+## Orbit reference
+
+The **orbit reference** (shown as the craft's parent, "Around") is what its
+orbit is described around: a planet, one star, or a pair's barycentre
+(`craft/reference.rs`). It is a label for readouts, prediction and the
+orbital pointing targets, so all of them describe the same orbit. Gravity
+still comes from every star and planet; a barycentre never pulls.
+
+- **Planets first:** the nearest planet whose Hill sphere holds the craft,
+  $r_H = q\,\sqrt[3]{m/3M}$ at the planet's periapsis $q$.
+- **Otherwise, down the stellar hierarchy.** Starting from the whole system,
+  step into a pair member while the craft is inside that member's stable
+  zone, the region where a planet could orbit it alone against its
+  partner's pull (Holman & Wiegert 1999, the same prescription that places
+  planets; see [stars](stars.md#understanding-the-companion-hierarchy)).
+  Near one star of a pair the reference is that star; between or around
+  both it is their barycentre; outside every zone it is the whole system.
+- **Switching margin:** the current reference, and everything it lies within,
+  is kept until the craft is 10% past its region (`SWITCH_MARGIN`), so the
+  label does not flicker on a boundary. Entering a new region needs no
+  margin.
+- **Kept with the craft:** the step chooses it again once a simulated second
+  (`REFERENCE_SECONDS`), which costs more than a step, and stores its ID in
+  the serialized craft so a server or saved craft chooses the same way.
+
+These are display and guidance heuristics: being "around" a body does not
+mean the orbit is bound or stable. The reference's GM is everything inside
+it (a pair's stars together), for the two-body readouts below.
 
 ## Integration
 

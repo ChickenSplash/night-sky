@@ -50,7 +50,8 @@ measurements and future ideas, not the current UI specification.
   All filters for one relationship must hold for the same related object.
 - `orbits` leads from a planet to its direct host star, or each star in its
   host pair (`Hosted::host_letters`). A pair matches when either star does.
-  From a craft it leads to its dominant body, a planet or star, so
+  From a craft it leads to its [orbit reference](craft.md#orbit-reference),
+  a planet, a star or each star of a pair, so
   `kind=ship orbits.planet_class=gas_giant` works. Planets never orbit
   planets, so `orbits.kind=planet` narrows results to craft.
 - `system` leads to every other star and planet in the same system, and to

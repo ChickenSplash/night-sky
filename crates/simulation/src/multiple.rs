@@ -319,7 +319,7 @@ pub(crate) struct Pair {
 /// Stability limit, as a share of the pair's separation, for planets orbiting
 /// one member, whose partner holds `mu` of the pair's mass (Holman & Wiegert
 /// 1999).
-fn s_type_limit(mu: f64, e: f64) -> f64 {
+pub(crate) fn s_type_limit(mu: f64, e: f64) -> f64 {
     let mu = mu.clamp(0.0, 0.9);
     (0.464 - 0.380 * mu - 0.631 * e + 0.586 * mu * e + 0.150 * e * e - 0.198 * mu * e * e).max(0.01)
 }

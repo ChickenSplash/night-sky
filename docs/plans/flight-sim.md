@@ -312,7 +312,7 @@ pipeline. Browser rendering has not been visually tested for this phase.
 
 Checkpoints, each committed and checked on both targets:
 
-1. **Hierarchical orbit references** (`crates/simulation`): planets, individual
+1. ✅ **Hierarchical orbit references** (`crates/simulation`): planets, individual
    stars and nested barycentres, with position, velocity and effective mass.
    Use the existing system hierarchy and stellar stability/influence zones
    to choose a useful local reference, expanding to enclosing pairs outside

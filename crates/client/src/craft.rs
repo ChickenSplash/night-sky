@@ -7,7 +7,7 @@ use space_shared::{Galaxy, StarSystem};
 use space_simulation::search::{SearchResult, live::LiveObject};
 use space_simulation::{
     EARTH_SOLAR, SUN_GM, SUN_RADIUS_METRES, State,
-    craft::{Body, Craft, CraftKind, Field, Frame, STEP_SECONDS, circular_speed, distance},
+    craft::{Craft, CraftKind, Field, Frame, Reference, STEP_SECONDS, circular_speed, distance},
 };
 
 mod control;
@@ -107,12 +107,14 @@ impl Live {
         }
     }
 
-    /// The system's bodies at `seconds`, and the one the craft answers to.
-    pub fn surroundings(&self, seconds: f64) -> (State, Option<Body>) {
+    /// The craft at `seconds`, and the reference its orbit is described
+    /// around, kept from its last step within the switching margin.
+    pub fn surroundings(&self, seconds: f64) -> (State, Option<Reference>) {
         let state = self.state_at(seconds);
-        let bodies = self.field.bodies(seconds);
-        let dominant = self.field.dominant(&bodies, state.position).cloned();
-        (state, dominant)
+        let reference =
+            self.field
+                .select_reference(self.craft.reference.as_deref(), state.position, seconds);
+        (state, reference)
     }
 
     /// The page star the craft's frame is measured from.
@@ -352,20 +354,20 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
         .craft
         .iter()
         .map(|live| {
-            let (state, dominant) = live.surroundings(seconds);
+            let (state, reference) = live.surroundings(seconds);
             let target_direction = match &live.craft.autopilot {
                 space_simulation::craft::AttitudePilot::Point { target, .. } => target
-                    .direction(live.craft.state(), live.craft.seconds, &live.field)
+                    .direction(live.craft.state(), live.craft.seconds, &live.field, live.craft.reference.as_deref())
                     .map(|v| v.to_array()),
                 _ => None,
             };
             let forward = bevy::math::DQuat::from_array(live.craft.orientation) * -bevy::math::DVec3::Z;
             let pointing_error_deg = target_direction.map(|v| forward.angle_between(bevy::math::DVec3::from_array(v)).to_degrees());
-            let around = dominant.map(|body| {
+            let around = reference.map(|body| {
                 let relative = relative(state, body.state);
                 let orbit = space_simulation::craft::Elements::of(relative, body.gm);
                 json!({
-                    "id": body.id,
+                    "id": body.id, "kind": body.kind,
                     "altitude_km": (distance(relative.position, [0.0; 3]) - body.radius_m) / 1_000.0,
                     "speed_kms": distance(relative.velocity, [0.0; 3]) / 1_000.0,
                     "orbit": {"eccentricity": orbit.eccentricity,
@@ -395,11 +397,11 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
 /// The inspector's title, facts and note for a craft, live at `seconds`.
 pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String, String)>) {
     use crate::format::{km_text, period_text, speed_label};
-    let (state, dominant) = live.surroundings(seconds);
+    let (state, reference) = live.surroundings(seconds);
     let mut rows = vec![("Type".to_owned(), live.craft.kind.label().to_owned())];
     let key = space_simulation::multiple::system_key(live.star());
     rows.push(("System".into(), crate::galaxy_nav::label(galaxy, key)));
-    if let Some(body) = dominant {
+    if let Some(body) = reference {
         let relative = relative(state, body.state);
         let r = distance(relative.position, [0.0; 3]);
         let v = distance(relative.velocity, [0.0; 3]);
@@ -455,7 +457,7 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
 }
 
 /// A body's name: a planet's designation, or a star's with its letters.
-pub fn body_label(live: &Live, galaxy: &Galaxy, body: &Body) -> String {
+pub fn body_label(live: &Live, galaxy: &Galaxy, body: &Reference) -> String {
     let system = live.field.system();
     if let Some(planet) = system.planets.iter().find(|p| p.id == body.id) {
         return planet.designation.clone();
@@ -489,9 +491,9 @@ pub fn live_objects(fleet: &Fleet, galaxy: &Galaxy, seconds: f64) -> Vec<LiveObj
         .craft
         .iter()
         .map(|live| {
-            let (state, dominant) = live.surroundings(seconds);
+            let (state, reference) = live.surroundings(seconds);
             let key = space_simulation::multiple::system_key(live.star()).to_owned();
-            let (altitude, speed) = dominant.as_ref().map_or((f64::NAN, f64::NAN), |body| {
+            let (altitude, speed) = reference.as_ref().map_or((f64::NAN, f64::NAN), |body| {
                 let relative = relative(state, body.state);
                 let r = distance(relative.position, [0.0; 3]);
                 (
@@ -514,7 +516,7 @@ pub fn live_objects(fleet: &Fleet, galaxy: &Galaxy, seconds: f64) -> Vec<LiveObj
                 system_key: key,
                 altitude_km: altitude,
                 speed_kms: speed,
-                orbits: dominant.map(|body| body.id),
+                orbits: reference.map(|body| body.id),
             }
         })
         .collect()

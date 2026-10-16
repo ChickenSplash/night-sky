@@ -388,7 +388,7 @@ pub const PROPERTIES: &[Property] = &[
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Link {
     /// A planet's direct host: its star, or every star of the pair it orbits.
-    /// A craft's dominant body: a planet or star.
+    /// A craft's orbit reference: a planet, a star, or every star of a pair.
     Orbits,
     /// Anything else in the same system, or the system itself.
     System,

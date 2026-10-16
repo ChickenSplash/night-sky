@@ -240,8 +240,10 @@ fn a_ship_orbits_a_planet_moving_around_its_star() {
     let mut craft = ship(state);
     craft.place(state, seconds);
     assert_eq!(
-        field.dominant(&bodies, state.position).map(|b| &b.id),
-        Some(&planet.id)
+        field
+            .select_reference(None, state.position, seconds)
+            .map(|r| r.id),
+        Some(planet.id.clone())
     );
     let period = TAU * r / speed;
     let (mut low, mut high) = (f64::MAX, 0.0_f64);
@@ -266,9 +268,11 @@ fn a_ship_orbits_a_planet_moving_around_its_star() {
     // Far outside the planet's Hill sphere, the star rules.
     let far = std::array::from_fn(|i| body.state.position[i] * 3.0);
     assert_eq!(
-        field.dominant(&bodies, far).map(|b| b.kind),
-        Some(BodyKind::Star)
+        field.select_reference(None, far, seconds).map(|r| r.kind),
+        Some(ReferenceKind::Star)
     );
+    // The step keeps the planet as its reference.
+    assert_eq!(craft.reference.as_deref(), Some(planet.id.as_str()));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

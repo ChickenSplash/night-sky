@@ -59,7 +59,12 @@ fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
             panic!("not pointing");
         };
         let direction = target
-            .direction(live.craft.state(), live.craft.seconds, &live.field)
+            .direction(
+                live.craft.state(),
+                live.craft.seconds,
+                &live.field,
+                live.craft.reference.as_deref(),
+            )
             .unwrap();
         (DQuat::from_array(live.craft.orientation) * -DVec3::Z)
             .angle_between(DVec3::from_array(direction.to_array()))
@@ -87,8 +92,8 @@ fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
     assert!(error(&app) < 0.004);
     let speed = |app: &App| {
         let live = &app.world().resource::<Fleet>().craft[0];
-        let (state, dominant) = live.surroundings(live.craft.seconds);
-        distance(relative(state, dominant.unwrap().state).velocity, [0.0; 3])
+        let (state, reference) = live.surroundings(live.craft.seconds);
+        distance(relative(state, reference.unwrap().state).velocity, [0.0; 3])
     };
     let before = speed(&app);
     send(&mut app, steer(Order::Throttle { value: 0.5 }));
