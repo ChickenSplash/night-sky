@@ -404,6 +404,14 @@ high-speed flight. `Craft::step` now integrates warp too. See
 [frames and arrival](../simulation/craft.md#frames-and-arrival). This
 revision has automated coverage only; it has not been flown live.
 
+A multiplayer review then fixed three foundations, also automated only. Ship
+orders (`craft::Order`, legacy thrust included) moved from the client into the
+simulation, so a server validates them the same way. Craft step on one world
+grid, counted by `tick` from time zero, so orders can be keyed by step number.
+A spawned ship's system is anchored at its star's seeded position, as arrival
+does, rather than at a camera-streamed position that could be missing or
+slightly different.
+
 Straight-line warp along the nose, from the CLI. See the
 [warp drive rules](#warp-drive-rules).
 

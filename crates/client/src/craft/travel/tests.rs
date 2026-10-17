@@ -14,15 +14,11 @@ fn live() -> Live {
     let system = galaxy().systems[0].clone();
     let page = system.first_page();
     let body = system.on_page(page).next().unwrap().id.clone();
-    let origin = crate::scene::page_origin_ly(&system, page) * (LY_METRES / PC_METRES)
-        + DVec3::from_array(GalaxyModel::milky_way().home_pc);
     let mut fleet = Fleet::default();
     fleet
         .spawn(system, page, &body, 400_000.0, Launch::Circular, 0.0)
         .unwrap();
-    let mut live = fleet.craft.remove(0);
-    live.origin_pc = origin.to_array();
-    live
+    fleet.craft.remove(0)
 }
 
 /// Step as the frame update does, until the craft reaches `until`.
@@ -248,4 +244,27 @@ fn maximum_warp_dropout_then_continues_in_galactic_space() {
     assert!(live.voyage.in_galaxy());
     assert!(!charts.regions.is_empty());
     assert_eq!(live.arrival_status(), "entering systems");
+}
+
+#[test]
+fn a_spawned_ship_is_anchored_where_arrival_would_put_it() {
+    let star = uncharted_star();
+    // Generated with no position at all: the anchor comes from seeds alone,
+    // never from the camera's streamed stars or a system's stored position.
+    let system = space_simulation::generated_system(&star.id, [0.0; 3]).unwrap();
+    let mut fleet = Fleet::default();
+    fleet
+        .spawn(system, 0, &star.id, 1e9, Launch::Circular, 12.34)
+        .unwrap();
+    let live = &fleet.craft[0];
+    assert_eq!(live.origin_pc, star.position_pc);
+    let candidate = Candidate {
+        id: star.id.clone(),
+        position_pc: star.position_pc,
+        reach_pc: 1.0,
+    };
+    let arrival = space_simulation::craft::voyage::generated_arrival(&candidate);
+    assert_eq!(arrival.origin_pc, live.origin_pc);
+    // And on the world step grid, at the first step after the clock.
+    assert_eq!(live.craft.tick, 247);
 }

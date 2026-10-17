@@ -263,7 +263,12 @@ in memory only: nothing is saved or shared yet.
   visited or charted. The ship starts on the body's far side from the body's
   own parent, in the plane of the body's orbit and turning the same way:
   circular by default, or at a given prograde speed, or a given velocity in
-  the system's axes. Speeds are relative to the body.
+  the system's axes. Speeds are relative to the body. The system frame is
+  anchored where seeds put its star (`voyage::frame_origin_pc`), the same
+  place arrival uses, never where the camera has streamed it, so leaving and
+  re-entering the spawn system cannot shift the ship. A legacy list page with
+  no cell star is anchored where its list places it. The first spawn works
+  out the galaxy's coarse cells on the frame, about 150 ms once natively.
 - **Selection and following:** `Selection::Craft` and `ObjectRef::Craft`.
   Clicking a craft's marker selects it; a second click, **Follow ship** or
   `fly_to_craft` follows it from 200 m, visiting its system first if needed.

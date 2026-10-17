@@ -7,7 +7,7 @@ use super::*;
 use bevy::math::DVec3;
 use space_simulation::{
     LY_METRES,
-    craft::voyage::{Arrival, Atlas, Rebase, Wait, page_star_id, seeded_arrival},
+    craft::voyage::{Arrival, Atlas, Rebase, Wait, listed_origin_pc, page_star_id, seeded_arrival},
     galaxy::{GalaxyModel, PC_METRES},
     neighbourhood::{Candidate, REGION_PC, Region},
 };
@@ -37,9 +37,9 @@ pub struct Charts {
     arrivals: HashMap<String, Arrival>,
     kept: VecDeque<Key>,
     pending: HashMap<Key, (Wait, Pending)>,
-    /// Works out waits on the frame itself: without a background worker, or
-    /// when none can be started.
-    fallback: Option<space_simulation::cells::Sky>,
+    /// Works out on the frame itself a spawned craft's seeded origin, and
+    /// waits without a background worker or when none can be started.
+    sky: Option<space_simulation::cells::Sky>,
     pub error: Option<String>,
     /// Work waits out on a background worker. Off in tests, which then step
     /// without waiting frames for one.
@@ -53,7 +53,7 @@ impl Default for Charts {
             arrivals: HashMap::new(),
             kept: VecDeque::new(),
             pending: HashMap::new(),
-            fallback: None,
+            sky: None,
             error: None,
             background: !cfg!(test),
         }
@@ -120,10 +120,14 @@ impl Charts {
             self.pending.insert(key, (wait.clone(), job));
             return false;
         }
-        let sky = self.fallback.get_or_insert_with(Default::default);
-        let reply = request.answer(sky, space_simulation::craft::voyage::threads());
+        let reply = request.answer(self.sky(), space_simulation::craft::voyage::threads());
         self.accept(wait, reply, galaxy);
         true
+    }
+
+    /// The sky this frame works seeded positions out on, kept warm.
+    pub fn sky(&mut self) -> &mut space_simulation::cells::Sky {
+        self.sky.get_or_insert_with(Default::default)
     }
 
     fn accept(&mut self, wait: &Wait, reply: Reply, galaxy: &Galaxy) {
@@ -178,16 +182,13 @@ impl Charts {
 /// List pages with no cell star of their own, which seeds cannot find.
 fn legacy_candidates(region: Region, galaxy: &Galaxy) -> Vec<Candidate> {
     let min = region.min_pc();
-    let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
     let mut found = Vec::new();
     for system in &galaxy.systems {
         for page in system.pages() {
             if system.page_star(page).is_some() {
                 continue;
             }
-            let origin_pc = (crate::scene::page_origin_ly(system, page) * (LY_METRES / PC_METRES)
-                + home)
-                .to_array();
+            let origin_pc = listed_origin_pc(system, page);
             let range_pc =
                 space_simulation::craft::voyage::range_m(&Field::new(system.clone(), page))
                     / PC_METRES;

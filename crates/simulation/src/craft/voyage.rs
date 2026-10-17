@@ -38,6 +38,32 @@ pub fn page_star_id(system: &space_shared::StarSystem, page: u32) -> String {
         .map_or_else(|| crate::star_id(&system.id, page), |star| star.id.clone())
 }
 
+/// Where a page's frame is anchored, in parsecs from the galactic centre,
+/// from seeds and the system alone. A cell star's page sits at the star's
+/// seeded position, the same one arrival uses, so a craft placed in a system
+/// and one flying into it agree to the metre. A legacy page with no cell
+/// star sits where its list puts it.
+pub fn frame_origin_pc(
+    sky: &mut crate::cells::Sky,
+    system: &space_shared::StarSystem,
+    page: u32,
+) -> [f64; 3] {
+    system
+        .page_star(page)
+        .and_then(|star| sky.star(&star.id))
+        .map_or_else(|| listed_origin_pc(system, page), |star| star.position_pc)
+}
+
+/// A page's position as its list gives it, in parsecs from the galactic
+/// centre: for legacy pages, which seeds cannot place.
+pub fn listed_origin_pc(system: &space_shared::StarSystem, page: u32) -> [f64; 3] {
+    let home = crate::galaxy::GalaxyModel::milky_way().home_pc;
+    let ly = system
+        .page_star(page)
+        .map_or(system.position_ly, |star| star.position_ly);
+    std::array::from_fn(|i| home[i] + ly[i] * LY_METRES / PC_METRES)
+}
+
 /// A system ready to be entered: its gravity, its origin and its exact range.
 #[derive(Clone, Debug)]
 pub struct Arrival {
@@ -121,6 +147,11 @@ impl Library {
             }
             _ => {}
         }
+    }
+
+    /// Where a page's frame is anchored; see `frame_origin_pc`.
+    pub fn origin_pc(&mut self, system: &space_shared::StarSystem, page: u32) -> [f64; 3] {
+        frame_origin_pc(&mut self.sky, system, page)
     }
 
     /// A list system's page, which takes the place of a generated system of

@@ -587,13 +587,7 @@ pub fn apply(
                         fleet.spawn(system, page, &body, altitude, launch, clock.0.seconds)
                     });
                 match spawned {
-                    Ok(id) => {
-                        if let Some(live) = fleet.get_mut(&id) {
-                            live.origin_pc =
-                                crate::craft::system_pc(&nav, galaxy, &field, live.star());
-                        }
-                        nav.select(Some(Selection::Craft(id)));
-                    }
+                    Ok(id) => nav.select(Some(Selection::Craft(id))),
                     Err(err) => warn!(target: "craft", "Cannot spawn a ship: {err}"),
                 }
             }

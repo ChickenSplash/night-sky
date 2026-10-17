@@ -223,6 +223,8 @@ impl Fleet {
         let seconds = tick_seconds(tick);
         let star = objects::star_id(&system, page);
         let mass = body_mass(&system, page, body).ok_or_else(|| format!("No body `{body}`"))?;
+        let origin_pc =
+            space_simulation::craft::voyage::frame_origin_pc(self.charts.sky(), &system, page);
         let field = Field::new(system, page);
         let system = field.system();
         let (here, parent, radius) = match system.planets.iter().find(|p| p.id == body) {
@@ -275,7 +277,7 @@ impl Fleet {
         info!(target: "craft", "Spawned {id} {:.0} km above {body}", altitude / 1_000.0);
         self.craft.push(Live {
             previous_orientation: craft.orientation,
-            voyage: Voyage::new(craft, field, [0.0; 3]),
+            voyage: Voyage::new(craft, field, origin_pc),
             previous: state,
             displayed: None,
             display_delta_m: bevy::math::DVec3::ZERO,
@@ -899,22 +901,6 @@ pub fn body_label(live: &Live, galaxy: &Galaxy, id: &str) -> String {
         &crate::galaxy_nav::label(galaxy, key),
         space_simulation::multiple::member_letters(id),
     )
-}
-
-/// Where a system's star is, in parsecs from the galactic centre, or the
-/// centre itself if it cannot be found.
-pub fn system_pc(
-    nav: &Navigation,
-    galaxy: &Galaxy,
-    field: &crate::stars::stream::Starfield,
-    star: &str,
-) -> [f64; 3] {
-    let Some(picked) = crate::galaxy_nav::selectable_star(nav, galaxy, field, star) else {
-        return [0.0; 3];
-    };
-    let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
-    let ly = picked.position_ly.to_array();
-    std::array::from_fn(|i| home[i] + ly[i] * space_simulation::search::PC_PER_LY)
 }
 
 /// Every craft as search sees it, at `seconds`.

@@ -202,3 +202,25 @@ fn leaving_and_reanchoring_preserve_position_heading_and_momentum() {
     assert_eq!(voyage.craft.state().velocity, state.velocity);
     assert!(DVec3::from_array(voyage.craft.state().position).length() < 1e6);
 }
+
+#[test]
+fn frames_are_anchored_from_seeds_else_from_the_list() {
+    let star = star();
+    let mut library = Library::default();
+    // A stored position is ignored for a seeded star: arrival uses the seeds.
+    let system = crate::generated_system(&star.id, [0.0; 3]).unwrap();
+    assert_eq!(library.origin_pc(&system, 0), star.position_pc);
+    assert_eq!(library.origin_pc(&system, 0), arrival(&star).origin_pc);
+    // A legacy page has no cell star, so its list places it.
+    let legacy = space_shared::StarSystem {
+        page_stars: Vec::new(),
+        position_ly: [1.0, 2.0, 3.0],
+        ..system
+    };
+    let home = GalaxyModel::milky_way().home_pc;
+    let origin = library.origin_pc(&legacy, 0);
+    for i in 0..3 {
+        let ly = (origin[i] - home[i]) * PC_METRES / LY_METRES;
+        assert!((ly - legacy.position_ly[i]).abs() < 1e-9);
+    }
+}
