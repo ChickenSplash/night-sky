@@ -306,8 +306,15 @@ or damage response. Arrival detection is separate and does not stop the drive.
   refused during warp, not silently cleared. Disengage before using them.
 - **Gravity policy:** `active` by default, evaluated at the current travelled
   positions and integrated into ordinary velocity. The developer alternative
-  `suspended` retains ordinary velocity but not position. Gravity resumes on
-  dropout; changing policy requires disengagement. Neither policy matches a
+  `suspended` retains ordinary velocity but not position. At and above light
+  speed (`GRAVITY_CUTOFF_MS`, judged by each step's average bubble speed)
+  gravity is ignored under either policy. Each 0.05 s step then spans at
+  least 15,000 km, and sampling gravity only at its ends could land deep in a
+  dense body and give a large, arbitrary kick, while a real pass that fast
+  changes velocity by at most metres per second for a main-sequence star.
+  Below light speed, a step ending close to a white dwarf can still give an
+  oversized kick. Gravity resumes on dropout; changing policy requires
+  disengagement. Neither policy matches a
   destination. This is a game rule, not a relativistic spacetime solution.
 - **Speed:** 1 m/s to 10,000 ly/s, matching the free camera's maximum,
   with each up/down multiplying/dividing by
