@@ -415,9 +415,9 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
 }
 
 #[test]
-fn manual_dropout_discards_undisplayed_warp_without_jumping_or_resetting_fixed_steps() {
+fn manual_dropout_takes_effect_from_the_next_fixed_step() {
     use super::control::WarpOrder;
-    use space_simulation::craft::warp::{GravityPolicy, MAX_SPEED};
+    use space_simulation::craft::warp::GravityPolicy;
     let mut app = app();
     let epoch = 6_000_000.0; // Match a live session's large simulation timestamp.
     app.world_mut().resource_mut::<Clock>().0.seconds = epoch;
@@ -431,19 +431,26 @@ fn manual_dropout_discards_undisplayed_warp_without_jumping_or_resetting_fixed_s
             velocity_kms: None,
         },
     );
-    {
+    // Fast, but one step stays well inside the system, so no handoff.
+    let speed = 1e9;
+    let ordinary = {
         let mut fleet = app.world_mut().resource_mut::<Fleet>();
         let live = &mut fleet.craft[0];
+        let ordinary = live.craft.state().velocity;
         live.craft.warp.gravity = GravityPolicy::Suspended;
-        live.craft.warp.set_speed(MAX_SPEED).unwrap();
+        live.craft.warp.set_speed(speed).unwrap();
         live.craft.engage_warp().unwrap();
-        live.craft.warp.actual_ms = MAX_SPEED;
+        live.craft.warp.actual_ms = speed;
         live.previous = live.craft.state();
         live.voyage.advance();
-    }
-    let cutoff = epoch + STEP_SECONDS * 0.4;
-    app.world_mut().resource_mut::<Clock>().0.seconds = cutoff;
-    let visible = app.world().resource::<Fleet>().craft[0].state_at(cutoff);
+        ordinary
+    };
+    let mid = epoch + STEP_SECONDS * 0.4;
+    app.world_mut().resource_mut::<Clock>().0.seconds = mid;
+    let (visible, warp_end) = {
+        let live = &app.world().resource::<Fleet>().craft[0];
+        (live.state_at(mid), live.craft.state())
+    };
     send(
         &mut app,
         UiCommand::SteerCraft {
@@ -454,51 +461,27 @@ fn manual_dropout_discards_undisplayed_warp_without_jumping_or_resetting_fixed_s
         },
     );
     let live = &app.world().resource::<Fleet>().craft[0];
-    assert!(
-        distance(live.state_at(cutoff).position, visible.position) < 0.01,
+    assert!(!live.craft.warp.engaged);
+    assert_eq!(live.craft.seconds, epoch + STEP_SECONDS);
+    assert_eq!(
+        live.state_at(mid),
+        visible,
         "dropout moved the displayed ship"
     );
-    assert_eq!(
-        live.craft.seconds,
-        epoch + STEP_SECONDS,
-        "the fixed-step timeline must not restart at the command time"
-    );
-    let later = live.state_at(cutoff + 0.01);
-    let movement = distance(visible.position, later.position);
-    assert!(
-        movement < 1_000_000.0,
-        "undisplayed warp leaked into ordinary flight: {movement} m"
-    );
-    assert!(
-        distance(later.velocity, visible.velocity) < 1.0,
-        "dropout must preserve ordinary momentum"
-    );
-    // Repeated paused orders must not erase the cut or reintroduce its old tail.
-    send(
-        &mut app,
-        UiCommand::SteerCraft {
-            id: None,
-            order: Order::Warp {
-                command: WarpOrder::Disengage,
-            },
-        },
-    );
-    let live = &app.world().resource::<Fleet>().craft[0];
-    assert!(distance(live.state_at(cutoff).position, visible.position) < 0.01);
-    let boundary = live.state_at(epoch + STEP_SECONDS);
-    assert!(distance(boundary.position, visible.position) < 1_000_000.0);
-    let boundary_pc = live.position_pc(epoch + STEP_SECONDS);
-    // The next ordinary step replaces the cut interval without a boundary jump.
-    app.world_mut().resource_mut::<Clock>().0.seconds = epoch + STEP_SECONDS + 0.01;
+    // The step already taken plays out; the one after it is ordinary flight.
+    app.world_mut().resource_mut::<Clock>().0.seconds = epoch + STEP_SECONDS * 1.5;
     app.update();
     let live = &app.world().resource::<Fleet>().craft[0];
-    assert!(live.cutoff.is_none());
-    // At the maximum speed the cutoff can leave the system, so compare in
-    // galactic coordinates rather than mixing pre/post-handoff local axes.
+    assert_eq!(live.previous, warp_end);
+    // A warp step covers 50,000 km; ordinary motion with the planet, kilometres.
+    let travelled = distance(live.craft.state().position, warp_end.position);
     assert!(
-        distance(live.position_pc(epoch + STEP_SECONDS + 0.01), boundary_pc)
-            * space_simulation::galaxy::PC_METRES
-            < 1_000_000.0
+        travelled < 1_000_000.0,
+        "warp continued after dropout: {travelled} m"
+    );
+    assert!(
+        distance(live.craft.state().velocity, ordinary) < 1.0,
+        "dropout must preserve ordinary momentum"
     );
 }
 

@@ -1,7 +1,6 @@
 //! Unsafe manual bubble transport, separate from ordinary momentum.
 //! There are no collision checks or route-coverage prerequisites.
 use super::{AttitudePilot, Craft, Gravity, Motion, STEP_SECONDS};
-use crate::State;
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 
@@ -12,15 +11,6 @@ pub const SPEED_FACTOR: f64 = 3.162_277_660_168_379_5;
 /// Exponential response time in simulated seconds, independent of frame rate.
 pub const RAMP_SECONDS: f64 = 0.3;
 pub const SPIN_TOLERANCE: f64 = 1e-6;
-
-/// A timestamped drive event within a straight fixed-step
-/// segment. Keep it when interpolating that segment: its remaining transport
-/// has been replaced by ordinary flight, without moving the step boundary.
-#[derive(Clone, Copy, Debug)]
-pub struct Cutoff {
-    pub seconds: f64,
-    pub state: State,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -72,51 +62,6 @@ impl Warp {
 }
 
 impl Craft {
-    /// Cancel only the not-yet-reached part of a warp segment. Physics steps
-    /// ahead to bracket the clock for interpolation, so simply setting warp off
-    /// would otherwise leave up to one enormous bubble step still to display.
-    /// The prefix remains the original straight path; gravity resumes over
-    /// the remaining fraction of this same fixed step, under either policy.
-    pub fn truncate_warp_segment(
-        &mut self,
-        from: State,
-        from_seconds: f64,
-        at_seconds: f64,
-        gravity: &impl Gravity,
-    ) -> Option<Cutoff> {
-        if !self.warp.engaged
-            || at_seconds < from_seconds
-            || at_seconds >= self.seconds
-            || from_seconds >= self.seconds
-        {
-            return None;
-        }
-        let share = (at_seconds - from_seconds) / (self.seconds - from_seconds);
-        let current = self.state();
-        let blend =
-            |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * share);
-        let cutoff = Cutoff {
-            seconds: at_seconds,
-            state: State {
-                position: blend(from.position, current.position),
-                velocity: blend(from.velocity, current.velocity),
-            },
-        };
-        let mut end = cutoff.state;
-        let acceleration = gravity.acceleration(end.position, at_seconds);
-        super::verlet(
-            &mut end,
-            gravity,
-            at_seconds,
-            self.seconds - at_seconds,
-            acceleration,
-            [[0.0; 3]; 2],
-        );
-        self.place(end, self.seconds);
-        self.reference = None;
-        Some(cutoff)
-    }
-
     /// Validate without changing motion or silently cutting other drives.
     pub fn engage_warp(&mut self) -> Result<(), &'static str> {
         if self.warp.engaged {

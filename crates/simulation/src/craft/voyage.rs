@@ -3,7 +3,7 @@
 //! whatever a camera has loaded, the same inputs give the same path: when the
 //! data a decision needs is missing, the step waits for it rather than
 //! carrying on without it.
-use super::{Craft, Field, Frame, Gravity, warp::Cutoff};
+use super::{Craft, Field, Frame, Gravity};
 use crate::galaxy::PC_METRES;
 use crate::neighbourhood::{Candidate, Region};
 use crate::{LY_METRES, State};
@@ -417,18 +417,6 @@ impl Voyage {
             self.craft.step(&Empty);
         } else {
             self.craft.step(&self.field);
-        }
-    }
-
-    /// Manual dropout inside the step that brackets the clock. See
-    /// `Craft::truncate_warp_segment`.
-    pub fn truncate_warp(&mut self, from: State, from_seconds: f64, at: f64) -> Option<Cutoff> {
-        if self.in_galaxy() {
-            self.craft
-                .truncate_warp_segment(from, from_seconds, at, &Empty)
-        } else {
-            self.craft
-                .truncate_warp_segment(from, from_seconds, at, &self.field)
         }
     }
 

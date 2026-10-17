@@ -51,26 +51,10 @@ pub enum WarpOrder {
     },
 }
 
-impl Live {
-    /// Orders have the simulation clock's timestamp, not the ahead-of-clock
-    /// integration endpoint. Manual dropout truncates its pending warp segment.
-    pub fn order(&mut self, order: &Order, seconds: f64) -> Result<(), String> {
-        order.apply(&mut self.craft.clone(), Some(&self.field))?;
-        if matches!(
-            order,
-            Order::Warp {
-                command: WarpOrder::Disengage
-            }
-        ) {
-            self.truncate_warp(seconds);
-            self.forecast = Forecast::default();
-        }
-        let voyage = &mut self.voyage;
-        order.apply(&mut voyage.craft, Some(&voyage.field))
-    }
-}
-
 impl Order {
+    /// Every order, warp included, takes effect from the next fixed step.
+    /// Physics already brackets the clock, so up to one step of the previous
+    /// motion (or warp travel) still plays out after the command.
     pub fn apply(&self, craft: &mut Craft, field: Option<&Field>) -> Result<(), String> {
         if craft.warp.engaged && matches!(self, Self::Point { .. } | Self::Stop | Self::Cut) {
             return Err("Disengage warp before engaging turning thrusters or pointing".into());

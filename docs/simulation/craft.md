@@ -293,16 +293,13 @@ or damage response. Arrival detection is separate and does not stop the drive.
   Bubble motion never becomes ordinary velocity on dropout. Attitude is held
   during phase 4 travel. Existing appreciable spin, turning inputs or an engaged
   attitude controller prevent engagement; stop rotation, then release the pilot.
-- **Timestamped manual dropout:** physics brackets the clock with a step that
-  may end up to 0.05 s ahead of the displayed pose. Disengagement cuts that
-   straight segment at the command's simulation timestamp, preserving
-  its position and ordinary velocity there. Only ordinary flight, with gravity,
-  is integrated over the remaining fraction of the existing step. Piecewise
-  interpolation keeps the cutoff continuous; the following step clears that
-  breakpoint. This avoids an undisplayed high-speed tail playing out after
-  dropout, without restarting the fixed-step timeline. Other orders, speed
-  changes included, take effect from the next fixed step.
-  A future authoritative server must receive the command timestamp too.
+- **Orders take effect from the next step:** every order, warp included, changes
+  the craft's input or drive state and acts from the next fixed step, so a server
+  can key inputs by step number. Physics brackets the clock with a step that may
+  end up to 0.05 s ahead of the displayed pose, so that step still plays out
+  after a command. After a disengage the ship keeps travelling for at most one
+  more step (up to 0.5 ly at 10,000 ly/s). Ordered while paused, that last step
+  is seen once time resumes.
 - **Drive interlock:** all sublight thrust must be zero before engaging warp.
   Nonzero throttle, fine/legacy translation, turning and pointing orders are
   refused during warp, not silently cleared. Disengage before using them.

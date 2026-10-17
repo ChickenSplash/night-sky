@@ -1,4 +1,5 @@
 use super::*;
+use crate::State;
 use crate::craft::{Controls, CraftKind, Frame};
 
 struct Constant;
@@ -118,69 +119,4 @@ fn speed_validation_and_ramp() {
     assert!(speed > 0.0 && speed < 1_000.0);
     let z = craft.state().position[2];
     assert!(z < 0.0 && z > -50.0);
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn timestamped_cutoff_preserves_momentum_and_step_boundary_under_both_policies() {
-    for policy in [GravityPolicy::Active, GravityPolicy::Suspended] {
-        for share in [0.0, 0.4, 0.999] {
-            let mut craft = ship();
-            craft.place(
-                State {
-                    position: [0.0; 3],
-                    velocity: [10.0, 0.0, 0.0],
-                },
-                0.0,
-            );
-            craft.warp.gravity = policy;
-            craft.warp.set_speed(MAX_SPEED).unwrap();
-            craft.engage_warp().unwrap();
-            craft.warp.actual_ms = MAX_SPEED;
-            let from = craft.state();
-            craft.step(&Constant);
-            let end = craft.state();
-            let at = STEP_SECONDS * share;
-            let cutoff = craft
-                .truncate_warp_segment(from, 0.0, at, &Constant)
-                .unwrap();
-            assert_eq!(craft.seconds, STEP_SECONDS);
-            assert_eq!(cutoff.seconds, at);
-            let expected_position = DVec3::from_array(from.position)
-                + (DVec3::from_array(end.position) - DVec3::from_array(from.position))
-                    * (at / craft.seconds);
-            assert!((DVec3::from_array(cutoff.state.position) - expected_position).length() < 0.01);
-            let expected_velocity = 10.0
-                + if policy == GravityPolicy::Active {
-                    2.0 * at
-                } else {
-                    0.0
-                };
-            assert!((cutoff.state.velocity[0] - expected_velocity).abs() < 1e-10);
-            // Ordinary gravity operates over the remainder, even when warp had suspended it.
-            assert!(
-                (craft.state().velocity[0] - expected_velocity - 2.0 * (STEP_SECONDS - at)).abs()
-                    < 1e-10
-            );
-            assert_eq!(craft.state().velocity[2], 0.0);
-            assert_eq!(craft.state().position[2], cutoff.state.position[2]);
-            craft.warp.stop("manual");
-        }
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn cutoff_at_a_finished_step_does_not_rewind_it() {
-    let mut craft = ship();
-    craft.engage_warp().unwrap();
-    let from = craft.state();
-    craft.step(&Constant);
-    let before = craft.state();
-    assert!(
-        craft
-            .truncate_warp_segment(from, 0.0, STEP_SECONDS, &Constant)
-            .is_none()
-    );
-    assert_eq!(craft.state(), before);
 }

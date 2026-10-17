@@ -213,24 +213,11 @@ fn legacy_candidates(region: Region, galaxy: &Galaxy) -> Vec<Candidate> {
 }
 
 impl Live {
-    pub(super) fn truncate_warp(&mut self, seconds: f64) {
-        let (from, from_seconds) = self.cutoff.map_or(
-            (self.previous, self.craft.seconds - STEP_SECONDS),
-            |cutoff| (cutoff.state, cutoff.seconds),
-        );
-        if let Some(cutoff) = self.voyage.truncate_warp(from, from_seconds, seconds) {
-            self.cutoff = Some(cutoff);
-        }
-    }
-
     /// Re-express everything kept in the old frame after a frame change.
     pub(super) fn rebase(&mut self, rebase: &Rebase) {
         self.previous = rebase.state(self.previous);
         self.previous_orientation = rebase.orientation(self.previous_orientation);
         self.displayed = self.displayed.map(|state| rebase.state(state));
-        if let Some(cutoff) = &mut self.cutoff {
-            cutoff.state = rebase.state(cutoff.state);
-        }
         if rebase.frame_changed {
             self.forecast = Forecast::default();
         }
