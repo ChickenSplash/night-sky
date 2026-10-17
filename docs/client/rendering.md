@@ -242,6 +242,11 @@ physically evolving atmosphere.
   (`scene::scale_floor`, down to 1 m). Shaders scale galactic offsets to
   parsecs before squaring them, as at small scales a squared distance in
   render units would overflow f32.
+- Every gizmo line is cut to the part in front of the camera in f64 before
+  Bevy sees it (`scene::draw::clip_strip`). The near plane is 0.01 units,
+  and a star's rings or a planet's orbit can be 1e10 units away: the line
+  shader's own f32 near-plane cut then rounds the cut end behind the camera,
+  and its segment flies across the opposite side of the screen as a fan.
 - Planets retain physical radii in every presentation mode. Wireframes use
   procedural latitude/longitude lines, not native polygon wireframe mode.
   Pick line density from on-screen radius: dense rings on small bodies merge

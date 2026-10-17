@@ -76,6 +76,51 @@ pub(super) fn star_display_radius(physical: f64, away: f64, (table, wide): (bool
     }
 }
 
+/// Lines are cut where they come closer to the camera plane than this share of
+/// their ends' distance: far off-screen, yet clear of f32 rounding.
+const CLIP_SHARE: f64 = 1e-4;
+
+/// A line through `points` cut to the part in front of the camera, as
+/// separate strips. Bevy clips lines at the near plane in f32 on the GPU; for
+/// ends many orders of magnitude beyond it (a star's rings or a planet's
+/// orbit seen side-on) rounding can put the cut end behind the camera, and
+/// its line then crosses the opposite side of the screen.
+pub(super) fn clip_strip(
+    points: impl IntoIterator<Item = Vec3>,
+    eye: DVec3,
+    forward: DVec3,
+) -> Vec<Vec<Vec3>> {
+    let mut strips = Vec::new();
+    let mut run = Vec::new();
+    let mut points = points.into_iter().map(|p| p.as_dvec3());
+    let Some(mut a) = points.next() else {
+        return strips;
+    };
+    for b in points {
+        let margin = CLIP_SHARE * (a - eye).length().max((b - eye).length());
+        let [da, db] = [a, b].map(|p| (p - eye).dot(forward) - margin);
+        let cut = || a.lerp(b, da / (da - db)).as_vec3();
+        if da >= 0.0 {
+            if run.is_empty() {
+                run.push(a.as_vec3());
+            }
+            if db >= 0.0 {
+                run.push(b.as_vec3());
+            } else {
+                run.push(cut());
+                strips.push(std::mem::take(&mut run));
+            }
+        } else if db >= 0.0 {
+            run = vec![cut(), b.as_vec3()];
+        }
+        a = b;
+    }
+    if run.len() > 1 {
+        strips.push(run);
+    }
+    strips
+}
+
 /// One frame's projection from f64 metres relative to the current star into render
 /// units around the floating-origin camera.
 struct Canvas<'a> {
@@ -98,6 +143,14 @@ impl Canvas<'_> {
     /// to an interstellar f32 coordinate, including while following a moving planet.
     fn world(&self, galactic: DVec3) -> Vec3 {
         self.origin + ((galactic - self.pose.eye) / self.scale).as_vec3()
+    }
+
+    /// A line strip, cut in front of the camera (`clip_strip`).
+    fn strip(&self, gizmos: &mut Gizmos, points: impl IntoIterator<Item = Vec3>, tint: Color) {
+        let eye = self.view.translation().as_dvec3();
+        for strip in clip_strip(points, eye, self.view.forward().as_dvec3()) {
+            gizmos.linestrip(strip, tint);
+        }
     }
 
     fn units(&self, metres: f64) -> f32 {
@@ -163,7 +216,8 @@ impl Canvas<'_> {
             } else {
                 (self.view.right().as_vec3(), self.view.up().as_vec3())
             };
-            gizmos.linestrip(
+            self.strip(
+                gizmos,
                 (0..=steps).map(|i| {
                     let a = i as f32 / steps as f32 * TAU;
                     centre + (right * a.cos() + up * a.sin()) * radius
@@ -177,14 +231,16 @@ impl Canvas<'_> {
         let band = PI / (2 * latitudes + 2) as f32;
         for latitude in -latitudes..=latitudes {
             let phi = latitude as f32 * band;
-            gizmos.linestrip(
+            self.strip(
+                gizmos,
                 (0..=steps).map(|i| point(ring(phi, i as f32 / steps as f32 * TAU))),
                 tint,
             );
         }
         for longitude in 0..longitudes {
             let a = longitude as f32 * PI / longitudes as f32;
-            gizmos.linestrip(
+            self.strip(
+                gizmos,
                 (0..=steps).map(|i| point(ring(i as f32 / steps as f32 * TAU, a))),
                 tint,
             );
@@ -199,7 +255,8 @@ impl Canvas<'_> {
             return;
         };
         let (right, up) = (self.view.right().as_vec3(), self.view.up().as_vec3());
-        gizmos.linestrip(
+        self.strip(
+            gizmos,
             (0..=8).map(|i| {
                 let a = i as f32 / 8.0 * TAU;
                 centre + (right * a.cos() + up * a.sin()) * 0.5 * per_pixel
@@ -257,9 +314,9 @@ impl Canvas<'_> {
                 break;
             };
             joined[next] = true;
-            gizmos.line(
-                self.world(stars[nearest[next].1]),
-                self.world(stars[next]),
+            self.strip(
+                gizmos,
+                [self.world(stars[nearest[next].1]), self.world(stars[next])],
                 LINK,
             );
             for i in 0..stars.len() {
@@ -356,7 +413,8 @@ impl Canvas<'_> {
             let masses = pair.members.each_ref().map(|m| system.member_mass(page, m));
             let total = masses[0] + masses[1];
             for share in [-masses[1] / total, masses[0] / total] {
-                gizmos.linestrip(
+                self.strip(
+                    gizmos,
                     (0..=192).map(|step| {
                         let local = centre + orbit_point(&pair.orbit, step, 192) * share;
                         self.world(self.frame * local)
@@ -412,7 +470,8 @@ impl Canvas<'_> {
             self.star_orbits(gizmos);
             for planet in system.on_page(pose.page) {
                 let host = self.member(&planet.host);
-                gizmos.linestrip(
+                self.strip(
+                    gizmos,
                     (0..=192).map(|step| {
                         self.world(place(host + orbit_point(&planet.orbit, step, 192)))
                     }),
@@ -483,7 +542,7 @@ impl Canvas<'_> {
                             * self.units(1.0)
                 };
                 for (a, b) in crate::craft::HULL_EDGES {
-                    gizmos.line(vertex(a), vertex(b), colour(CRAFT_COLOUR));
+                    self.strip(gizmos, [vertex(a), vertex(b)], colour(CRAFT_COLOUR));
                 }
             }
             if let Some(point) = self.screen(centre) {
@@ -518,7 +577,7 @@ impl Canvas<'_> {
         } else {
             TRAJECTORY_STALE
         };
-        gizmos.linestrip(path.points.iter().map(|&p| place(p)), tint);
+        self.strip(gizmos, path.points.iter().map(|&p| place(p)), tint);
         for (local, mark) in path.marks {
             let colour = match mark {
                 PathMark::Apsis => tint,
@@ -537,7 +596,7 @@ impl Canvas<'_> {
                 centre - right,
                 centre + up,
             ];
-            gizmos.linestrip(corners, colour);
+            self.strip(gizmos, corners, colour);
         }
     }
 }

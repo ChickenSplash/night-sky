@@ -767,3 +767,34 @@ fn constellation_pages_have_independent_planes_and_local_coordinates() {
         assert!(((frame * point).length() - point.length()).abs() < 0.001);
     }
 }
+
+#[test]
+fn lines_are_cut_in_front_of_the_camera_in_f64() {
+    use super::draw::clip_strip;
+    use std::f64::consts::TAU;
+    // A star's ring 2.4e10 render units away, 87° off the view axis, wide
+    // enough to straddle the plane through the camera.
+    let forward = DVec3::NEG_Z;
+    let centre = DVec3::new(2.4e10, 0.0, -1.2e9);
+    let ring: Vec<Vec3> = (0..=96)
+        .map(|i| {
+            let a = i as f64 / 96.0 * TAU;
+            (centre + DVec3::new(a.cos(), a.sin(), a.sin()) * 2.8e9).as_vec3()
+        })
+        .collect();
+    let strips = clip_strip(ring.clone(), DVec3::ZERO, forward);
+    assert!(!strips.is_empty());
+    for strip in &strips {
+        assert!(strip.len() > 1);
+        for p in strip {
+            let p = p.as_dvec3();
+            // Well in front: no f32 near-plane clip can flip it behind.
+            assert!(p.dot(forward) > 1e-5 * p.length(), "{p}");
+        }
+    }
+    // A line wholly in front is untouched; one wholly behind is dropped.
+    let ahead = vec![Vec3::new(0.0, 0.0, -5.0), Vec3::new(1.0, 2.0, -7.0)];
+    assert_eq!(clip_strip(ahead.clone(), DVec3::ZERO, forward), vec![ahead]);
+    let behind = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(1.0, 2.0, 7.0)];
+    assert!(clip_strip(behind, DVec3::ZERO, forward).is_empty());
+}
