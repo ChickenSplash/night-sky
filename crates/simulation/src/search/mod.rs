@@ -1,7 +1,7 @@
 //! Object search: one query model and engine for every front end (the
 //! in-game browser, the `ns` CLI, and later a query builder and the ship's
 //! navigator). See `docs/simulation/search.md`.
-mod engine;
+pub(crate) mod engine;
 pub mod live;
 pub mod query;
 pub mod registry;

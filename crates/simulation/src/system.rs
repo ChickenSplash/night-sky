@@ -34,7 +34,7 @@ const MIN_HILL_SPACING: f64 = 10.0;
 const MAX_MASS_RATIO: f64 = 0.004;
 /// Generously beyond the known planets, but short of a loosely bound Oort-cloud
 /// object. A full page should not become an interstellar-scale planetary system.
-const MAX_SYSTEM_APOAPSIS_AU: f64 = 1_000.0;
+pub(crate) const MAX_SYSTEM_APOAPSIS_AU: f64 = 1_000.0;
 /// Period ratios offered for resonant pairs, outer:inner.
 const RESONANCES: [[u32; 2]; 6] = [[2, 1], [3, 2], [4, 3], [5, 4], [5, 3], [3, 1]];
 

@@ -6,6 +6,7 @@ pub use generated::generated_system;
 pub mod kinematics;
 pub mod light;
 pub mod multiple;
+pub mod neighbourhood;
 pub mod objects;
 pub mod population;
 pub mod search;

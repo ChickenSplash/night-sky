@@ -509,7 +509,7 @@ pub fn gap_pc(cell: Cell, p: [f64; 3]) -> f64 {
 }
 
 /// Cells of a level within a distance of a point.
-fn near(level: usize, p: [f64; 3], radius: f64) -> Vec<Cell> {
+pub(crate) fn near(level: usize, p: [f64; 3], radius: f64) -> Vec<Cell> {
     let size = ROOT_PC / (1u64 << level) as f64;
     let last = ((1u64 << level) - 1) as f64;
     let range = |axis: usize| {
