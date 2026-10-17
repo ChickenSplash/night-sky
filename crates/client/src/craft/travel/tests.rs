@@ -78,7 +78,7 @@ fn unsafe_warp_crosses_unknown_space_at_ten_light_years_per_second() {
     assert!(distance(start, live.position_pc(live.craft.seconds())) * PC_METRES > 40.0 * LY_METRES);
     assert!((live.craft.warp.actual_ms / speed - 1.0).abs() < 1e-6);
     // Too fast to enter systems, it never needed any system data.
-    assert!(charts.regions.is_empty() && charts.arrivals.is_empty());
+    assert_eq!(charts.counts(), (0, 0));
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn maximum_warp_dropout_then_continues_in_galactic_space() {
     // Slow again, it asks for the systems around it before each step.
     catch_up(&mut live, &mut charts, 40.0 * STEP_SECONDS);
     assert!(live.voyage.in_galaxy());
-    assert!(!charts.regions.is_empty());
+    assert!(charts.counts().0 > 0);
     assert_eq!(live.arrival_status(), "entering systems");
 }
 
@@ -267,4 +267,33 @@ fn a_spawned_ship_is_anchored_where_arrival_would_put_it() {
     assert_eq!(arrival.origin_pc, live.origin_pc);
     // And on the world step grid, at the first step after the clock.
     assert_eq!(live.craft.tick, 247);
+}
+
+#[test]
+fn server_library_and_client_charts_give_identical_list_arrivals() {
+    use space_simulation::craft::voyage::Library;
+    let galaxy = galaxy();
+    let mut live = live();
+    live.craft.frame = Frame::Galaxy {
+        origin_pc: live.origin_pc,
+    };
+    let state = State {
+        position: [0.0; 3],
+        velocity: [0.0; 3],
+    };
+    live.craft.place(state, 0);
+    live.previous = state;
+    let mut server = live.voyage.clone();
+    let mut library = Library::new(galaxy.clone());
+    let mut charts = Charts::default();
+    for tick in 1..=40 {
+        library.step(&mut server);
+        live.catch_up(&mut charts, &galaxy, tick_seconds(tick), &mut 0.0);
+        assert!(live.waiting.is_none());
+        assert_eq!(live.craft, server.craft);
+        assert_eq!(live.origin_pc, server.origin_pc);
+        assert_eq!(live.field.system(), server.field.system());
+    }
+    assert!(!server.in_galaxy());
+    assert_eq!(server.field.system().id, galaxy.systems[0].id);
 }

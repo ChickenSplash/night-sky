@@ -132,7 +132,11 @@ fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
             velocity_kms: None,
         },
     );
-    let steer = |order| UiCommand::SteerCraft { id: None, order };
+    let steer = |order| UiCommand::SteerCraft {
+        id: None,
+        order,
+        tick: None,
+    };
     send(
         &mut app,
         steer(Order::Point {
@@ -185,7 +189,11 @@ fn body_orders_validate_and_patch_inputs_without_cancelling_pointing() {
             velocity_kms: None,
         },
     );
-    let order = |order| UiCommand::SteerCraft { id: None, order };
+    let order = |order| UiCommand::SteerCraft {
+        id: None,
+        order,
+        tick: None,
+    };
     send(
         &mut app,
         order(Order::Point {
@@ -282,6 +290,7 @@ fn manoeuvres_cap_the_clock_before_physics_and_preserve_pause_and_requested_rate
     send(
         &mut app,
         UiCommand::SteerCraft {
+            tick: None,
             id: None,
             order: Order::Throttle { value: 0.5 },
         },
@@ -337,6 +346,7 @@ fn warp_respects_pause_without_the_sublight_time_cap() {
     send(
         &mut app,
         UiCommand::SteerCraft {
+            tick: None,
             id: None,
             order: Order::Warp {
                 command: WarpOrder::Engage,
@@ -455,6 +465,7 @@ fn manual_dropout_takes_effect_from_the_next_fixed_step() {
     send(
         &mut app,
         UiCommand::SteerCraft {
+            tick: None,
             id: None,
             order: Order::Warp {
                 command: WarpOrder::Disengage,
@@ -585,6 +596,66 @@ fn send(app: &mut App, command: UiCommand) {
         .unwrap_or_else(|err| panic!("{command:?}: {err}"));
     app.world_mut().write_message(command);
     app.update();
+}
+
+#[test]
+fn developer_orders_can_target_a_future_tick_without_acting_early() {
+    use space_simulation::craft::WarpOrder;
+    let mut app = app();
+    app.world_mut().resource_mut::<Clock>().0.seconds = 0.0;
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let commands = [
+        Order::Warp {
+            command: WarpOrder::Set {
+                speed_ms: 100_000.0,
+            },
+        },
+        Order::Warp {
+            command: WarpOrder::Engage,
+        },
+    ];
+    for order in commands {
+        // Exercise JSON/API decoding, including the new optional tick.
+        let value = serde_json::json!({"type": "steer_craft", "order": order, "tick": 2});
+        let command: UiCommand = serde_json::from_value(value).unwrap();
+        send(&mut app, command);
+    }
+    let fleet = app.world().resource::<Fleet>();
+    assert!(!fleet.craft[0].craft.warp.engaged);
+    assert_eq!(
+        readout(fleet, 0.0)["craft"][0]["pending_orders"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(1);
+    app.update();
+    assert!(!app.world().resource::<Fleet>().craft[0].craft.warp.engaged);
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(2);
+    app.update();
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert!(live.craft.warp.engaged);
+    assert_eq!(live.craft.warp.actual_ms, 0.0);
+    assert!(live.scheduled().next().is_none());
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(3);
+    app.update();
+    assert!(
+        app.world().resource::<Fleet>().craft[0]
+            .craft
+            .warp
+            .actual_ms
+            > 0.0
+    );
 }
 
 #[test]

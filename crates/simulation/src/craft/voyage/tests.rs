@@ -51,6 +51,164 @@ fn galactic_state(voyage: &Voyage, reference: [f64; 3]) -> (DVec3, DVec3, DVec3)
 
 const AU: f64 = crate::AU_METRES;
 
+fn empty_voyage() -> Voyage {
+    let system = space_shared::StarSystem {
+        id: "orders".into(),
+        name: "Orders".into(),
+        position_ly: [0.0; 3],
+        planets: Vec::new(),
+        stars: Vec::new(),
+        barycentres: Vec::new(),
+        page_stars: Vec::new(),
+    };
+    let craft = Craft::new(
+        "ship".into(),
+        "Ship".into(),
+        CraftKind::Ship,
+        Frame::System {
+            star: page_star_id(&system, 0),
+        },
+        0,
+    );
+    Voyage::new(craft, Field::new(system, 0), [0.0; 3])
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn orders_are_step_keyed_ordered_and_refused_atomically() {
+    use crate::craft::{Order, WarpOrder};
+    let mut voyage = empty_voyage();
+    let before = voyage.craft.clone();
+    assert!(voyage.order(-1, Order::Throttle { value: 1.0 }).is_err());
+    assert_eq!(voyage.craft, before);
+    voyage.order(2, Order::Throttle { value: 0.5 }).unwrap();
+    voyage.order(2, Order::Throttle { value: 1.0 }).unwrap();
+    voyage.step(&Blank).unwrap();
+    assert_eq!(voyage.craft.state(), State::default());
+    assert_eq!(voyage.craft.input.controls.throttle, 0.0);
+    voyage.step(&Blank).unwrap();
+    assert_eq!(voyage.craft.state(), State::default(), "no early burn");
+    assert_eq!(voyage.craft.input.controls.throttle, 1.0, "same-tick FIFO");
+    voyage
+        .order(
+            3,
+            Order::Warp {
+                command: WarpOrder::Engage,
+            },
+        )
+        .unwrap();
+    let result = voyage.step(&Blank).unwrap();
+    assert_eq!(result.from, State::default());
+    assert!(voyage.craft.state().velocity[2] < 0.0);
+    assert_eq!(result.refused.len(), 1);
+    assert_eq!(result.refused[0].tick, 3);
+    assert!(!voyage.craft.warp.engaged);
+    assert!(voyage.scheduled().next().is_none());
+    assert!(
+        voyage.step(&Blank).unwrap().refused.is_empty(),
+        "refused once"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn queued_warp_orders_replay_after_a_snapshot() {
+    use crate::craft::{Order, WarpOrder};
+    let mut voyage = empty_voyage();
+    let log = vec![
+        ScheduledOrder {
+            tick: 1,
+            order: Order::Warp {
+                command: WarpOrder::Set {
+                    speed_ms: 100_000.0,
+                },
+            },
+        },
+        ScheduledOrder {
+            tick: 1,
+            order: Order::Warp {
+                command: WarpOrder::Engage,
+            },
+        },
+        ScheduledOrder {
+            tick: 6,
+            order: Order::Warp {
+                command: WarpOrder::Set { speed_ms: 1_000.0 },
+            },
+        },
+        ScheduledOrder {
+            tick: 10,
+            order: Order::Warp {
+                command: WarpOrder::Disengage,
+            },
+        },
+        ScheduledOrder {
+            tick: 10,
+            order: Order::Throttle { value: 1.0 },
+        },
+    ];
+    for input in &log {
+        voyage.order(input.tick, input.order.clone()).unwrap();
+    }
+    for _ in 0..4 {
+        voyage.step(&Blank).unwrap();
+    }
+    let craft: Craft =
+        serde_json::from_str(&serde_json::to_string(&voyage.craft).unwrap()).unwrap();
+    let saved = serde_json::to_string(&voyage.pending_orders()).unwrap();
+    let pending: Vec<ScheduledOrder> = serde_json::from_str(&saved).unwrap();
+    let mut restored = Voyage::new(craft, voyage.field.clone(), voyage.origin_pc);
+    for input in pending {
+        restored.order(input.tick, input.order).unwrap();
+    }
+    // A server receives the same log just in time instead of ahead of time.
+    let mut server = empty_voyage();
+    while server.craft.tick < 4 {
+        let tick = server.craft.tick;
+        for input in log.iter().filter(|input| input.tick == tick) {
+            server.order(input.tick, input.order.clone()).unwrap();
+        }
+        server.step(&Blank).unwrap();
+    }
+    for _ in 4..20 {
+        let tick = server.craft.tick;
+        for input in log.iter().filter(|input| input.tick == tick) {
+            server.order(input.tick, input.order.clone()).unwrap();
+        }
+        let a = voyage.step(&Blank).unwrap();
+        let b = restored.step(&Blank).unwrap();
+        server.step(&Blank).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(voyage.craft, restored.craft);
+        // Future commands apply at a boundary, so compare motion rather than
+        // the server's not-yet-submitted boundary input.
+        assert_eq!(voyage.craft.state(), server.craft.state());
+    }
+    assert!(!voyage.craft.warp.engaged);
+    assert_eq!(voyage.craft.input.controls.throttle, 1.0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn pending_orders_are_bounded_and_waits_do_not_consume_them() {
+    use crate::craft::Order;
+    let mut voyage = empty_voyage();
+    for tick in 1..=MAX_PENDING_ORDERS as i64 {
+        voyage.order(tick, Order::Release).unwrap();
+    }
+    assert!(voyage.order(10_000, Order::Release).is_err());
+    voyage.craft.frame = Frame::Galaxy {
+        origin_pc: voyage.origin_pc,
+    };
+    let pending = voyage.pending_orders();
+    let craft = voyage.craft.clone();
+    for _ in 0..3 {
+        assert!(voyage.step(&Blank).is_err());
+    }
+    assert_eq!(voyage.craft, craft);
+    assert_eq!(voyage.pending_orders(), pending);
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn dropout_beside_an_uncharted_star_enters_it_from_seeds_alone() {
@@ -62,7 +220,7 @@ fn dropout_beside_an_uncharted_star_enters_it_from_seeds_alone() {
     assert!(matches!(voyage.step(&Blank), Err(Wait::Region(_))));
     assert_eq!(voyage.craft, unchanged);
     let mut library = Library::default();
-    let rebase = library.step(&mut voyage).expect("a handoff");
+    let rebase = library.step(&mut voyage).rebase.expect("a handoff");
     assert!(rebase.frame_changed);
     assert_eq!(
         voyage.craft.frame,
@@ -143,7 +301,7 @@ fn fast_warp_needs_no_system_data_and_keeps_local_precision() {
         let rebase = voyage
             .step(&Blank)
             .expect("no data needed above the threshold");
-        anchors += usize::from(rebase.is_some());
+        anchors += usize::from(rebase.rebase.is_some());
         assert!(voyage.in_galaxy());
         assert!(
             DVec3::from_array(voyage.craft.state().position).length()

@@ -80,6 +80,9 @@ pub enum UiCommand {
         order: crate::craft::Order,
         #[serde(default)]
         id: Option<String>,
+        /// World step to apply from; absent means the next unsimulated step.
+        #[serde(default)]
+        tick: Option<i64>,
     },
     /// Select a craft by ID without moving the camera.
     SelectCraft {
@@ -374,13 +377,12 @@ impl UiCommand {
             UiCommand::SetThrust { id, thrust } => {
                 let id = thrust_target(id.as_deref(), nav, fleet)?;
                 let live = fleet.get(&id).ok_or("No craft")?;
-                crate::craft::Order::Thrust { thrust: *thrust }
-                    .apply(&mut live.craft.clone(), Some(&live.field))
+                live.check(&crate::craft::Order::Thrust { thrust: *thrust })
             }
-            UiCommand::SteerCraft { id, order } => {
+            UiCommand::SteerCraft { id, order, tick } => {
                 let id = thrust_target(id.as_deref(), nav, fleet)?;
                 let live = fleet.get(&id).ok_or("No craft")?;
-                order.apply(&mut live.craft.clone(), Some(&live.field))
+                live.check_order(tick.unwrap_or(live.craft.tick), order)
             }
             UiCommand::SelectCraft { id } => craft(id).map(|_| ()),
             UiCommand::FlyToCraft { id } => craft(id).map(|_| ()),
@@ -604,15 +606,17 @@ pub fn apply(
                 let order = crate::craft::Order::Thrust { thrust: *thrust };
                 if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
                     && let Some(live) = fleet.get_mut(&id)
-                    && let Err(err) = order.apply(&mut live.voyage.craft, Some(&live.voyage.field))
+                    && let Err(err) = live.voyage.order(live.craft.tick, order)
                 {
                     warn!(target: "craft", "Thrust refused: {err}");
                 }
             }
-            UiCommand::SteerCraft { id, order } => {
+            UiCommand::SteerCraft { id, order, tick } => {
                 if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
                     && let Some(live) = fleet.get_mut(&id)
-                    && let Err(err) = order.apply(&mut live.voyage.craft, Some(&live.voyage.field))
+                    && let Err(err) = live
+                        .voyage
+                        .order(tick.unwrap_or(live.craft.tick), order.clone())
                 {
                     warn!(target: "craft", "Ship order refused: {err}");
                 }

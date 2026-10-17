@@ -7,15 +7,11 @@ use super::*;
 use bevy::math::DVec3;
 use space_simulation::{
     LY_METRES,
-    craft::voyage::{Arrival, Atlas, Rebase, Wait, listed_origin_pc, page_star_id, seeded_arrival},
+    craft::voyage::{Arrival, Atlas, Cache, Rebase, Wait},
     galaxy::{GalaxyModel, PC_METRES},
-    neighbourhood::{Candidate, REGION_PC, Region},
+    neighbourhood::{Candidate, Region},
 };
-use std::collections::{HashMap, VecDeque};
-
-/// Regions and systems kept once worked out, oldest dropped first.
-const REGIONS: usize = 8;
-const ARRIVALS: usize = 64;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Key {
@@ -33,9 +29,9 @@ impl Key {
 }
 
 pub struct Charts {
-    regions: HashMap<Region, Vec<Candidate>>,
-    arrivals: HashMap<String, Arrival>,
-    kept: VecDeque<Key>,
+    cache: Cache,
+    /// Frames polled, each one cache round.
+    frames: i64,
     pending: HashMap<Key, (Wait, Pending)>,
     /// Works out on the frame itself a spawned craft's seeded origin, and
     /// waits without a background worker or when none can be started.
@@ -49,9 +45,8 @@ pub struct Charts {
 impl Default for Charts {
     fn default() -> Self {
         Self {
-            regions: HashMap::new(),
-            arrivals: HashMap::new(),
-            kept: VecDeque::new(),
+            cache: Cache::default(),
+            frames: 0,
             pending: HashMap::new(),
             sky: None,
             error: None,
@@ -62,17 +57,19 @@ impl Default for Charts {
 
 impl Atlas for Charts {
     fn region(&self, region: Region) -> Option<&[Candidate]> {
-        self.regions.get(&region).map(Vec::as_slice)
+        self.cache.region(region)
     }
 
     fn arrival(&self, star: &str) -> Option<&Arrival> {
-        self.arrivals.get(star)
+        self.cache.arrival(star)
     }
 }
 
 impl Charts {
-    /// Collect finished background work.
+    /// Start a frame's cache round and collect finished background work.
     pub fn poll(&mut self, galaxy: &Galaxy) {
+        self.frames += 1;
+        self.cache.round(self.frames);
         let done: Vec<(Key, Result<Reply, ()>)> = self
             .pending
             .iter()
@@ -81,7 +78,7 @@ impl Charts {
         for (key, result) in done {
             let (wait, _) = self.pending.remove(&key).unwrap();
             match result {
-                Ok(reply) => self.accept(&wait, reply, galaxy),
+                Ok(reply) => self.cache.accept(&wait, reply, galaxy),
                 // Asked again on the next wait, never silently skipped.
                 Err(()) => {
                     self.error = Some(format!("Background system loading failed for {key:?}"));
@@ -93,13 +90,7 @@ impl Charts {
     /// Start working out what a craft waits for. Returns whether it is
     /// already known, so the craft can step again at once.
     pub fn offer(&mut self, wait: &Wait, galaxy: &Galaxy) -> bool {
-        if let Wait::System(candidate) = wait
-            && let Some((system, page)) = crate::objects::known_system(galaxy, &candidate.id)
-        {
-            let arrival = Arrival::new(Field::new(system.clone(), page), candidate.position_pc);
-            self.keep(Key::System(candidate.id.clone()), |charts| {
-                charts.arrivals.insert(candidate.id.clone(), arrival);
-            });
+        if self.cache.chart(wait, galaxy) {
             return true;
         }
         let key = Key::of(wait);
@@ -121,7 +112,7 @@ impl Charts {
             return false;
         }
         let reply = request.answer(self.sky(), space_simulation::craft::voyage::threads());
-        self.accept(wait, reply, galaxy);
+        self.cache.accept(wait, reply, galaxy);
         true
     }
 
@@ -130,87 +121,11 @@ impl Charts {
         self.sky.get_or_insert_with(Default::default)
     }
 
-    fn accept(&mut self, wait: &Wait, reply: Reply, galaxy: &Galaxy) {
-        match (wait, reply) {
-            (Wait::Region(region), Reply::Region { mut candidates }) => {
-                candidates.extend(legacy_candidates(*region, galaxy));
-                candidates.sort_by(|a, b| a.id.cmp(&b.id));
-                self.keep(Key::Region(*region), |charts| {
-                    charts.regions.insert(*region, candidates);
-                });
-            }
-            (Wait::System(candidate), Reply::System { system }) => {
-                let arrival = seeded_arrival(candidate, system);
-                self.keep(Key::System(candidate.id.clone()), |charts| {
-                    charts.arrivals.insert(candidate.id.clone(), arrival);
-                });
-            }
-            _ => {}
-        }
+    /// How many regions and systems are kept.
+    #[cfg(test)]
+    pub fn counts(&self) -> (usize, usize) {
+        self.cache.counts()
     }
-
-    fn keep(&mut self, key: Key, insert: impl FnOnce(&mut Self)) {
-        insert(self);
-        self.kept.retain(|k| *k != key);
-        self.kept.push_back(key);
-        let count = |kept: &VecDeque<Key>, region: bool| {
-            kept.iter()
-                .filter(|k| matches!(k, Key::Region(_)) == region)
-                .count()
-        };
-        for (region, most) in [(true, REGIONS), (false, ARRIVALS)] {
-            while count(&self.kept, region) > most {
-                let index = self
-                    .kept
-                    .iter()
-                    .position(|k| matches!(k, Key::Region(_)) == region)
-                    .unwrap();
-                match self.kept.remove(index) {
-                    Some(Key::Region(r)) => {
-                        self.regions.remove(&r);
-                    }
-                    Some(Key::System(id)) => {
-                        self.arrivals.remove(&id);
-                    }
-                    None => {}
-                }
-            }
-        }
-    }
-}
-
-/// List pages with no cell star of their own, which seeds cannot find.
-fn legacy_candidates(region: Region, galaxy: &Galaxy) -> Vec<Candidate> {
-    let min = region.min_pc();
-    let mut found = Vec::new();
-    for system in &galaxy.systems {
-        for page in system.pages() {
-            if system.page_star(page).is_some() {
-                continue;
-            }
-            let origin_pc = listed_origin_pc(system, page);
-            let range_pc =
-                space_simulation::craft::voyage::range_m(&Field::new(system.clone(), page))
-                    / PC_METRES;
-            let gap: f64 = (0..3)
-                .map(|i| {
-                    (min[i] - origin_pc[i])
-                        .max(origin_pc[i] - min[i] - REGION_PC)
-                        .max(0.0)
-                        .powi(2)
-                })
-                .sum::<f64>()
-                .sqrt();
-            if gap < range_pc {
-                found.push(Candidate {
-                    id: page_star_id(system, page),
-                    position_pc: origin_pc,
-                    reach_pc: range_pc,
-                });
-            }
-        }
-    }
-    found
 }
 
 impl Live {

@@ -149,7 +149,7 @@ pub struct Usage {
 pub const USAGE: [Usage; 31] = [
     Usage {
         name: "steer_craft",
-        fields: &["order", "id"],
+        fields: &["order", "id", "tick"],
         about: "Ship order JSON: throttle, translate, rotate, point, stop (spin), release, cut (sublight drives and brake spin), configure, warp; use ns ship --help",
     },
     Usage {

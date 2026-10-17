@@ -15,7 +15,7 @@ pub const SPIN_TOLERANCE: f64 = 1e-6;
 /// A pass this fast changes ordinary velocity by at most metres per second
 /// for a main-sequence star, while sampling gravity only at the ends of each
 /// light-second-long step would give large, arbitrary kicks deep in a body.
-pub const GRAVITY_CUTOFF_MS: f64 = 299_792_458.0;
+pub const GRAVITY_CUTOFF_MS: f64 = crate::LIGHT_SPEED_MS;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

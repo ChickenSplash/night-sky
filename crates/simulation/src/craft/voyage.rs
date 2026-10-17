@@ -3,22 +3,40 @@
 //! whatever a camera has loaded, the same inputs give the same path: when the
 //! data a decision needs is missing, the step waits for it rather than
 //! carrying on without it.
-use super::{Craft, Field, Frame, Gravity};
+use super::{Craft, Field, Frame, Gravity, Order};
 use crate::galaxy::PC_METRES;
 use crate::neighbourhood::{Candidate, Region};
 use crate::{LY_METRES, State};
 use glam::{DQuat, DVec3};
+use std::collections::BTreeMap;
+
+mod atlas;
+pub use atlas::*;
 
 /// Fastest warp at which a craft enters systems. Below it a star's pull on a
 /// passing craft can matter; above it a craft crosses a system's range in a
 /// few steps, so it stays in galactic space and needs no system data.
-pub const ARRIVAL_MAX_SPEED: f64 = 299_792_458.0;
+pub const ARRIVAL_MAX_SPEED: f64 = crate::LIGHT_SPEED_MS;
 /// Galactic offsets beyond this move the frame's anchor, keeping local metres
 /// precise. Only precision: it decides nothing else.
 pub const ANCHOR_M: f64 = 0.125 * LY_METRES;
 /// A system is left at this many times its entry range, so a craft on its
 /// edge does not switch back and forth.
 pub const LEAVE_RANGES: f64 = 2.0;
+/// Maximum future orders held by one voyage. A server still needs per-player
+/// rate limits and ownership checks at its network boundary.
+pub const MAX_PENDING_ORDERS: usize = 1_024;
+/// Approximate retained generation-cache budget between requests. A single
+/// query's temporary working set is additional to this.
+pub const SKY_CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+fn trim_sky(sky: &mut crate::cells::Sky) {
+    if sky.cache_bytes() > SKY_CACHE_BYTES {
+        // Keep the expensive coarse integration warm, but release fine cells
+        // accumulated on long voyages. Rebuilding them changes no seeds.
+        sky.retain(|cell| cell.level() <= 3);
+    }
+}
 
 /// Rotation from a page's orbital-plane axes into galactic axes.
 pub fn page_basis(system: &space_shared::StarSystem, page: u32) -> DQuat {
@@ -48,10 +66,12 @@ pub fn frame_origin_pc(
     system: &space_shared::StarSystem,
     page: u32,
 ) -> [f64; 3] {
-    system
+    let origin = system
         .page_star(page)
         .and_then(|star| sky.star(&star.id))
-        .map_or_else(|| listed_origin_pc(system, page), |star| star.position_pc)
+        .map_or_else(|| listed_origin_pc(system, page), |star| star.position_pc);
+    trim_sky(sky);
+    origin
 }
 
 /// A page's position as its list gives it, in parsecs from the galactic
@@ -85,100 +105,6 @@ impl Arrival {
 /// A system's entry range, in metres.
 pub fn range_m(field: &Field) -> f64 {
     crate::neighbourhood::range_m(crate::system_extent_au(field.system(), field.page()))
-}
-
-/// Where a voyage's systems come from. A server answers from seeds and its
-/// lists at once; a client from caches it fills in the background.
-pub trait Atlas {
-    /// Systems that may reach into a region, or `None` until known.
-    fn region(&self, region: Region) -> Option<&[Candidate]>;
-    /// A candidate system's bodies, or `None` until loaded.
-    fn arrival(&self, star: &str) -> Option<&Arrival>;
-}
-
-/// An atlas that knows nothing yet, for steps that need no system data.
-pub struct Blank;
-
-impl Atlas for Blank {
-    fn region(&self, _: Region) -> Option<&[Candidate]> {
-        None
-    }
-    fn arrival(&self, _: &str) -> Option<&Arrival> {
-        None
-    }
-}
-
-/// An atlas that works out what a step waits for there and then, as a
-/// server or test would. Charted (list) systems are added with `chart`.
-pub struct Library {
-    sky: crate::cells::Sky,
-    regions: std::collections::HashMap<Region, Vec<Candidate>>,
-    arrivals: std::collections::HashMap<String, Arrival>,
-    threads: usize,
-}
-
-impl Default for Library {
-    fn default() -> Self {
-        Self {
-            sky: crate::cells::Sky::default(),
-            regions: Default::default(),
-            arrivals: Default::default(),
-            threads: threads(),
-        }
-    }
-}
-
-impl Library {
-    /// Work out what a step waited for.
-    pub fn supply(&mut self, wait: &Wait) {
-        let reply = Request::of(wait).answer(&mut self.sky, self.threads);
-        self.accept(wait, reply);
-    }
-
-    /// Store a worked-out reply to a wait.
-    pub fn accept(&mut self, wait: &Wait, reply: Reply) {
-        match (wait, reply) {
-            (Wait::Region(region), Reply::Region { candidates }) => {
-                self.regions.insert(*region, candidates);
-            }
-            (Wait::System(candidate), Reply::System { system }) => {
-                let arrival = seeded_arrival(candidate, system);
-                self.arrivals.insert(candidate.id.clone(), arrival);
-            }
-            _ => {}
-        }
-    }
-
-    /// Where a page's frame is anchored; see `frame_origin_pc`.
-    pub fn origin_pc(&mut self, system: &space_shared::StarSystem, page: u32) -> [f64; 3] {
-        frame_origin_pc(&mut self.sky, system, page)
-    }
-
-    /// A list system's page, which takes the place of a generated system of
-    /// the same star, or adds a legacy page with no cell star.
-    pub fn chart(&mut self, arrival: Arrival) {
-        let id = page_star_id(arrival.field.system(), arrival.field.page());
-        self.arrivals.insert(id, arrival);
-    }
-
-    /// Step, supplying whatever the step waits for first.
-    pub fn step(&mut self, voyage: &mut Voyage) -> Option<Rebase> {
-        loop {
-            match voyage.step(self) {
-                Ok(rebase) => return rebase,
-                Err(wait) => self.supply(&wait),
-            }
-        }
-    }
-}
-
-impl Atlas for Library {
-    fn region(&self, region: Region) -> Option<&[Candidate]> {
-        self.regions.get(&region).map(Vec::as_slice)
-    }
-    fn arrival(&self, star: &str) -> Option<&Arrival> {
-        self.arrivals.get(star)
-    }
 }
 
 /// Threads a native lookup may use; one in the browser.
@@ -258,14 +184,16 @@ impl Request {
 
     /// Work it out here and now, with a warm `sky` for speed.
     pub fn answer(&self, sky: &mut crate::cells::Sky, threads: usize) -> Reply {
-        match self {
+        let reply = match self {
             Self::Region { region } => Reply::Region {
                 candidates: crate::neighbourhood::candidates(sky, *region, threads),
             },
             Self::System { id, position_ly } => Reply::System {
                 system: crate::generated_system(id, *position_ly),
             },
-        }
+        };
+        trim_sky(sky);
+        reply
     }
 }
 
@@ -316,6 +244,39 @@ pub struct Voyage {
     pub origin_pc: [f64; 3],
     /// The current system's entry range, in metres.
     pub range_m: f64,
+    /// Orders given for later world steps, by step number. Every key is
+    /// after the craft's `tick`: an order is applied as soon as the craft
+    /// reaches its step.
+    orders: BTreeMap<i64, Vec<Order>>,
+}
+
+/// One fixed step taken by `Voyage::step`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Step {
+    /// The frame change made before moving, if any.
+    pub rebase: Option<Rebase>,
+    /// The craft's state and attitude as it set off, in its new frame.
+    pub from: State,
+    pub from_orientation: [f64; 4],
+    /// Scheduled orders refused at the boundary reached by this step.
+    pub refused: Vec<Refused>,
+}
+
+/// A scheduled order its step refused.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refused {
+    pub tick: i64,
+    pub order: Order,
+    pub reason: String,
+}
+
+/// A step-keyed input, suitable for a replay log or saving pending orders
+/// alongside the craft. Orders sharing a tick retain their submitted order.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduledOrder {
+    pub tick: i64,
+    pub order: Order,
 }
 
 impl Voyage {
@@ -325,7 +286,89 @@ impl Voyage {
             craft,
             field,
             origin_pc,
+            orders: BTreeMap::new(),
         }
+    }
+
+    /// The craft's system, for checking orders, when it is in one.
+    fn system_field(&self) -> Option<&Field> {
+        (!self.in_galaxy()).then_some(&self.field)
+    }
+
+    /// Give an order for world step `tick`, so a server can key every input
+    /// by step number. An order for the craft's current step applies at
+    /// once, returning any refusal; it acts from that step. A later one is
+    /// kept until the craft reaches its step, and a refusal then goes to
+    /// the step's result. An order for a step already taken is refused.
+    pub fn order(&mut self, tick: i64, order: Order) -> Result<(), String> {
+        if tick == self.craft.tick {
+            let in_system = !self.in_galaxy();
+            order.apply(&mut self.craft, in_system.then_some(&self.field))
+        } else {
+            self.check_order(tick, &order)?;
+            self.orders.entry(tick).or_default().push(order);
+            Ok(())
+        }
+    }
+
+    /// Whether an order would be accepted now, without applying it.
+    pub fn check(&self, order: &Order) -> Result<(), String> {
+        order.apply(&mut self.craft.clone(), self.system_field())
+    }
+
+    /// Check submission without changing the voyage. Future orders are
+    /// checked against drive state only when their step arrives.
+    pub fn check_order(&self, tick: i64, order: &Order) -> Result<(), String> {
+        if tick < self.craft.tick {
+            return Err(format!(
+                "An order for step {tick} came after step {}",
+                self.craft.tick
+            ));
+        }
+        if tick == self.craft.tick {
+            return self.check(order);
+        }
+        if self.orders.values().map(Vec::len).sum::<usize>() >= MAX_PENDING_ORDERS {
+            return Err("Too many pending ship orders".into());
+        }
+        Ok(())
+    }
+
+    /// Orders kept for later steps, soonest first.
+    pub fn scheduled(&self) -> impl Iterator<Item = (i64, &Order)> {
+        self.orders
+            .iter()
+            .flat_map(|(tick, orders)| orders.iter().map(move |order| (*tick, order)))
+    }
+
+    /// Save pending inputs alongside a craft snapshot. On load, submit them
+    /// through `order` after reconstructing the voyage from the saved craft.
+    pub fn pending_orders(&self) -> Vec<ScheduledOrder> {
+        self.scheduled()
+            .map(|(tick, order)| ScheduledOrder {
+                tick,
+                order: order.clone(),
+            })
+            .collect()
+    }
+
+    /// Apply the orders kept for the step the craft has reached.
+    fn apply_due(&mut self) -> Vec<Refused> {
+        let Some(orders) = self.orders.remove(&self.craft.tick) else {
+            return Vec::new();
+        };
+        let mut refused = Vec::new();
+        let in_system = !self.in_galaxy();
+        for order in orders {
+            if let Err(reason) = order.apply(&mut self.craft, in_system.then_some(&self.field)) {
+                refused.push(Refused {
+                    tick: self.craft.tick,
+                    order,
+                    reason,
+                });
+            }
+        }
+        refused
     }
 
     /// Replace the system field, as when a craft is placed in it.
@@ -366,10 +409,16 @@ impl Voyage {
 
     /// One fixed step: any frame change due at the current state, then
     /// motion. On `Err` nothing has changed; supply the data and step again.
-    pub fn step(&mut self, atlas: &impl Atlas) -> Result<Option<Rebase>, Wait> {
+    pub fn step(&mut self, atlas: &impl Atlas) -> Result<Step, Wait> {
         let rebase = self.settle(atlas)?;
-        self.advance();
-        Ok(rebase)
+        let mut step = Step {
+            rebase,
+            from: self.craft.state(),
+            from_orientation: self.craft.orientation,
+            refused: Vec::new(),
+        };
+        step.refused = self.advance();
+        Ok(step)
     }
 
     /// The frame change due at the current state, if any, before moving.
@@ -442,13 +491,15 @@ impl Voyage {
         Ok(None)
     }
 
-    /// Moves the craft by one fixed step in its current frame.
-    pub fn advance(&mut self) {
+    /// Moves the craft by one fixed step in its current frame, then applies
+    /// the orders kept for the step it reaches.
+    pub fn advance(&mut self) -> Vec<Refused> {
         if self.in_galaxy() {
             self.craft.step(&Empty);
         } else {
             self.craft.step(&self.field);
         }
+        self.apply_due()
     }
 
     /// Re-express the craft in another frame. Position, attitude and

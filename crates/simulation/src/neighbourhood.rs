@@ -39,7 +39,7 @@ pub fn max_reach_pc() -> f64 {
 }
 
 /// A cube of space whose candidate systems are found together.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Region(pub [i64; 3]);
 
 impl Region {

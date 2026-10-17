@@ -55,27 +55,12 @@ pub fn member_label(name: &str, letters: &str) -> String {
 }
 
 pub fn star_id(system: &StarSystem, page: u32) -> String {
-    system.page_star(page).map_or_else(
-        || space_simulation::star_id(&system.id, page),
-        |star| star.id.clone(),
-    )
+    space_simulation::craft::voyage::page_star_id(system, page)
 }
 
 /// Resolve remote bodies without visiting them or relying on streamed meshes.
 pub fn known_system<'a>(galaxy: &'a Galaxy, star: &str) -> Option<(&'a StarSystem, u32)> {
-    if let Some((list, page)) = crate::galaxy_nav::mapped(galaxy, star) {
-        return Some((&galaxy.systems[list], page));
-    }
-    for system in &galaxy.systems {
-        if let Some(page) = system
-            .pages()
-            .into_iter()
-            .find(|page| star_id(system, *page) == star)
-        {
-            return Some((system, page));
-        }
-    }
-    None
+    space_simulation::craft::voyage::listed_page(galaxy, star)
 }
 
 pub fn system<'a>(galaxy: &'a Galaxy, star: &str) -> Option<(Cow<'a, StarSystem>, u32)> {

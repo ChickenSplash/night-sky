@@ -200,6 +200,16 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   It also accepts `translate`, `rotate`, `point`, `stop`, `cut`, `release` and
   `configure`. `ns ship --help` and each subcommand's help describe arguments.
   Spawn, despawn, selection and following retain their existing commands.
+- `steer_craft` also accepts an optional integer `tick`, for example
+  `{"type":"steer_craft","tick":200,"order":{"action":"throttle","value":0.25}}`.
+  Without it, the order affects the ship's next unsimulated interval as
+  before. A future tick queues it; a past tick is refused. Same-tick orders
+  keep submission order. Queue acceptance is not execution acceptance:
+  drive/frame interlocks are checked at that future boundary and refusals
+  are logged. `ship state` exposes `pending_orders` as tick/order pairs.
+  See [step-keyed orders](../simulation/craft.md#body-axis-control-simulation)
+  for queue limits and replay semantics. Use the generic JSON command API
+  for explicit ticks; the `ns ship` convenience commands still mean now.
 - Legacy `ns ship thrust x,y,z` / `set_thrust [x,y,z]` remains a system-axis
   debug acceleration, at most 100 m/s². It is the `thrust` order underneath
   (`{"action":"thrust","thrust":[x,y,z]}`), validated like the others. A

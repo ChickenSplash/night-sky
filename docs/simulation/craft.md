@@ -51,6 +51,27 @@ sends orders through `steer_craft` and `ns ship`; see the
 [CLI guide](../client/developer-api.md#craft) for input persistence, command
 grouping and examples.
 
+`Voyage::order(tick, order)` is the step-keyed submission path. An order at
+the current `craft.tick` changes inputs now and affects the next uncomputed
+interval, from tick N to N+1, never motion already integrated for display.
+Future orders are queued, in submission order within each tick, and applied
+as soon as the craft reaches that boundary. Past ticks are rejected, not
+silently retimed. Future orders are validated against the drive state and
+frame at application, so a queued disengage followed by thrust works. A
+refusal is returned with that step, consumed once, rather than accumulated
+inside the simulation. Waiting for system data consumes neither steps nor
+queued orders.
+
+Each voyage accepts at most 1,024 pending orders. `ScheduledOrder` is a
+serializable tick/order pair for replay; `pending_orders()` supplies the
+remaining queue to save alongside a craft snapshot. Reconstruct its field
+and frame origin, then resubmit those pairs to restore it. JSON parsing uses
+round-trip f64 precision so a snapshot does not lose physics bits. This is
+replay infrastructure, not a multiplayer protocol: ownership, administrator
+permissions, player rate limits, acknowledgements and rollback/correction
+still belong to future server work. Cross-target correction must still
+tolerate the numerical differences noted below.
+
 ### Attitude guidance (simulation)
 
 `point` engages a persistent pointing autopilot; `stop_rotation` brakes spin
@@ -220,6 +241,9 @@ in memory only: nothing is saved or shared yet.
   [waits for system data](#frames-and-arrival) holds the clock the same way
   until a background worker supplies it. The HUD's `held by craft` covers
   the manoeuvre cap and either hold.
+  Pending sublight or pointing orders also conservatively apply the manoeuvre
+  cap, so a catch-up frame cannot run a newly scheduled burn at the high
+  coasting rate. Pending warp-only orders do not apply that cap.
 - **Forecasts:** each craft keeps its last finished
   [coast prediction](#coast-prediction) (`craft::Forecast`) on show while a
   newer one is worked on. `craft::forecast` runs after stepping and shares
@@ -390,8 +414,27 @@ inputs give the same path on any machine, wherever the camera is.
   the existing galaxy-model approximation: assigned galactic velocities are
   momentum offsets, not moving stellar ephemerides, so drift relative to
   stars in galactic space is approximate.
-- **In the client:** `Fleet::charts` caches the last 8 regions and 64 systems,
-  shared by every craft, worked out on one native thread or the browser's
+- **Shared atlas rules:** the simulation owns list-page lookup, legacy
+  candidate inclusion, ID ordering and replacement of generated bodies by
+  charted pages. `Library::new(lists)` and the client's asynchronous atlas
+  use the same `Cache`, given the same list snapshot. A generated worker
+  reply cannot overwrite a charted page. `Voyage::step` also returns the
+  pre-motion state, attitude and rebase for interpolation, so the client
+  does not duplicate frame-change and stepping logic.
+- **Cache lifetime:** the cache normally retains 8 regions and 64 systems,
+  evicting least recently used entries. Entries read or supplied in this or
+  the previous round are protected, allowing a larger active fleet without
+  eviction/reload churn. These are idle-cache targets, not hard memory limits:
+  the active working set may exceed them, then shrinks after it goes idle.
+  A client round is a frame; the synchronous library uses world ticks and
+  should step the fleet together on that grid, not run one ship far ahead.
+  Dropping data changes loading cost, never physics decisions.
+  The warm generation `Sky` also drops fine cells after a request if its
+  estimated cache storage exceeds 32 MiB, retaining coarse cells through
+  level 3. This bounds retained fine-cell growth on long voyages, not the
+  temporary memory needed to answer one query or allocator overhead.
+- **In the client:** `Fleet::charts` shares that cache between every craft,
+  worked out on one native thread or the browser's
   craft worker. If no worker can start, it works them out on the frame
   instead and reports `system_loading_error`.
 

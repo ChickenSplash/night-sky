@@ -402,9 +402,10 @@ of carrying on without it. Craft enter systems only below light speed, which
 keeps the per-region seeded lookup (10 to 90 ms natively, 200 ms cold) off
 high-speed flight. `Craft::step` now integrates warp too. See
 [frames and arrival](../simulation/craft.md#frames-and-arrival). This
-revision has automated coverage only; it has not been flown live.
+revision also passed the native CLI flight below; visual confirmation of this
+revision is pending.
 
-A multiplayer review then fixed three foundations, also automated only. Ship
+A multiplayer review then fixed three foundations. Ship
 orders (`craft::Order`, legacy thrust included) moved from the client into the
 simulation, so a server validates them the same way. Craft step on one world
 grid, counted by `tick` from time zero, so orders can be keyed by step number.
@@ -412,8 +413,36 @@ A spawned ship's system is anchored at its star's seeded position, as arrival
 does, rather than at a camera-streamed position that could be missing or
 slightly different.
 
+The 2026-10-17 native CLI flight exercised the revised voyage and tick code:
+10 ly/s departure into galactic space, exact paused state, four refused
+conflicting drive orders, return to the original uncharted seeded system below
+light speed, manual dropout and ordinary coast with a fresh prediction. No
+system-loading error was reported and sampled ticks matched simulation time.
+The first return attempt missed its straight-line target and timed out while
+still above the entry speed limit; explicitly reducing requested speed to
+200,000,000 m/s allowed entry. This was a test-course correction, not automatic
+arrival guidance. The client was left paused with warp off for user visual
+confirmation. CLI evidence: `data/logs/warp-cli-live-review.json`.
+
 Straight-line warp along the nose, from the CLI. See the
 [warp drive rules](#warp-drive-rules).
+
+The next foundation hardening pass shares list-page and legacy arrival rules
+between the client and synchronous server-side library, adds bounded
+step-keyed order queues with serializable replay inputs and an optional
+`steer_craft.tick`, and replaces separate atlas caches with one working-set-aware
+cache. Idle targets remain 8 regions and 64 systems; active fleets can exceed
+them without evicting data another ship still needs. The client now calls the
+same voyage step as a server and consumes its interpolation state, while
+inspector/API readouts live in their own client module. Light-speed and spin
+thresholds share constants. Automated tests cover replay after a snapshot,
+order timing/refusals, cache pressure and identical client/server list arrivals.
+This does not add a live authoritative server, network ownership checks or
+background server prefetch. No new live or browser visual acceptance is claimed.
+Verified on 2026-10-18 with `./scripts/check.sh`: formatting, CLI transport,
+native workspace tests, strict native/WASM Clippy and 45 craft tests under
+Node. The generation worker also releases fine-cell caches above an estimated
+32 MiB between requests, retaining expensive coarse integration.
 
 Phase 4 is the manually commanded drive foundation, not a destination or route
 autopilot. The CLI engages it, selects speed and disengages it; steering,

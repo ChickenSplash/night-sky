@@ -12,7 +12,8 @@ version = "0.1.0"
 space-shared = { path = "crates/shared" }
 space-simulation = { path = "crates/simulation" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Craft snapshots must retain all f64 bits when read back for replay.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 anyhow = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
