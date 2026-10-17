@@ -1,5 +1,5 @@
-use super::super::control::{Order, WarpOrder};
 use super::*;
+use space_simulation::craft::{Order, WarpOrder};
 use space_simulation::{
     cells::{Cell, CellStar, Sky},
     craft::warp::{GravityPolicy, MAX_SPEED},

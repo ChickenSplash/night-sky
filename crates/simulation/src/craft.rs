@@ -20,6 +20,8 @@ pub const REFERENCE_SECONDS: f64 = 1.0;
 
 mod attitude;
 pub use attitude::{AttitudePilot, PointTarget};
+mod order;
+pub use order::{MAX_THRUST, Order, WarpOrder};
 mod reference;
 pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
 pub mod predict;

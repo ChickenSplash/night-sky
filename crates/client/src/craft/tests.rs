@@ -316,7 +316,7 @@ fn planet_system() -> (StarSystem, u32, String) {
 
 #[test]
 fn warp_respects_pause_without_the_sublight_time_cap() {
-    use super::control::WarpOrder;
+    use space_simulation::craft::WarpOrder;
     let mut app = app();
     app.init_resource::<Time>().add_systems(
         Update,
@@ -416,7 +416,7 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
 
 #[test]
 fn manual_dropout_takes_effect_from_the_next_fixed_step() {
-    use super::control::WarpOrder;
+    use space_simulation::craft::WarpOrder;
     use space_simulation::craft::warp::GravityPolicy;
     let mut app = app();
     let epoch = 6_000_000.0; // Match a live session's large simulation timestamp.
@@ -677,7 +677,7 @@ fn commands_spawn_select_follow_steer_and_remove_ships() {
         thrust: [0.0, 1e3, 0.0],
         id: None,
     };
-    assert!(too_hard.check_values().is_err());
+    assert!(refused(&app, &too_hard).contains("at most"));
     send(&mut app, UiCommand::FlyToCraft { id: id.clone() });
     let nav = app.world().resource::<Navigation>();
     assert!(nav.following && nav.fly && nav.distance == FOLLOW_M);

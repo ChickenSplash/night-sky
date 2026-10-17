@@ -200,8 +200,10 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   `configure`. `ns ship --help` and each subcommand's help describe arguments.
   Spawn, despawn, selection and following retain their existing commands.
 - Legacy `ns ship thrust x,y,z` / `set_thrust [x,y,z]` remains a system-axis
-  debug acceleration. A throttle or translate command clears it, and `cut`
-  clears it too. Prefer the body-axis commands for flying.
+  debug acceleration, at most 100 m/s². It is the `thrust` order underneath
+  (`{"action":"thrust","thrust":[x,y,z]}`), validated like the others. A
+  throttle or translate command clears it, and `cut` clears it too. Prefer
+  the body-axis commands for flying.
 - Manoeuvres (drive inputs, spin, or an engaged attitude pilot) cap clock
   advancement at 10× without changing the requested rate or pause setting.
   `/state/clock/effective_rate` reports that ceiling (zero while paused),

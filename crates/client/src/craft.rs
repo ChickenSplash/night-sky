@@ -14,8 +14,7 @@ use space_simulation::{
     },
 };
 
-mod control;
-pub use control::Order;
+pub use space_simulation::craft::Order;
 mod forecast;
 pub use forecast::{Forecast, forecast};
 mod loading;
@@ -39,9 +38,6 @@ pub const SHIP_RADIUS_M: f64 = 18.0;
 
 /// The follow camera's distance when it starts following a craft, in metres.
 pub const FOLLOW_M: f64 = 200.0;
-
-/// Thrust the developer command accepts, in metres per second squared.
-pub const MAX_THRUST: f64 = 100.0;
 
 #[derive(Resource, Default)]
 pub struct Fleet {

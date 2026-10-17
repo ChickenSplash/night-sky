@@ -223,14 +223,6 @@ impl UiCommand {
                 }
                 Ok(())
             }
-            UiCommand::SetThrust { thrust, .. } => {
-                let size = thrust.iter().map(|v| v * v).sum::<f64>().sqrt();
-                if size.is_finite() {
-                    within("thrust", size, 0.0..=crate::craft::MAX_THRUST)
-                } else {
-                    Err("thrust must be three finite numbers".into())
-                }
-            }
             UiCommand::Search { query } => {
                 space_simulation::search::Query::parse(query).and_then(|query| query.check())
             }
@@ -380,13 +372,10 @@ impl UiCommand {
                 None => Ok(()),
             },
             UiCommand::SetThrust { id, thrust } => {
-                self.check_values()?;
                 let id = thrust_target(id.as_deref(), nav, fleet)?;
-                if fleet.get(&id).is_some_and(|live| live.craft.warp.engaged) && *thrust != [0.0; 3]
-                {
-                    return Err("Disengage warp before using thrusters".into());
-                }
-                Ok(())
+                let live = fleet.get(&id).ok_or("No craft")?;
+                crate::craft::Order::Thrust { thrust: *thrust }
+                    .apply(&mut live.craft.clone(), Some(&live.field))
             }
             UiCommand::SteerCraft { id, order } => {
                 let id = thrust_target(id.as_deref(), nav, fleet)?;
@@ -618,11 +607,12 @@ pub fn apply(
                 }
             }
             UiCommand::SetThrust { thrust, id } => {
+                let order = crate::craft::Order::Thrust { thrust: *thrust };
                 if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
                     && let Some(live) = fleet.get_mut(&id)
-                    && (!live.craft.warp.engaged || *thrust == [0.0; 3])
+                    && let Err(err) = order.apply(&mut live.voyage.craft, Some(&live.voyage.field))
                 {
-                    live.craft.input.thrust = *thrust;
+                    warn!(target: "craft", "Thrust refused: {err}");
                 }
             }
             UiCommand::SteerCraft { id, order } => {

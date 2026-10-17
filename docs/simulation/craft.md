@@ -42,9 +42,14 @@ model yet. With no rotation input, spin persists. A midpoint angular step
 updates and normalizes the quaternion; thrust in the two Verlet half-kicks
 uses the starting and ending attitudes.
 
-These controls are integrated through the client's `steer_craft` orders and
-`ns ship` subcommands. See the [CLI guide](../client/developer-api.md#craft)
-for input persistence, command grouping and examples.
+Every change a pilot asks for is an `Order` (`craft/order.rs`): drive
+inputs, pointing, thruster limits, legacy thrust and warp. `Order::apply`
+validates and applies it in one step, so any client or server refuses the
+same orders and nothing else edits a craft's input. `configure` changes the
+ship itself; a server should take it only from an administrator. The client
+sends orders through `steer_craft` and `ns ship`; see the
+[CLI guide](../client/developer-api.md#craft) for input persistence, command
+grouping and examples.
 
 ### Attitude guidance (simulation)
 
