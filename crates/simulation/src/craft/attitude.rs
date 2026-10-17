@@ -155,7 +155,7 @@ impl PointTarget {
     }
 }
 
-fn unit(v: [f64; 3]) -> Option<DVec3> {
+pub(super) fn unit(v: [f64; 3]) -> Option<DVec3> {
     let vector = DVec3::from_array(v);
     let magnitude = vector.abs().max_element();
     if !vector.is_finite() || magnitude < 1e-12 {

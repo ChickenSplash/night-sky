@@ -62,9 +62,14 @@ refusal is returned with that step, consumed once, rather than accumulated
 inside the simulation. Waiting for system data consumes neither steps nor
 queued orders.
 
-Each voyage accepts at most 1,024 pending orders. `ScheduledOrder` is a
-serializable tick/order pair for replay; `pending_orders()` supplies the
-remaining queue to save alongside a craft snapshot. Reconstruct its field
+Each voyage accepts at most 1,024 pending orders, at most 300 simulated
+seconds ahead of its current tick. Value checks (finite numbers, ranges and
+nonzero directions) run at submission; drive interlocks and body checks run
+at application. Long replay logs must be fed incrementally as ticks advance.
+
+`ScheduledOrder` is a serializable tick/order pair for replay;
+`pending_orders()` supplies the remaining queue to save alongside a craft
+snapshot. Reconstruct its field
 and frame origin, then resubmit those pairs to restore it. JSON parsing uses
 round-trip f64 precision so a snapshot does not lose physics bits. This is
 replay infrastructure, not a multiplayer protocol: ownership, administrator
@@ -369,6 +374,12 @@ or damage response. Arrival detection is separate and does not stop the drive.
   while warp is engaged, bubble transport, so anything stepping a craft
   (client, tests, a future server) moves it the same way.
 
+Below the gravity cutoff, active warp retains its final gravity sample for
+the next step, including ordinary flight after dropout. Samples use the
+world tick's exact represented time, so snapshot reloads recompute the same
+value. Suspended or superluminal steps, placement, frame changes and field
+replacement discard the sample.
+
 ## Frames and arrival
 
 `craft::voyage` decides which frame a craft flies in, from its own state and
@@ -414,6 +425,17 @@ inputs give the same path on any machine, wherever the camera is.
   the existing galaxy-model approximation: assigned galactic velocities are
   momentum offsets, not moving stellar ephemerides, so drift relative to
   stars in galactic space is approximate.
+  This approximation is retained for phase 5: matching is scoped to bodies
+  in the craft's current system, not remote stars in galactic space. A ship
+  that leaves a system retains its galactic velocity and can drift relative
+  to the static star positions. Subtracting local rotation would not fix
+  individual stellar scatter and would change the velocity model, so it is
+  not used as a workaround. Consistent matching outside systems requires
+  moving stellar ephemerides and corresponding spatial lookup work.
+  Persistent frame-axis thrust, fixed pointing directions, the pointing up
+  vector and the pilot's retained attitude rotate with a frame handoff;
+  body-local inputs and spin do not. Queued orders describe axes at their
+  application tick, so unapplied orders are not rotated during handoffs.
 - **Shared atlas rules:** the simulation owns list-page lookup, legacy
   candidate inclusion, ID ordering and replacement of generated bodies by
   charted pages. `Library::new(lists)` and the client's asynchronous atlas

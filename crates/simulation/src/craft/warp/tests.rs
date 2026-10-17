@@ -9,6 +9,70 @@ impl Gravity for Constant {
     }
 }
 
+struct Counted {
+    calls: std::cell::Cell<usize>,
+}
+
+impl Gravity for Counted {
+    fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3] {
+        self.calls.set(self.calls.get() + 1);
+        [2.0 + seconds * 0.1 + position[0] * 0.001, 0.0, 0.0]
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn warp_reuses_gravity_and_invalidates_it_across_skipped_samples() {
+    let field = Counted {
+        calls: std::cell::Cell::new(0),
+    };
+    let mut craft = ship();
+    craft.engage_warp().unwrap();
+    for _ in 0..10 {
+        craft.step(&field);
+    }
+    assert_eq!(
+        field.calls.get(),
+        11,
+        "two first samples, then one per step"
+    );
+    // Recomputed snapshot samples must use precisely the same tick time as
+    // the retained sample, not the rounded sum of previous time and dt.
+    let mut restored: Craft =
+        serde_json::from_str(&serde_json::to_string(&craft).unwrap()).unwrap();
+    for _ in 0..10 {
+        craft.step(&field);
+        restored.step(&field);
+        assert_eq!(craft.state(), restored.state());
+    }
+    craft.warp.gravity = GravityPolicy::Suspended;
+    let before = field.calls.get();
+    craft.step(&field);
+    assert_eq!(
+        field.calls.get(),
+        before,
+        "slow suspended warp also skips gravity"
+    );
+    assert!(craft.gravity.is_none());
+    craft.warp.stop("test");
+    craft.step(&field);
+    assert_eq!(field.calls.get(), before + 2);
+    craft.engage_warp().unwrap();
+    for policy in [GravityPolicy::Active, GravityPolicy::Suspended] {
+        craft.warp.gravity = policy;
+        craft.warp.actual_ms = MAX_SPEED;
+        craft.warp.set_speed(MAX_SPEED).unwrap();
+        let before = field.calls.get();
+        craft.step(&field);
+        assert_eq!(field.calls.get(), before, "no samples above cutoff");
+        assert!(craft.gravity.is_none());
+        craft.warp.stop("test");
+        craft.step(&field);
+        assert_eq!(field.calls.get(), before + 2, "dropout resamples gravity");
+        craft.engage_warp().unwrap();
+    }
+}
+
 fn ship() -> Craft {
     Craft::new(
         "ship".into(),

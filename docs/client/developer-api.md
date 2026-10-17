@@ -204,7 +204,9 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   `{"type":"steer_craft","tick":200,"order":{"action":"throttle","value":0.25}}`.
   Without it, the order affects the ship's next unsimulated interval as
   before. A future tick queues it; a past tick is refused. Same-tick orders
-  keep submission order. Queue acceptance is not execution acceptance:
+  keep submission order. Future inputs are value-checked on submission and
+  limited to 300 simulated seconds ahead and 1,024 pending orders per craft.
+  Queue acceptance is not execution acceptance:
   drive/frame interlocks are checked at that future boundary and refusals
   are logged. `ship state` exposes `pending_orders` as tick/order pairs.
   See [step-keyed orders](../simulation/craft.md#body-axis-control-simulation)

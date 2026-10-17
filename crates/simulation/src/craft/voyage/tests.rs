@@ -51,6 +51,135 @@ fn galactic_state(voyage: &Voyage, reference: [f64; 3]) -> (DVec3, DVec3, DVec3)
 
 const AU: f64 = crate::AU_METRES;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn frame_changes_rotate_persistent_frame_axis_inputs() {
+    use crate::craft::{AttitudePilot, PointTarget};
+    let mut voyage = empty_voyage();
+    voyage.craft.input.thrust = [1.0, 2.0, 3.0];
+    voyage
+        .craft
+        .point(PointTarget::Vector([2.0, -1.0, 0.5]), Some([0.0, 1.0, 0.0]))
+        .unwrap();
+    let original = voyage.craft.clone();
+    // Exercise an arbitrary change of axes, independently
+    // of arrival discovery. Body-local spin/controls must not rotate.
+    voyage.craft.spin = [0.1, 0.2, 0.3];
+    let basis = DQuat::from_euler(glam::EulerRot::XYZ, 0.4, -0.7, 1.1);
+    let rebase = voyage.rebase(
+        Frame::System { star: "new".into() },
+        voyage.origin_pc,
+        basis,
+        None,
+    );
+    assert_eq!(
+        voyage.craft.input.thrust,
+        rebase.direction(original.input.thrust)
+    );
+    assert_eq!(voyage.craft.spin, [0.1, 0.2, 0.3]);
+    let AttitudePilot::Point {
+        target: PointTarget::Vector(v),
+        up,
+        attitude,
+    } = &voyage.craft.autopilot
+    else {
+        panic!("pointing lost")
+    };
+    let AttitudePilot::Point {
+        attitude: old_attitude,
+        ..
+    } = original.autopilot
+    else {
+        unreachable!()
+    };
+    assert_eq!(*v, rebase.direction([2.0, -1.0, 0.5]));
+    assert_eq!(*up, Some(rebase.direction([0.0, 1.0, 0.0])));
+    assert_eq!(*attitude, rebase.orientation(old_attitude));
+    assert!((basis * DVec3::from_array(*v) - DVec3::new(2.0, -1.0, 0.5)).length() < 1e-14);
+    assert!(
+        (basis * DVec3::from_array(voyage.craft.input.thrust)
+            - DVec3::from_array(original.input.thrust))
+        .length()
+            < 1e-14
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn future_orders_reject_invalid_values_and_excessive_horizons_at_submission() {
+    use crate::craft::{MAX_THRUST, PointTarget, Thrusters, WarpOrder};
+    let mut voyage = empty_voyage();
+    let invalid = [
+        Order::Throttle { value: f64::NAN },
+        Order::Translate {
+            right: 2.0,
+            up: 0.0,
+            forward: 0.0,
+        },
+        Order::Rotate {
+            pitch: 0.0,
+            yaw: f64::INFINITY,
+            roll: 0.0,
+        },
+        Order::Point {
+            target: PointTarget::Vector([0.0; 3]),
+            up: None,
+        },
+        Order::Point {
+            target: PointTarget::Prograde,
+            up: Some([f64::NAN; 3]),
+        },
+        Order::Configure {
+            thrusters: Thrusters {
+                forward: -1.0,
+                ..Default::default()
+            },
+        },
+        Order::Thrust {
+            thrust: [MAX_THRUST + 1.0, 0.0, 0.0],
+        },
+        Order::Warp {
+            command: WarpOrder::Set { speed_ms: f64::NAN },
+        },
+    ];
+    let before = voyage.craft.clone();
+    for order in invalid {
+        assert!(voyage.order(1, order).is_err());
+        assert_eq!(voyage.craft, before);
+        assert!(voyage.pending_orders().is_empty());
+    }
+    assert!(
+        voyage
+            .order(MAX_ORDER_AHEAD_TICKS + 1, Order::Release)
+            .is_err()
+    );
+    assert!(voyage.order(i64::MAX, Order::Release).is_err());
+    voyage.order(MAX_ORDER_AHEAD_TICKS, Order::Release).unwrap();
+    // A state-dependent conflict is still allowed at submission: a preceding
+    // order may resolve it before this boundary is reached.
+    voyage
+        .order(
+            1,
+            Order::Warp {
+                command: WarpOrder::Engage,
+            },
+        )
+        .unwrap();
+    voyage
+        .order(
+            2,
+            Order::Warp {
+                command: WarpOrder::Disengage,
+            },
+        )
+        .unwrap();
+    voyage.order(2, Order::Throttle { value: 1.0 }).unwrap();
+    voyage.step(&Blank).unwrap();
+    assert!(voyage.craft.warp.engaged);
+    assert!(voyage.step(&Blank).unwrap().refused.is_empty());
+    assert_eq!(voyage.craft.input.controls.throttle, 1.0);
+}
+
 fn empty_voyage() -> Voyage {
     let system = space_shared::StarSystem {
         id: "orders".into(),

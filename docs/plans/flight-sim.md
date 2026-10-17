@@ -444,6 +444,13 @@ native workspace tests, strict native/WASM Clippy and 45 craft tests under
 Node. The generation worker also releases fine-cell caches above an estimated
 32 MiB between requests, retaining expensive coarse integration.
 
+Foundation review follow-up: frame handoffs also rotate persistent frame-axis
+thrust and pointing state. Active sublight warp reuses its final gravity sample,
+discarding it whenever gravity is skipped or the field changes. Queued orders
+receive value validation on submission and have a 300 simulated second horizon;
+state-dependent checks remain at execution. Regression tests cover these rules
+on native and WASM. Visual acceptance of these revisions remains pending.
+
 Phase 4 is the manually commanded drive foundation, not a destination or route
 autopilot. The CLI engages it, selects speed and disengages it; steering,
 assists, plotted autopilot and in-app controls are layered on in later phases.
@@ -495,6 +502,11 @@ Accepted behaviour (including the later unsafe-manual-warp revision):
 
 ### 5 · Dropout velocity
 
+- **Frame decision:** keep the existing static-star approximation and
+  galactic momentum convention. Matching in this phase uses a body in the
+  craft's current system only. Remote matching in galactic space is deferred
+  until stellar positions and spatial queries can advance consistently;
+  subtracting a local rotation velocity alone does not solve stellar scatter.
 - Unmatched dropout keeps the current ordinary velocity, including gravity's
   changes during warp under the default policy. With gravity suspended during
   warp, it preserves the pre-engagement ordinary velocity instead. Neither

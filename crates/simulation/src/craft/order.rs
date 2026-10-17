@@ -58,10 +58,65 @@ pub enum WarpOrder {
 }
 
 impl Order {
+    /// State-independent validation, also run when future inputs are submitted.
+    /// Drive interlocks and body/frame checks remain application-time rules.
+    pub fn validate(&self) -> Result<(), String> {
+        let fractions: &[f64] = match self {
+            Self::Throttle { value } => std::slice::from_ref(value),
+            Self::Translate { right, up, forward } => &[*right, *up, *forward],
+            Self::Rotate { pitch, yaw, roll } => &[*pitch, *yaw, *roll],
+            _ => &[],
+        };
+        if !fractions
+            .iter()
+            .all(|v| v.is_finite() && (-1.0..=1.0).contains(v))
+        {
+            return Err("controls must be finite fractions in [-1, 1]".into());
+        }
+        match self {
+            Self::Point { target, up } => {
+                if let PointTarget::Vector(v) = target
+                    && super::attitude::unit(*v).is_none()
+                {
+                    return Err("direction must be finite and nonzero".into());
+                }
+                if up.is_some_and(|v| super::attitude::unit(v).is_none()) {
+                    return Err("up must be finite and nonzero".into());
+                }
+            }
+            Self::Configure { thrusters } => {
+                if ![thrusters.forward, thrusters.reverse, thrusters.fine]
+                    .iter()
+                    .chain(thrusters.angular.iter())
+                    .all(|v| v.is_finite() && *v >= 0.0)
+                {
+                    return Err("thruster limits must be finite and nonnegative".into());
+                }
+            }
+            Self::Thrust { thrust } => {
+                let size = thrust.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if !size.is_finite() {
+                    return Err("thrust must be three finite numbers".into());
+                }
+                if size > MAX_THRUST {
+                    return Err(format!("thrust must be at most {MAX_THRUST} m/s²"));
+                }
+            }
+            Self::Warp {
+                command: WarpOrder::Set { speed_ms },
+            } => {
+                super::warp::Warp::validate_speed(*speed_ms)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Every order, warp included, takes effect from the craft's next fixed
     /// step (`Craft::tick`), so a server can key orders by step number.
     /// `field` is the craft's system, when it is in one, to check bodies.
     pub fn apply(&self, craft: &mut Craft, field: Option<&Field>) -> Result<(), String> {
+        self.validate()?;
         if craft.warp.engaged && matches!(self, Self::Point { .. } | Self::Stop | Self::Cut) {
             return Err("Disengage warp before engaging turning thrusters or pointing".into());
         }
@@ -118,13 +173,6 @@ impl Order {
                 return Ok(());
             }
             Self::Configure { thrusters } => {
-                if ![thrusters.forward, thrusters.reverse, thrusters.fine]
-                    .iter()
-                    .chain(thrusters.angular.iter())
-                    .all(|v| v.is_finite() && *v >= 0.0)
-                {
-                    return Err("thruster limits must be finite and nonnegative".into());
-                }
                 if thrusters.reverse == 0.0 && controls.throttle < 0.0 {
                     return Err("Cut reverse throttle before disabling the reverse drive".into());
                 }
@@ -132,13 +180,6 @@ impl Order {
                 return Ok(());
             }
             Self::Thrust { thrust } => {
-                let size = thrust.iter().map(|v| v * v).sum::<f64>().sqrt();
-                if !size.is_finite() {
-                    return Err("thrust must be three finite numbers".into());
-                }
-                if size > MAX_THRUST {
-                    return Err(format!("thrust must be at most {MAX_THRUST} m/s²"));
-                }
                 if craft.warp.engaged && *thrust != [0.0; 3] {
                     return Err("Disengage warp before using thrusters".into());
                 }

@@ -26,6 +26,9 @@ pub const LEAVE_RANGES: f64 = 2.0;
 /// Maximum future orders held by one voyage. A server still needs per-player
 /// rate limits and ownership checks at its network boundary.
 pub const MAX_PENDING_ORDERS: usize = 1_024;
+/// Live submission horizon: five simulated minutes. Long replays should feed
+/// their log incrementally rather than occupy the live queue indefinitely.
+pub const MAX_ORDER_AHEAD_TICKS: i64 = 300 * super::STEPS_PER_SECOND;
 /// Approximate retained generation-cache budget between requests. A single
 /// query's temporary working set is additional to this.
 pub const SKY_CACHE_BYTES: usize = 32 * 1024 * 1024;
@@ -328,6 +331,10 @@ impl Voyage {
         if tick == self.craft.tick {
             return self.check(order);
         }
+        if tick.saturating_sub(self.craft.tick) > MAX_ORDER_AHEAD_TICKS {
+            return Err("Ship orders may be scheduled at most 300 simulated seconds ahead".into());
+        }
+        order.validate()?;
         if self.orders.values().map(Vec::len).sum::<usize>() >= MAX_PENDING_ORDERS {
             return Err("Too many pending ship orders".into());
         }
@@ -375,6 +382,7 @@ impl Voyage {
     pub fn set_field(&mut self, field: Field) {
         self.range_m = range_m(&field);
         self.field = field;
+        self.craft.gravity = None;
     }
 
     pub fn in_galaxy(&self) -> bool {
@@ -527,6 +535,19 @@ impl Voyage {
         };
         let state = rebase.state(self.craft.state());
         self.craft.orientation = rebase.orientation(self.craft.orientation);
+        self.craft.input.thrust = rebase.direction(self.craft.input.thrust);
+        if let super::AttitudePilot::Point {
+            target,
+            up,
+            attitude,
+        } = &mut self.craft.autopilot
+        {
+            if let super::PointTarget::Vector(vector) = target {
+                *vector = rebase.direction(*vector);
+            }
+            *up = up.map(|vector| rebase.direction(vector));
+            *attitude = rebase.orientation(*attitude);
+        }
         self.craft.warp.bubble_delta_m = rebase.direction(self.craft.warp.bubble_delta_m);
         self.craft.place(state, self.craft.tick);
         self.craft.reference = None;

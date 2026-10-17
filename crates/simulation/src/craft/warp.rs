@@ -51,10 +51,15 @@ impl Default for Warp {
 
 impl Warp {
     pub fn set_speed(&mut self, speed: f64) -> Result<(), &'static str> {
+        Self::validate_speed(speed)?;
+        self.requested_ms = speed;
+        Ok(())
+    }
+
+    pub(super) fn validate_speed(speed: f64) -> Result<(), &'static str> {
         if !speed.is_finite() || !(MIN_SPEED..=MAX_SPEED).contains(&speed) {
             return Err("Warp speed must be finite, between 1 m/s and 10,000 ly/s");
         }
-        self.requested_ms = speed;
         Ok(())
     }
 
@@ -105,7 +110,10 @@ impl Craft {
         let seconds = self.seconds();
         let pulled = self.warp.gravity == GravityPolicy::Active && travel < GRAVITY_CUTOFF_MS * dt;
         let a = if pulled {
-            DVec3::from_array(gravity.acceleration(state.position, seconds))
+            DVec3::from_array(
+                self.gravity
+                    .unwrap_or_else(|| gravity.acceleration(state.position, seconds)),
+            )
         } else {
             DVec3::ZERO
         };
@@ -113,7 +121,9 @@ impl Craft {
         state.position =
             (DVec3::from_array(state.position) + half_velocity * dt + bubble).to_array();
         let end_a = if pulled {
-            DVec3::from_array(gravity.acceleration(state.position, seconds + dt))
+            DVec3::from_array(
+                gravity.acceleration(state.position, super::tick_seconds(self.tick + 1)),
+            )
         } else {
             DVec3::ZERO
         };
@@ -122,7 +132,9 @@ impl Craft {
         self.tick += 1;
         self.warp.actual_ms = speed;
         self.warp.bubble_delta_m = bubble.to_array();
-        self.gravity = None;
+        // A skipped sample must not survive a suspended/superluminal step.
+        // A valid final sample is also the next ordinary-flight half kick.
+        self.gravity = pulled.then_some(end_a.to_array());
         self.reference = None;
     }
 }
