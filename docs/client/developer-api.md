@@ -236,8 +236,10 @@ The API uses `steer_craft`, for example
 or `{"type":"steer_craft","order":{"action":"warp","command":{"command":"set","speed_ms":1000000}}}`.
 `/state/craft/craft/<index>/warp` contains `engaged`, `requested_ms`, `actual_ms`,
 `gravity`, `stop_reason` and the last step's `bubble_delta_m` in frame axes.
-`warp_mode` (`unsafe_manual`), informational `nearby_systems_status` and
-galactocentric `position_pc` are alongside it. `velocity_ms`
+`warp_mode` (`unsafe_manual`), `arrival` (whether it can enter systems, or
+what its next step waits for while the clock is held) and galactocentric
+`position_pc` are alongside it; `system_loading_error` reports a failed
+background loader. `velocity_ms`
 remains ordinary velocity in the named frame, never bubble speed. During warp
 or galactic flight, prediction reports unavailable rather than an old orbit.
 

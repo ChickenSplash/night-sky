@@ -65,7 +65,8 @@ impl Live {
             self.truncate_warp(seconds);
             self.forecast = Forecast::default();
         }
-        order.apply(&mut self.craft, Some(&self.field))
+        let voyage = &mut self.voyage;
+        order.apply(&mut voyage.craft, Some(&voyage.field))
     }
 }
 

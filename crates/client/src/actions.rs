@@ -600,7 +600,7 @@ pub fn apply(
                 match spawned {
                     Ok(id) => {
                         if let Some(live) = fleet.get_mut(&id) {
-                            live.system_pc =
+                            live.origin_pc =
                                 crate::craft::system_pc(&nav, galaxy, &field, live.star());
                         }
                         nav.select(Some(Selection::Craft(id)));

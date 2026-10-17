@@ -1,21 +1,20 @@
-// Full bodies only for a streamed star the craft is actually approaching.
-import init, { craft_system } from './sim_worker.js';
+// What craft wait for: the systems near a region, and one system's bodies.
+import init, { craft_answer } from './sim_worker.js';
 
 const early = [];
 let ready = false;
-function build(text) {
-  const [token, id, position] = JSON.parse(text);
+function answer(text) {
+  const [token, request] = JSON.parse(text);
   try {
-    const system = JSON.parse(craft_system(id, ...position));
-    self.postMessage(JSON.stringify([token, system]));
+    self.postMessage(JSON.stringify([token, JSON.parse(craft_answer(JSON.stringify(request)))]));
   } catch {
     self.postMessage(JSON.stringify([token, null]));
   }
 }
 self.onmessage = ({ data }) => {
-  if (ready) build(data);
+  if (ready) answer(data);
   else early.push(data);
 };
 await init();
 ready = true;
-early.splice(0).forEach(build);
+early.splice(0).forEach(answer);

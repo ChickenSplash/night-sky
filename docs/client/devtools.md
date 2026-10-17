@@ -31,10 +31,10 @@ GPU/CPU time and vertex/fragment invocations per pass from Bevy's
 hides the main view's pass. Keep the [vendor patch](../../vendor/README.md)
 in step with upgrades.
 
-The **craft CPU** section separates arrival discovery (loaded-system proximity
-checks, streamed-star lookups and polling background body loads) from movement
-plus frame handoffs. Full-system generation runs off-thread and is not included
-in these main-update timings.
+The **craft CPU** section separates system discovery (polling and requesting
+the regions and bodies craft wait for) from movement plus frame handoffs.
+Region lookups and body generation run off-thread and are not included in
+these main-update timings.
 It shows latest values and trailing-second peaks, plus fixed-step counts, even
 when warp is off. These CPU elapsed timings exclude rendering and coast
 forecasting. The same fields are exported as `performance.latest.craft`, each

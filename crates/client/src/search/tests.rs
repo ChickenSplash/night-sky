@@ -92,7 +92,7 @@ fn live_craft_are_found_by_kind_name_and_among_generated_objects() {
         .spawn(system, page, &planet, 400_000.0, Launch::Circular, 0.0)
         .unwrap();
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
-    fleet.get_mut(&ship).unwrap().system_pc = home;
+    fleet.get_mut(&ship).unwrap().origin_pc = home;
     let hub = Hub::new(2);
     let live = live_objects(&fleet, &galaxy, 0.0);
     let search = |text: &str| {

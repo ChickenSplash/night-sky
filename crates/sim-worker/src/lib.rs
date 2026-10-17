@@ -1,8 +1,9 @@
 //! Generation-only WASM for the browser's workers, with no Bevy, DOM or
 //! graphics context: `web/star-worker.js` streams stars with `StarWorker`
-//! and `web/search-worker.js` runs searches with `SearchWorker`. The craft worker
-//! uses `craft_system` for demand-driven full bodies. Each worker
-//! has its own instance and memory.
+//! and `web/search-worker.js` runs searches with `SearchWorker`.
+//! `web/craft-worker.js` answers what craft wait for with `craft_answer`:
+//! nearby systems and their full bodies. Each worker has its own instance
+//! and memory.
 use space_simulation::search::{Order, Runner};
 use space_simulation::{cells::Sky, stream::Loader, stream_wire};
 use std::time::Duration;
@@ -12,11 +13,22 @@ use wasm_bindgen::prelude::*;
 /// orders are seen promptly.
 const SEARCH_SLICE: u64 = 1_000_000;
 
-/// Demand-driven craft body generation, on its own worker, never the UI thread.
+thread_local! {
+    /// Kept warm between requests: a region's first query integrates the
+    /// coarse cells around it, which later ones reuse.
+    static CRAFT_SKY: std::cell::RefCell<Sky> = std::cell::RefCell::new(Sky::default());
+}
+
+/// A craft's wait, as a JSON `voyage::Request`, answered as a JSON
+/// `voyage::Reply`, or `null` when the request is not understood.
 #[wasm_bindgen]
-pub fn craft_system(id: &str, x: f64, y: f64, z: f64) -> String {
-    serde_json::to_string(&space_simulation::generated_system(id, [x, y, z]))
-        .unwrap_or_else(|_| "null".into())
+pub fn craft_answer(request: &str) -> String {
+    use space_simulation::craft::voyage::Request;
+    let Ok(request) = serde_json::from_str::<Request>(request) else {
+        return "null".into();
+    };
+    let reply = CRAFT_SKY.with_borrow_mut(|sky| request.answer(sky, 1));
+    serde_json::to_string(&reply).unwrap_or_else(|_| "null".into())
 }
 
 #[wasm_bindgen]

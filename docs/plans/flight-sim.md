@@ -393,6 +393,18 @@ checked, and a headless browser test verifies the craft-worker transport and
 deterministic body generation. Browser flight visuals were not manually tested;
 native visual acceptance is recorded above.
 
+A post-acceptance review found frame handoffs depended on the client: arrival
+used the camera's streamed stars and entered a system whenever a background
+load happened to finish, so the same inputs could give different paths and an
+unfollowed ship could miss uncharted systems. Frame decisions now live in
+`craft::voyage` in the simulation, from the craft's state and seeded or list
+data alone, with steps waiting (holding the clock) for missing data instead
+of carrying on without it. Craft enter systems only below light speed, which
+keeps the per-region seeded lookup (10 to 90 ms natively, 200 ms cold) off
+high-speed flight. `Craft::step` now integrates warp too. See
+[frames and arrival](../simulation/craft.md#frames-and-arrival). This
+revision has automated coverage only; it has not been flown live.
+
 Straight-line warp along the nose, from the CLI. See the
 [warp drive rules](#warp-drive-rules).
 
@@ -431,16 +443,15 @@ Accepted behaviour (including the later unsafe-manual-warp revision):
 - Frame handoffs: in-system first, then system to galaxy and galaxy to system.
   Position and ordinary velocity transform consistently. Following finds the
   ship across frames; streaming and the visited system stay camera-based, and
-   the craft uses current-system gravity and loaded-star positions for handoffs.
-  Discovery can lag behind high-speed travel and never blocks the drive.
+  the craft uses current-system gravity and seeded system data for handoffs.
+  Missing data holds the clock below light speed and never blocks the drive.
 - How phase 3's prediction behaves in warp: never show the pre-warp orbit as
   the current forecast.
 - A `ns ship warp` group and matching developer API commands, with warp state
   in `ns ship state` and the inspector.
 - No fuel or realistic bubble energy budget in the alpha.
-- Arrival discovery reuses loaded list systems and the streamed spatial index,
-  with demand-driven background body loading, not procedural neighbourhood
-  searches or route certification. The existing generation bound remains a separate alpha
+- Arrival uses a seeded per-region lookup and list systems, loaded in the
+  background, not the camera's streamed stars or route certification. The existing generation bound remains a separate alpha
   simplification; see [stars](../simulation/stars.md).
 - **Done when:** from the CLI, warp to another planet and out of the system,
   then disengage, with no position jumps or unwanted automatic stops, on both

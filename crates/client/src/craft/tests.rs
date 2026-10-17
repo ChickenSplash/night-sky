@@ -40,7 +40,7 @@ fn displayed_warp_motion_survives_reanchors_and_holds_when_paused() {
         let mut fleet = app.world_mut().resource_mut::<Fleet>();
         let live = &mut fleet.craft[0];
         live.craft.frame = Frame::Galaxy {
-            origin_pc: live.system_pc,
+            origin_pc: live.origin_pc,
         };
         let state = State {
             position: [0.0; 3],
@@ -55,11 +55,11 @@ fn displayed_warp_motion_survives_reanchors_and_holds_when_paused() {
     }
     let mut changes = 0;
     for i in 1..=200 {
-        let before = app.world().resource::<Fleet>().craft[0].origin_pc();
+        let before = app.world().resource::<Fleet>().craft[0].origin_pc;
         app.world_mut().resource_mut::<Clock>().0.seconds = epoch + i as f64 * 0.006;
         app.update();
         let live = &app.world().resource::<Fleet>().craft[0];
-        changes += usize::from(before != live.origin_pc());
+        changes += usize::from(before != live.origin_pc);
         assert!((live.display_delta_m.length() / (speed * 0.006) - 1.0).abs() < 1e-6);
     }
     assert!(changes > 10);
@@ -389,7 +389,9 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
         };
         live.craft.place(state, 0.0);
         live.previous = state;
-        live.travel_step();
+        let blank = space_simulation::craft::voyage::Blank;
+        let rebase = live.voyage.settle(&blank).unwrap().unwrap();
+        live.rebase(&rebase);
         assert!(matches!(live.craft.frame, Frame::Galaxy { .. }));
     }
     // Finish the deliberate initial follow flight, not a handoff flight.
@@ -436,8 +438,8 @@ fn manual_dropout_discards_undisplayed_warp_without_jumping_or_resetting_fixed_s
         live.craft.warp.set_speed(MAX_SPEED).unwrap();
         live.craft.engage_warp().unwrap();
         live.craft.warp.actual_ms = MAX_SPEED;
-        let (state, speed, bubble) = live.craft.warp_candidate(&live.field);
-        live.craft.commit_warp(state, speed, bubble);
+        live.previous = live.craft.state();
+        live.voyage.advance();
     }
     let cutoff = epoch + STEP_SECONDS * 0.4;
     app.world_mut().resource_mut::<Clock>().0.seconds = cutoff;
@@ -752,7 +754,7 @@ fn orders_make_a_forecast_obsolete_and_burns_still_finish_theirs() {
     let coasting = fleet.craft[0].forecast.shown.clone().unwrap();
     let live = &mut fleet.craft[0];
     Order::Throttle { value: 0.2 }
-        .apply(&mut live.craft, Some(&live.field))
+        .apply(&mut live.voyage.craft, Some(&live.voyage.field))
         .unwrap();
     fleet.forecast(forecast::STEPS_PER_FRAME);
     let live = &fleet.craft[0];
@@ -764,7 +766,7 @@ fn orders_make_a_forecast_obsolete_and_burns_still_finish_theirs() {
     for _ in 0..60 {
         let live = &mut fleet.craft[0];
         for _ in 0..20 {
-            live.craft.step(&live.field);
+            live.voyage.craft.step(&live.voyage.field);
         }
         let before = live.forecast.shown.as_ref().map(|p| p.start_seconds);
         fleet.forecast(forecast::STEPS_PER_FRAME);
@@ -798,7 +800,9 @@ fn craft_share_the_budget_and_fast_time_ages_a_forecast() {
     let live = &mut fleet.craft[0];
     let horizon = live.forecast.shown.as_ref().unwrap().horizon_seconds;
     let until = live.craft.seconds + horizon * 0.6;
-    live.craft.advance(&live.field, until, usize::MAX);
+    live.voyage
+        .craft
+        .advance(&live.voyage.field, until, usize::MAX);
     let age = readout(&fleet, until)["craft"][0]["prediction"]["age_seconds"]
         .as_f64()
         .unwrap();
@@ -844,7 +848,9 @@ fn a_predicted_path_is_anchored_where_its_planet_is_now() {
         .unwrap();
     let started = live.craft.seconds;
     let soon = started + period * 0.2;
-    live.craft.advance(&live.field, soon, usize::MAX);
+    live.voyage
+        .craft
+        .advance(&live.voyage.field, soon, usize::MAX);
     live.previous = live.craft.state();
     let live = fleet.get(&id).unwrap();
     let loop_ = predicted_path(live, soon).unwrap();
@@ -863,7 +869,9 @@ fn a_predicted_path_is_anchored_where_its_planet_is_now() {
     let live = fleet.get_mut(&id).unwrap();
     let horizon = live.forecast.shown.as_ref().unwrap().horizon_seconds;
     let until = started + horizon * 0.3;
-    live.craft.advance(&live.field, until, usize::MAX);
+    live.voyage
+        .craft
+        .advance(&live.voyage.field, until, usize::MAX);
     live.previous = live.craft.state();
     let live = fleet.get(&id).unwrap();
     let p = live.forecast.shown.as_ref().unwrap();

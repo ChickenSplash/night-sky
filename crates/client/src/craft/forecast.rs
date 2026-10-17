@@ -109,7 +109,8 @@ impl Fleet {
     pub fn forecast(&mut self, budget: usize) {
         let share = (budget / self.craft.len().max(1)).max(1);
         for live in &mut self.craft {
-            live.forecast.work(&live.craft, &live.field, share);
+            live.forecast
+                .work(&live.voyage.craft, &live.voyage.field, share);
         }
     }
 }

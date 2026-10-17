@@ -47,8 +47,7 @@ fn ordinary_momentum_and_bubble_are_separate_under_both_policies() {
         craft.warp.set_speed(1e12).unwrap();
         craft.engage_warp().unwrap();
         for _ in 0..20 {
-            let (state, speed, bubble) = craft.warp_candidate(&Constant);
-            craft.commit_warp(state, speed, bubble);
+            craft.step(&Constant);
         }
         let expected = if policy == GravityPolicy::Active {
             12.0
@@ -93,9 +92,13 @@ fn engagement_and_control_interlocks() {
             })
             .is_err()
     );
+    // Stepping an engaged craft moves it by bubble transport.
+    craft.warp.set_speed(1_000.0).unwrap();
+    craft.warp.actual_ms = 1_000.0;
     let before = craft.state();
     craft.step(&Constant);
-    assert_eq!(craft.state(), before); // warp is advanced through its own integrator
+    assert!(craft.state().position[2] < before.position[2] - 49.0);
+    assert_eq!(craft.seconds, STEP_SECONDS);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -107,12 +110,14 @@ fn speed_validation_and_ramp() {
     }
     craft.warp.set_speed(1_000.0).unwrap();
     craft.engage_warp().unwrap();
-    let (state, speed, _) = craft.warp_candidate(&Constant);
-    assert!(speed > 0.0 && speed < 1_000.0);
-    assert!(state.position[2] < 0.0 && state.position[2] > -50.0);
     let encoded = serde_json::to_string(&craft).unwrap();
     let loaded: Craft = serde_json::from_str(&encoded).unwrap();
     assert_eq!(loaded.warp, craft.warp);
+    craft.step(&Constant);
+    let speed = craft.warp.actual_ms;
+    assert!(speed > 0.0 && speed < 1_000.0);
+    let z = craft.state().position[2];
+    assert!(z < 0.0 && z > -50.0);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -133,8 +138,7 @@ fn timestamped_cutoff_preserves_momentum_and_step_boundary_under_both_policies()
             craft.engage_warp().unwrap();
             craft.warp.actual_ms = MAX_SPEED;
             let from = craft.state();
-            let (state, speed, bubble) = craft.warp_candidate(&Constant);
-            craft.commit_warp(state, speed, bubble);
+            craft.step(&Constant);
             let end = craft.state();
             let at = STEP_SECONDS * share;
             let cutoff = craft
@@ -171,8 +175,7 @@ fn cutoff_at_a_finished_step_does_not_rewind_it() {
     let mut craft = ship();
     craft.engage_warp().unwrap();
     let from = craft.state();
-    let (state, speed, bubble) = craft.warp_candidate(&Constant);
-    craft.commit_warp(state, speed, bubble);
+    craft.step(&Constant);
     let before = craft.state();
     assert!(
         craft

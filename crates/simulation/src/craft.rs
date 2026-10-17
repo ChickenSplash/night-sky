@@ -23,6 +23,7 @@ pub use attitude::{AttitudePilot, PointTarget};
 mod reference;
 pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
 pub mod predict;
+pub mod voyage;
 pub mod warp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -286,10 +287,11 @@ impl Craft {
     }
 
     /// One fixed step: kick, drift, kick (velocity Verlet), which keeps
-    /// orbital energy from drifting over many laps.
+    /// orbital energy from drifting over many laps; or bubble transport
+    /// while warp is engaged.
     pub fn step(&mut self, gravity: &impl Gravity) {
-        // Bubble motion uses its own integrator, not ordinary stepping.
         if self.warp.engaged {
+            self.warp_step(gravity);
             return;
         }
         let thrust = self.thrust();

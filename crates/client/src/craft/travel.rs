@@ -1,34 +1,215 @@
-//! Unsafe manual travel and demand-driven frame handoffs. Reuse loaded star
-//! positions; generate bodies off-thread only when approaching a candidate.
+//! The client's atlas: the system data its craft wait for, worked out in the
+//! background and cached. It never decides a frame change, only supplies
+//! data; `Voyage` decides from the craft's own state. Charted list pages take
+//! the place of the generated systems they are assigned to.
+use super::loading::{Pending, Reply, Request};
 use super::*;
-use bevy::math::{DQuat, DVec3};
+use bevy::math::DVec3;
 use space_simulation::{
-    AU_METRES, LY_METRES,
-    craft::Gravity,
+    LY_METRES,
+    craft::voyage::{Arrival, Atlas, Rebase, Wait, page_star_id, seeded_arrival},
     galaxy::{GalaxyModel, PC_METRES},
+    neighbourhood::{Candidate, REGION_PC, Region},
 };
+use std::collections::{HashMap, VecDeque};
 
-// Local precision threshold only. No search is restarted at this distance.
-const REACH_M: f64 = 0.25 * LY_METRES;
+/// Regions and systems kept once worked out, oldest dropped first.
+const REGIONS: usize = 8;
+const ARRIVALS: usize = 64;
 
-#[derive(Default)]
-pub struct NearbySystems {
-    pending: Option<ArrivalLoad>,
-    attempted: Option<String>,
-    fields: Vec<Known>,
-    pub ready: bool,
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Key {
+    Region(Region),
+    System(String),
+}
+
+impl Key {
+    fn of(wait: &Wait) -> Self {
+        match wait {
+            Wait::Region(region) => Self::Region(*region),
+            Wait::System(candidate) => Self::System(candidate.id.clone()),
+        }
+    }
+}
+
+pub struct Charts {
+    regions: HashMap<Region, Vec<Candidate>>,
+    arrivals: HashMap<String, Arrival>,
+    kept: VecDeque<Key>,
+    pending: HashMap<Key, (Wait, Pending)>,
+    /// Works out waits on the frame itself: without a background worker, or
+    /// when none can be started.
+    fallback: Option<space_simulation::cells::Sky>,
     pub error: Option<String>,
+    /// Work waits out on a background worker. Off in tests, which then step
+    /// without waiting frames for one.
+    pub background: bool,
 }
 
-struct ArrivalLoad {
-    id: String,
-    origin_pc: [f64; 3],
-    job: super::loading::Pending,
+impl Default for Charts {
+    fn default() -> Self {
+        Self {
+            regions: HashMap::new(),
+            arrivals: HashMap::new(),
+            kept: VecDeque::new(),
+            pending: HashMap::new(),
+            fallback: None,
+            error: None,
+            background: !cfg!(test),
+        }
+    }
 }
 
-struct Known {
-    field: Field,
-    origin_pc: [f64; 3],
+impl Atlas for Charts {
+    fn region(&self, region: Region) -> Option<&[Candidate]> {
+        self.regions.get(&region).map(Vec::as_slice)
+    }
+
+    fn arrival(&self, star: &str) -> Option<&Arrival> {
+        self.arrivals.get(star)
+    }
+}
+
+impl Charts {
+    /// Collect finished background work.
+    pub fn poll(&mut self, galaxy: &Galaxy) {
+        let done: Vec<(Key, Result<Reply, ()>)> = self
+            .pending
+            .iter()
+            .filter_map(|(key, (_, job))| Some((key.clone(), job.poll()?)))
+            .collect();
+        for (key, result) in done {
+            let (wait, _) = self.pending.remove(&key).unwrap();
+            match result {
+                Ok(reply) => self.accept(&wait, reply, galaxy),
+                // Asked again on the next wait, never silently skipped.
+                Err(()) => {
+                    self.error = Some(format!("Background system loading failed for {key:?}"));
+                }
+            }
+        }
+    }
+
+    /// Start working out what a craft waits for. Returns whether it is
+    /// already known, so the craft can step again at once.
+    pub fn offer(&mut self, wait: &Wait, galaxy: &Galaxy) -> bool {
+        if let Wait::System(candidate) = wait
+            && let Some((system, page)) = crate::objects::known_system(galaxy, &candidate.id)
+        {
+            let arrival = Arrival::new(Field::new(system.clone(), page), candidate.position_pc);
+            self.keep(Key::System(candidate.id.clone()), |charts| {
+                charts.arrivals.insert(candidate.id.clone(), arrival);
+            });
+            return true;
+        }
+        let key = Key::of(wait);
+        if self.pending.contains_key(&key) {
+            return false;
+        }
+        let request = Request::of(wait);
+        let job = if !self.background {
+            None
+        } else {
+            let job = Pending::start(request.clone());
+            if job.is_none() {
+                self.error = Some("Cannot start the system loader; loading on the frame".into());
+            }
+            job
+        };
+        if let Some(job) = job {
+            self.pending.insert(key, (wait.clone(), job));
+            return false;
+        }
+        let sky = self.fallback.get_or_insert_with(Default::default);
+        let reply = request.answer(sky, space_simulation::craft::voyage::threads());
+        self.accept(wait, reply, galaxy);
+        true
+    }
+
+    fn accept(&mut self, wait: &Wait, reply: Reply, galaxy: &Galaxy) {
+        match (wait, reply) {
+            (Wait::Region(region), Reply::Region { mut candidates }) => {
+                candidates.extend(legacy_candidates(*region, galaxy));
+                candidates.sort_by(|a, b| a.id.cmp(&b.id));
+                self.keep(Key::Region(*region), |charts| {
+                    charts.regions.insert(*region, candidates);
+                });
+            }
+            (Wait::System(candidate), Reply::System { system }) => {
+                let arrival = seeded_arrival(candidate, system);
+                self.keep(Key::System(candidate.id.clone()), |charts| {
+                    charts.arrivals.insert(candidate.id.clone(), arrival);
+                });
+            }
+            _ => {}
+        }
+    }
+
+    fn keep(&mut self, key: Key, insert: impl FnOnce(&mut Self)) {
+        insert(self);
+        self.kept.retain(|k| *k != key);
+        self.kept.push_back(key);
+        let count = |kept: &VecDeque<Key>, region: bool| {
+            kept.iter()
+                .filter(|k| matches!(k, Key::Region(_)) == region)
+                .count()
+        };
+        for (region, most) in [(true, REGIONS), (false, ARRIVALS)] {
+            while count(&self.kept, region) > most {
+                let index = self
+                    .kept
+                    .iter()
+                    .position(|k| matches!(k, Key::Region(_)) == region)
+                    .unwrap();
+                match self.kept.remove(index) {
+                    Some(Key::Region(r)) => {
+                        self.regions.remove(&r);
+                    }
+                    Some(Key::System(id)) => {
+                        self.arrivals.remove(&id);
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+}
+
+/// List pages with no cell star of their own, which seeds cannot find.
+fn legacy_candidates(region: Region, galaxy: &Galaxy) -> Vec<Candidate> {
+    let min = region.min_pc();
+    let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+    let mut found = Vec::new();
+    for system in &galaxy.systems {
+        for page in system.pages() {
+            if system.page_star(page).is_some() {
+                continue;
+            }
+            let origin_pc = (crate::scene::page_origin_ly(system, page) * (LY_METRES / PC_METRES)
+                + home)
+                .to_array();
+            let range_pc =
+                space_simulation::craft::voyage::range_m(&Field::new(system.clone(), page))
+                    / PC_METRES;
+            let gap: f64 = (0..3)
+                .map(|i| {
+                    (min[i] - origin_pc[i])
+                        .max(origin_pc[i] - min[i] - REGION_PC)
+                        .max(0.0)
+                        .powi(2)
+                })
+                .sum::<f64>()
+                .sqrt();
+            if gap < range_pc {
+                found.push(Candidate {
+                    id: page_star_id(system, page),
+                    position_pc: origin_pc,
+                    reach_pc: range_pc,
+                });
+            }
+        }
+    }
+    found
 }
 
 impl Live {
@@ -37,286 +218,47 @@ impl Live {
             (self.previous, self.craft.seconds - STEP_SECONDS),
             |cutoff| (cutoff.state, cutoff.seconds),
         );
-        let cutoff = if matches!(self.craft.frame, Frame::Galaxy { .. }) {
-            self.craft
-                .truncate_warp_segment(from, from_seconds, seconds, &Empty)
-        } else {
-            self.craft
-                .truncate_warp_segment(from, from_seconds, seconds, &self.field)
-        };
-        if cutoff.is_some() {
-            self.cutoff = cutoff;
+        if let Some(cutoff) = self.voyage.truncate_warp(from, from_seconds, seconds) {
+            self.cutoff = Some(cutoff);
         }
     }
 
-    pub fn origin_pc(&self) -> [f64; 3] {
-        match self.craft.frame {
-            Frame::Galaxy { origin_pc } => origin_pc,
-            Frame::System { .. } => self.system_pc,
+    /// Re-express everything kept in the old frame after a frame change.
+    pub(super) fn rebase(&mut self, rebase: &Rebase) {
+        self.previous = rebase.state(self.previous);
+        self.previous_orientation = rebase.orientation(self.previous_orientation);
+        self.displayed = self.displayed.map(|state| rebase.state(state));
+        if let Some(cutoff) = &mut self.cutoff {
+            cutoff.state = rebase.state(cutoff.state);
+        }
+        if rebase.frame_changed {
+            self.forecast = Forecast::default();
         }
     }
 
-    pub fn basis(&self) -> DQuat {
-        match self.craft.frame {
-            Frame::Galaxy { .. } => DQuat::IDENTITY,
-            Frame::System { .. } => {
-                crate::scene::page_frame(self.field.system(), self.field.page())
-            }
-        }
-    }
-
+    /// Where the craft is at `seconds`, in parsecs from the galactic centre.
     pub fn position_pc(&self, seconds: f64) -> [f64; 3] {
-        (DVec3::from_array(self.origin_pc())
-            + self.basis() * DVec3::from_array(self.state_at(seconds).position) / PC_METRES)
-            .to_array()
+        self.voyage.galactic_pc(self.state_at(seconds).position)
     }
 
+    /// The frame's origin in light years from home, as drawing places it.
     pub fn origin_ly(&self) -> DVec3 {
-        if matches!(self.craft.frame, Frame::System { .. }) {
+        if !self.voyage.in_galaxy() {
             return crate::scene::page_origin_ly(self.field.system(), self.field.page());
         }
-        (DVec3::from_array(self.origin_pc()) - DVec3::from_array(GalaxyModel::milky_way().home_pc))
+        (DVec3::from_array(self.origin_pc) - DVec3::from_array(GalaxyModel::milky_way().home_pc))
             * (PC_METRES / LY_METRES)
     }
 
-    pub fn nearby_status(&self) -> &str {
-        if let Some(error) = &self.nearby.error {
-            error
-        } else if self.nearby.ready {
-            "loaded-system proximity checks only"
-        } else {
-            "loading approached system in background (warp unrestricted)"
+    /// What the craft's next step is waiting for, if anything.
+    pub fn arrival_status(&self) -> String {
+        match &self.waiting {
+            None if self.voyage.arriving() => "entering systems".into(),
+            None if self.voyage.in_galaxy() => "too fast to enter systems".into(),
+            None => format!("in {}", self.star()),
+            Some(Wait::Region(_)) => "waiting for nearby systems (clock held)".into(),
+            Some(Wait::System(candidate)) => format!("loading {} (clock held)", candidate.id),
         }
-    }
-
-    pub fn prepare_nearby(&mut self, galaxy: &Galaxy) {
-        // Keep galactic offsets local too. Re-anchor by subtracting a nearby
-        // representable origin, retaining the residual in metres rather than
-        // replacing the craft position with rounded galactocentric parsecs.
-        if let Frame::Galaxy { origin_pc } = self.craft.frame
-            && DVec3::from_array(self.craft.state().position).length() > REACH_M / 2.0
-        {
-            let next = self.position_pc(self.craft.seconds);
-            let shift = (DVec3::from_array(next) - DVec3::from_array(origin_pc)) * PC_METRES;
-            let mut state = self.craft.state();
-            state.position = (DVec3::from_array(state.position) - shift).to_array();
-            self.previous.position = (DVec3::from_array(self.previous.position) - shift).to_array();
-            if let Some(displayed) = &mut self.displayed {
-                displayed.position = (DVec3::from_array(displayed.position) - shift).to_array();
-            }
-            if let Some(cutoff) = &mut self.cutoff {
-                cutoff.state.position =
-                    (DVec3::from_array(cutoff.state.position) - shift).to_array();
-            }
-            self.craft.place(state, self.craft.seconds);
-            self.craft.frame = Frame::Galaxy { origin_pc: next };
-            self.system_pc = next;
-        }
-        if let Some(result) = self.nearby.pending.as_ref().and_then(|p| p.job.poll()) {
-            let pending = self.nearby.pending.take().unwrap();
-            if let Some(system) = result {
-                let known = Known {
-                    field: Field::new(system, 0),
-                    origin_pc: pending.origin_pc,
-                };
-                // Results cannot change the frame after the craft has flown on.
-                if self.inside(&known) {
-                    self.remember(known);
-                }
-            } else {
-                self.nearby.error = Some(format!(
-                    "Body loading failed for {} (warp unrestricted)",
-                    pending.id
-                ));
-            }
-        }
-        self.nearby.ready = self.nearby.pending.is_none();
-        if !self.needs_arrival() {
-            return;
-        }
-        // Lists are already loaded. No procedural census or body generation.
-        let here = self.origin_ly()
-            + self.basis() * DVec3::from_array(self.craft.state().position) / LY_METRES;
-        for system in &galaxy.systems {
-            for page in system.pages() {
-                let origin = crate::scene::page_origin_ly(system, page);
-                if (origin - here).length() * LY_METRES < system_range(system, page) {
-                    let known = Known {
-                        field: Field::new(system.clone(), page),
-                        origin_pc: (origin * (LY_METRES / PC_METRES)
-                            + DVec3::from_array(GalaxyModel::milky_way().home_pc))
-                        .to_array(),
-                    };
-                    self.remember(known);
-                    return;
-                }
-            }
-        }
-    }
-
-    fn inside(&self, known: &Known) -> bool {
-        let delta = (DVec3::from_array(self.origin_pc()) - DVec3::from_array(known.origin_pc))
-            * PC_METRES
-            + self.basis() * DVec3::from_array(self.craft.state().position);
-        delta.length() < range(&known.field)
-    }
-
-    fn needs_arrival(&self) -> bool {
-        (self.star().is_empty()
-            || DVec3::from_array(self.craft.state().position).length() >= 2.0 * range(&self.field))
-            && !self.nearby.fields.iter().any(|known| self.inside(known))
-    }
-
-    fn remember(&mut self, known: Known) {
-        // A bounded two-entry arrival cache, not an accumulating neighbourhood.
-        if self.nearby.fields.len() >= 2 {
-            self.nearby.fields.remove(0);
-        }
-        self.nearby.fields.push(known);
-    }
-
-    pub fn prepare_streamed(
-        &mut self,
-        stars: &crate::stars::stream::Starfield,
-        metrics: &mut crate::stars::stream::StreamMetrics,
-    ) {
-        if !self.needs_arrival() || self.nearby.pending.is_some() {
-            return;
-        }
-        let here = DVec3::from_array(self.position_pc(self.craft.seconds));
-        let Some((_, cell, star)) = stars.nearest(here, 0.02 * LY_METRES / PC_METRES, metrics)
-        else {
-            self.nearby.attempted = None;
-            return;
-        };
-        self.request_arrival(star.id(cell), star.position_pc);
-    }
-
-    fn request_arrival(&mut self, id: String, origin_pc: [f64; 3]) {
-        if self.nearby.pending.is_some() || self.nearby.attempted.as_ref() == Some(&id) {
-            return;
-        }
-        self.nearby.attempted = Some(id.clone());
-        self.nearby.error = None;
-        let ly = ((DVec3::from_array(origin_pc)
-            - DVec3::from_array(GalaxyModel::milky_way().home_pc))
-            * (PC_METRES / LY_METRES))
-            .to_array();
-        if let Some(job) = super::loading::Pending::start(id.clone(), ly) {
-            self.nearby.pending = Some(ArrivalLoad { id, origin_pc, job });
-            self.nearby.ready = false;
-        } else {
-            self.nearby.error = Some("Cannot start body loader (warp unrestricted)".into());
-        }
-    }
-
-    pub fn travel_step(&mut self) {
-        if !self.craft.warp.engaged {
-            if matches!(self.craft.frame, Frame::Galaxy { .. }) {
-                self.craft.step(&Empty);
-            } else {
-                self.craft.step(&self.field);
-            }
-            self.handoff();
-            return;
-        }
-        let (candidate, speed, bubble) = if self.star().is_empty() {
-            self.craft.warp_candidate(&Empty)
-        } else {
-            self.craft.warp_candidate(&self.field)
-        };
-        // Manual warp intentionally permits body crossings and unknown space.
-        self.craft.commit_warp(candidate, speed, bubble);
-        self.forecast = Forecast::default();
-        self.handoff();
-    }
-
-    fn handoff(&mut self) {
-        let origin = DVec3::from_array(self.origin_pc());
-        let old_basis = self.basis();
-        let state = self.craft.state();
-        let here = old_basis * DVec3::from_array(state.position);
-        let current = self.star().to_owned();
-        let inside_current = !current.is_empty() && here.length() < 2.0 * range(&self.field);
-        if inside_current {
-            return;
-        }
-        let target = self.nearby.fields.iter().find(|known| {
-            let delta = (origin - DVec3::from_array(known.origin_pc)) * PC_METRES + here;
-            delta.length() < range(&known.field)
-        });
-        let (frame, new_origin, new_basis, new_field) = match target {
-            Some(known) => (
-                Frame::System {
-                    star: objects::star_id(known.field.system(), known.field.page()),
-                },
-                DVec3::from_array(known.origin_pc),
-                crate::scene::page_frame(known.field.system(), known.field.page()),
-                Some(known.field.clone()),
-            ),
-            None if current.is_empty() => return,
-            None => (
-                Frame::Galaxy {
-                    origin_pc: origin.to_array(),
-                },
-                origin,
-                DQuat::IDENTITY,
-                None,
-            ),
-        };
-        let old_velocity = frame_velocity(&self.craft.frame, self.system_pc);
-        let new_velocity = frame_velocity(&frame, new_origin.to_array());
-        let rotation = new_basis.inverse() * old_basis;
-        let transform = |s: State| State {
-            position: (new_basis.inverse()
-                * ((origin - new_origin) * PC_METRES + old_basis * DVec3::from_array(s.position)))
-            .to_array(),
-            velocity: (new_basis.inverse()
-                * (old_basis * DVec3::from_array(s.velocity) + old_velocity - new_velocity))
-                .to_array(),
-        };
-        self.previous = transform(self.previous);
-        self.displayed = self.displayed.map(transform);
-        if let Some(cutoff) = &mut self.cutoff {
-            cutoff.state = transform(cutoff.state);
-        }
-        self.previous_orientation =
-            (rotation * DQuat::from_array(self.previous_orientation)).to_array();
-        self.craft.orientation = (rotation * DQuat::from_array(self.craft.orientation)).to_array();
-        self.craft.warp.bubble_delta_m =
-            (rotation * DVec3::from_array(self.craft.warp.bubble_delta_m)).to_array();
-        self.craft.place(transform(state), self.craft.seconds);
-        self.craft.reference = None;
-        self.craft.frame = frame;
-        self.system_pc = new_origin.to_array();
-        if let Some(field) = new_field {
-            self.field = field;
-        }
-        self.forecast = Forecast::default();
-    }
-}
-
-fn range(field: &Field) -> f64 {
-    system_range(field.system(), field.page())
-}
-
-fn system_range(system: &StarSystem, page: u32) -> f64 {
-    (0.02 * LY_METRES).max(4.0 * space_simulation::system_extent_au(system, page) * AU_METRES)
-}
-
-fn frame_velocity(frame: &Frame, pc: [f64; 3]) -> DVec3 {
-    match frame {
-        Frame::Galaxy { .. } => DVec3::ZERO,
-        Frame::System { star } => {
-            DVec3::from_array(space_simulation::kinematics::system_velocity_kms(star, pc)) * 1_000.0
-        }
-    }
-}
-
-struct Empty;
-impl Gravity for Empty {
-    fn acceleration(&self, _: [f64; 3], _: f64) -> [f64; 3] {
-        [0.0; 3]
     }
 }
 

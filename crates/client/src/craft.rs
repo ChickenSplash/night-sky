@@ -10,6 +10,7 @@ use space_simulation::{
     craft::{
         Craft, CraftKind, Field, Frame, Reference, STEP_SECONDS, circular_speed, distance,
         predict::Prediction,
+        voyage::{Voyage, Wait},
     },
 };
 
@@ -45,6 +46,8 @@ pub const MAX_THRUST: f64 = 100.0;
 #[derive(Resource, Default)]
 pub struct Fleet {
     pub craft: Vec<Live>,
+    /// System data the craft have waited for, shared between them.
+    pub charts: travel::Charts,
     /// The last number given to a craft.
     numbered: u64,
     /// Whether the craft held the clock back this frame.
@@ -63,12 +66,8 @@ pub struct Now<'a> {
 impl Now<'static> {
     /// No craft at all.
     pub fn none() -> Self {
-        static EMPTY: Fleet = Fleet {
-            craft: Vec::new(),
-            numbered: 0,
-            held: false,
-        };
-        EMPTY.at(0.0)
+        static EMPTY: std::sync::OnceLock<Fleet> = std::sync::OnceLock::new();
+        EMPTY.get_or_init(Fleet::default).at(0.0)
     }
 }
 
@@ -78,9 +77,10 @@ impl<'a> Now<'a> {
     }
 }
 
+/// A live craft: its voyage, which steps it, and what drawing needs. Reads
+/// through to the voyage's craft, field and frame origin.
 pub struct Live {
-    pub craft: Craft,
-    pub field: Field,
+    pub voyage: Voyage,
     /// The state one step before `craft`'s, blended with it when drawn.
     previous: State,
     previous_orientation: [f64; 4],
@@ -90,12 +90,23 @@ pub struct Live {
     displayed: Option<State>,
     /// This update's displayed displacement in galactic axes, excluding camera orbit.
     pub display_delta_m: bevy::math::DVec3,
-    /// Its system's position, in parsecs from the galactic centre, where
-    /// search measures its distance from.
-    pub system_pc: [f64; 3],
     /// Where it would go if it coasted.
     pub forecast: Forecast,
-    pub nearby: travel::NearbySystems,
+    /// What its next step waits for: the clock is held until it is known.
+    pub waiting: Option<Wait>,
+}
+
+impl std::ops::Deref for Live {
+    type Target = Voyage;
+    fn deref(&self) -> &Voyage {
+        &self.voyage
+    }
+}
+
+impl std::ops::DerefMut for Live {
+    fn deref_mut(&mut self) -> &mut Voyage {
+        &mut self.voyage
+    }
 }
 
 impl Live {
@@ -282,15 +293,13 @@ impl Fleet {
         info!(target: "craft", "Spawned {id} {:.0} km above {body}", altitude / 1_000.0);
         self.craft.push(Live {
             previous_orientation: craft.orientation,
-            craft,
-            field,
+            voyage: Voyage::new(craft, field, [0.0; 3]),
             previous: state,
             displayed: None,
             display_delta_m: bevy::math::DVec3::ZERO,
             cutoff: None,
-            system_pc: [0.0; 3],
             forecast: Forecast::default(),
-            nearby: travel::NearbySystems::default(),
+            waiting: None,
         });
         Ok(id)
     }
@@ -376,35 +385,26 @@ pub fn locate_body(
 }
 
 /// Steps every craft up to the clock, at most `MAX_STEPS_PER_FRAME` steps
-/// each. A craft that cannot keep up holds the clock back to it.
+/// each. A craft that cannot keep up, or waits for system data, holds the
+/// clock back to it.
 pub fn step(
     mut clock: ResMut<Clock>,
     mut fleet: ResMut<Fleet>,
     galaxy: Res<crate::Universe>,
-    mut metrics: Option<ResMut<crate::stars::stream::StreamMetrics>>,
-    stars: Option<Res<crate::stars::stream::Starfield>>,
+    metrics: Option<ResMut<crate::stars::stream::StreamMetrics>>,
 ) {
     use bevy::platform::time::Instant;
     let start = Instant::now();
     let mut timing = crate::stars::stream::CraftFrame::default();
     let until = clock.0.seconds;
     let mut reached = f64::INFINITY;
-    for live in &mut fleet.craft {
-        let discovery_start = Instant::now();
-        live.prepare_nearby(&galaxy.0);
-        if let (Some(stars), Some(metrics)) = (stars.as_deref(), metrics.as_deref_mut()) {
-            live.prepare_streamed(stars, metrics);
-        }
-        timing.discovery_ms += discovery_start.elapsed().as_secs_f64() * 1000.0;
+    let Fleet { craft, charts, .. } = &mut *fleet;
+    let discovery_start = Instant::now();
+    charts.poll(&galaxy.0);
+    timing.discovery_ms += discovery_start.elapsed().as_secs_f64() * 1000.0;
+    for live in craft.iter_mut() {
         let stepping_start = Instant::now();
-        let mut steps = 0;
-        while live.craft.seconds < until && steps < MAX_STEPS_PER_FRAME {
-            live.cutoff = None;
-            live.previous = live.craft.state();
-            live.previous_orientation = live.craft.orientation;
-            live.travel_step();
-            steps += 1;
-        }
+        let steps = live.catch_up(charts, &galaxy.0, until, &mut timing.discovery_ms);
         reached = reached.min(live.craft.seconds);
         timing.stepping_ms += stepping_start.elapsed().as_secs_f64() * 1000.0;
         timing.steps += steps;
@@ -426,6 +426,48 @@ pub fn step(
     timing.total_ms = start.elapsed().as_secs_f64() * 1000.0;
     if let Some(mut metrics) = metrics {
         metrics.craft_latest = timing;
+    }
+}
+
+impl Live {
+    /// Step towards `until`, at most `MAX_STEPS_PER_FRAME` steps, stopping
+    /// early while system data the next step needs is worked out. Returns
+    /// the steps taken; `discovery_ms` gains the time spent asking for data.
+    pub fn catch_up(
+        &mut self,
+        charts: &mut travel::Charts,
+        galaxy: &Galaxy,
+        until: f64,
+        discovery_ms: &mut f64,
+    ) -> usize {
+        use bevy::platform::time::Instant;
+        let mut steps = 0;
+        self.waiting = None;
+        while self.craft.seconds < until && steps < MAX_STEPS_PER_FRAME {
+            match self.voyage.settle(&*charts) {
+                Ok(Some(rebase)) => self.rebase(&rebase),
+                Ok(None) => {}
+                Err(wait) => {
+                    let start = Instant::now();
+                    let known = charts.offer(&wait, galaxy);
+                    *discovery_ms += start.elapsed().as_secs_f64() * 1000.0;
+                    if known {
+                        continue;
+                    }
+                    self.waiting = Some(wait);
+                    break;
+                }
+            }
+            self.cutoff = None;
+            self.previous = self.craft.state();
+            self.previous_orientation = self.craft.orientation;
+            self.voyage.advance();
+            if self.craft.warp.engaged {
+                self.forecast = Forecast::default();
+            }
+            steps += 1;
+        }
+        steps
     }
 }
 
@@ -473,12 +515,13 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 "prediction": prediction_readout(live, seconds),
                 "warp": live.craft.warp,
                 "warp_mode": "unsafe_manual",
-                "nearby_systems_status": live.nearby_status(),
+                "arrival": live.arrival_status(),
                 "position_pc": live.position_pc(seconds),
             })
         })
         .collect();
-    json!({"craft": craft, "held_clock": fleet.held, "step_seconds": STEP_SECONDS})
+    json!({"craft": craft, "held_clock": fleet.held, "step_seconds": STEP_SECONDS,
+        "system_loading_error": fleet.charts.error})
 }
 
 /// The shown coast prediction, for `ns ship state`.
@@ -714,7 +757,7 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
         "Warp mode".into(),
         "Unsafe manual (no collision protection)".into(),
     ));
-    rows.push(("Nearby systems".into(), live.nearby_status().into()));
+    rows.push(("Arrival".into(), live.arrival_status()));
     if let Some(reason) = &live.craft.warp.stop_reason {
         rows.push(("Warp stopped".into(), reason.clone()));
     }

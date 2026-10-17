@@ -42,7 +42,7 @@ const LIGHTEST_STAR: f64 = 0.08;
 const SEPARATION_AU: (f64, f64) = (0.01, 20_000.0);
 /// Absolute post-widening stellar extent. Extremely wide hierarchies are not
 /// retained as bound systems in this alpha (galactic tides are not integrated).
-/// Also keeps nearby-system discovery practical for craft frame handoffs.
+/// Also bounds how far a craft looks for systems it may enter.
 pub const MAX_STELLAR_SEPARATION_AU: f64 = 100_000.0;
 /// Companions closer than this to a star that became a white dwarf shared its
 /// giant envelope and merged or spiralled in.

@@ -1,40 +1,76 @@
-//! Demand-driven body loading. Never run generation in a frame update.
-use space_shared::StarSystem;
+//! System data craft wait for, worked out off the frame update: on one
+//! long-lived native thread, or the browser's dedicated craft worker, each
+//! keeping its own warm `Sky`. Results are pure functions of seeds, so where
+//! they are computed never changes a craft's path.
+pub use space_simulation::craft::voyage::{Reply, Request};
 use std::sync::{Mutex, mpsc};
 
 pub struct Pending {
-    result: Mutex<mpsc::Receiver<Option<StarSystem>>>,
+    result: Mutex<mpsc::Receiver<Reply>>,
 }
 
 impl Pending {
-    pub fn start(id: String, position_ly: [f64; 3]) -> Option<Self> {
+    pub fn start(request: Request) -> Option<Self> {
         let (send, receive) = mpsc::channel();
         #[cfg(not(target_arch = "wasm32"))]
-        std::thread::Builder::new()
-            .name("craft bodies".into())
-            .spawn(move || {
-                let _ = send.send(space_simulation::generated_system(&id, position_ly));
-            })
-            .ok()?;
+        native::submit(request, send)?;
         #[cfg(target_arch = "wasm32")]
-        web::submit(id, position_ly, send)?;
+        web::submit(request, send)?;
         Some(Self {
             result: Mutex::new(receive),
         })
     }
 
-    /// None while pending; Some(None) on failure. Never wait for a worker.
-    pub fn poll(&self) -> Option<Option<StarSystem>> {
-        match self
-            .result
+    /// `None` while pending; `Some(Err)` on failure. Never waits.
+    pub fn poll(&self) -> Option<Result<Reply, ()>> {
+        match self.receiver().try_recv() {
+            Ok(reply) => Some(Ok(reply)),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(())),
+        }
+    }
+
+    fn receiver(&self) -> std::sync::MutexGuard<'_, mpsc::Receiver<Reply>> {
+        self.result
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .try_recv()
-        {
-            Ok(system) => Some(system),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => Some(None),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native {
+    use super::*;
+    use std::sync::OnceLock;
+
+    type Job = (Request, mpsc::Sender<Reply>);
+    static WORKER: OnceLock<Mutex<mpsc::Sender<Job>>> = OnceLock::new();
+
+    fn start() -> Option<Mutex<mpsc::Sender<Job>>> {
+        let (send, receive) = mpsc::channel::<Job>();
+        std::thread::Builder::new()
+            .name("craft systems".into())
+            .spawn(move || {
+                let mut sky = space_simulation::cells::Sky::default();
+                let threads = space_simulation::craft::voyage::threads();
+                for (request, reply) in receive {
+                    let _ = reply.send(request.answer(&mut sky, threads));
+                }
+            })
+            .ok()?;
+        Some(Mutex::new(send))
+    }
+
+    pub fn submit(request: Request, reply: mpsc::Sender<Reply>) -> Option<()> {
+        if WORKER.get().is_none() {
+            let worker = start()?;
+            let _ = WORKER.set(worker);
         }
+        WORKER
+            .get()?
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .send((request, reply))
+            .ok()
     }
 }
 
@@ -49,7 +85,7 @@ mod web {
     use wasm_bindgen::{JsCast, closure::Closure};
     use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
-    type Replies = Rc<RefCell<HashMap<u64, mpsc::Sender<Option<StarSystem>>>>>;
+    type Replies = Rc<RefCell<HashMap<u64, mpsc::Sender<Reply>>>>;
     struct Running {
         worker: Worker,
         replies: Replies,
@@ -73,19 +109,21 @@ mod web {
             let Some(text) = event.data().as_string() else {
                 return;
             };
-            let Ok((token, system)) = serde_json::from_str::<(u64, Option<StarSystem>)>(&text)
-            else {
+            let Ok((token, reply)) = serde_json::from_str::<(u64, Option<Reply>)>(&text) else {
                 return;
             };
-            if let Some(send) = inbox.borrow_mut().remove(&token) {
-                let _ = send.send(system);
+            // A failed request drops its sender, which the poller sees.
+            if let Some(send) = inbox.borrow_mut().remove(&token)
+                && let Some(reply) = reply
+            {
+                let _ = send.send(reply);
             }
         });
         let inbox = replies.clone();
         let invalid = failed.clone();
         let error = Closure::<dyn FnMut(ErrorEvent)>::new(move |_| {
             invalid.set(true);
-            inbox.borrow_mut().clear(); // Disconnect pending requests; no inline fallback.
+            inbox.borrow_mut().clear(); // Disconnect pending requests.
         });
         worker.set_onmessage(Some(message.as_ref().unchecked_ref()));
         worker.set_onerror(Some(error.as_ref().unchecked_ref()));
@@ -99,11 +137,7 @@ mod web {
         })
     }
 
-    pub fn submit(
-        id: String,
-        position: [f64; 3],
-        send: mpsc::Sender<Option<StarSystem>>,
-    ) -> Option<()> {
+    pub fn submit(request: Request, send: mpsc::Sender<Reply>) -> Option<()> {
         WORKER.with_borrow_mut(|slot| {
             if slot.is_none() {
                 *slot = start();
@@ -114,7 +148,7 @@ mod web {
             }
             running.next += 1;
             let token = running.next;
-            let text = serde_json::to_string(&(token, id, position)).ok()?;
+            let text = serde_json::to_string(&(token, request)).ok()?;
             running.worker.post_message(&text.into()).ok()?;
             running.replies.borrow_mut().insert(token, send);
             Some(())

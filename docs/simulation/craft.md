@@ -205,8 +205,10 @@ in memory only: nothing is saved or shared yet.
   ship present. Pausing stops craft too.
   Drive inputs, spin, or an engaged attitude pilot cap advancement at 10×
   before physics steps, without overwriting the requested clock rate. Quiet
-  manual coasting restores the requested rate. The HUD's `held by craft`
-  covers either this manoeuvre cap or the catch-up hold.
+  manual coasting restores the requested rate. A craft whose next step
+  [waits for system data](#frames-and-arrival) holds the clock the same way
+  until a background worker supplies it. The HUD's `held by craft` covers
+  the manoeuvre cap and either hold.
 - **Forecasts:** each craft keeps its last finished
   [coast prediction](#coast-prediction) (`craft::Forecast`) on show while a
   newer one is worked on. `craft::forecast` runs after stepping and shares
@@ -275,9 +277,8 @@ in memory only: nothing is saved or shared yet.
 
 What is seen (streaming, render precision, the visited system) stays
 camera-based even while following; what the ship does (gravity, altitude,
-thrust and frame handoffs) stays craft-based. Arrival discovery reuses loaded
-star positions, so an unfollowed ship can only enter uncharted systems whose
-stars happen to be streamed around the camera; it does not force camera loading.
+thrust and frame handoffs) stays craft-based and never depends on the camera
+or on streamed stars.
 
 ## Warp core
 
@@ -299,7 +300,8 @@ or damage response. Arrival detection is separate and does not stop the drive.
   is integrated over the remaining fraction of the existing step. Piecewise
   interpolation keeps the cutoff continuous; the following step clears that
   breakpoint. This avoids an undisplayed high-speed tail playing out after
-  dropout or a paused speed change, without restarting the fixed-step timeline.
+  dropout, without restarting the fixed-step timeline. Other orders, speed
+  changes included, take effect from the next fixed step.
   A future authoritative server must receive the command timestamp too.
 - **Drive interlock:** all sublight thrust must be zero before engaging warp.
   Nonzero throttle, fine/legacy translation, turning and pointing orders are
@@ -317,35 +319,64 @@ or damage response. Arrival detection is separate and does not stop the drive.
   fixed-step catch-up limits still apply.
 - **Gravity locality:** the current system supplies ordinary-flight gravity
   during warp under the active policy. In a galactic frame no local-system
-  gravity is applied. There is no neighbourhood census or summing of distant
-  planetary systems. This is an explicit alpha approximation, not a complete
-  galactic gravitational field.
-- **Discovery, not permission:** cheap arrival checks reuse already loaded
-  list systems and the streamed star spatial index. There is no procedural
-  search in the craft update. A streamed star within 0.02 ly can request full
-  bodies on a background native thread or dedicated browser worker. Each craft
-  permits only one request in flight; it never restarts that request just
-  because the ship moves. Results are accepted only while the craft remains
-  inside that system's entry range, and the arrival cache holds at most two
-  systems. Failure does not fall back to generation on the UI thread.
-  Loaded list systems retain their extent-based entry ranges; uncharted systems
-  must first approach within 0.02 ly of the streamed primary to be loaded.
-  Pending, failed or absent data never blocks warp. At high speeds, discovery
-  can lag or miss systems entirely, with no guaranteed detection of every system
-  crossed. The 0.125 ly re-anchor threshold only preserves local precision;
-  it no longer starts any search or generation.
-- **Frames:** leaving beyond twice the system range switches to a local
-  galactic anchor; entering a known system's range switches to its plane axes.
-  Ranges use the camera's existing 0.02 ly / four-system-extent convention,
-  but craft handoffs are independent of camera proximity. Position, attitude,
-  previous render state and ordinary velocity transform together. System
-  velocities are added/subtracted when converting ordinary momentum, never
-  matched implicitly. Stars' origins remain static, the existing galaxy-model
-  approximation: assigned galactic velocities are momentum offsets, not moving
-  stellar ephemerides. Consequently spatial drift is approximate across those
-  static/moving frame conventions; full stellar motion remains future work.
+  gravity is applied, and distant systems are never summed. This is an
+  explicit alpha approximation, not a complete galactic gravitational field.
+- **One step for both drives:** `Craft::step` integrates ordinary flight or,
+  while warp is engaged, bubble transport, so anything stepping a craft
+  (client, tests, a future server) moves it the same way.
+
+## Frames and arrival
+
+`craft::voyage` decides which frame a craft flies in, from its own state and
+seeded or shared system data alone (`Voyage`). Each fixed step first applies
+any frame change due at the current state (`settle`), then moves. The same
+inputs give the same path on any machine, wherever the camera is.
+
+- **Leaving:** past twice its system's entry range a craft switches to a
+  galactic frame anchored where it is. It needs no data, at any speed.
+- **Re-anchoring:** galactic offsets beyond 0.125 ly move the anchor, keeping
+  a residual in metres. Only precision; it decides nothing else.
+- **Entering:** in galactic space, below `ARRIVAL_MAX_SPEED` (light speed),
+  a craft enters the first system whose exact entry range holds it. Faster
+  warp stays in galactic space and needs no system data: crossing a system's
+  range takes a few steps there, and gravity would barely change the path.
+- **Entry ranges** use the camera's convention: four times a system's extent,
+  at least 0.02 ly.
+- **Which systems:** space is split into 1 pc `Region`s.
+  `neighbourhood::candidates` lists every generated system whose entry range
+  could reach into one, from seeds alone, with an upper bound on that range
+  from its stars' separation plus the 1,000 AU planet limit. A candidate in
+  reach then needs its bodies for its exact range and gravity. Charted list
+  pages take the place of the generated systems they are assigned to; legacy
+  pages with no cell star are added as candidates of their own.
+- **Waiting, not guessing:** when a step needs a region or a system's bodies
+  that its `Atlas` does not have yet, it returns `Wait` and changes nothing.
+  `Library` answers at once, as a server or test would. The client asks its
+  background worker and holds the clock until the answer arrives, so a slow
+  machine arrives at the same step, only later in real time.
+- **Cost:** every star of every tier is placed to know whether it is near, and
+  bright tiers hold millions of stars per coarse cell. A region takes about
+  10 ms near home, 50 ms in the inner disc and 90 ms in the bulge natively with
+  20 threads (300 ms and 700 ms on one thread), plus about 200 ms the first
+  time while coarse cells are integrated. The browser's single-threaded
+  worker takes about 30 ms near home (450 ms the first time), 550 ms in the
+  inner disc and 1.3 s in the bulge. Workers keep their `Sky` warm. A
+  region is asked once, and below light speed a craft takes years of
+  simulated time to cross one.
+- **Transformations:** position, attitude and ordinary velocity transform
+  together (`Rebase`), and the client applies the same change to its
+  interpolation states. System velocities are added/subtracted when converting
+  ordinary momentum, never matched implicitly. Stars' origins remain static,
+  the existing galaxy-model approximation: assigned galactic velocities are
+  momentum offsets, not moving stellar ephemerides, so drift relative to
+  stars in galactic space is approximate.
+- **In the client:** `Fleet::charts` caches the last 8 regions and 64 systems,
+  shared by every craft, worked out on one native thread or the browser's
+  craft worker. If no worker can start, it works them out on the frame
+  instead and reports `system_loading_error`.
 
 `ns ship state` and the inspector expose requested/actual speed, gravity policy,
-`warp_mode: "unsafe_manual"`, informational `nearby_systems_status` and stop
-reason. Discovery status is not a drive interlock. Phase 4 has joint native
-live acceptance; browser flight visuals have not been manually tested.
+`warp_mode: "unsafe_manual"`, `arrival` (whether it can enter systems, or
+what its next step waits for) and stop reason. Waiting holds time, never the
+drive. Phase 4 has joint native live acceptance; browser flight visuals have
+not been manually tested.

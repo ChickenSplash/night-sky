@@ -139,8 +139,9 @@ impl Craft {
         Ok(())
     }
 
-    /// Candidate drift for a complete fixed step. This never changes live state.
-    pub fn warp_candidate(&self, gravity: &impl Gravity) -> (State, f64, [f64; 3]) {
+    /// One fixed step of bubble transport, with ordinary drift and, under
+    /// the active policy, gravity. No collision or route checks.
+    pub(super) fn warp_step(&mut self, gravity: &impl Gravity) {
         let dt = STEP_SECONDS;
         let speed = self.warp.requested_ms
             + (self.warp.actual_ms - self.warp.requested_ms) * (-dt / RAMP_SECONDS).exp();
@@ -165,15 +166,10 @@ impl Craft {
             DVec3::ZERO
         };
         state.velocity = (half_velocity + end_a * (dt / 2.0)).to_array();
-        (state, speed, bubble.to_array())
-    }
-
-    /// Apply manual bubble transport without collision or route checks.
-    pub fn commit_warp(&mut self, state: State, speed: f64, bubble: [f64; 3]) {
         self.motion = Motion::Free(state);
-        self.seconds += STEP_SECONDS;
+        self.seconds += dt;
         self.warp.actual_ms = speed;
-        self.warp.bubble_delta_m = bubble;
+        self.warp.bubble_delta_m = bubble.to_array();
         self.gravity = None;
         self.reference = None;
     }
