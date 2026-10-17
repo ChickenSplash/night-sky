@@ -45,7 +45,7 @@ fn ordinary_momentum_and_bubble_are_separate_under_both_policies() {
             0.0,
         );
         craft.warp.gravity = policy;
-        craft.warp.set_speed(1e12).unwrap();
+        craft.warp.set_speed(1e7).unwrap();
         craft.engage_warp().unwrap();
         for _ in 0..20 {
             craft.step(&Constant);
@@ -57,13 +57,31 @@ fn ordinary_momentum_and_bubble_are_separate_under_both_policies() {
         };
         assert!((craft.state().velocity[0] - expected).abs() < 1e-10);
         assert_eq!(craft.state().velocity[2], 0.0);
-        assert!(craft.state().position[2] < -1e11);
+        assert!(craft.state().position[2] < -1e6);
         let before = craft.state();
         craft.warp.stop("manual");
         assert_eq!(craft.state(), before);
         craft.step(&Constant);
         assert!(craft.state().velocity[0] > expected);
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gravity_is_ignored_at_and_above_light_speed() {
+    let mut craft = ship();
+    craft.engage_warp().unwrap();
+    let step_at = |craft: &mut Craft, speed: f64| {
+        craft.warp.set_speed(speed).unwrap();
+        craft.warp.actual_ms = speed;
+        craft.step(&Constant);
+        craft.state().velocity[0]
+    };
+    assert_eq!(step_at(&mut craft, GRAVITY_CUTOFF_MS), 0.0);
+    assert_eq!(step_at(&mut craft, MAX_SPEED), 0.0);
+    // Pulled again as soon as a step's bubble speed falls below the cutoff.
+    let slowed = step_at(&mut craft, GRAVITY_CUTOFF_MS * 0.99);
+    assert!((slowed - 2.0 * STEP_SECONDS).abs() < 1e-12);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

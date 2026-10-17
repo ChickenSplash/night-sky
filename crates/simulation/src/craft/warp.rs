@@ -11,6 +11,11 @@ pub const SPEED_FACTOR: f64 = 3.162_277_660_168_379_5;
 /// Exponential response time in simulated seconds, independent of frame rate.
 pub const RAMP_SECONDS: f64 = 0.3;
 pub const SPIN_TOLERANCE: f64 = 1e-6;
+/// Bubble speed at and above which gravity is ignored under either policy.
+/// A pass this fast changes ordinary velocity by at most metres per second
+/// for a main-sequence star, while sampling gravity only at the ends of each
+/// light-second-long step would give large, arbitrary kicks deep in a body.
+pub const GRAVITY_CUTOFF_MS: f64 = 299_792_458.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -97,7 +102,8 @@ impl Craft {
                 * (1.0 - (-dt / RAMP_SECONDS).exp());
         let bubble = DQuat::from_array(self.orientation) * -DVec3::Z * travel;
         let mut state = self.state();
-        let a = if self.warp.gravity == GravityPolicy::Active {
+        let pulled = self.warp.gravity == GravityPolicy::Active && travel < GRAVITY_CUTOFF_MS * dt;
+        let a = if pulled {
             DVec3::from_array(gravity.acceleration(state.position, self.seconds))
         } else {
             DVec3::ZERO
@@ -105,7 +111,7 @@ impl Craft {
         let half_velocity = DVec3::from_array(state.velocity) + a * (dt / 2.0);
         state.position =
             (DVec3::from_array(state.position) + half_velocity * dt + bubble).to_array();
-        let end_a = if self.warp.gravity == GravityPolicy::Active {
+        let end_a = if pulled {
             DVec3::from_array(gravity.acceleration(state.position, self.seconds + dt))
         } else {
             DVec3::ZERO
