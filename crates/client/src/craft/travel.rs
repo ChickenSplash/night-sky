@@ -32,23 +32,6 @@ struct Known {
 }
 
 impl Live {
-    pub(super) fn truncate_warp(&mut self, seconds: f64) {
-        let (from, from_seconds) = self.cutoff.map_or(
-            (self.previous, self.craft.seconds - STEP_SECONDS),
-            |cutoff| (cutoff.state, cutoff.seconds),
-        );
-        let cutoff = if matches!(self.craft.frame, Frame::Galaxy { .. }) {
-            self.craft
-                .truncate_warp_segment(from, from_seconds, seconds, &Empty)
-        } else {
-            self.craft
-                .truncate_warp_segment(from, from_seconds, seconds, &self.field)
-        };
-        if cutoff.is_some() {
-            self.cutoff = cutoff;
-        }
-    }
-
     pub fn origin_pc(&self) -> [f64; 3] {
         match self.craft.frame {
             Frame::Galaxy { origin_pc } => origin_pc,
@@ -103,10 +86,6 @@ impl Live {
             self.previous.position = (DVec3::from_array(self.previous.position) - shift).to_array();
             if let Some(displayed) = &mut self.displayed {
                 displayed.position = (DVec3::from_array(displayed.position) - shift).to_array();
-            }
-            if let Some(cutoff) = &mut self.cutoff {
-                cutoff.state.position =
-                    (DVec3::from_array(cutoff.state.position) - shift).to_array();
             }
             self.craft.place(state, self.craft.seconds);
             self.craft.frame = Frame::Galaxy { origin_pc: next };
@@ -277,9 +256,6 @@ impl Live {
         };
         self.previous = transform(self.previous);
         self.displayed = self.displayed.map(transform);
-        if let Some(cutoff) = &mut self.cutoff {
-            cutoff.state = transform(cutoff.state);
-        }
         self.previous_orientation =
             (rotation * DQuat::from_array(self.previous_orientation)).to_array();
         self.craft.orientation = (rotation * DQuat::from_array(self.craft.orientation)).to_array();

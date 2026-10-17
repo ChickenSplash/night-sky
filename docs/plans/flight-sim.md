@@ -344,11 +344,10 @@ Historical checks of the original safety-enabled implementation: outward warp at
 system all looked clean to the user. Eight drive interlocks refused conflicting
 commands without movement. Pause held time, position, ordinary velocity and warp
 state exactly, but the following movement measurement exposed an undisplayed
-high-speed segment left over from manual dropout. A timestamped cutoff now
-replaces only the remainder of that fixed step with ordinary flight and retains
-a piecewise interpolation breakpoint; the fixed-step timeline is unchanged.
-The cutoff fix has regression coverage; its dedicated dropout sequence was not
-separately repeated after the final rebuild.
+high-speed segment left over from manual dropout. A timestamped cutoff fixed
+that at first. It was later removed for one simpler rule: every order, warp
+included, takes effect from the next fixed step, matching step-keyed server
+inputs. The last warp step after a disengage now plays out, at most 0.05 s.
 
 The user subsequently requested unrestricted, unsafe manual warp. Removed both
 collision sweeps and missing-route-data stops, including the inside-body
@@ -412,7 +411,7 @@ Accepted behaviour (including the later unsafe-manual-warp revision):
   is engaged. Do not silently clear inputs. Gravity is not a thrust input and
   remains governed by the gravity-during-warp policy.
 - Normal speed changes use a short, tunable ramp. Manual disengagement cancels
-  bubble motion at the command timestamp while preserving ordinary velocity.
+  bubble motion from the next fixed step while preserving ordinary velocity.
 - Unsafe manual travel does not stop for bodies, atmosphere, proximity or missing
   discovery data. No collision damage or crash response is implemented.
 

@@ -628,7 +628,7 @@ pub fn apply(
             UiCommand::SteerCraft { id, order } => {
                 if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
                     && let Some(live) = fleet.get_mut(&id)
-                    && let Err(err) = live.order(order, clock.0.seconds)
+                    && let Err(err) = order.apply(&mut live.craft, Some(&live.field))
                 {
                     warn!(target: "craft", "Ship order refused: {err}");
                 }

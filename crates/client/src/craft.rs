@@ -84,8 +84,6 @@ pub struct Live {
     /// The state one step before `craft`'s, blended with it when drawn.
     previous: State,
     previous_orientation: [f64; 4],
-    /// A manual warp cutoff inside the current interpolation interval.
-    cutoff: Option<space_simulation::craft::warp::Cutoff>,
     /// Last displayed state, transformed alongside physics during any rebase.
     displayed: Option<State>,
     /// This update's displayed displacement in galactic axes, excluding camera orbit.
@@ -101,8 +99,7 @@ pub struct Live {
 impl Live {
     fn share_at(&self, seconds: f64) -> f64 {
         let start = self.craft.seconds - STEP_SECONDS;
-        // Use the represented interval, as timestamped cutoff does. At large
-        // clock epochs, dividing by literal 0.05 gives a slightly different
+        // Use the represented interval. At large clock epochs, dividing by literal 0.05 gives a slightly different
         // share, which becomes kilometres at interstellar warp speeds.
         ((seconds - start) / (self.craft.seconds - start)).clamp(0.0, 1.0)
     }
@@ -118,26 +115,12 @@ impl Live {
     /// Where the craft is at `seconds`, between its last two steps.
     pub fn state_at(&self, seconds: f64) -> State {
         let current = self.craft.state();
-        let start_seconds = self.craft.seconds - STEP_SECONDS;
-        let (previous, current, share) = match self.cutoff {
-            Some(cutoff) if seconds >= cutoff.seconds => (
-                cutoff.state,
-                current,
-                ((seconds - cutoff.seconds) / (self.craft.seconds - cutoff.seconds))
-                    .clamp(0.0, 1.0),
-            ),
-            Some(cutoff) if cutoff.seconds > start_seconds => (
-                self.previous,
-                cutoff.state,
-                ((seconds - start_seconds) / (cutoff.seconds - start_seconds)).clamp(0.0, 1.0),
-            ),
-            _ => (self.previous, current, self.share_at(seconds)),
-        };
+        let share = self.share_at(seconds);
         let blend =
             |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * share);
         State {
-            position: blend(previous.position, current.position),
-            velocity: blend(previous.velocity, current.velocity),
+            position: blend(self.previous.position, current.position),
+            velocity: blend(self.previous.velocity, current.velocity),
         }
     }
 
@@ -287,7 +270,6 @@ impl Fleet {
             previous: state,
             displayed: None,
             display_delta_m: bevy::math::DVec3::ZERO,
-            cutoff: None,
             system_pc: [0.0; 3],
             forecast: Forecast::default(),
             nearby: travel::NearbySystems::default(),
@@ -399,7 +381,6 @@ pub fn step(
         let stepping_start = Instant::now();
         let mut steps = 0;
         while live.craft.seconds < until && steps < MAX_STEPS_PER_FRAME {
-            live.cutoff = None;
             live.previous = live.craft.state();
             live.previous_orientation = live.craft.orientation;
             live.travel_step();
