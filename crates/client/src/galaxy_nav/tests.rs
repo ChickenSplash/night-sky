@@ -1,5 +1,7 @@
 use super::*;
 use crate::Selection;
+use space_shared::PageStar;
+use space_simulation::cells::planet_designation;
 use space_simulation::population::VISIBLE_MAGNITUDE;
 use space_simulation::{
     cells::{Cell, Sky},

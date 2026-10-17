@@ -40,6 +40,10 @@ const LIGHTEST_STAR: f64 = 0.08;
 /// Separations drawn, in AU: from touching to where the galaxy's tides pull
 /// pairs apart.
 const SEPARATION_AU: (f64, f64) = (0.01, 20_000.0);
+/// Absolute post-widening stellar extent. Extremely wide hierarchies are not
+/// retained as bound systems in this alpha (galactic tides are not integrated).
+/// Also keeps nearby-system discovery practical for craft frame handoffs.
+pub const MAX_STELLAR_SEPARATION_AU: f64 = 100_000.0;
 /// Companions closer than this to a star that became a white dwarf shared its
 /// giant envelope and merged or spiralled in.
 const ENVELOPE_AU: f64 = 3.0;
@@ -544,6 +548,15 @@ impl Hierarchy {
             }
             _ => {}
         }
+        // Widening after mass loss and hierarchical stability adjustments can
+        // exceed the initial separation draw. Such systems would need disruption
+        // modelling; keep only their primary rather than a huge bound hierarchy.
+        if self.separation_au() > MAX_STELLAR_SEPARATION_AU {
+            self.stars.truncate(1);
+            self.masses.truncate(1);
+            self.radii_au.truncate(1);
+            self.pairs.clear();
+        }
     }
 
     /// Joins two members in an orbit drawn from this separation, widened if
@@ -645,7 +658,9 @@ fn hierarchy(
         return system;
     }
     system.arrange(&mut *streams.draws, origin.birth_mass, companions);
-    system.reletter(key);
+    if !system.pairs.is_empty() {
+        system.reletter(key);
+    }
     system
 }
 
@@ -920,7 +935,11 @@ pub(crate) fn companion_light(draws: &mut Rng, primary: &Primary) -> (f64, f64) 
     let mut system = Hierarchy::of(Vec::new(), bodies);
     system.arrange(draws, primary.origin.birth_mass, &companions);
     (
-        companions.iter().map(|c| c.luminosity).sum(),
+        if system.pairs.is_empty() {
+            0.0
+        } else {
+            companions.iter().map(|c| c.luminosity).sum()
+        },
         system.separation_au(),
     )
 }
@@ -929,6 +948,27 @@ pub(crate) fn companion_light(draws: &mut Rng, primary: &Primary) -> (f64, f64) 
 mod tests {
     use super::*;
     use crate::galaxy::Component;
+
+    #[test]
+    fn post_widening_hierarchies_have_a_finite_spatial_bound() {
+        let mut hierarchy = Hierarchy::of(Vec::new(), [(1.0, 1.0), (0.5, 0.5)].into_iter());
+        let companion = Companion {
+            kind: Kind::Main { mass: 0.5 },
+            luminosity: 0.1,
+            separation_au: MAX_STELLAR_SEPARATION_AU * 2.0,
+            eccentricity: 0.5,
+        };
+        let mut rng = Rng::new("warp-bound");
+        hierarchy.arrange(&mut rng, 1.0, &[companion]);
+        assert!(hierarchy.pairs.is_empty());
+        assert_eq!(hierarchy.masses.len(), 1);
+        for component in Component::ALL {
+            for i in 0..1_000 {
+                let bodies = crate::galactic_bodies(&format!("warp-bound:{i}"), component);
+                assert!(widest_separation_au(&bodies.barycentres) <= MAX_STELLAR_SEPARATION_AU);
+            }
+        }
+    }
 
     fn sample(count: usize) -> Vec<Bodies> {
         (0..count)

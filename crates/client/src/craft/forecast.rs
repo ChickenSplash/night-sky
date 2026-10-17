@@ -57,6 +57,10 @@ impl Forecast {
 
     /// Take at most `steps` prediction steps for this craft.
     fn work(&mut self, craft: &Craft, field: &Field, steps: usize) {
+        if craft.warp.engaged || matches!(craft.frame, Frame::Galaxy { .. }) {
+            *self = Self::default();
+            return;
+        }
         let key = Key::of(craft);
         // Obsolete work is dropped rather than finished.
         if self.working.as_ref().is_some_and(|(_, k)| *k != key) {

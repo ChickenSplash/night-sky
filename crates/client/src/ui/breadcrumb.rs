@@ -167,7 +167,11 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy, now: crate::craft::Now
             id: live.star().to_owned(),
         },
     };
-    let mut trail = object_trail(nav, galaxy, parent);
+    let mut trail = if live.star().is_empty() {
+        Vec::new()
+    } else {
+        object_trail(nav, galaxy, parent)
+    };
     trail.push(Crumb {
         level: Level::Craft,
         label: live.craft.name.clone(),

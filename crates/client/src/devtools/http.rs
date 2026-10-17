@@ -1046,6 +1046,7 @@ mod tests {
             split: Default::default(),
             sync: Default::default(),
             instrumentation: Default::default(),
+            craft: Default::default(),
         };
         let shared = Arc::new(Mutex::new(Some(Published {
             state: Arc::new(json!({

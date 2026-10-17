@@ -94,6 +94,12 @@ class CliTests(unittest.TestCase):
     def test_ship_orders_are_organised_and_translated_to_api_json(self):
         parser = NS["parser"]()
         cases = [
+            (["warp", "engage"], {"action": "warp", "command": {"command": "engage"}}),
+            (["warp", "disengage"], {"action": "warp", "command": {"command": "disengage"}}),
+            (["warp", "up"], {"action": "warp", "command": {"command": "up"}}),
+            (["warp", "down"], {"action": "warp", "command": {"command": "down"}}),
+            (["warp", "set", "1000000"], {"action": "warp", "command": {"command": "set", "speed_ms": 1000000.0}}),
+            (["warp", "gravity", "suspended"], {"action": "warp", "command": {"command": "gravity", "policy": "suspended"}}),
             (["throttle", "-0.5"], {"action": "throttle", "value": -0.5}),
             (["translate", "--up", "0.2"], {"action": "translate", "right": 0.0, "up": 0.2, "forward": 0.0}),
             (["rotate", "--roll", "-0.1"], {"action": "rotate", "pitch": 0.0, "yaw": 0.0, "roll": -0.1}),

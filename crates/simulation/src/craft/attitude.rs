@@ -35,6 +35,9 @@ impl Craft {
     /// Engage pointing. An optional up vector fixes roll (projected onto the
     /// plane normal to the target); without one the initial roll is retained.
     pub fn point(&mut self, target: PointTarget, up: Option<[f64; 3]>) -> Result<(), &'static str> {
+        if self.warp.engaged {
+            return Err("Disengage warp before pointing");
+        }
         if let PointTarget::Vector(v) = &target
             && unit(*v).is_none()
         {

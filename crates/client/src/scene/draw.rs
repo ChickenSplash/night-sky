@@ -90,6 +90,7 @@ struct Canvas<'a> {
     frame: DQuat,
     seconds: f64,
     photometry: &'a Photometry,
+    frame_ly: DVec3,
 }
 
 impl Canvas<'_> {
@@ -464,11 +465,15 @@ impl Canvas<'_> {
         if self.pose.layout > 0.0 {
             return;
         }
-        for live in crate::craft::shown_here(fleet, self.system, self.pose.page) {
+        for live in &fleet.craft {
             let state = live.state_at(self.seconds);
-            let centre = self.world(self.frame * DVec3::from_array(state.position));
+            let offset = (live.origin_ly() - self.frame_ly) * space_simulation::LY_METRES;
+            let relative = self.pose.craft_relative(&live.craft.id).unwrap_or_else(|| {
+                offset + live.basis() * DVec3::from_array(state.position) - self.pose.eye
+            });
+            let centre = self.origin + (relative / self.scale).as_vec3();
             let half = self.units(crate::craft::SHIP_RADIUS_M);
-            let turn = (self.frame * live.orientation_at(self.seconds)).as_quat();
+            let turn = (live.basis() * live.orientation_at(self.seconds)).as_quat();
             let pixels = self.pixels(centre, half);
             if pixels.is_some_and(|p| p >= 1.0) {
                 let vertex = |i: usize| {
@@ -490,7 +495,9 @@ impl Canvas<'_> {
                     object: Marked::Craft(live.craft.id.clone()),
                 });
             }
-            if self.nav.selection == Some(crate::Selection::Craft(live.craft.id.clone())) {
+            if self.nav.selection == Some(crate::Selection::Craft(live.craft.id.clone()))
+                && live.star() == crate::objects::star_id(self.system, self.pose.page)
+            {
                 self.trajectory(gizmos, live);
             }
         }
@@ -546,6 +553,7 @@ pub fn draw(
     mut markers: ResMut<Markers>,
     light: (ResMut<Lights>, Res<Photometry>),
     fleet: Res<crate::craft::Fleet>,
+    rig: Res<super::CameraRig>,
 ) {
     let (mut lights, photometry) = light;
     markers.0.clear();
@@ -554,12 +562,14 @@ pub fn draw(
         return;
     };
     lights.eye = view.translation();
-    let Some(system) = nav.system(&universe.0) else {
+    let visited = nav.system(&universe.0);
+    let Some(system) = visited.or_else(|| fleet.craft.first().map(|live| live.field.system()))
+    else {
         return;
     };
     // During a page-to-page flight the camera may still be near the departure
     // star. Do not draw the destination's AU-scale orbits from interstellar range.
-    let planets_shown = body_range(&nav, system, &pose).is_some();
+    let planets_shown = visited.is_some() && body_range(&nav, system, &pose).is_some();
     let canvas = Canvas {
         camera,
         view,
@@ -571,6 +581,7 @@ pub fn draw(
         frame: page_frame(system, pose.page),
         seconds: clock.0.seconds,
         photometry: &photometry,
+        frame_ly: rig.frame_ly,
     };
     let markers = &mut markers.0;
     if nav.presentation_mode == PresentationMode::Constellation {
@@ -585,6 +596,6 @@ pub fn draw(
     if planets_shown {
         canvas.stars(&mut gizmos, &mut lights);
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
-        canvas.craft(&mut gizmos, &fleet, markers);
     }
+    canvas.craft(&mut gizmos, &fleet, markers);
 }

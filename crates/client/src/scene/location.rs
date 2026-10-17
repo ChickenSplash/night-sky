@@ -114,6 +114,7 @@ pub fn locate(
     }
     // Flights and presets are deliberate: wait until they land.
     if nav.presentation_mode != PresentationMode::Simulation
+        || (nav.following && nav.selected_craft().is_some())
         || rig.flying()
         || nav.fly
         || !rig.placed()

@@ -65,7 +65,21 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   Selecting one replaces the other; `Navigation::select` keeps following only
   from planet to planet. A second click activates it: a star is visited, a
   planet or craft followed. Following a craft targets its blended position
-  each frame (`craft::followed`), from 200 m.
+  each frame (`craft::followed`), from 200 m. It uses the craft's retained body
+  data, not visible-star reachability, and tracks system/galactic handoffs
+  without starting another camera flight. Open-space following uses the craft's
+  local galactic anchor for close-up precision. Camera-driven automatic system
+  entry/exit is suspended while following a craft; its physical proximity still
+  determines arrival and body visibility.
+- Craft following retains the target-to-eye offset separately from the large
+  local position. Both hull and label use that exact camera-relative centre,
+  rather than adding a 200 m offset to a light-year-sized number and subtracting
+  it again. This keeps high-speed warp rendering steady between physics steps.
+  The craft also retains its previous displayed state and transforms it with
+  every re-anchor/frame handoff. Camera velocity uses the resulting displayed
+  displacement plus changes to the follow offset, divided by real frame time.
+  Re-anchoring therefore does not produce a zero-speed frame or hide the velocity
+  marker. Pausing still yields zero travel; camera-orbit marker rules are unchanged.
 - Esc while following reframes the system and clears selection; otherwise it
   clears selection, or with nothing selected goes up physically. Leaving a
   system keeps either selection and stops tracking.

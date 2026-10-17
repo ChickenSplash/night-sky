@@ -14,7 +14,7 @@ use bevy_egui::EguiContexts;
 use space_simulation::LY_METRES;
 
 pub const MIN_SPEED: f64 = 1.0;
-pub const MAX_SPEED: f64 = 10_000.0 * LY_METRES;
+pub const MAX_SPEED: f64 = space_simulation::craft::warp::MAX_SPEED;
 /// Closest camera zoom (Shift + scroll), in metres, whatever is in view. The
 /// render scale comes down with it (`scale_floor`).
 pub const MIN_DISTANCE: f64 = 1.0;

@@ -1,6 +1,8 @@
 pub mod cells;
 pub mod craft;
 pub mod galaxy;
+mod generated;
+pub use generated::generated_system;
 pub mod kinematics;
 pub mod light;
 pub mod multiple;

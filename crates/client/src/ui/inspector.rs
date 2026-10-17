@@ -417,12 +417,6 @@ pub fn actions(
             let Some(live) = now.get(id) else {
                 return Vec::new();
             };
-            let here = nav
-                .system(galaxy)
-                .is_some_and(|system| objects::star_id(system, nav.page) == live.star());
-            if !here && !crate::galaxy_nav::reachable(nav, galaxy, field, live.star()) {
-                return Vec::new();
-            }
             vec![Action {
                 label: format!("Follow {}", live.craft.kind.label().to_lowercase()),
                 current: nav.following && nav.selected_craft() == Some(id.as_str()),

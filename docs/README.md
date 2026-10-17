@@ -83,8 +83,11 @@ The shared native/browser client in `crates/client`, with browser workers in
   is an approximate smooth prototype, not a detailed dust-attenuated renderer.
 - Camera flights are navigation aids, not physical spacecraft or warp simulations.
   Craft have six-axis CLI flight, pointing assists and a predicted coast
-  path, and can be followed closely, but no in-app piloting controls, warp,
-  saving or collisions yet; predicted impacts are shown but not enforced.
+  path, can be followed across systems, and have unsafe straight-line CLI warp
+  up to 10,000 ly/s, without collision or missing-data stops. No in-app piloting
+  controls, warp steering, automatic arrivals, atmospheric exclusion, saving or collisions yet;
+  predicted impacts outside warp are shown but not enforced. Phase 4 warp has
+  native live acceptance; browser flight visuals have not been manually tested.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 
 ## Organisation

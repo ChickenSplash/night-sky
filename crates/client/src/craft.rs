@@ -17,7 +17,9 @@ mod control;
 pub use control::Order;
 mod forecast;
 pub use forecast::{Forecast, forecast};
+mod loading;
 mod shape;
+mod travel;
 pub use shape::{HULL_EDGES, HULL_VERTICES};
 
 /// Safe requested-time ceiling during manoeuvres, without changing the
@@ -82,16 +84,27 @@ pub struct Live {
     /// The state one step before `craft`'s, blended with it when drawn.
     previous: State,
     previous_orientation: [f64; 4],
+    /// A manual warp cutoff inside the current interpolation interval.
+    cutoff: Option<space_simulation::craft::warp::Cutoff>,
+    /// Last displayed state, transformed alongside physics during any rebase.
+    displayed: Option<State>,
+    /// This update's displayed displacement in galactic axes, excluding camera orbit.
+    pub display_delta_m: bevy::math::DVec3,
     /// Its system's position, in parsecs from the galactic centre, where
     /// search measures its distance from.
     pub system_pc: [f64; 3],
     /// Where it would go if it coasted.
     pub forecast: Forecast,
+    pub nearby: travel::NearbySystems,
 }
 
 impl Live {
     fn share_at(&self, seconds: f64) -> f64 {
-        ((seconds - (self.craft.seconds - STEP_SECONDS)) / STEP_SECONDS).clamp(0.0, 1.0)
+        let start = self.craft.seconds - STEP_SECONDS;
+        // Use the represented interval, as timestamped cutoff does. At large
+        // clock epochs, dividing by literal 0.05 gives a slightly different
+        // share, which becomes kilometres at interstellar warp speeds.
+        ((seconds - start) / (self.craft.seconds - start)).clamp(0.0, 1.0)
     }
 
     /// Shortest-arc attitude interpolation, on the same timeline as position.
@@ -105,12 +118,26 @@ impl Live {
     /// Where the craft is at `seconds`, between its last two steps.
     pub fn state_at(&self, seconds: f64) -> State {
         let current = self.craft.state();
-        let share = self.share_at(seconds);
+        let start_seconds = self.craft.seconds - STEP_SECONDS;
+        let (previous, current, share) = match self.cutoff {
+            Some(cutoff) if seconds >= cutoff.seconds => (
+                cutoff.state,
+                current,
+                ((seconds - cutoff.seconds) / (self.craft.seconds - cutoff.seconds))
+                    .clamp(0.0, 1.0),
+            ),
+            Some(cutoff) if cutoff.seconds > start_seconds => (
+                self.previous,
+                cutoff.state,
+                ((seconds - start_seconds) / (cutoff.seconds - start_seconds)).clamp(0.0, 1.0),
+            ),
+            _ => (self.previous, current, self.share_at(seconds)),
+        };
         let blend =
             |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * share);
         State {
-            position: blend(self.previous.position, current.position),
-            velocity: blend(self.previous.velocity, current.velocity),
+            position: blend(previous.position, current.position),
+            velocity: blend(previous.velocity, current.velocity),
         }
     }
 
@@ -118,6 +145,9 @@ impl Live {
     /// around, kept from its last step within the switching margin.
     pub fn surroundings(&self, seconds: f64) -> (State, Option<Reference>) {
         let state = self.state_at(seconds);
+        if matches!(self.craft.frame, Frame::Galaxy { .. }) {
+            return (state, None);
+        }
         let reference =
             self.field
                 .select_reference(self.craft.reference.as_deref(), state.position, seconds);
@@ -255,8 +285,12 @@ impl Fleet {
             craft,
             field,
             previous: state,
+            displayed: None,
+            display_delta_m: bevy::math::DVec3::ZERO,
+            cutoff: None,
             system_pc: [0.0; 3],
             forecast: Forecast::default(),
+            nearby: travel::NearbySystems::default(),
         });
         Ok(id)
     }
@@ -322,8 +356,12 @@ pub fn locate_body(
     }
     let (system, page) = match &nav.visit {
         Some(crate::Visit::Generated(system)) if system.id == key => ((**system).clone(), 0),
-        _ => objects::system(galaxy, key)
-            .map(|(system, page)| (system.into_owned(), page))
+        _ => objects::known_system(galaxy, key)
+            .map(|(system, page)| (system.clone(), page))
+            .or_else(|| {
+                let picked = crate::galaxy_nav::selectable_star(nav, galaxy, field, key)?;
+                crate::galaxy_nav::generated(key, picked.position_ly).map(|system| (system, 0))
+            })
             .ok_or_else(|| format!("No system for `{id}`"))?,
     };
     let body = if id == key {
@@ -339,22 +377,55 @@ pub fn locate_body(
 
 /// Steps every craft up to the clock, at most `MAX_STEPS_PER_FRAME` steps
 /// each. A craft that cannot keep up holds the clock back to it.
-pub fn step(mut clock: ResMut<Clock>, mut fleet: ResMut<Fleet>) {
+pub fn step(
+    mut clock: ResMut<Clock>,
+    mut fleet: ResMut<Fleet>,
+    galaxy: Res<crate::Universe>,
+    mut metrics: Option<ResMut<crate::stars::stream::StreamMetrics>>,
+    stars: Option<Res<crate::stars::stream::Starfield>>,
+) {
+    use bevy::platform::time::Instant;
+    let start = Instant::now();
+    let mut timing = crate::stars::stream::CraftFrame::default();
     let until = clock.0.seconds;
     let mut reached = f64::INFINITY;
     for live in &mut fleet.craft {
+        let discovery_start = Instant::now();
+        live.prepare_nearby(&galaxy.0);
+        if let (Some(stars), Some(metrics)) = (stars.as_deref(), metrics.as_deref_mut()) {
+            live.prepare_streamed(stars, metrics);
+        }
+        timing.discovery_ms += discovery_start.elapsed().as_secs_f64() * 1000.0;
+        let stepping_start = Instant::now();
         let mut steps = 0;
         while live.craft.seconds < until && steps < MAX_STEPS_PER_FRAME {
+            live.cutoff = None;
             live.previous = live.craft.state();
             live.previous_orientation = live.craft.orientation;
-            live.craft.step(&live.field);
+            live.travel_step();
             steps += 1;
         }
         reached = reached.min(live.craft.seconds);
+        timing.stepping_ms += stepping_start.elapsed().as_secs_f64() * 1000.0;
+        timing.steps += steps;
     }
     fleet.held = reached < until;
     if fleet.held {
         clock.0.seconds = reached;
+    }
+    // Use the final shared clock, including catch-up holds, just as drawing does.
+    for live in &mut fleet.craft {
+        let state = live.state_at(clock.0.seconds);
+        live.display_delta_m = live.displayed.map_or(bevy::math::DVec3::ZERO, |previous| {
+            live.basis()
+                * (bevy::math::DVec3::from_array(state.position)
+                    - bevy::math::DVec3::from_array(previous.position))
+        });
+        live.displayed = Some(state);
+    }
+    timing.total_ms = start.elapsed().as_secs_f64() * 1000.0;
+    if let Some(mut metrics) = metrics {
+        metrics.craft_latest = timing;
     }
 }
 
@@ -400,6 +471,10 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 "thrusters": live.craft.thrusters,
                 "autopilot": live.craft.autopilot,
                 "prediction": prediction_readout(live, seconds),
+                "warp": live.craft.warp,
+                "warp_mode": "unsafe_manual",
+                "nearby_systems_status": live.nearby_status(),
+                "position_pc": live.position_pc(seconds),
             })
         })
         .collect();
@@ -411,6 +486,9 @@ fn prediction_readout(live: &Live, seconds: f64) -> serde_json::Value {
     use serde_json::json;
     use space_simulation::craft::predict::End;
     let forecast = &live.forecast;
+    if live.craft.warp.engaged || live.star().is_empty() {
+        return json!({"current": false, "updating": false, "status": "unavailable during warp or galactic flight"});
+    }
     let Some(p) = &forecast.shown else {
         return json!({"updating": forecast.updating()});
     };
@@ -483,6 +561,9 @@ pub enum PathMark {
 /// smoothly along the path instead: it starts at the craft and, when it
 /// closes, ends there too.
 pub fn predicted_path(live: &Live, seconds: f64) -> Option<Path> {
+    if live.craft.warp.engaged || live.star().is_empty() {
+        return None;
+    }
     use space_simulation::craft::predict::{End, Event};
     let p = live.forecast.shown.as_ref()?;
     let anchor = live
@@ -609,8 +690,43 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
     use crate::format::{duration_text, km_text, speed_label};
     let (state, reference) = live.surroundings(seconds);
     let mut rows = vec![("Type".to_owned(), live.craft.kind.label().to_owned())];
+    rows.push((
+        "Warp".into(),
+        if live.craft.warp.engaged {
+            "Engaged".into()
+        } else {
+            "Off".into()
+        },
+    ));
+    rows.push((
+        "Warp requested / actual".into(),
+        format!(
+            "{} / {}",
+            speed_label(live.craft.warp.requested_ms),
+            speed_label(live.craft.warp.actual_ms)
+        ),
+    ));
+    rows.push((
+        "Warp gravity".into(),
+        format!("{:?}", live.craft.warp.gravity),
+    ));
+    rows.push((
+        "Warp mode".into(),
+        "Unsafe manual (no collision protection)".into(),
+    ));
+    rows.push(("Nearby systems".into(), live.nearby_status().into()));
+    if let Some(reason) = &live.craft.warp.stop_reason {
+        rows.push(("Warp stopped".into(), reason.clone()));
+    }
     let key = space_simulation::multiple::system_key(live.star());
-    rows.push(("System".into(), crate::galaxy_nav::label(galaxy, key)));
+    rows.push((
+        "System".into(),
+        if key.is_empty() {
+            "Galactic space".into()
+        } else {
+            crate::galaxy_nav::label(galaxy, key)
+        },
+    ));
     if let Some(body) = reference {
         let relative = relative(state, body.state);
         let r = distance(relative.position, [0.0; 3]);
@@ -668,6 +784,12 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
 fn prediction_facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> Vec<(String, String)> {
     use crate::format::{duration_text, km_text};
     use space_simulation::craft::predict::End;
+    if live.craft.warp.engaged || live.star().is_empty() {
+        return vec![(
+            "Prediction".into(),
+            "Unavailable during warp or galactic flight".into(),
+        )];
+    }
     let forecast = &live.forecast;
     let Some(p) = &forecast.shown else {
         return vec![("Prediction".into(), "Working…".into())];
@@ -798,7 +920,7 @@ pub fn live_objects(fleet: &Fleet, galaxy: &Galaxy, seconds: f64) -> Vec<LiveObj
                     class: live.craft.kind.label().into(),
                     system: crate::galaxy_nav::label(galaxy, &key),
                     distance_ly: 0.0,
-                    position_pc: live.system_pc,
+                    position_pc: live.position_pc(seconds),
                 },
                 system_key: key,
                 altitude_km: altitude,
@@ -817,26 +939,12 @@ pub fn relative(state: State, to: State) -> State {
     }
 }
 
-/// Keeps craft out of reach from being drawn, picked or followed elsewhere:
-/// a craft is shown only in its own system, on the page its frame names.
-pub fn shown_here<'a>(
-    fleet: &'a Fleet,
-    system: &'a StarSystem,
-    page: u32,
-) -> impl Iterator<Item = &'a Live> {
-    let star = objects::star_id(system, page);
-    fleet.craft.iter().filter(move |live| live.star() == star)
-}
-
 /// Whether the camera follows a craft this frame, and where it is.
-pub fn followed(nav: &Navigation, galaxy: &Galaxy, fleet: &Fleet, seconds: f64) -> Option<State> {
+pub fn followed(nav: &Navigation, _galaxy: &Galaxy, fleet: &Fleet, seconds: f64) -> Option<State> {
     let Some(crate::Selection::Craft(id)) = &nav.selection else {
         return None;
     };
-    let system = nav.system(galaxy)?;
-    shown_here(fleet, system, nav.page)
-        .find(|live| live.craft.id == *id)
-        .map(|live| live.state_at(seconds))
+    fleet.get(id).map(|live| live.state_at(seconds))
 }
 
 #[cfg(test)]

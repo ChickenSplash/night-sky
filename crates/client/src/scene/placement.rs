@@ -44,6 +44,32 @@ pub fn place_camera(
         With<SpaceCamera>,
     >,
 ) {
+    // Following changes the camera's coordinate frame, never the craft's.
+    // Re-express orientation without starting a navigation flight at a handoff.
+    if nav.following
+        && let Some(id) = nav.selected_craft()
+        && let Some(live) = fleet.get(id)
+    {
+        let old_basis = nav
+            .system(&universe.0)
+            .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.page));
+        let same = nav
+            .system(&universe.0)
+            .is_some_and(|s| crate::objects::star_id(s, nav.page) == live.star());
+        if !same && (!live.star().is_empty() || nav.visit.is_some()) {
+            nav.rotation =
+                ((live.basis().inverse() * old_basis).as_quat() * nav.rotation).normalize();
+            nav.visit = if live.star().is_empty() {
+                None
+            } else {
+                Some(crate::Visit::Generated(Box::new(
+                    live.field.system().clone(),
+                )))
+            };
+            nav.page = live.field.page();
+            nav.arrived = !live.star().is_empty();
+        }
+    }
     nav.fit_preset(&universe.0);
     if nav.fly || nav.following || nav.presentation_mode != PresentationMode::Simulation {
         nav.eye = None;
@@ -78,7 +104,18 @@ pub fn place_camera(
         rotation: frame_tilt.as_quat() * nav.rotation,
         layout: f64::from(u8::from(nav.presentation_mode == PresentationMode::Table)),
     };
-    let frame = system.map_or(DVec3::ZERO, |system| page_origin_ly(system, frame_page));
+    let frame = system.map_or_else(
+        || {
+            if nav.following {
+                nav.selected_craft()
+                    .and_then(|id| fleet.get(id))
+                    .map_or(DVec3::ZERO, |live| live.origin_ly())
+            } else {
+                DVec3::ZERO
+            }
+        },
+        |system| page_origin_ly(system, frame_page),
+    );
     let mut shown = rig.shown.unwrap_or(desired);
     let frame_shift_ly = (frame - rig.frame_ly).length();
     if rig.shown.is_some() && frame != rig.frame_ly {
@@ -146,13 +183,20 @@ pub fn place_camera(
     pose.page = frame_page;
 
     let rotation = shown.rotation;
-    pose.eye = if rig.flight.is_none() {
-        nav.eye.map_or_else(
-            || shown.target + (rotation * Vec3::Z).as_dvec3() * shown.distance,
-            |eye| frame_tilt * eye,
-        )
+    let eye_offset = (rotation * Vec3::Z).as_dvec3() * shown.distance;
+    pose.followed = if rig.flight.is_none() && nav.following {
+        nav.selected_craft().map(|id| super::camera::FollowPose {
+            id: id.to_owned(),
+            eye_offset,
+        })
     } else {
-        shown.target + (rotation * Vec3::Z).as_dvec3() * shown.distance
+        None
+    };
+    pose.eye = if rig.flight.is_none() {
+        nav.eye
+            .map_or_else(|| shown.target + eye_offset, |eye| frame_tilt * eye)
+    } else {
+        shown.target + eye_offset
     };
     pose.distance = shown.distance;
     // The camera range is only a framing control. A streamed point can need

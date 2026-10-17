@@ -179,6 +179,7 @@ pub(super) fn publish(
             "latest": metrics.history.back(),
             "split_peak_last_second": metrics.split_peak(),
             "sync_peak_last_second": metrics.sync_peak(),
+            "craft_peak_last_second": metrics.craft_peak(),
             "instrumentation_peak_last_second": metrics.instrumentation_peak(),
             "frame_peak_last_second_ms": metrics.frame_peak_ms(),
             "split_systems": metrics.split_systems, "split_candidates": metrics.split_candidates,

@@ -127,6 +127,15 @@ not time-integrated mass loss or a replay of actual planet formation.
 - Pairs nest hierarchically (`Barycentre`, innermost first, the last holding
   the system), each a two-body orbit widened to stay stable (Mardling & Aarseth).
   Stars are lettered down the hierarchy (a close pair AB, its distant third C).
+- Initial separations are drawn up to 20,000 AU, but mass loss and stability
+  adjustments can widen them further. A post-widening hierarchy with maximum
+  stellar separation over 100,000 AU is rejected, retaining only its primary.
+  This is an explicit alpha approximation for disrupted ultra-wide systems,
+  not an integration of galactic tides. Compact light/extent generation and
+  full body generation apply the same rule. Besides avoiding unbounded bound
+  hierarchies, it keeps craft nearby-system discovery practical; planets add at
+  most 1,000 AU apoapsis around their host. This generation bound does not impose
+  a travel boundary or collision protection on unsafe manual warp.
 - Planets orbit one star inside its stable zone, or a pair closer than 1 AU
   from outside it (Holman & Wiegert); pairs under 50 AU keep planets a third
   of the time.

@@ -23,6 +23,7 @@ pub use attitude::{AttitudePilot, PointTarget};
 mod reference;
 pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
 pub mod predict;
+pub mod warp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,12 +64,15 @@ pub enum Frame {
     /// A star system, by its page star's ID: metres from the page's outermost
     /// barycentre, in the system's plane axes.
     System { star: String },
+    /// Local metres in galactic axes, anchored at a fixed galactocentric point.
+    Galaxy { origin_pc: [f64; 3] },
 }
 
 impl Frame {
     pub fn star(&self) -> &str {
         match self {
             Self::System { star } => star,
+            Self::Galaxy { .. } => "",
         }
     }
 }
@@ -148,6 +152,8 @@ pub struct Craft {
     /// Simulation time `motion` describes, in seconds.
     pub seconds: f64,
     pub input: Input,
+    #[serde(default)]
+    pub warp: warp::Warp,
     /// Gravity at the current state, kept from the last step's end. Any
     /// client or server recomputes the same value when it is missing.
     #[serde(skip)]
@@ -206,6 +212,7 @@ impl Craft {
             reference: None,
             seconds,
             input: Input::default(),
+            warp: warp::Warp::default(),
             gravity: None,
         }
     }
@@ -219,6 +226,13 @@ impl Craft {
     /// Accept a complete manual input atomically, rejecting unsupported or
     /// non-finite commands instead of silently clipping them.
     pub fn control(&mut self, controls: Controls) -> Result<(), &'static str> {
+        if self.warp.engaged
+            && (controls.throttle != 0.0
+                || controls.translation != [0.0; 3]
+                || controls.rotation != [0.0; 3])
+        {
+            return Err("Disengage warp before using thrusters");
+        }
         if !std::iter::once(&controls.throttle)
             .chain(controls.translation.iter())
             .chain(controls.rotation.iter())
@@ -274,6 +288,10 @@ impl Craft {
     /// One fixed step: kick, drift, kick (velocity Verlet), which keeps
     /// orbital energy from drifting over many laps.
     pub fn step(&mut self, gravity: &impl Gravity) {
+        // Bubble motion uses its own integrator, not ordinary stepping.
+        if self.warp.engaged {
+            return;
+        }
         let thrust = self.thrust();
         let rotation = self.guidance(gravity);
         self.turn(rotation);

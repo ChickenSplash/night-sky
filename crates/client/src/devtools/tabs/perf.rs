@@ -57,6 +57,44 @@ pub fn perf(
         terminal::facts_with_details(ui, "debug-frames", &rows);
         frame_graph(ui, frames);
     }
+    if terminal::section(ui, "craft CPU") {
+        let latest = &metrics.craft_latest;
+        let peak = metrics.craft_peak();
+        terminal::facts_with_details(
+            ui,
+            "debug-craft-cpu",
+            &[
+                (
+                    "update",
+                    format!("{:.2} / {:.2} ms", latest.total_ms, peak.total_ms),
+                    Some(
+                        "Latest / trailing-second peak CPU time in the craft update. Includes discovery, fixed steps and frame handoffs, not rendering or orbit forecasting.",
+                    ),
+                ),
+                (
+                    "system discovery",
+                    format!("{:.2} / {:.2} ms", latest.discovery_ms, peak.discovery_ms),
+                    Some(
+                        "Latest / trailing-second peak CPU time checking loaded system/star positions and polling background arrival loads. Body generation runs off-thread. Warp never waits for it.",
+                    ),
+                ),
+                (
+                    "movement + handoffs",
+                    format!("{:.2} / {:.2} ms", latest.stepping_ms, peak.stepping_ms),
+                    Some(
+                        "Latest / trailing-second peak CPU time stepping craft, applying gravity and changing coordinate frames.",
+                    ),
+                ),
+                (
+                    "fixed steps",
+                    format!("{} / {}", latest.steps, peak.steps),
+                    Some(
+                        "Fixed physics steps this update / maximum over the trailing second, across all craft.",
+                    ),
+                ),
+            ],
+        );
+    }
     if terminal::section(ui, "star stream") {
         let s = metrics.live(field);
         let aimed = field.aimed_pc.map_or("nowhere yet".into(), |[x, y, z]| {

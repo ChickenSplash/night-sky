@@ -52,6 +52,17 @@ pub struct InstrumentationFrame {
     pub debug_window_ms: f64,
 }
 
+/// CPU work in the craft update, independent of camera/star rendering.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct CraftFrame {
+    pub total_ms: f64,
+    /// Loaded-system proximity checks and polling background arrival loads.
+    pub discovery_ms: f64,
+    /// Fixed-step movement, gravity and frame handoffs.
+    pub stepping_ms: f64,
+    pub steps: usize,
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct FrameSample {
     pub sequence: u64,
@@ -61,6 +72,7 @@ pub struct FrameSample {
     pub split: SplitFrame,
     pub sync: SyncFrame,
     pub instrumentation: InstrumentationFrame,
+    pub craft: CraftFrame,
 }
 
 /// One-second measurements of generation and mesh preparation. The render
@@ -104,6 +116,7 @@ pub struct StreamMetrics {
     pub split_latest: SplitFrame,
     pub sync_latest: SyncFrame,
     pub instrumentation_latest: InstrumentationFrame,
+    pub craft_latest: CraftFrame,
     pub history: VecDeque<FrameSample>,
     history_started: Instant,
     sequence: u64,
@@ -159,6 +172,7 @@ impl Default for StreamMetrics {
             split_latest: SplitFrame::default(),
             sync_latest: SyncFrame::default(),
             instrumentation_latest: InstrumentationFrame::default(),
+            craft_latest: CraftFrame::default(),
             history: VecDeque::new(),
             history_started: Instant::now(),
             sequence: 0,
@@ -228,6 +242,7 @@ impl StreamMetrics {
             split: self.split_latest.clone(),
             sync: self.sync_latest.clone(),
             instrumentation: self.instrumentation_latest.clone(),
+            craft: self.craft_latest.clone(),
         });
         while self.history.len() > 4096
             || self
@@ -273,6 +288,18 @@ impl StreamMetrics {
                 peak.precise_sprites = peak.precise_sprites.max(s.precise_sprites);
                 peak.render_extract_ms = peak.render_extract_ms.max(s.render_extract_ms);
                 peak.render_prepare_ms = peak.render_prepare_ms.max(s.render_prepare_ms);
+                peak
+            })
+    }
+
+    pub fn craft_peak(&self) -> CraftFrame {
+        self.last_second()
+            .fold(CraftFrame::default(), |mut peak, frame| {
+                let s = &frame.craft;
+                peak.total_ms = peak.total_ms.max(s.total_ms);
+                peak.discovery_ms = peak.discovery_ms.max(s.discovery_ms);
+                peak.stepping_ms = peak.stepping_ms.max(s.stepping_ms);
+                peak.steps = peak.steps.max(s.steps);
                 peak
             })
     }
@@ -470,6 +497,29 @@ impl StreamMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn craft_timings_record_spikes_and_expire_without_stale_values() {
+        let mut metrics = StreamMetrics {
+            craft_latest: CraftFrame {
+                total_ms: 122.0,
+                discovery_ms: 120.0,
+                stepping_ms: 1.0,
+                steps: 2,
+            },
+            ..Default::default()
+        };
+        metrics.record_frame(6.0);
+        metrics.craft_latest = CraftFrame::default();
+        metrics.record_frame(122.0);
+        assert_eq!(metrics.craft_peak().discovery_ms, 120.0);
+        assert_eq!(metrics.craft_peak().steps, 2);
+        let json = serde_json::to_value(metrics.history.front()).unwrap();
+        assert_eq!(json["craft"]["discovery_ms"], 120.0);
+        assert_eq!(metrics.history.back().unwrap().craft.total_ms, 0.0);
+        metrics.history.front_mut().unwrap().elapsed_seconds = -2.0;
+        assert_eq!(metrics.craft_peak().total_ms, 0.0);
+    }
 
     #[test]
     fn history_preserves_spikes_and_has_time_and_capacity_bounds() {

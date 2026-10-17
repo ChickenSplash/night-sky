@@ -119,7 +119,7 @@ impl Navigation {
     }
 
     /// Follow the selected craft from a few lengths away, in simulation mode.
-    /// It must be in the visited system (`craft::followed`).
+    /// Camera placement tracks its system or local galactic frame.
     pub fn follow_craft(&mut self) {
         self.presentation_mode = PresentationMode::Simulation;
         self.rotation = Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85);

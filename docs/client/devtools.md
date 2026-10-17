@@ -31,6 +31,17 @@ GPU/CPU time and vertex/fragment invocations per pass from Bevy's
 hides the main view's pass. Keep the [vendor patch](../../vendor/README.md)
 in step with upgrades.
 
+The **craft CPU** section separates arrival discovery (loaded-system proximity
+checks, streamed-star lookups and polling background body loads) from movement
+plus frame handoffs. Full-system generation runs off-thread and is not included
+in these main-update timings.
+It shows latest values and trailing-second peaks, plus fixed-step counts, even
+when warp is off. These CPU elapsed timings exclude rendering and coast
+forecasting. The same fields are exported as `performance.latest.craft`, each
+history sample's `craft`, and `performance.craft_peak_last_second`; they remain
+recorded while the console is closed. A slow update usually lengthens the next
+frame interval, not the interval attached to its own work sample.
+
 The collapsible `perf` switches use `render::debug::RenderDebug`, not `Navigation`.
 They are A/B tests, reset on restart and can be set with `set_debug <switch> <on>`:
 freeze star streaming (loader keeps its last aim), galactic points, shade point

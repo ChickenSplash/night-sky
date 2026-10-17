@@ -12,6 +12,7 @@ pub struct CameraVelocity {
     pub metres_per_second: DVec3,
     pub marker_metres_per_second: DVec3,
     previous: Option<(DVec3, DVec3)>,
+    previous_follow: Option<(String, DVec3)>,
 }
 
 /// The main 3D camera. Extracted so the star pipeline draws only in its view.
@@ -30,9 +31,25 @@ pub struct CameraPose {
     pub layout: f64,
     /// Page anchoring the camera (the list's first page in constellation view).
     pub page: u32,
+    /// Exact target-to-eye offset while following a craft, in galactic axes.
+    /// Kept separate so adding it to a light-year-sized position cannot round it.
+    pub followed: Option<FollowPose>,
+}
+
+pub struct FollowPose {
+    pub id: String,
+    pub eye_offset: DVec3,
 }
 
 impl CameraPose {
+    /// The tracked hull and its label share this exact camera-relative centre.
+    pub fn craft_relative(&self, id: &str) -> Option<DVec3> {
+        self.followed
+            .as_ref()
+            .filter(|follow| follow.id == id)
+            .map(|follow| -follow.eye_offset)
+    }
+
     /// Metres per render unit. Keeps the camera about 1,000 units from its target, so
     /// GPU clip-space values stay small at every zoom level (perspective is
     /// scale-invariant, so the image does not change).
@@ -97,9 +114,41 @@ pub fn measure_velocity(
     pose: Res<CameraPose>,
     motion: Res<CameraMotion>,
     mut velocity: ResMut<CameraVelocity>,
+    fleet: Option<Res<crate::craft::Fleet>>,
 ) {
     let current = (rig.frame_ly, pose.eye);
     let dt = time.delta_secs_f64();
+    if let Some(follow) = &pose.followed
+        && let Some(live) = fleet.as_deref().and_then(|fleet| fleet.get(&follow.id))
+    {
+        // The craft's previous displayed state was transformed by the exact
+        // same rebase as its current state. Do not difference rounded origins.
+        let displacement = velocity
+            .previous_follow
+            .as_ref()
+            .filter(|(id, _)| *id == follow.id)
+            .map_or(DVec3::ZERO, |(_, offset)| {
+                live.display_delta_m + follow.eye_offset - *offset
+            });
+        velocity.metres_per_second = if dt > 0.0 {
+            displacement / dt
+        } else {
+            DVec3::ZERO
+        };
+        velocity.marker_metres_per_second = if motion.orbiting {
+            if dt > 0.0 {
+                motion.travel_metres / dt
+            } else {
+                DVec3::ZERO
+            }
+        } else {
+            velocity.metres_per_second
+        };
+        velocity.previous_follow = Some((follow.id.clone(), follow.eye_offset));
+        velocity.previous = Some(current);
+        return;
+    }
+    velocity.previous_follow = None;
     velocity.metres_per_second = if let Some((frame, eye)) = velocity.previous {
         if dt > 0.0 {
             if frame != rig.frame_ly {

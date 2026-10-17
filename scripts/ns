@@ -84,6 +84,17 @@ def parser():
         epilog="Example: ship point prograde; ship throttle 0.2; ship cut. "
         "stop brakes spin only; cut cancels all drive inputs and brakes spin; release disables the attitude pilot.")
     ships = ship.add_subparsers(dest="ship", required=True)
+    warp = ships.add_parser("warp", help="straight-line bubble transport, separate from sublight thrust")
+    warps = warp.add_subparsers(dest="warp", required=True)
+    for name in ("engage", "disengage", "up", "down"):
+        command = warps.add_parser(name)
+        command.add_argument("--id", help="craft ID (default: selected or only ship)")
+    speed = warps.add_parser("set", help="requested speed in m/s, 1 to 299792458000000")
+    speed.add_argument("speed_ms", type=float)
+    speed.add_argument("--id")
+    gravity = warps.add_parser("gravity", help="developer policy, change only while disengaged")
+    gravity.add_argument("policy", choices=("active", "suspended"))
+    gravity.add_argument("--id")
     spawn = ships.add_parser(
         "spawn", help="place a ship above a body, by default in a circular orbit",
         description="The body is a planet, star or barycentre ID, or a system's key; without --body, "
@@ -338,6 +349,14 @@ def vector(text, name):
 
 def ship_command(args):
     """The app command for a ship action, or None for a read."""
+    if args.ship == "warp":
+        command = {"command": args.warp}
+        if args.warp == "set":
+            command["speed_ms"] = args.speed_ms
+        elif args.warp == "gravity":
+            command["policy"] = args.policy
+        return {"type": "steer_craft", "id": args.id,
+                "order": {"action": "warp", "command": command}}
     if args.ship in ("throttle", "translate", "rotate", "point", "stop", "release", "cut", "configure"):
         order = {"action": args.ship}
         if args.ship == "throttle":

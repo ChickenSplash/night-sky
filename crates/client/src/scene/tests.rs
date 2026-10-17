@@ -454,6 +454,89 @@ fn turning_in_place_has_no_measured_velocity() {
 }
 
 #[test]
+fn followed_hull_centre_does_not_round_trip_through_large_positions() {
+    let offset = DVec3::new(123.456789, -65.4321, 143.210987);
+    let mut pose = CameraPose {
+        followed: Some(camera::FollowPose {
+            id: "craft-1".into(),
+            eye_offset: offset,
+        }),
+        ..default()
+    };
+    for magnitude in [1e9, 1e15, 1e18, 1e21] {
+        pose.eye = DVec3::splat(magnitude) + offset;
+        assert_eq!(pose.craft_relative("craft-1"), Some(-offset));
+        assert_eq!(pose.craft_relative("another"), None);
+    }
+    pose.followed = None;
+    assert_eq!(pose.craft_relative("craft-1"), None);
+}
+
+#[test]
+fn followed_velocity_and_marker_survive_every_frame_reanchoring() {
+    let galaxy = space_simulation::demo_galaxy();
+    let system = galaxy.systems[0].clone();
+    let page = system.first_page();
+    let body = system.on_page(page).next().unwrap().id.clone();
+    let mut fleet = crate::craft::Fleet::default();
+    let id = fleet
+        .spawn(
+            system,
+            page,
+            &body,
+            400_000.0,
+            crate::craft::Launch::Circular,
+            0.0,
+        )
+        .unwrap();
+    let mut app = App::new();
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(fleet)
+        .insert_resource(CameraRig::default())
+        .insert_resource(CameraPose {
+            followed: Some(camera::FollowPose {
+                id: id.clone(),
+                eye_offset: DVec3::Z * 200.0,
+            }),
+            ..default()
+        })
+        .init_resource::<CameraMotion>()
+        .init_resource::<CameraVelocity>()
+        .add_systems(Update, measure_velocity);
+    let dt = 0.006;
+    let speed = 10.0 * LY_METRES;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(6));
+    app.update();
+    for i in 1..=100 {
+        app.world_mut().resource_mut::<CameraRig>().frame_ly = DVec3::X * i as f64 * 0.5;
+        app.world_mut()
+            .resource_mut::<crate::craft::Fleet>()
+            .get_mut(&id)
+            .unwrap()
+            .display_delta_m = DVec3::X * speed * dt;
+        app.update();
+        let velocity = app.world().resource::<CameraVelocity>();
+        assert!((velocity.metres_per_second.x / speed - 1.0).abs() < 1e-12);
+        assert_eq!(
+            velocity.marker_metres_per_second,
+            velocity.metres_per_second
+        );
+    }
+    app.world_mut()
+        .resource_mut::<crate::craft::Fleet>()
+        .get_mut(&id)
+        .unwrap()
+        .display_delta_m = DVec3::ZERO;
+    app.update();
+    assert_eq!(
+        app.world().resource::<CameraVelocity>().metres_per_second,
+        DVec3::ZERO
+    );
+}
+
+#[test]
 fn orbit_motion_does_not_steer_travel_marker() {
     let mut app = App::new();
     app.insert_resource(Time::<()>::default())

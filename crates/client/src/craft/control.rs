@@ -31,12 +31,78 @@ pub enum Order {
     Configure {
         thrusters: Thrusters,
     },
+    Warp {
+        command: WarpOrder,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WarpOrder {
+    Engage,
+    Disengage,
+    Set {
+        speed_ms: f64,
+    },
+    Up,
+    Down,
+    Gravity {
+        policy: space_simulation::craft::warp::GravityPolicy,
+    },
+}
+
+impl Live {
+    /// Orders have the simulation clock's timestamp, not the ahead-of-clock
+    /// integration endpoint. Manual dropout truncates its pending warp segment.
+    pub fn order(&mut self, order: &Order, seconds: f64) -> Result<(), String> {
+        order.apply(&mut self.craft.clone(), Some(&self.field))?;
+        if matches!(
+            order,
+            Order::Warp {
+                command: WarpOrder::Disengage
+            }
+        ) {
+            self.truncate_warp(seconds);
+            self.forecast = Forecast::default();
+        }
+        order.apply(&mut self.craft, Some(&self.field))
+    }
 }
 
 impl Order {
     pub fn apply(&self, craft: &mut Craft, field: Option<&Field>) -> Result<(), String> {
+        if craft.warp.engaged && matches!(self, Self::Point { .. } | Self::Stop | Self::Cut) {
+            return Err("Disengage warp before engaging turning thrusters or pointing".into());
+        }
         let mut controls = craft.input.controls;
         match self {
+            Self::Warp { command } => {
+                use space_simulation::craft::warp::{MAX_SPEED, MIN_SPEED, SPEED_FACTOR};
+                match command {
+                    WarpOrder::Engage => {
+                        craft.engage_warp().map_err(String::from)?;
+                    }
+                    WarpOrder::Disengage => craft.warp.stop("Manual disengagement"),
+                    WarpOrder::Set { speed_ms } => {
+                        craft.warp.set_speed(*speed_ms).map_err(String::from)?
+                    }
+                    WarpOrder::Up => craft
+                        .warp
+                        .set_speed((craft.warp.requested_ms * SPEED_FACTOR).min(MAX_SPEED))
+                        .map_err(String::from)?,
+                    WarpOrder::Down => craft
+                        .warp
+                        .set_speed((craft.warp.requested_ms / SPEED_FACTOR).max(MIN_SPEED))
+                        .map_err(String::from)?,
+                    WarpOrder::Gravity { policy } => {
+                        if craft.warp.engaged {
+                            return Err("Disengage warp before changing its gravity policy".into());
+                        }
+                        craft.warp.gravity = *policy;
+                    }
+                }
+                return Ok(());
+            }
             Self::Throttle { value } => controls.throttle = *value,
             Self::Translate { right, up, forward } => {
                 controls.translation = [*right, *up, -*forward]

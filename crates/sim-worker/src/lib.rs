@@ -1,6 +1,7 @@
 //! Generation-only WASM for the browser's workers, with no Bevy, DOM or
 //! graphics context: `web/star-worker.js` streams stars with `StarWorker`
-//! and `web/search-worker.js` runs searches with `SearchWorker`. Each worker
+//! and `web/search-worker.js` runs searches with `SearchWorker`. The craft worker
+//! uses `craft_system` for demand-driven full bodies. Each worker
 //! has its own instance and memory.
 use space_simulation::search::{Order, Runner};
 use space_simulation::{cells::Sky, stream::Loader, stream_wire};
@@ -10,6 +11,13 @@ use wasm_bindgen::prelude::*;
 /// Search work per slice: under a second on one browser thread, so newer
 /// orders are seen promptly.
 const SEARCH_SLICE: u64 = 1_000_000;
+
+/// Demand-driven craft body generation, on its own worker, never the UI thread.
+#[wasm_bindgen]
+pub fn craft_system(id: &str, x: f64, y: f64, z: f64) -> String {
+    serde_json::to_string(&space_simulation::generated_system(id, [x, y, z]))
+        .unwrap_or_else(|_| "null".into())
+}
 
 #[wasm_bindgen]
 pub struct StarWorker(Loader);

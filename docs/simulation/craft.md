@@ -11,7 +11,7 @@ of their own (`craft-1`), and they never shift any generated object. See the
 | Part | Meaning |
 | --- | --- |
 | `kind` | `ship`, `station`, `rover` or `probe`; only ships exist yet |
-| `frame` | What the position is measured from: a star system, by its page star's ID |
+| `frame` | A star system by its page star's ID, or a fixed galactocentric anchor with local metres in galactic axes |
 | `motion` | How it moves; only `Free` (integrated) exists yet |
 | `seconds` | The simulation time its state describes |
 | `input` | Persistent throttle, translation and rotation fractions; legacy frame-axis thrust remains for the current CLI |
@@ -148,6 +148,10 @@ Node, as WebAssembly (`./scripts/check.sh`).
 
 ## Coast prediction
 
+Coast forecasts are cleared during warp and in the galactic frame, rather than
+showing the departure orbit as a forecast of warp travel. A new forecast starts
+after dropout in a system.
+
 `craft::predict` forecasts where a craft goes if it coasts from now: a copy
 of its position and velocity, every propulsion input off, under the same
 summed gravity and Verlet kick, drift, kick as real flight. The real craft
@@ -220,9 +224,9 @@ in memory only: nothing is saved or shared yet.
   clock's time, with shortest-arc quaternion interpolation for attitude.
   The placeholder is a 30 m long wireframe cuboid with a pyramid nose (-Z)
   and two wings rooted on its bottom edge (-Y), plus a marker and label.
-  Forward and top are distinguishable without model assets. Only craft in
-  the visited system, on the page their frame names,
-  are drawn, picked or followed.
+  Forward and top are distinguishable without model assets. Craft render and
+  can be followed across system and galactic frames, independently of the
+  visited system.
 - **Predicted path:** the selected craft's shown prediction is drawn from
   the craft onwards (`craft::predicted_path`), dimmed once it is out of date.
   A current prediction's whole revolution is joined back to the craft, so a
@@ -271,4 +275,77 @@ in memory only: nothing is saved or shared yet.
 
 What is seen (streaming, render precision, the visited system) stays
 camera-based even while following; what the ship does (gravity, altitude,
-thrust) stays craft-based. A ship cannot leave its system yet.
+thrust and frame handoffs) stays craft-based. Arrival discovery reuses loaded
+star positions, so an unfollowed ship can only enter uncharted systems whose
+stars happen to be streamed around the camera; it does not force camera loading.
+
+## Warp core
+
+Warp is straight-line bubble transport along the ship's nose, commanded through
+the CLI/API. It is not a destination autopilot. There is no steering, matching,
+approach assist, fuel or energy budget yet. Manual warp is deliberately unsafe:
+there are no body collision checks, atmosphere exclusions or missing-data stops.
+It can engage inside a body and pass through stars and planets, with no crash
+or damage response. Arrival detection is separate and does not stop the drive.
+
+- **Two motions:** each 0.05 s step adds ordinary drift and bubble displacement.
+  Bubble motion never becomes ordinary velocity on dropout. Attitude is held
+  during phase 4 travel. Existing appreciable spin, turning inputs or an engaged
+  attitude controller prevent engagement; stop rotation, then release the pilot.
+- **Timestamped manual dropout:** physics brackets the clock with a step that
+  may end up to 0.05 s ahead of the displayed pose. Disengagement cuts that
+   straight segment at the command's simulation timestamp, preserving
+  its position and ordinary velocity there. Only ordinary flight, with gravity,
+  is integrated over the remaining fraction of the existing step. Piecewise
+  interpolation keeps the cutoff continuous; the following step clears that
+  breakpoint. This avoids an undisplayed high-speed tail playing out after
+  dropout or a paused speed change, without restarting the fixed-step timeline.
+  A future authoritative server must receive the command timestamp too.
+- **Drive interlock:** all sublight thrust must be zero before engaging warp.
+  Nonzero throttle, fine/legacy translation, turning and pointing orders are
+  refused during warp, not silently cleared. Disengage before using them.
+- **Gravity policy:** `active` by default, evaluated at the current travelled
+  positions and integrated into ordinary velocity. The developer alternative
+  `suspended` retains ordinary velocity but not position. Gravity resumes on
+  dropout; changing policy requires disengagement. Neither policy matches a
+  destination. This is a game rule, not a relativistic spacetime solution.
+- **Speed:** 1 m/s to 10,000 ly/s, matching the free camera's maximum,
+  with each up/down multiplying/dividing by
+  √10. Requested speed persists; actual speed approaches it with a 0.3 simulated
+  second exponential response. Displacement integrates that ramp. Pause stops
+  motion; warp alone does not activate the sublight manoeuvre time cap. Normal
+  fixed-step catch-up limits still apply.
+- **Gravity locality:** the current system supplies ordinary-flight gravity
+  during warp under the active policy. In a galactic frame no local-system
+  gravity is applied. There is no neighbourhood census or summing of distant
+  planetary systems. This is an explicit alpha approximation, not a complete
+  galactic gravitational field.
+- **Discovery, not permission:** cheap arrival checks reuse already loaded
+  list systems and the streamed star spatial index. There is no procedural
+  search in the craft update. A streamed star within 0.02 ly can request full
+  bodies on a background native thread or dedicated browser worker. Each craft
+  permits only one request in flight; it never restarts that request just
+  because the ship moves. Results are accepted only while the craft remains
+  inside that system's entry range, and the arrival cache holds at most two
+  systems. Failure does not fall back to generation on the UI thread.
+  Loaded list systems retain their extent-based entry ranges; uncharted systems
+  must first approach within 0.02 ly of the streamed primary to be loaded.
+  Pending, failed or absent data never blocks warp. At high speeds, discovery
+  can lag or miss systems entirely, with no guaranteed detection of every system
+  crossed. The 0.125 ly re-anchor threshold only preserves local precision;
+  it no longer starts any search or generation.
+- **Frames:** leaving beyond twice the system range switches to a local
+  galactic anchor; entering a known system's range switches to its plane axes.
+  Ranges use the camera's existing 0.02 ly / four-system-extent convention,
+  but craft handoffs are independent of camera proximity. Position, attitude,
+  previous render state and ordinary velocity transform together. System
+  velocities are added/subtracted when converting ordinary momentum, never
+  matched implicitly. Stars' origins remain static, the existing galaxy-model
+  approximation: assigned galactic velocities are momentum offsets, not moving
+  stellar ephemerides. Consequently spatial drift is approximate across those
+  static/moving frame conventions; full stellar motion remains future work.
+
+`ns ship state` and the inspector expose requested/actual speed, gravity policy,
+`warp_mode: "unsafe_manual"`, informational `nearby_systems_status` and stop
+reason. Discovery status is not a drive interlock. Phase 4 has joint native
+live acceptance; browser flight visuals have not been manually tested.

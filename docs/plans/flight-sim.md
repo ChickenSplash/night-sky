@@ -66,19 +66,30 @@ The rules:
   increments. Releasing the control holds the cruise speed. Warp speed and
   thrust throttle are separate inputs. Exact ranges and ramps are tuning
   parameters.
-- **Hard safety, always on.** No engaging or travel inside a body or its
-  atmosphere; engaging from orbit is allowed. Each step checks the whole path
-  it covers, including moving bodies, not just its endpoint. Missing body data
-  stops warp at a known-safe position rather than letting it pass through.
-  This is not an assist and cannot be switched off.
+- **Unsafe manual warp.** The user superseded the initial always-on hard-safety
+  requirement after live testing. Manual travel has no body/atmosphere exclusion,
+  swept collision check or missing-data stop. It can engage inside and pass
+  through bodies. Collision/approach protection belongs to explicitly enabled
+  future assists, not an unavoidable restriction on manual warp.
 - **Disengage at any time.** Ending bubble travel stops warp motion, not the
   ship's ordinary velocity or gravity.
 - **Two velocities.** The ship's ordinary velocity is tracked apart from the
-  bubble's motion. Changing reference frame must not change momentum, and
-  bubble motion is never applied as a launch velocity on dropout.
-- **Dropout velocity.** Unmatched, the ship keeps the ordinary velocity it had
-  before engaging. Matched, it takes a chosen body's velocity, optionally plus
-  the sideways speed for a rough orbit. A realistic 1 g drive would otherwise
+  bubble's motion. Ordinary movement continues during warp: bubble motion adds
+  to it rather than replacing it. Changing reference frame must not change
+  momentum, and bubble motion is never applied as a launch velocity on dropout.
+- **Gravity during warp.** By default, gravity remains active at the ship's
+  current position and continues changing its ordinary velocity, not its
+  requested bubble speed. Keep this as an explicit, engine-independent
+  simulation policy, separate from safety, speed control and frame handoffs.
+  An alternative gravity-suspended policy preserves ordinary velocity during
+  warp, while ordinary movement still continues. Both policies are tested;
+  choosing between them is initially a developer setting, not a player-facing
+  assist. Gravity resumes normally on dropout under either policy. This is a
+  documented game rule, not a claim to simulate an Alcubierre spacetime.
+- **Dropout velocity.** Unmatched, the ship keeps its current ordinary velocity,
+  including changes accumulated under the active warp policy, rather than
+  restoring its pre-engagement velocity. Matched, it takes a chosen body's
+  velocity, optionally plus the sideways speed for a rough orbit. A realistic 1 g drive would otherwise
   need 30 to 60 minutes to match a planet's 10 to 50 km/s.
 - **Plotted trip time.** About 20 to 60 seconds at 1× simulation time, using a
   distance-scaled cruise and slower approach. Pause stops travel. Manual trips
@@ -105,8 +116,8 @@ limit.
    keeps steering; turning away does not pull the ship back. An unreachable or
    unsafe target is reported, never hidden by a teleport.
 
-The assists and the hard safety limit combine predictably: the requested speed
-is capped by every active limit, and the lowest one wins.
+Future enabled assists combine predictably: the requested speed is capped by
+every active assist, and the lowest one wins. Unsafe manual warp has none.
 
 ## Craft (man-made objects)
 
@@ -323,8 +334,87 @@ covered by tests only, and browser rendering was not visually tested.
 
 ### 4 · Warp core
 
+Complete, accepted by the user after the final joint native 10 ly/s flight.
+`./scripts/check.sh` passes: formatting, CLI transport tests, native workspace
+tests and strict native/WASM Clippy, with simulation craft tests under Node.
+Native live outcomes and remaining browser visual coverage are recorded below.
+
+Historical checks of the original safety-enabled implementation: outward warp at 10 km/s and 150 km/s, an inward
+100,000 km/s body-safety stop, system departure and entry into a different binary
+system all looked clean to the user. Eight drive interlocks refused conflicting
+commands without movement. Pause held time, position, ordinary velocity and warp
+state exactly, but the following movement measurement exposed an undisplayed
+high-speed segment left over from manual dropout. A timestamped cutoff now
+replaces only the remainder of that fixed step with ordinary flight and retains
+a piecewise interpolation breakpoint; the fixed-step timeline is unchanged.
+The cutoff fix has regression coverage; its dedicated dropout sequence was not
+separately repeated after the final rebuild.
+
+The user subsequently requested unrestricted, unsafe manual warp. Removed both
+collision sweeps and missing-route-data stops, including the inside-body
+engagement restriction. Nearby discovery remains informational for gravity and
+frame handoffs, never permission to travel. The speed maximum is 10,000 ly/s,
+matching the camera. The final native flight was accepted in this revised mode.
+
+At 10 ly/s the timing-only native build measured discovery at 116.8 ms,
+movement/handoffs at 0.0025 ms and a 121.3 ms worst frame. Replacing the old
+per-craft census removes that synchronous discovery from the frame update.
+Arrival now checks loaded list systems and streamed stars; only an approached
+uncharted star requests bodies in the background. One job per craft, a bounded
+arrival cache and rejection of passed-system results prevent requeue churn.
+Gravity uses the current system only, with no local-system gravity in galactic
+space. Craft timings remain in the performance console/API. A joint native
+post-restart repeat at 10 ly/s measured 5.6–6.4 ms sampled frame intervals,
+6.7 ms P95 and 7.1 ms maximum trailing-second peak, versus a 5.9 ms baseline
+sample. Discovery peaked at 0.089 ms and the whole craft update at 0.090 ms,
+versus the previous 116.8 ms discovery stall. Warp remained engaged at
+9.999998 ly/s. Measurements are saved in `data/logs/warp-discovery-after.json`.
+The user confirmed smooth performance.
+
+The subsequent live run exposed two follow-camera issues: measured camera
+velocity was zeroed on every origin change (also hiding the marker), and the
+small follow offset was rounded when added to a light-year-scale local pose.
+Follow velocity now uses rebased previous/current displayed craft states, and
+the hull/label share a separately retained camera-relative offset. Tests cover
+repeated warp re-anchoring, pause, handoffs, HUD/marker continuity and offset
+precision. The rebuilt-client repeat held 10 ly/s with about 6.0 ms frames,
+a 7.0 ms trailing-second frame peak and 0.082 ms craft-update peak. The user
+accepted the speed readout, marker, hull and label as good enough, completing
+native phase 4 acceptance. Results are in `data/logs/warp-follow-retest.json`.
+
+Automated coverage includes both gravity policies and dropout momentum, speed
+validation/ramping, thrust/turning interlocks, discovery without camera streaming,
+uninterrupted 10 ly/s travel without data, body crossings and inside-body
+engagement, continuous system-to-galaxy-to-system
+travel, frame momentum/heading preservation, local re-anchoring, following and
+pause/time-rate behaviour. Simulation warp tests run natively and under Node as
+WebAssembly; client integration tests run natively. Browser compilation is
+checked, and a headless browser test verifies the craft-worker transport and
+deterministic body generation. Browser flight visuals were not manually tested;
+native visual acceptance is recorded above.
+
 Straight-line warp along the nose, from the CLI. See the
 [warp drive rules](#warp-drive-rules).
+
+Phase 4 is the manually commanded drive foundation, not a destination or route
+autopilot. The CLI engages it, selects speed and disengages it; steering,
+assists, plotted autopilot and in-app controls are layered on in later phases.
+
+Accepted behaviour (including the later unsafe-manual-warp revision):
+
+- Refuse engagement while appreciably spinning or while a turning input or
+  attitude controller is active. The caller must stop rotation and release
+  pointing orders first; engagement never silently freezes attitude. Reject
+  turning and pointing orders while phase 4's straight-line warp is engaged.
+- Sublight propulsion and warp are mutually exclusive. Refuse warp engagement
+  until all thrust inputs are zero (main/reverse throttle, fine translation
+  and legacy frame-axis thrust), and reject nonzero thrust commands while warp
+  is engaged. Do not silently clear inputs. Gravity is not a thrust input and
+  remains governed by the gravity-during-warp policy.
+- Normal speed changes use a short, tunable ramp. Manual disengagement cancels
+  bubble motion at the command timestamp while preserving ordinary velocity.
+- Unsafe manual travel does not stop for bodies, atmosphere, proximity or missing
+  discovery data. No collision damage or crash response is implemented.
 
 - Warp state in `crates/simulation`, engine independent: engaged or not,
   requested and actual speed, and the bubble's motion kept apart from the
@@ -332,25 +422,36 @@ Straight-line warp along the nose, from the CLI. See the
 - The logarithmic speed scale, with step up, step down and set commands.
   Warp speeds are simulation-time speeds; pause stops travel, and warp does
   not inherit phase 2's manoeuvre time-rate cap.
-- Engage and disengage, with ordinary velocity and gravity carried through.
-- The hard safety limit: swept-path checks against moving bodies, engaging
-  from orbit, and stopping safely when body data is missing.
+- Engage and disengage, with ordinary movement carried through and gravity
+  active by default. Isolate the gravity-during-warp policy so a developer
+  setting can select gravity-suspended travel without changing the rest of the
+  drive. Test both policies, including ordinary drift and unmatched dropout;
+  retain the existing ordinary-flight integrator and its regression tests.
+- No mandatory hard-safety limit. Warp can cross bodies and unknown space.
 - Frame handoffs: in-system first, then system to galaxy and galaxy to system.
   Position and ordinary velocity transform consistently. Following finds the
   ship across frames; streaming and the visited system stay camera-based, and
-  the craft requests the data it needs to travel safely.
+   the craft uses current-system gravity and loaded-star positions for handoffs.
+  Discovery can lag behind high-speed travel and never blocks the drive.
 - How phase 3's prediction behaves in warp: never show the pre-warp orbit as
   the current forecast.
 - A `ns ship warp` group and matching developer API commands, with warp state
   in `ns ship state` and the inspector.
 - No fuel or realistic bubble energy budget in the alpha.
+- Arrival discovery reuses loaded list systems and the streamed spatial index,
+  with demand-driven background body loading, not procedural neighbourhood
+  searches or route certification. The existing generation bound remains a separate alpha
+  simplification; see [stars](../simulation/stars.md).
 - **Done when:** from the CLI, warp to another planet and out of the system,
-  then disengage, with no position jumps or passing through bodies, on both
+  then disengage, with no position jumps or unwanted automatic stops, on both
   targets.
 
 ### 5 · Dropout velocity
 
-- Unmatched dropout keeps the ordinary velocity the ship had before warp.
+- Unmatched dropout keeps the current ordinary velocity, including gravity's
+  changes during warp under the default policy. With gravity suspended during
+  warp, it preserves the pre-engagement ordinary velocity instead. Neither
+  policy adds bubble speed or silently matches the destination's motion.
 - Matched dropout sets it to a reference body's velocity (planet, star or
   barycentre, using phase 3's references), with an optional rough-orbit exit
   that adds the sideways speed. Matching a planet's motion alone would leave
@@ -376,8 +477,8 @@ Straight-line warp along the nose, from the CLI. See the
 - Test close flybys, small bodies ahead, bodies well off the path and moving
   targets.
 - **Done when:** flying straight at a planet with the assist on ends safely,
-  passing beside one does not slow the ship needlessly, and with it off only
-  the hard safety limit applies.
+  passing beside one does not slow the ship needlessly, and with it off manual
+  warp has no collision protection.
 
 ### 8 · Approach assist
 
@@ -390,7 +491,7 @@ Straight-line warp along the nose, from the CLI. See the
 
 ### 9 · Plotted warp autopilot
 
-- Plot and fly a route with the same drive, safety limit and assists as
+- Plot and fly a route with the same drive and explicitly enabled assists as
   manual flight. Autopilot only adds steering and route management.
 - In-system first, then interstellar. Allows for moving destinations and
   bodies in the way, and aims for the 20 to 60 second trip profile.

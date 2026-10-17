@@ -208,6 +208,39 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   before any further physics catch-up hold. Quiet manual coasting restores
   the requested rate; release the attitude pilot to allow that restoration.
 
+### Warp commands
+
+```sh
+./scripts/ns ship cut              # cut thrust and brake spin
+# Wait until spin_rads is near zero, then release the braking controller.
+./scripts/ns ship release
+./scripts/ns ship state            # inspect spin, inputs and warp state
+./scripts/ns ship warp set 1000000  # requested m/s; does not engage
+./scripts/ns ship warp engage
+./scripts/ns ship warp up          # multiply requested speed by √10
+./scripts/ns ship warp down
+./scripts/ns ship warp disengage
+./scripts/ns ship warp gravity suspended  # developer policy, only while off
+./scripts/ns ship warp gravity active     # default
+```
+
+All warp commands accept `--id`. Point the ship before engagement; phase 4 has
+no warp steering or automatic arrival. Thrust and turning are interlocked with
+warp. Manual warp is unsafe: no collision checks, proximity slowdown, automatic
+arrival stop or missing-data stop. It can pass through stars and planets without
+a crash response. Ordinary motion continues. See the
+[warp model](../simulation/craft.md#warp-core) for the precise rules and limits.
+
+The API uses `steer_craft`, for example
+`{"type":"steer_craft","order":{"action":"warp","command":{"command":"engage"}}}`
+or `{"type":"steer_craft","order":{"action":"warp","command":{"command":"set","speed_ms":1000000}}}`.
+`/state/craft/craft/<index>/warp` contains `engaged`, `requested_ms`, `actual_ms`,
+`gravity`, `stop_reason` and the last step's `bubble_delta_m` in frame axes.
+`warp_mode` (`unsafe_manual`), informational `nearby_systems_status` and
+galactocentric `position_pc` are alongside it. `velocity_ms`
+remains ordinary velocity in the named frame, never bubble speed. During warp
+or galactic flight, prediction reports unavailable rather than an old orbit.
+
 ## Object search
 
 - `GET /catalogue` lists kinds, families, properties, relationships and syntax.

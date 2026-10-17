@@ -379,9 +379,14 @@ impl UiCommand {
                 None if fleet.craft.is_empty() => Err("There are no craft".into()),
                 None => Ok(()),
             },
-            UiCommand::SetThrust { id, .. } => {
+            UiCommand::SetThrust { id, thrust } => {
                 self.check_values()?;
-                thrust_target(id.as_deref(), nav, fleet).map(|_| ())
+                let id = thrust_target(id.as_deref(), nav, fleet)?;
+                if fleet.get(&id).is_some_and(|live| live.craft.warp.engaged) && *thrust != [0.0; 3]
+                {
+                    return Err("Disengage warp before using thrusters".into());
+                }
+                Ok(())
             }
             UiCommand::SteerCraft { id, order } => {
                 let id = thrust_target(id.as_deref(), nav, fleet)?;
@@ -389,13 +394,7 @@ impl UiCommand {
                 order.apply(&mut live.craft.clone(), Some(&live.field))
             }
             UiCommand::SelectCraft { id } => craft(id).map(|_| ()),
-            UiCommand::FlyToCraft { id } => {
-                let live = craft(id)?;
-                let here = nav
-                    .system(galaxy)
-                    .is_some_and(|system| crate::objects::star_id(system, nav.page) == live.star());
-                if here { Ok(()) } else { star(live.star()) }
-            }
+            UiCommand::FlyToCraft { id } => craft(id).map(|_| ()),
             _ => self.check_values(),
         }
     }
@@ -621,6 +620,7 @@ pub fn apply(
             UiCommand::SetThrust { thrust, id } => {
                 if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
                     && let Some(live) = fleet.get_mut(&id)
+                    && (!live.craft.warp.engaged || *thrust == [0.0; 3])
                 {
                     live.craft.input.thrust = *thrust;
                 }
@@ -628,7 +628,7 @@ pub fn apply(
             UiCommand::SteerCraft { id, order } => {
                 if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
                     && let Some(live) = fleet.get_mut(&id)
-                    && let Err(err) = order.apply(&mut live.craft, Some(&live.field))
+                    && let Err(err) = live.order(order, clock.0.seconds)
                 {
                     warn!(target: "craft", "Ship order refused: {err}");
                 }
@@ -640,14 +640,16 @@ pub fn apply(
             }
             UiCommand::FlyToCraft { id } => {
                 if let Some(live) = fleet.get(id) {
-                    let star = live.star().to_owned();
-                    let here = nav
-                        .system(galaxy)
-                        .is_some_and(|system| crate::objects::star_id(system, nav.page) == star);
-                    if here || crate::galaxy_nav::visit_star(&mut nav, galaxy, &field, &star) {
-                        nav.select(Some(Selection::Craft(id.clone())));
-                        nav.follow_craft();
+                    if live.star().is_empty() {
+                        nav.visit = None;
+                    } else {
+                        nav.visit = Some(crate::Visit::Generated(Box::new(
+                            live.field.system().clone(),
+                        )));
+                        nav.page = live.field.page();
                     }
+                    nav.select(Some(Selection::Craft(id.clone())));
+                    nav.follow_craft();
                 }
             }
             UiCommand::Up => {

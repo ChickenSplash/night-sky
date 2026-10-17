@@ -128,6 +128,7 @@ Additional graphical and browser checks:
 node scripts/test-browser.mjs
 SPACE_URL=http://127.0.0.1:4321 node scripts/test-breadcrumbs.mjs
 node scripts/test-star-worker.mjs
+node scripts/test-craft-worker.mjs
 node scripts/test-exposure.mjs
 ```
 

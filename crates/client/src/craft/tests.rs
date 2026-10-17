@@ -20,6 +20,57 @@ fn test_hull_has_a_forward_nose_and_low_mounted_wings_inside_its_pick_bound() {
 }
 
 #[test]
+fn displayed_warp_motion_survives_reanchors_and_holds_when_paused() {
+    use bevy::math::DVec3;
+    let mut app = app();
+    app.world_mut().resource_mut::<Clock>().0.seconds = 6_000_000.0;
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let epoch = app.world().resource::<Clock>().0.seconds;
+    let speed = 10.0 * space_simulation::LY_METRES;
+    {
+        let mut fleet = app.world_mut().resource_mut::<Fleet>();
+        let live = &mut fleet.craft[0];
+        live.craft.frame = Frame::Galaxy {
+            origin_pc: live.system_pc,
+        };
+        let state = State {
+            position: [0.0; 3],
+            velocity: [0.0; 3],
+        };
+        live.craft.place(state, epoch);
+        live.previous = state;
+        live.displayed = Some(state);
+        live.craft.warp.set_speed(speed).unwrap();
+        live.craft.engage_warp().unwrap();
+        live.craft.warp.actual_ms = speed;
+    }
+    let mut changes = 0;
+    for i in 1..=200 {
+        let before = app.world().resource::<Fleet>().craft[0].origin_pc();
+        app.world_mut().resource_mut::<Clock>().0.seconds = epoch + i as f64 * 0.006;
+        app.update();
+        let live = &app.world().resource::<Fleet>().craft[0];
+        changes += usize::from(before != live.origin_pc());
+        assert!((live.display_delta_m.length() / (speed * 0.006) - 1.0).abs() < 1e-6);
+    }
+    assert!(changes > 10);
+    app.update(); // Same simulation time, just as while paused.
+    assert_eq!(
+        app.world().resource::<Fleet>().craft[0].display_delta_m,
+        DVec3::ZERO
+    );
+}
+
+#[test]
 fn drawn_attitude_interpolates_on_the_same_step_as_position() {
     use bevy::math::{DQuat, DVec3};
     let (system, page, body) = planet_system();
@@ -261,6 +312,192 @@ fn planet_system() -> (StarSystem, u32, String) {
     let page = system.first_page();
     let planet = system.on_page(page).next().unwrap().id.clone();
     (system, page, planet)
+}
+
+#[test]
+fn warp_respects_pause_without_the_sublight_time_cap() {
+    use super::control::WarpOrder;
+    let mut app = app();
+    app.init_resource::<Time>().add_systems(
+        Update,
+        crate::tick.after(crate::actions::apply).before(step),
+    );
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    // Engagement does not wait for nearby-system discovery.
+    send(
+        &mut app,
+        UiCommand::SteerCraft {
+            id: None,
+            order: Order::Warp {
+                command: WarpOrder::Engage,
+            },
+        },
+    );
+    app.world_mut().resource_mut::<Clock>().0.rate = 20.0;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs(1));
+    app.update();
+    assert_eq!(app.world().resource::<Clock>().0.seconds, 20.0);
+    assert!(app.world().resource::<Fleet>().craft[0].craft.warp.engaged);
+    assert_eq!(app.world().resource::<Fleet>().safe_rate(100.0), 100.0);
+    app.world_mut().resource_mut::<Clock>().0.paused = true;
+    let before = app.world().resource::<Fleet>().craft[0].craft.clone();
+    app.update();
+    let after = &app.world().resource::<Fleet>().craft[0].craft;
+    assert_eq!(after.state(), before.state());
+    assert_eq!(after.warp, before.warp);
+    assert_eq!(after.seconds, before.seconds);
+}
+
+#[test]
+fn following_a_craft_survives_its_departure_into_galactic_space() {
+    use bevy::math::DVec3;
+    let mut app = app();
+    app.init_resource::<Time>()
+        .init_resource::<crate::scene::CameraPose>()
+        .init_resource::<crate::scene::CameraRig>()
+        .init_resource::<crate::stars::stream::StreamMetrics>()
+        .add_systems(Update, crate::scene::place_camera.after(step));
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let id = app.world().resource::<Fleet>().craft[0].craft.id.clone();
+    send(&mut app, UiCommand::FlyToCraft { id: id.clone() });
+    {
+        let mut fleet = app.world_mut().resource_mut::<Fleet>();
+        let live = &mut fleet.craft[0];
+        let state = State {
+            position: [10.0 * space_simulation::LY_METRES, 0.0, 0.0],
+            velocity: [0.0; 3],
+        };
+        live.craft.place(state, 0.0);
+        live.previous = state;
+        live.travel_step();
+        assert!(matches!(live.craft.frame, Frame::Galaxy { .. }));
+    }
+    // Finish the deliberate initial follow flight, not a handoff flight.
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs(10));
+    app.update();
+    let nav = app.world().resource::<Navigation>();
+    assert!(nav.following);
+    assert_eq!(nav.selected_craft(), Some(id.as_str()));
+    assert!(nav.visit.is_none());
+    let fleet = app.world().resource::<Fleet>();
+    let live = &fleet.craft[0];
+    let pose = app.world().resource::<crate::scene::CameraPose>();
+    let here = DVec3::from_array(
+        live.state_at(app.world().resource::<Clock>().0.seconds)
+            .position,
+    );
+    assert!(((pose.eye - here).length() - FOLLOW_M).abs() < 0.01);
+    assert!(!app.world().resource::<crate::scene::CameraRig>().flying());
+}
+
+#[test]
+fn manual_dropout_discards_undisplayed_warp_without_jumping_or_resetting_fixed_steps() {
+    use super::control::WarpOrder;
+    use space_simulation::craft::warp::{GravityPolicy, MAX_SPEED};
+    let mut app = app();
+    let epoch = 6_000_000.0; // Match a live session's large simulation timestamp.
+    app.world_mut().resource_mut::<Clock>().0.seconds = epoch;
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    {
+        let mut fleet = app.world_mut().resource_mut::<Fleet>();
+        let live = &mut fleet.craft[0];
+        live.craft.warp.gravity = GravityPolicy::Suspended;
+        live.craft.warp.set_speed(MAX_SPEED).unwrap();
+        live.craft.engage_warp().unwrap();
+        live.craft.warp.actual_ms = MAX_SPEED;
+        let (state, speed, bubble) = live.craft.warp_candidate(&live.field);
+        live.craft.commit_warp(state, speed, bubble);
+    }
+    let cutoff = epoch + STEP_SECONDS * 0.4;
+    app.world_mut().resource_mut::<Clock>().0.seconds = cutoff;
+    let visible = app.world().resource::<Fleet>().craft[0].state_at(cutoff);
+    send(
+        &mut app,
+        UiCommand::SteerCraft {
+            id: None,
+            order: Order::Warp {
+                command: WarpOrder::Disengage,
+            },
+        },
+    );
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert!(
+        distance(live.state_at(cutoff).position, visible.position) < 0.01,
+        "dropout moved the displayed ship"
+    );
+    assert_eq!(
+        live.craft.seconds,
+        epoch + STEP_SECONDS,
+        "the fixed-step timeline must not restart at the command time"
+    );
+    let later = live.state_at(cutoff + 0.01);
+    let movement = distance(visible.position, later.position);
+    assert!(
+        movement < 1_000_000.0,
+        "undisplayed warp leaked into ordinary flight: {movement} m"
+    );
+    assert!(
+        distance(later.velocity, visible.velocity) < 1.0,
+        "dropout must preserve ordinary momentum"
+    );
+    // Repeated paused orders must not erase the cut or reintroduce its old tail.
+    send(
+        &mut app,
+        UiCommand::SteerCraft {
+            id: None,
+            order: Order::Warp {
+                command: WarpOrder::Disengage,
+            },
+        },
+    );
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert!(distance(live.state_at(cutoff).position, visible.position) < 0.01);
+    let boundary = live.state_at(epoch + STEP_SECONDS);
+    assert!(distance(boundary.position, visible.position) < 1_000_000.0);
+    let boundary_pc = live.position_pc(epoch + STEP_SECONDS);
+    // The next ordinary step replaces the cut interval without a boundary jump.
+    app.world_mut().resource_mut::<Clock>().0.seconds = epoch + STEP_SECONDS + 0.01;
+    app.update();
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert!(live.cutoff.is_none());
+    // At the maximum speed the cutoff can leave the system, so compare in
+    // galactic coordinates rather than mixing pre/post-handoff local axes.
+    assert!(
+        distance(live.position_pc(epoch + STEP_SECONDS + 0.01), boundary_pc)
+            * space_simulation::galaxy::PC_METRES
+            < 1_000_000.0
+    );
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
