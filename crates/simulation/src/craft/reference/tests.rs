@@ -148,8 +148,8 @@ fn a_craft_keeps_its_reference_and_points_relative_to_it() {
         position: std::array::from_fn(|i| star.state.position[i] + offset[i]),
         velocity: star.state.velocity,
     };
-    let mut craft = Craft::new("c".into(), "C".into(), CraftKind::Ship, field_frame(), 0.0);
-    craft.place(state, 0.0);
+    let mut craft = Craft::new("c".into(), "C".into(), CraftKind::Ship, field_frame(), 0);
+    craft.place(state, 0);
     craft.reference = Some("t#A".into());
     craft.point(PointTarget::RadialOut, None).unwrap();
     // Past a reference choice, a second in.
@@ -159,7 +159,7 @@ fn a_craft_keeps_its_reference_and_points_relative_to_it() {
     let direction = PointTarget::RadialOut
         .direction(
             craft.state(),
-            craft.seconds,
+            craft.seconds(),
             &field,
             craft.reference.as_deref(),
         )

@@ -46,7 +46,8 @@ fn displayed_warp_motion_survives_reanchors_and_holds_when_paused() {
             position: [0.0; 3],
             velocity: [0.0; 3],
         };
-        live.craft.place(state, epoch);
+        live.craft
+            .place(state, space_simulation::craft::tick_at(epoch));
         live.previous = state;
         live.displayed = Some(state);
         live.craft.warp.set_speed(speed).unwrap();
@@ -82,7 +83,7 @@ fn drawn_attitude_interpolates_on_the_same_step_as_position() {
     live.previous_orientation = DQuat::IDENTITY.to_array();
     // The opposite quaternion sign must still take the shortest rotation.
     live.craft.orientation = (-DQuat::from_rotation_y(1.0)).to_array();
-    live.craft.seconds = STEP_SECONDS;
+    live.craft.tick = 1;
     let halfway = live.orientation_at(STEP_SECONDS / 2.0);
     assert!((halfway * -DVec3::Z).distance(DQuat::from_rotation_y(0.5) * -DVec3::Z) < 1e-12);
     assert!(live.orientation_at(-1.0).dot(DQuat::IDENTITY).abs() > 1.0 - 1e-12);
@@ -112,7 +113,7 @@ fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
         let direction = target
             .direction(
                 live.craft.state(),
-                live.craft.seconds,
+                live.craft.seconds(),
                 &live.field,
                 live.craft.reference.as_deref(),
             )
@@ -143,7 +144,7 @@ fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
     assert!(error(&app) < 0.004);
     let speed = |app: &App| {
         let live = &app.world().resource::<Fleet>().craft[0];
-        let (state, reference) = live.surroundings(live.craft.seconds);
+        let (state, reference) = live.surroundings(live.craft.seconds());
         distance(relative(state, reference.unwrap().state).velocity, [0.0; 3])
     };
     let before = speed(&app);
@@ -356,7 +357,7 @@ fn warp_respects_pause_without_the_sublight_time_cap() {
     let after = &app.world().resource::<Fleet>().craft[0].craft;
     assert_eq!(after.state(), before.state());
     assert_eq!(after.warp, before.warp);
-    assert_eq!(after.seconds, before.seconds);
+    assert_eq!(after.tick, before.tick);
 }
 
 #[test]
@@ -387,7 +388,7 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
             position: [10.0 * space_simulation::LY_METRES, 0.0, 0.0],
             velocity: [0.0; 3],
         };
-        live.craft.place(state, 0.0);
+        live.craft.place(state, 0);
         live.previous = state;
         let blank = space_simulation::craft::voyage::Blank;
         let rebase = live.voyage.settle(&blank).unwrap().unwrap();
@@ -462,7 +463,7 @@ fn manual_dropout_takes_effect_from_the_next_fixed_step() {
     );
     let live = &app.world().resource::<Fleet>().craft[0];
     assert!(!live.craft.warp.engaged);
-    assert_eq!(live.craft.seconds, epoch + STEP_SECONDS);
+    assert_eq!(live.craft.seconds(), epoch + STEP_SECONDS);
     assert_eq!(
         live.state_at(mid),
         visible,
@@ -600,16 +601,16 @@ fn ships_follow_the_clock_in_fixed_steps_and_hold_it_when_behind() {
             velocity_kms: None,
         },
     );
-    let start = app.world().resource::<Fleet>().craft[0].craft.seconds;
+    let start = app.world().resource::<Fleet>().craft[0].craft.seconds();
     app.world_mut().resource_mut::<Clock>().0.seconds = start + 10.01;
     app.update();
     let fleet = app.world().resource::<Fleet>();
     let craft = &fleet.craft[0].craft;
     assert!(!fleet.held);
     assert!(
-        (craft.seconds - (start + 10.05)).abs() < 1e-9,
+        (craft.seconds() - (start + 10.05)).abs() < 1e-9,
         "{}",
-        craft.seconds
+        craft.seconds()
     );
     // Drawn between its last two steps, at the clock's time.
     let live = &fleet.craft[0];
@@ -622,7 +623,7 @@ fn ships_follow_the_clock_in_fixed_steps_and_hold_it_when_behind() {
     // A day in one frame is too much: the clock waits for the ship.
     app.world_mut().resource_mut::<Clock>().0.seconds = start + 86_400.0;
     app.update();
-    let reached = app.world().resource::<Fleet>().craft[0].craft.seconds;
+    let reached = app.world().resource::<Fleet>().craft[0].craft.seconds();
     assert!(app.world().resource::<Fleet>().held);
     assert_eq!(app.world().resource::<Clock>().0.seconds, reached);
     let steps = (reached - start) / STEP_SECONDS;
@@ -782,7 +783,7 @@ fn craft_share_the_budget_and_fast_time_ages_a_forecast() {
     // until then reads as aged.
     let live = &mut fleet.craft[0];
     let horizon = live.forecast.shown.as_ref().unwrap().horizon_seconds;
-    let until = live.craft.seconds + horizon * 0.6;
+    let until = live.craft.seconds() + horizon * 0.6;
     live.voyage
         .craft
         .advance(&live.voyage.field, until, usize::MAX);
@@ -795,7 +796,7 @@ fn craft_share_the_budget_and_fast_time_ages_a_forecast() {
     assert!(!fleet.craft[1].forecast.updating());
     settle(&mut fleet, 100);
     let shown = fleet.craft[0].forecast.shown.as_ref().unwrap();
-    assert_eq!(shown.start_seconds, fleet.craft[0].craft.seconds);
+    assert_eq!(shown.start_seconds, fleet.craft[0].craft.seconds());
 }
 
 #[test]
@@ -829,7 +830,7 @@ fn a_predicted_path_is_anchored_where_its_planet_is_now() {
         .unwrap()
         .period_seconds
         .unwrap();
-    let started = live.craft.seconds;
+    let started = live.craft.seconds();
     let soon = started + period * 0.2;
     live.voyage
         .craft

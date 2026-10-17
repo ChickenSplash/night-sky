@@ -7,7 +7,7 @@ fn ship() -> Craft {
         "Ship".into(),
         CraftKind::Ship,
         Frame::System { star: "sun".into() },
-        0.0,
+        0,
     )
 }
 

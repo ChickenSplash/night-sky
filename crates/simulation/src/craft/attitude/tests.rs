@@ -15,7 +15,7 @@ fn ship() -> Craft {
         Frame::System {
             star: "test".into(),
         },
-        0.0,
+        0,
     )
 }
 
@@ -225,7 +225,7 @@ fn prograde_tracks_an_entire_orbit_and_saved_guidance_resumes_within_precision()
             position: [1000.0, 0.0, 0.0],
             velocity: [0.0, 0.0, -1.0],
         },
-        0.0,
+        0,
     );
     craft.point(PointTarget::Prograde, None).unwrap();
     let steps = (std::f64::consts::TAU * 1000.0 / STEP_SECONDS).ceil() as usize;
@@ -255,7 +255,7 @@ fn prograde_tracks_an_entire_orbit_and_saved_guidance_resumes_within_precision()
             .abs()
             > 1.0 - 1e-12
     );
-    assert_eq!(craft.seconds, loaded.seconds);
+    assert_eq!(craft.tick, loaded.tick);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

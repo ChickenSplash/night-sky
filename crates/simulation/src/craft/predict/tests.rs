@@ -37,8 +37,10 @@ impl Gravity for Earth {
 
 fn ship(state: State, seconds: f64) -> Craft {
     let frame = Frame::System { star: "t".into() };
-    let mut craft = Craft::new("c".into(), "C".into(), CraftKind::Ship, frame, seconds);
-    craft.place(state, seconds);
+    let tick = crate::craft::tick_at(seconds);
+    assert_eq!(crate::craft::tick_seconds(tick), seconds);
+    let mut craft = Craft::new("c".into(), "C".into(), CraftKind::Ship, frame, tick);
+    craft.place(state, tick);
     craft
 }
 
@@ -74,7 +76,7 @@ fn a_bound_prediction_matches_fine_steps_and_its_apsides() {
     fine.advance(&Earth, end.seconds - STEP_SECONDS / 2.0, usize::MAX);
     let mut last = fine.clone();
     last.step(&Earth);
-    let share = (end.seconds - fine.seconds) / STEP_SECONDS;
+    let share = (end.seconds - fine.seconds()) / STEP_SECONDS;
     let expected: [f64; 3] = std::array::from_fn(|i| {
         let [a, b] = [fine.state().position[i], last.state().position[i]];
         a + (b - a) * share
@@ -258,7 +260,7 @@ fn a_whole_lap_stays_ahead_until_a_refresh_is_due() {
     let period = orbit.period().unwrap();
     assert_eq!(prediction.period_seconds, Some(period));
     for share in [0.0, 0.2, LEAD - 0.01] {
-        let now = craft.seconds + share * period;
+        let now = craft.seconds() + share * period;
         // One revolution exactly, which for Earth alone is one period, so
         // the path meets the craft without drawing over itself.
         let end = prediction.lap_end(now).unwrap();

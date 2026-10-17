@@ -13,7 +13,7 @@ of their own (`craft-1`), and they never shift any generated object. See the
 | `kind` | `ship`, `station`, `rover` or `probe`; only ships exist yet |
 | `frame` | A star system by its page star's ID, or a fixed galactocentric anchor with local metres in galactic axes |
 | `motion` | How it moves; only `Free` (integrated) exists yet |
-| `seconds` | The simulation time its state describes |
+| `tick` | The world step its state describes; its time is `tick / 20` seconds |
 | `input` | Persistent throttle, translation and rotation fractions; legacy frame-axis thrust remains for the current CLI |
 | `orientation` | Unit quaternion mapping body axes to system axes |
 | `spin` | Body-local angular velocity in rad/s, without passive damping |
@@ -124,7 +124,7 @@ still comes from every star and planet; a barycentre never pulls.
   label does not flicker on a boundary. Entering a new region needs no
   margin.
 - **Kept with the craft:** the step chooses it again once a simulated second
-  (`REFERENCE_SECONDS`), which costs more than a step, and stores its ID in
+  (`REFERENCE_STEPS`), which costs more than a step, and stores its ID in
   the serialized craft so a server or saved craft chooses the same way.
 
 These are display and guidance heuristics: being "around" a body does not
@@ -135,6 +135,12 @@ it (a pair's stars together), for the two-body readouts below.
 
 - **Fixed steps** of `STEP_SECONDS` (1/20 s) of simulation time, shared by
   every client and a future server, whatever the frame rate.
+- **One world step grid.** A craft stores the number of the step it is at
+  (`tick`), counted from simulation time zero, and derives its time from it
+  (`tick_seconds`). A craft placed at any time starts on the first boundary
+  at or after it (`tick_at`), so every craft steps on the same instants, a
+  step number names the same moment on any machine, and orders can be keyed
+  by it. Time never accumulates rounding from repeated additions.
 - **Velocity Verlet** (kick, drift, kick). It is symplectic, so orbital energy
   oscillates slightly rather than drifting: around a fixed Earth, an
   eccentric orbit from 400 km keeps its energy to better than $10^{-8}$ over
@@ -299,8 +305,8 @@ or damage response. Arrival detection is separate and does not stop the drive.
   during phase 4 travel. Existing appreciable spin, turning inputs or an engaged
   attitude controller prevent engagement; stop rotation, then release the pilot.
 - **Orders take effect from the next step:** every order, warp included, changes
-  the craft's input or drive state and acts from the next fixed step, so a server
-  can key inputs by step number. Physics brackets the clock with a step that may
+  the craft's input or drive state and acts from its next fixed step (its
+  `tick`), so a server can key inputs by step number. Physics brackets the clock with a step that may
   end up to 0.05 s ahead of the displayed pose, so that step still plays out
   after a command. After a disengage the ship keeps travelling for at most one
   more step (up to 0.5 ly at 10,000 ly/s). Ordered while paused, that last step

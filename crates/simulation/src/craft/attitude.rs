@@ -70,9 +70,12 @@ impl Craft {
         let direction = match &self.autopilot {
             AttitudePilot::Manual => return self.input.controls.rotation,
             AttitudePilot::Stop => None,
-            AttitudePilot::Point { target, .. } => {
-                target.direction(self.state(), self.seconds, field, self.reference.as_deref())
-            }
+            AttitudePilot::Point { target, .. } => target.direction(
+                self.state(),
+                self.seconds(),
+                field,
+                self.reference.as_deref(),
+            ),
         };
         let current = DQuat::from_array(self.orientation);
         let mut error = DVec3::ZERO;

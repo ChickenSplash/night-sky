@@ -203,7 +203,7 @@ impl Predictor {
     /// Start from the craft's state now. None when the field has no orbit
     /// reference for it.
     pub fn new(craft: &Craft, gravity: &impl Gravity) -> Option<Self> {
-        let (state, seconds) = (craft.state(), craft.seconds);
+        let (state, seconds) = (craft.state(), craft.seconds());
         let reference =
             gravity.orbit_reference(craft.reference.as_deref(), state.position, seconds)?;
         let relative = relative(state, reference.state);

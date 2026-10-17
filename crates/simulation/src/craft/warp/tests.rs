@@ -15,7 +15,7 @@ fn ship() -> Craft {
         "Ship".into(),
         CraftKind::Ship,
         Frame::System { star: "sun".into() },
-        0.0,
+        0,
     )
 }
 
@@ -42,7 +42,7 @@ fn ordinary_momentum_and_bubble_are_separate_under_both_policies() {
                 position: [0.0; 3],
                 velocity: [10.0, 0.0, 0.0],
             },
-            0.0,
+            0,
         );
         craft.warp.gravity = policy;
         craft.warp.set_speed(1e7).unwrap();
@@ -117,7 +117,8 @@ fn engagement_and_control_interlocks() {
     let before = craft.state();
     craft.step(&Constant);
     assert!(craft.state().position[2] < before.position[2] - 49.0);
-    assert_eq!(craft.seconds, STEP_SECONDS);
+    assert_eq!(craft.tick, 1);
+    assert_eq!(craft.seconds(), STEP_SECONDS);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

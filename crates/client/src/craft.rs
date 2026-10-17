@@ -10,6 +10,7 @@ use space_simulation::{
     craft::{
         Craft, CraftKind, Field, Frame, Reference, STEP_SECONDS, circular_speed, distance,
         predict::Prediction,
+        tick_at, tick_seconds,
         voyage::{Voyage, Wait},
     },
 };
@@ -105,10 +106,10 @@ impl std::ops::DerefMut for Live {
 
 impl Live {
     fn share_at(&self, seconds: f64) -> f64 {
-        let start = self.craft.seconds - STEP_SECONDS;
+        let start = tick_seconds(self.craft.tick - 1);
         // Use the represented interval. At large clock epochs, dividing by literal 0.05 gives a slightly different
         // share, which becomes kilometres at interstellar warp speeds.
-        ((seconds - start) / (self.craft.seconds - start)).clamp(0.0, 1.0)
+        ((seconds - start) / (self.craft.seconds() - start)).clamp(0.0, 1.0)
     }
 
     /// Shortest-arc attitude interpolation, on the same timeline as position.
@@ -194,7 +195,7 @@ impl Fleet {
         let seconds = self
             .craft
             .iter()
-            .map(|live| live.craft.seconds)
+            .map(|live| live.craft.seconds())
             .fold(f64::INFINITY, f64::min);
         self.at(if seconds.is_finite() { seconds } else { 0.0 })
     }
@@ -207,8 +208,8 @@ impl Fleet {
         self.craft.iter_mut().find(|live| live.craft.id == id)
     }
 
-    /// A new ship `altitude` metres above a body's surface, at `seconds`.
-    /// Returns its ID.
+    /// A new ship `altitude` metres above a body's surface, placed at the
+    /// first world step at or after `seconds`. Returns its ID.
     pub fn spawn(
         &mut self,
         system: StarSystem,
@@ -218,6 +219,8 @@ impl Fleet {
         launch: Launch,
         seconds: f64,
     ) -> Result<String, String> {
+        let tick = tick_at(seconds);
+        let seconds = tick_seconds(tick);
         let star = objects::star_id(&system, page);
         let mass = body_mass(&system, page, body).ok_or_else(|| format!("No body `{body}`"))?;
         let field = Field::new(system, page);
@@ -263,9 +266,9 @@ impl Fleet {
             name,
             CraftKind::Ship,
             Frame::System { star },
-            seconds,
+            tick,
         );
-        craft.place(state, seconds);
+        craft.place(state, tick);
         craft.reference = field
             .select_reference(None, state.position, seconds)
             .map(|reference| reference.id);
@@ -383,7 +386,7 @@ pub fn step(
     for live in craft.iter_mut() {
         let stepping_start = Instant::now();
         let steps = live.catch_up(charts, &galaxy.0, until, &mut timing.discovery_ms);
-        reached = reached.min(live.craft.seconds);
+        reached = reached.min(live.craft.seconds());
         timing.stepping_ms += stepping_start.elapsed().as_secs_f64() * 1000.0;
         timing.steps += steps;
     }
@@ -421,7 +424,7 @@ impl Live {
         use bevy::platform::time::Instant;
         let mut steps = 0;
         self.waiting = None;
-        while self.craft.seconds < until && steps < MAX_STEPS_PER_FRAME {
+        while self.craft.seconds() < until && steps < MAX_STEPS_PER_FRAME {
             match self.voyage.settle(&*charts) {
                 Ok(Some(rebase)) => self.rebase(&rebase),
                 Ok(None) => {}
@@ -458,7 +461,7 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
             let (state, reference) = live.surroundings(seconds);
             let target_direction = match &live.craft.autopilot {
                 space_simulation::craft::AttitudePilot::Point { target, .. } => target
-                    .direction(live.craft.state(), live.craft.seconds, &live.field, live.craft.reference.as_deref())
+                    .direction(live.craft.state(), live.craft.seconds(), &live.field, live.craft.reference.as_deref())
                     .map(|v| v.to_array()),
                 _ => None,
             };
@@ -478,7 +481,7 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
             });
             json!({
                 "id": live.craft.id, "name": live.craft.name, "kind": live.craft.kind,
-                "frame": live.craft.frame, "seconds": live.craft.seconds,
+                "frame": live.craft.frame, "seconds": live.craft.seconds(), "tick": live.craft.tick,
                 "position_m": state.position, "velocity_ms": state.velocity,
                 "speed_kms": distance(state.velocity, [0.0; 3]) / 1_000.0,
                 "input": live.craft.input, "around": around,

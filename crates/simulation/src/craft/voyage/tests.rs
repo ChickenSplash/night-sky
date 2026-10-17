@@ -31,9 +31,9 @@ fn galactic(star: &CellStar, position: [f64; 3], velocity: [f64; 3]) -> Voyage {
         Frame::Galaxy {
             origin_pc: star.position_pc,
         },
-        0.0,
+        0,
     );
-    craft.place(State { position, velocity }, 0.0);
+    craft.place(State { position, velocity }, 0);
     Voyage::new(craft, arrival(star).field, star.position_pc)
 }
 
@@ -169,7 +169,7 @@ fn leaving_and_reanchoring_preserve_position_heading_and_momentum() {
         Frame::System {
             star: star.id.clone(),
         },
-        0.0,
+        0,
     );
     craft.orientation = DQuat::from_rotation_y(0.7).to_array();
     craft.place(
@@ -177,7 +177,7 @@ fn leaving_and_reanchoring_preserve_position_heading_and_momentum() {
             position: [3.0 * arrival.range_m, 1e9, -2e9],
             velocity: [123.0, 45.0, 67.0],
         },
-        0.0,
+        0,
     );
     let mut voyage = Voyage::new(craft, arrival.field, star.position_pc);
     let before = galactic_state(&voyage, star.position_pc);
@@ -193,7 +193,7 @@ fn leaving_and_reanchoring_preserve_position_heading_and_momentum() {
     voyage.craft.warp.actual_ms = ARRIVAL_MAX_SPEED;
     let mut state = voyage.craft.state();
     state.position = [ANCHOR_M * 1.5 + 123.5, 25.0, 43.0];
-    voyage.craft.place(state, 0.0);
+    voyage.craft.place(state, 0);
     let before = galactic_state(&voyage, star.position_pc);
     let rebase = voyage.settle(&Blank).unwrap().expect("re-anchored");
     assert!(!rebase.frame_changed);

@@ -28,7 +28,7 @@ fn live() -> Live {
 /// Step as the frame update does, until the craft reaches `until`.
 fn catch_up(live: &mut Live, charts: &mut Charts, until: f64) {
     let galaxy = galaxy();
-    while live.craft.seconds < until {
+    while live.craft.seconds() < until {
         live.catch_up(charts, &galaxy, until, &mut 0.0);
         assert!(live.waiting.is_none(), "{}", live.arrival_status());
     }
@@ -63,7 +63,7 @@ fn beside(star: &CellStar, offset: [f64; 3]) -> Live {
         position: offset,
         velocity: [0.0; 3],
     };
-    live.craft.place(state, 0.0);
+    live.craft.place(state, 0);
     live.previous = state;
     live
 }
@@ -79,7 +79,7 @@ fn unsafe_warp_crosses_unknown_space_at_ten_light_years_per_second() {
     let start = live.position_pc(0.0);
     catch_up(&mut live, &mut charts, 100.0 * STEP_SECONDS);
     assert!(live.craft.warp.engaged && live.voyage.in_galaxy());
-    assert!(distance(start, live.position_pc(live.craft.seconds)) * PC_METRES > 40.0 * LY_METRES);
+    assert!(distance(start, live.position_pc(live.craft.seconds())) * PC_METRES > 40.0 * LY_METRES);
     assert!((live.craft.warp.actual_ms / speed - 1.0).abs() < 1e-6);
     // Too fast to enter systems, it never needed any system data.
     assert!(charts.regions.is_empty() && charts.arrivals.is_empty());
@@ -101,7 +101,7 @@ fn unsafe_warp_crosses_a_planet_and_discards_the_forecast() {
             position: start.to_array(),
             velocity: [0.0; 3],
         },
-        0.0,
+        0,
     );
     live.previous = live.craft.state();
     live.craft.warp.set_speed(1e12).unwrap();
@@ -121,7 +121,7 @@ fn unsafe_warp_can_engage_inside_a_planet() {
         .into_iter()
         .find(|b| b.kind == space_simulation::craft::BodyKind::Planet)
         .unwrap();
-    live.craft.place(planet.state, 0.0);
+    live.craft.place(planet.state, 0);
     let voyage = &mut live.voyage;
     Order::Warp {
         command: WarpOrder::Engage,
@@ -202,7 +202,7 @@ fn background_loading_holds_the_clock_and_never_changes_the_path() {
     for _ in 0..20_000 {
         background.poll(&galaxy);
         slow.catch_up(&mut background, &galaxy, until, &mut 0.0);
-        if slow.craft.seconds >= until {
+        if slow.craft.seconds() >= until {
             break;
         }
         waited += usize::from(slow.waiting.is_some());

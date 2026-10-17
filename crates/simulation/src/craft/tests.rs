@@ -40,7 +40,7 @@ fn body_drives_and_fine_thrusters_follow_attitude() {
         let expected = DQuat::from_array(craft.orientation)
             * DVec3::from_array(translation)
             * craft.thrusters.fine
-            * craft.seconds;
+            * craft.seconds();
         assert!(DVec3::from_array(craft.state().velocity).distance(expected) < 1e-10);
     }
     for throttle in [-1.0, 0.5, 1.0] {
@@ -124,8 +124,8 @@ fn ship(state: State) -> Craft {
     let frame = Frame::System {
         star: "test".into(),
     };
-    let mut craft = Craft::new("craft-1".into(), "Ship".into(), CraftKind::Ship, frame, 0.0);
-    craft.place(state, 0.0);
+    let mut craft = Craft::new("craft-1".into(), "Ship".into(), CraftKind::Ship, frame, 0);
+    craft.place(state, 0);
     craft
 }
 
@@ -161,7 +161,7 @@ fn an_orbit_keeps_its_energy_for_a_hundred_laps() {
     // A hundred periods later it is back where it began, give or take
     // the part of a step between the last step and the exact period.
     let end = craft.state().position;
-    let late = (craft.seconds - 100.0 * period).abs();
+    let late = (craft.seconds() - 100.0 * period).abs();
     assert!(late <= STEP_SECONDS);
     assert!(
         distance(end, start.position) < 10.0 + speed * late,
@@ -238,7 +238,7 @@ fn a_ship_orbits_a_planet_moving_around_its_star() {
         velocity: std::array::from_fn(|i| body.state.velocity[i] + [0.0, 0.0, speed][i]),
     };
     let mut craft = ship(state);
-    craft.place(state, seconds);
+    craft.place(state, crate::craft::tick_at(seconds));
     assert_eq!(
         field
             .select_reference(None, state.position, seconds)
@@ -248,7 +248,7 @@ fn a_ship_orbits_a_planet_moving_around_its_star() {
     let period = TAU * r / speed;
     let (mut low, mut high) = (f64::MAX, 0.0_f64);
     let relative = |craft: &Craft| {
-        let planet = crate::planet_state(field.system(), &planet, craft.seconds);
+        let planet = crate::planet_state(field.system(), &planet, craft.seconds());
         let state = craft.state();
         State {
             position: std::array::from_fn(|i| state.position[i] - planet.position[i]),
@@ -307,4 +307,24 @@ fn elements_give_the_apsides_and_period_of_an_orbit() {
         EARTH_GM,
     );
     assert_eq!(escape.apsides(), None);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn every_craft_steps_on_one_world_grid() {
+    for tick in [-41, 0, 1, 3, 7, 120_000_001, 631_152_000_000] {
+        assert_eq!(tick_at(tick_seconds(tick)), tick);
+        assert_eq!(tick_at(tick_seconds(tick) - 1e-3), tick);
+        assert_eq!(tick_at(tick_seconds(tick) + 1e-3), tick + 1);
+    }
+    // Accumulated sums of the step land on their boundary, not the next.
+    assert_eq!(tick_at(0.05 + 0.05 + 0.05), 3);
+    // Placed at different times, two craft share step boundaries.
+    let mut early = ship(State::default());
+    let mut late = ship(State::default());
+    early.place(State::default(), tick_at(0.0));
+    late.place(State::default(), tick_at(12.34));
+    early.advance(&Nothing, late.seconds(), usize::MAX);
+    assert_eq!(early.tick, late.tick);
+    assert_eq!(early.seconds(), late.seconds());
 }

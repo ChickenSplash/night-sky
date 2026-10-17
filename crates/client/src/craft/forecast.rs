@@ -89,7 +89,7 @@ impl Forecast {
             return true;
         }
         let length = shown.period_seconds.unwrap_or(shown.horizon_seconds);
-        craft.seconds - shown.start_seconds > REFRESH_SHARE * length
+        craft.seconds() - shown.start_seconds > REFRESH_SHARE * length
     }
 }
 

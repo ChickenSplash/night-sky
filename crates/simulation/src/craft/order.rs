@@ -59,7 +59,7 @@ pub enum WarpOrder {
 
 impl Order {
     /// Every order, warp included, takes effect from the craft's next fixed
-    /// step, so a server can key orders by step number.
+    /// step (`Craft::tick`), so a server can key orders by step number.
     /// `field` is the craft's system, when it is in one, to check bodies.
     pub fn apply(&self, craft: &mut Craft, field: Option<&Field>) -> Result<(), String> {
         if craft.warp.engaged && matches!(self, Self::Point { .. } | Self::Stop | Self::Cut) {
@@ -96,7 +96,7 @@ impl Order {
                 if let PointTarget::Body(id) = target
                     && let Some(field) = field
                     && !field
-                        .bodies(craft.seconds)
+                        .bodies(craft.seconds())
                         .iter()
                         .any(|body| body.id == *id)
                 {

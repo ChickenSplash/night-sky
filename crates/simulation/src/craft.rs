@@ -13,10 +13,32 @@ use space_shared::{Planet, StarSystem};
 
 use crate::{EARTH_SOLAR, SUN_GM, State};
 
-/// Fixed simulation time per physics step, shared by every client and server.
-pub const STEP_SECONDS: f64 = 1.0 / 20.0;
-/// Simulation time between choices of a craft's orbit reference.
-pub const REFERENCE_SECONDS: f64 = 1.0;
+/// Fixed physics steps per simulated second, shared by every client and server.
+pub const STEPS_PER_SECOND: i64 = 20;
+/// Fixed simulation time per physics step.
+pub const STEP_SECONDS: f64 = 1.0 / STEPS_PER_SECOND as f64;
+/// Steps between choices of a craft's orbit reference: one simulated second.
+pub const REFERENCE_STEPS: i64 = STEPS_PER_SECOND;
+
+/// The simulation time of a step boundary. Every craft steps on this one
+/// world-wide grid, counted from time zero, so a step number names the same
+/// instant on any client or server and inputs can be keyed by it.
+pub fn tick_seconds(tick: i64) -> f64 {
+    tick as f64 / STEPS_PER_SECOND as f64
+}
+
+/// The first step boundary at or after `seconds`.
+pub fn tick_at(seconds: f64) -> i64 {
+    let steps = seconds * STEPS_PER_SECOND as f64;
+    let nearest = steps.round();
+    // A boundary's own time, or a sum of steps, rounded maps back to that
+    // boundary: allow a few units in the last place.
+    if (steps - nearest).abs() <= 16.0 * f64::EPSILON * nearest.abs().max(1.0) {
+        nearest as i64
+    } else {
+        steps.ceil() as i64
+    }
+}
 
 mod attitude;
 pub use attitude::{AttitudePilot, PointTarget};
@@ -148,12 +170,13 @@ pub struct Craft {
     #[serde(default)]
     pub autopilot: AttitudePilot,
     /// What its orbit is described around, by ID. Chosen again each
-    /// `REFERENCE_SECONDS` and kept between, so it switches only past
+    /// `REFERENCE_STEPS` and kept between, so it switches only past
     /// `SWITCH_MARGIN`.
     #[serde(default)]
     pub reference: Option<String>,
-    /// Simulation time `motion` describes, in seconds.
-    pub seconds: f64,
+    /// The world step `motion` describes (see `tick_seconds`). Orders given
+    /// now take effect from this step.
+    pub tick: i64,
     pub input: Input,
     #[serde(default)]
     pub warp: warp::Warp,
@@ -201,7 +224,7 @@ pub struct Closest {
 }
 
 impl Craft {
-    pub fn new(id: String, name: String, kind: CraftKind, frame: Frame, seconds: f64) -> Self {
+    pub fn new(id: String, name: String, kind: CraftKind, frame: Frame, tick: i64) -> Self {
         Self {
             id,
             name,
@@ -213,11 +236,16 @@ impl Craft {
             thrusters: Thrusters::default(),
             autopilot: AttitudePilot::default(),
             reference: None,
-            seconds,
+            tick,
             input: Input::default(),
             warp: warp::Warp::default(),
             gravity: None,
         }
+    }
+
+    /// Simulation time `motion` describes, in seconds.
+    pub fn seconds(&self) -> f64 {
+        tick_seconds(self.tick)
     }
 
     pub fn state(&self) -> State {
@@ -282,9 +310,9 @@ impl Craft {
     }
 
     /// Place the craft, as when it is built or loaded.
-    pub fn place(&mut self, state: State, seconds: f64) {
+    pub fn place(&mut self, state: State, tick: i64) {
         self.motion = Motion::Free(state);
-        self.seconds = seconds;
+        self.tick = tick;
         self.gravity = None;
     }
 
@@ -300,27 +328,27 @@ impl Craft {
         let rotation = self.guidance(gravity);
         self.turn(rotation);
         let end_thrust = self.thrust();
+        let seconds = self.seconds();
         let Motion::Free(state) = &mut self.motion;
         let before = self
             .gravity
-            .unwrap_or_else(|| gravity.acceleration(state.position, self.seconds));
+            .unwrap_or_else(|| gravity.acceleration(state.position, seconds));
         let after = verlet(
             state,
             gravity,
-            self.seconds,
+            seconds,
             STEP_SECONDS,
             before,
             [thrust, end_thrust],
         );
-        self.seconds += STEP_SECONDS;
+        self.tick += 1;
         self.gravity = Some(after);
         // Once a simulated second: choosing costs more than the step itself,
         // and no craft crosses a region in a second.
         let position = state.position;
-        let second = |t: f64| (t / REFERENCE_SECONDS).floor();
-        if self.reference.is_none() || second(self.seconds) != second(self.seconds - STEP_SECONDS) {
+        if self.reference.is_none() || self.tick.rem_euclid(REFERENCE_STEPS) == 0 {
             self.reference = gravity
-                .orbit_reference(self.reference.as_deref(), position, self.seconds)
+                .orbit_reference(self.reference.as_deref(), position, self.seconds())
                 .map(|reference| reference.id);
         }
     }
@@ -329,7 +357,7 @@ impl Craft {
     /// Returns the steps taken.
     pub fn advance(&mut self, gravity: &impl Gravity, until: f64, max_steps: usize) -> usize {
         let mut steps = 0;
-        while self.seconds < until && steps < max_steps {
+        while self.seconds() < until && steps < max_steps {
             self.step(gravity);
             steps += 1;
         }

@@ -180,7 +180,8 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   reference, and whether a newer one is `updating`. Its `events` list the
   next sampled periapsis and apoapsis (`altitude_km`) and every predicted
   `exit` or `encounter` (`to`), each `in_seconds` from now.
-  `held_clock` indicates physics catch-up; `step_seconds` is the fixed step.
+  `held_clock` indicates physics catch-up; `step_seconds` is the fixed step,
+  and each craft's `tick` is the world step its state describes.
   While pointing, `target_direction` and `pointing_error_deg` report the
   resolved direction and nose error at the latest physics step; they are
   null outside pointing mode or when its target is undefined.

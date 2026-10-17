@@ -102,9 +102,10 @@ impl Craft {
                 * (1.0 - (-dt / RAMP_SECONDS).exp());
         let bubble = DQuat::from_array(self.orientation) * -DVec3::Z * travel;
         let mut state = self.state();
+        let seconds = self.seconds();
         let pulled = self.warp.gravity == GravityPolicy::Active && travel < GRAVITY_CUTOFF_MS * dt;
         let a = if pulled {
-            DVec3::from_array(gravity.acceleration(state.position, self.seconds))
+            DVec3::from_array(gravity.acceleration(state.position, seconds))
         } else {
             DVec3::ZERO
         };
@@ -112,13 +113,13 @@ impl Craft {
         state.position =
             (DVec3::from_array(state.position) + half_velocity * dt + bubble).to_array();
         let end_a = if pulled {
-            DVec3::from_array(gravity.acceleration(state.position, self.seconds + dt))
+            DVec3::from_array(gravity.acceleration(state.position, seconds + dt))
         } else {
             DVec3::ZERO
         };
         state.velocity = (half_velocity + end_a * (dt / 2.0)).to_array();
         self.motion = Motion::Free(state);
-        self.seconds += dt;
+        self.tick += 1;
         self.warp.actual_ms = speed;
         self.warp.bubble_delta_m = bubble.to_array();
         self.gravity = None;

@@ -446,7 +446,7 @@ impl Voyage {
         let state = rebase.state(self.craft.state());
         self.craft.orientation = rebase.orientation(self.craft.orientation);
         self.craft.warp.bubble_delta_m = rebase.direction(self.craft.warp.bubble_delta_m);
-        self.craft.place(state, self.craft.seconds);
+        self.craft.place(state, self.craft.tick);
         self.craft.reference = None;
         self.craft.frame = frame;
         self.origin_pc = origin_pc;
