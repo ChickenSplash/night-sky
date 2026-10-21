@@ -26,7 +26,7 @@ for implementation details.
 | Bodies, lighting, star points and galaxy glow | Client `render/`, `stars/` | [Rendering](docs/client/rendering.md), [galactic rendering](docs/client/galactic-rendering.md) |
 | HUD, breadcrumbs, inspector and panels | Client `ui/` | [Interface](docs/client/ui/interface.md), [controls](docs/client/controls.md), [browser](docs/client/ui/browser.md) |
 | Reusable widgets, themes and interaction | Client `ui/kit/`, `ui/terminal.rs` | [UI kit](docs/client/ui/kit.md) |
-| Debug console, snapshots, API and CLI | Client `devtools/`, `command_line.rs`, `scripts/ns` | [Diagnostics](docs/client/devtools.md), [developer API](docs/client/developer-api.md), [benchmarks](docs/client/benchmarks.md) |
+| Debug console, snapshots, API and CLI | Client `devtools/`, `command_line.rs`, `scripts/ns`, `scripts/ns-tui` | [Diagnostics](docs/client/devtools.md), [developer API](docs/client/developer-api.md), [benchmarks](docs/client/benchmarks.md) |
 | Demo backend and web serving | `crates/server` | [Backend](docs/server/backend.md) |
 | Builds, tests, logs and file moves | Workspace and `scripts/` | [Development](docs/development.md) |
 

@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Terminal control panel for the Night Sky developer API.
+
+Forms come from the app's live command catalogue (GET /commands), so a new
+USAGE entry appears here with no change to this file. Textual lives in a
+project-local virtual environment, made on first run in tools/tui/.
+"""
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VENV = os.path.join(ROOT, "tools", "tui")
+VENV_PYTHON = os.path.join(VENV, "bin", "python")
+
+try:
+    from rich.json import JSON
+    from rich.text import Text
+    from textual import on, work
+    from textual.app import App, ComposeResult
+    from textual.containers import Horizontal, Vertical, VerticalScroll
+    from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RichLog, Static
+    from textual.widgets.option_list import Option
+except ImportError:
+    if sys.executable == VENV_PYTHON:
+        sys.exit(f"ns-tui: Textual is missing from {VENV}; delete it and run again")
+    if not os.path.exists(VENV_PYTHON):
+        print(f"ns-tui: installing Textual into {VENV} (first run only)", file=sys.stderr)
+        subprocess.run([sys.executable, "-m", "venv", VENV], check=True)
+        subprocess.run([VENV_PYTHON, "-m", "pip", "install", "-q", "textual"], check=True)
+    os.execv(VENV_PYTHON, [VENV_PYTHON, *sys.argv])
+
+PORT = int(os.environ.get("NIGHT_SKY_API_PORT", "4322"))
+WATCH = "clock, camera/flying, presentation_mode"
+
+
+class ApiError(Exception):
+    pass
+
+
+def request(path, body=None):
+    """One loopback request, as `ns` makes it. Returns (status, JSON)."""
+    headers = {}
+    if body is not None:
+        headers = {"X-Night-Sky-Client": "cli", "Content-Type": "text/plain; charset=utf-8"}
+    req = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", data=body, headers=headers)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=5) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        try:
+            return error.code, json.load(error)
+        except ValueError:
+            return error.code, {"error": error.reason}
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        raise ApiError(f"cannot reach Night Sky on port {PORT}: start ./scripts/run.sh ({error})") from error
+    except ValueError as error:
+        raise ApiError("API returned invalid JSON") from error
+
+
+def quote(value):
+    return f'"{value}"' if any(c.isspace() for c in value) else value
+
+
+def command_line(entry, values):
+    """Typed command text from form values, by field name so blanks can be left out."""
+    if entry["name"] == "search":
+        return "search " + values.get("query", "")
+    return " ".join([entry["name"]] + [f"{f}={quote(v)}" for f, v in values.items() if v])
+
+
+class NsTui(App):
+    TITLE = "Night Sky · ns-tui"
+    CSS = """
+    #commands { width: 34; border: round $primary; }
+    #filter { margin-bottom: 1; }
+    #middle { width: 1fr; }
+    #form { height: auto; max-height: 60%; border: round $accent; padding: 0 1; }
+    .about { color: $text-muted; margin-bottom: 1; }
+    .field { height: auto; }
+    .field Label { width: 20; padding: 1 1 0 0; }
+    .field Input { width: 1fr; }
+    .run { margin-top: 1; }
+    #log { border: round $secondary; height: 1fr; }
+    #line { dock: bottom; }
+    #watch { width: 46; border: round $success; }
+    #state { height: 1fr; }
+    """
+    BINDINGS = [
+        ("ctrl+r", "run", "Run form"),
+        ("ctrl+f", "focus_filter", "Find command"),
+        ("ctrl+l", "focus_line", "Type command"),
+        ("ctrl+s", "screenshot", "Screenshot"),
+        ("ctrl+q", "quit", "Quit"),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.catalogue = []
+        self.entry = None
+        self.inputs = {}
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Horizontal():
+            with Vertical(id="commands"):
+                yield Input(placeholder="filter commands", id="filter")
+                yield OptionList(id="list")
+            with Vertical(id="middle"):
+                with VerticalScroll(id="form"):
+                    yield Static("Waiting for the app…", classes="about")
+                yield RichLog(id="log", markup=False, wrap=True)
+                yield Input(placeholder="type any command, e.g. set_debug bloom false  (enter runs)", id="line")
+            with Vertical(id="watch"):
+                yield Input(value=WATCH, placeholder="state paths, comma separated", id="paths")
+                yield Static(id="state")
+        yield Footer()
+
+    def on_mount(self):
+        # Terminal colours throughout: no background of its own.
+        self.theme = "ansi-dark"
+        self.query_one("#form").border_title = "command"
+        self.query_one("#log").border_title = "history"
+        self.query_one("#watch").border_title = "live state"
+        self.query_one("#commands").border_title = "commands"
+        self.load_catalogue()
+        self.set_interval(1.0, self.refresh_state)
+
+    # Catalogue and form
+
+    @work(thread=True, exclusive=True, group="catalogue")
+    def load_catalogue(self):
+        try:
+            status, catalogue = request("/commands")
+        except ApiError as error:
+            self.call_from_thread(self.set_offline, str(error))
+            return
+        if status == 200:
+            self.call_from_thread(self.set_catalogue, catalogue)
+
+    def set_offline(self, message):
+        self.sub_title = "offline, retrying"
+        self.query_one(".about", Static).update(message)
+        self.set_timer(2.0, self.load_catalogue)
+
+    def set_catalogue(self, catalogue):
+        self.catalogue = sorted(catalogue, key=lambda entry: entry["name"])
+        self.sub_title = f"port {PORT} · {len(self.catalogue)} commands"
+        self.fill_list(self.query_one("#filter", Input).value)
+
+    def fill_list(self, text):
+        options = self.query_one("#list", OptionList)
+        options.clear_options()
+        words = text.lower().split()
+        options.add_options(
+            Option(entry["name"], id=entry["name"]) for entry in self.catalogue
+            if all(w in (entry["name"] + " " + entry["about"]).lower() for w in words))
+        if options.option_count:
+            options.highlighted = 0
+
+    @on(Input.Changed, "#filter")
+    def filter_changed(self, event):
+        self.fill_list(event.value)
+
+    @on(Input.Submitted, "#filter")
+    def filter_submitted(self):
+        self.query_one("#list").focus()
+
+    @on(OptionList.OptionHighlighted, "#list")
+    async def command_highlighted(self, event):
+        entry = next(e for e in self.catalogue if e["name"] == event.option.id)
+        if entry is not self.entry:
+            await self.show_form(entry)
+
+    @on(OptionList.OptionSelected, "#list")
+    def command_selected(self):
+        if self.inputs:
+            next(iter(self.inputs.values())).focus()
+        else:
+            self.action_run()
+
+    async def show_form(self, entry):
+        self.entry = entry
+        form = self.query_one("#form")
+        form.border_title = entry["synopsis"]
+        await form.remove_children()
+        self.inputs = {}
+        widgets = [Static(entry["about"], classes="about")]
+        for field in entry["fields"]:
+            box = Input(placeholder="optional, left out if blank")
+            self.inputs[field] = box
+            widgets.append(Horizontal(Label(field), box, classes="field"))
+        widgets.append(Button(f"Run {entry['name']}  (ctrl+r)", classes="run", variant="primary"))
+        await form.mount_all(widgets)
+
+    @on(Input.Submitted)
+    def field_submitted(self, event):
+        if event.input in self.inputs.values():
+            self.action_run()
+
+    @on(Button.Pressed, ".run")
+    def run_pressed(self):
+        self.action_run()
+
+    def action_run(self):
+        if self.entry:
+            values = {field: box.value.strip() for field, box in self.inputs.items()}
+            self.send(command_line(self.entry, values))
+
+    @on(Input.Submitted, "#line")
+    def line_submitted(self, event):
+        if event.value.strip():
+            self.send(event.value.strip())
+            event.input.value = ""
+
+    # Commands and history
+
+    @work(thread=True, group="command")
+    def send(self, line):
+        try:
+            status, reply = request("/command", line.encode("utf-8"))
+        except ApiError as error:
+            status, reply = 0, {"error": str(error)}
+        self.call_from_thread(self.log_reply, line, status, reply)
+
+    def log_reply(self, line, status, reply):
+        log = self.query_one("#log", RichLog)
+        ok = 200 <= status < 300
+        text = Text("✓ " if ok else "✗ ", style="green" if ok else "red")
+        text.append(line, style="bold")
+        detail = reply.get("status") if ok and isinstance(reply, dict) else reply.get("error", reply)
+        text.append(f"  {detail}", style="dim" if ok else "red")
+        log.write(text)
+
+    def action_screenshot(self):
+        self.screenshot()
+
+    @work(thread=True, group="command")
+    def screenshot(self):
+        try:
+            status, reply = request("/screenshot", b"")
+        except ApiError as error:
+            status, reply = 0, {"error": str(error)}
+        if 200 <= status < 300:
+            reply = {"status": f"→ {reply.get('png')}"}
+        self.call_from_thread(self.log_reply, "screenshot", status, reply)
+
+    # Live state
+
+    @work(thread=True, exclusive=True, group="state")
+    def refresh_state(self):
+        paths = [p.strip().strip("/") for p in self.query_one("#paths", Input).value.split(",") if p.strip()]
+        values = {}
+        for path in paths:
+            try:
+                status, value = request("/state/" + urllib.parse.quote(path, safe="/~"))
+            except ApiError:
+                self.call_from_thread(self.query_one("#state", Static).update, "app not reachable")
+                return
+            values[path] = value if status == 200 else f"({value.get('error', status)})"
+        self.call_from_thread(self.query_one("#state", Static).update, JSON(json.dumps(values)))
+
+    def action_focus_filter(self):
+        self.query_one("#filter").focus()
+
+    def action_focus_line(self):
+        self.query_one("#line").focus()
+
+
+if __name__ == "__main__":
+    NsTui().run()
