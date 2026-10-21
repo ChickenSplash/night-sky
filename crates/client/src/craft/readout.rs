@@ -131,6 +131,17 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
             speed_label(live.craft.warp.actual_ms)
         ),
     ));
+    let turning = bevy::math::DVec3::from_array(live.craft.spin)
+        .length()
+        .to_degrees();
+    rows.push((
+        "Warp turn rate".into(),
+        if live.craft.warp.engaged {
+            format!("{turning:.1} / {} °/s", live.craft.warp.turn_rate_dps)
+        } else {
+            format!("{} °/s at full steering", live.craft.warp.turn_rate_dps)
+        },
+    ));
     rows.push((
         "Warp gravity".into(),
         format!("{:?}", live.craft.warp.gravity),

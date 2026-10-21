@@ -150,7 +150,7 @@ pub const USAGE: [Usage; 31] = [
     Usage {
         name: "steer_craft",
         fields: &["order", "id", "tick"],
-        about: "Ship order JSON: throttle, translate, rotate, point, stop (spin), release, cut (sublight drives and brake spin), configure, warp; use ns ship --help",
+        about: "Ship order JSON: throttle, translate, rotate, point, stop (spin), release, cut (sublight drives and brake spin), configure, warp (turning steers the bubble while engaged); use ns ship --help",
     },
     Usage {
         name: "pick_star",

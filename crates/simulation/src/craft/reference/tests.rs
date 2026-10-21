@@ -238,7 +238,7 @@ fn refused_matched_exits_are_atomic_and_do_not_stop_warp() {
     assert!(craft.matched_dropout(Some(&field), "t#A/0", false).is_err());
     assert_eq!(craft, before);
     craft.frame = Frame::System { star: "t#A".into() };
-    craft.warp.stop("test");
+    craft.disengage_warp("test");
     let before = craft.clone();
     assert!(craft.matched_dropout(Some(&field), "t#A/0", false).is_err());
     assert_eq!(craft, before);

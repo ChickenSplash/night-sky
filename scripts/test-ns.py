@@ -101,6 +101,7 @@ class CliTests(unittest.TestCase):
             (["warp", "up"], {"action": "warp", "command": {"command": "up"}}),
             (["warp", "down"], {"action": "warp", "command": {"command": "down"}}),
             (["warp", "set", "1000000"], {"action": "warp", "command": {"command": "set", "speed_ms": 1000000.0}}),
+            (["warp", "turn-rate", "90"], {"action": "warp", "command": {"command": "turn_rate", "degrees_per_second": 90.0}}),
             (["warp", "gravity", "suspended"], {"action": "warp", "command": {"command": "gravity", "policy": "suspended"}}),
             (["throttle", "-0.5"], {"action": "throttle", "value": -0.5}),
             (["translate", "--up", "0.2"], {"action": "translate", "right": 0.0, "up": 0.2, "forward": 0.0}),

@@ -1,6 +1,10 @@
 //! Unsafe manual bubble transport, separate from ordinary momentum.
 //! There are no collision checks or route-coverage prerequisites.
-use super::{AttitudePilot, Craft, Field, Frame, Gravity, Motion, STEP_SECONDS, circular_speed};
+//!
+//! The drive also turns the bubble and the ship inside it together, without
+//! turning thrusters: a game rule. Steering sets a turn rate, not an angular
+//! acceleration, so releasing it stops the turn, and dropout leaves no spin.
+use super::{Craft, Field, Frame, Gravity, Motion, STEP_SECONDS, circular_speed};
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 
@@ -8,9 +12,14 @@ pub const MIN_SPEED: f64 = 1.0;
 /// Shared upper travel speed for warp and the free camera, in metres/second.
 pub const MAX_SPEED: f64 = 10_000.0 * crate::LY_METRES;
 pub const SPEED_FACTOR: f64 = 3.162_277_660_168_379_5;
-/// Exponential response time in simulated seconds, independent of frame rate.
+/// Exponential response time of speed and turn rate in simulated seconds,
+/// independent of frame rate.
 pub const RAMP_SECONDS: f64 = 0.3;
 pub const SPIN_TOLERANCE: f64 = 1e-6;
+/// Range and default of the bubble's turn rate at full steering, in °/s.
+pub const MIN_TURN_RATE_DPS: f64 = 1.0;
+pub const MAX_TURN_RATE_DPS: f64 = 360.0;
+pub const DEFAULT_TURN_RATE_DPS: f64 = 30.0;
 /// Bubble speed at and above which gravity is ignored under either policy.
 /// A pass this fast changes ordinary velocity by at most metres per second
 /// for a main-sequence star, while sampling gravity only at the ends of each
@@ -32,6 +41,10 @@ pub struct Warp {
     pub actual_ms: f64,
     pub gravity: GravityPolicy,
     pub stop_reason: Option<String>,
+    /// Turn rate at full steering, in degrees per second. Steering on several
+    /// axes together shares it, and pointing never exceeds it.
+    #[serde(default = "default_turn_rate")]
+    pub turn_rate_dps: f64,
     /// The displacement from bubble motion alone on the last physics step.
     pub bubble_delta_m: [f64; 3],
     /// Last successful matched exit, retained for inspection, not a standing
@@ -57,10 +70,15 @@ impl Default for Warp {
             actual_ms: 0.0,
             gravity: GravityPolicy::Active,
             stop_reason: None,
+            turn_rate_dps: DEFAULT_TURN_RATE_DPS,
             bubble_delta_m: [0.0; 3],
             last_match: None,
         }
     }
+}
+
+fn default_turn_rate() -> f64 {
+    DEFAULT_TURN_RATE_DPS
 }
 
 impl Warp {
@@ -77,7 +95,22 @@ impl Warp {
         Ok(())
     }
 
-    pub fn stop(&mut self, reason: &str) {
+    pub fn set_turn_rate(&mut self, degrees_per_second: f64) -> Result<(), &'static str> {
+        Self::validate_turn_rate(degrees_per_second)?;
+        self.turn_rate_dps = degrees_per_second;
+        Ok(())
+    }
+
+    pub(super) fn validate_turn_rate(degrees_per_second: f64) -> Result<(), &'static str> {
+        if !degrees_per_second.is_finite()
+            || !(MIN_TURN_RATE_DPS..=MAX_TURN_RATE_DPS).contains(&degrees_per_second)
+        {
+            return Err("Warp turn rate must be finite, between 1 and 360 °/s");
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self, reason: &str) {
         self.engaged = false;
         self.actual_ms = 0.0;
         self.bubble_delta_m = [0.0; 3];
@@ -151,7 +184,7 @@ impl Craft {
         self.motion = Motion::Free(state);
         self.gravity = None;
         self.reference = None;
-        self.warp.stop(if orbit {
+        self.disengage_warp(if orbit {
             "Rough-orbit matched dropout"
         } else {
             "Velocity-matched dropout"
@@ -166,6 +199,8 @@ impl Craft {
     }
 
     /// Validate without changing motion or silently cutting other drives.
+    /// Turning carries over: the bubble takes over any spin and eases it to
+    /// the rotation input or attitude pilot, which now steer the bubble.
     pub fn engage_warp(&mut self) -> Result<(), &'static str> {
         if self.warp.engaged {
             return Err("Warp is already engaged");
@@ -173,12 +208,6 @@ impl Craft {
         let c = self.input.controls;
         if self.input.thrust != [0.0; 3] || c.throttle != 0.0 || c.translation != [0.0; 3] {
             return Err("Cut sublight thrust before engaging warp");
-        }
-        if c.rotation != [0.0; 3]
-            || self.spin.iter().any(|v| v.abs() > SPIN_TOLERANCE)
-            || !matches!(self.autopilot, AttitudePilot::Manual)
-        {
-            return Err("Stop rotation and release the attitude pilot before engaging warp");
         }
         self.warp.engaged = true;
         self.warp.actual_ms = 0.0;
@@ -188,18 +217,39 @@ impl Craft {
         Ok(())
     }
 
+    /// End bubble travel, keeping ordinary velocity. The bubble's turn ends
+    /// with it, so the ship drops out without spin; the rotation input and
+    /// attitude pilot pass back to the turning thrusters unchanged.
+    pub fn disengage_warp(&mut self, reason: &str) {
+        self.warp.stop(reason);
+        self.spin = [0.0; 3];
+    }
+
     /// One fixed step of bubble transport, with ordinary drift and, under
     /// the active policy, gravity. No collision or route checks.
     pub(super) fn warp_step(&mut self, gravity: &impl Gravity) {
         let dt = STEP_SECONDS;
-        let speed = self.warp.requested_ms
-            + (self.warp.actual_ms - self.warp.requested_ms) * (-dt / RAMP_SECONDS).exp();
+        let decay = (-dt / RAMP_SECONDS).exp();
+        let speed = self.warp.requested_ms + (self.warp.actual_ms - self.warp.requested_ms) * decay;
         // Integral of the exponential speed ramp, not endpoint speed times dt.
         let travel = self.warp.requested_ms * dt
-            + (self.warp.actual_ms - self.warp.requested_ms)
-                * RAMP_SECONDS
-                * (1.0 - (-dt / RAMP_SECONDS).exp());
-        let bubble = DQuat::from_array(self.orientation) * -DVec3::Z * travel;
+            + (self.warp.actual_ms - self.warp.requested_ms) * RAMP_SECONDS * (1.0 - decay);
+        // The turn rate follows the same ramp towards the steering target,
+        // and the path bends with the nose at the step's midpoint attitude.
+        let target = self.steering(gravity);
+        let spin = DVec3::from_array(self.spin);
+        let turn = target * dt + (spin - target) * RAMP_SECONDS * (1.0 - decay);
+        let start = DQuat::from_array(self.orientation);
+        let heading = if turn == DVec3::ZERO {
+            start
+        } else {
+            self.orientation = (start * DQuat::from_scaled_axis(turn))
+                .normalize()
+                .to_array();
+            start * DQuat::from_scaled_axis(turn / 2.0)
+        };
+        self.spin = (target + (spin - target) * decay).to_array();
+        let bubble = heading * -DVec3::Z * travel;
         let mut state = self.state();
         let seconds = self.seconds();
         let pulled = self.warp.gravity == GravityPolicy::Active && travel < GRAVITY_CUTOFF_MS * dt;

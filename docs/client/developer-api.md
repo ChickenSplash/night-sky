@@ -233,6 +233,7 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   the body-axis commands for flying.
 - Manoeuvres (drive inputs, spin, or an engaged attitude pilot) cap clock
   advancement at 10× without changing the requested rate or pause setting.
+  Steering the warp bubble is not a manoeuvre and does not cap it.
   `/state/clock/effective_rate` reports that ceiling (zero while paused),
   before any further physics catch-up hold. Quiet manual coasting restores
   the requested rate; release the attitude pilot to allow that restoration.
@@ -240,14 +241,18 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 ### Warp commands
 
 ```sh
-./scripts/ns ship cut              # cut thrust and brake spin
-# Wait until spin_rads is near zero, then release the braking controller.
-./scripts/ns ship release
+./scripts/ns ship throttle 0       # warp needs every sublight thrust input at zero
 ./scripts/ns ship state            # inspect spin, inputs and warp state
 ./scripts/ns ship warp set 1000000  # requested m/s; does not engage
 ./scripts/ns ship warp engage
 ./scripts/ns ship warp up          # multiply requested speed by √10
 ./scripts/ns ship warp down
+# Steering while engaged: the same turning commands steer the bubble.
+./scripts/ns ship rotate --yaw 0.5        # turn at half the turn rate, until changed
+./scripts/ns ship rotate                  # stop turning (eases out over ~0.3 s)
+./scripts/ns ship point body 'body-id'    # turn towards a body and track it
+./scripts/ns ship stop                    # stop turning, ending pointing
+./scripts/ns ship warp turn-rate 90       # turn rate at full steering, 1 to 360 °/s
 ./scripts/ns ship warp disengage
 # Alternative exits while engaged, using a body in the ship's current system:
 ./scripts/ns ship warp match 'body-id'          # match only the body's velocity
@@ -256,9 +261,13 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 ./scripts/ns ship warp gravity active     # default
 ```
 
-All warp commands accept `--id`. Point the ship before engagement; phase 4 has
-no warp steering or automatic arrival. Thrust and turning are interlocked with
-warp. Manual warp is unsafe: no collision checks, proximity slowdown, automatic
+All warp commands accept `--id`. Sublight thrust is interlocked with warp;
+turning is not. While engaged, `rotate`, `point`, `stop` and `cut` steer the
+bubble rather than the turning thrusters, at up to the turn rate (default
+30 °/s), and engagement takes over any existing spin and eases it out. On
+disengagement the ship keeps no spin, and a held rotation input or pointing
+pilot passes back to the turning thrusters. There is no automatic arrival.
+Manual warp is unsafe: no collision checks, proximity slowdown, automatic
 arrival stop or missing-data stop. It can pass through stars and planets without
 a crash response. Ordinary motion continues. See the
 [warp model](../simulation/craft.md#warp-core) for the precise rules and limits.
@@ -266,8 +275,10 @@ a crash response. Ordinary motion continues. See the
 The API uses `steer_craft`, for example
 `{"type":"steer_craft","order":{"action":"warp","command":{"command":"engage"}}}`
 or `{"type":"steer_craft","order":{"action":"warp","command":{"command":"set","speed_ms":1000000}}}`.
+The turn rate order is `{"action":"warp","command":{"command":"turn_rate","degrees_per_second":90}}`.
 `/state/craft/craft/<index>/warp` contains `engaged`, `requested_ms`, `actual_ms`,
-`gravity`, `stop_reason` and the last step's `bubble_delta_m` in frame axes.
+`gravity`, `stop_reason`, `turn_rate_dps` and the last step's `bubble_delta_m`
+in frame axes. The bubble's current turn rate is `spin_rads`, body axes.
 `last_match` is null or the last successful matched exit's `body`, `orbit`,
 `tick` and `velocity_ms` (system-frame velocity at exit, not current velocity).
 It clears on the next engagement. Matching uses existing planet, star and

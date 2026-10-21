@@ -1,5 +1,6 @@
-//! Thruster-limited attitude guidance. It outputs rotation fractions, never
-//! edits orientation or spin. All vectors and roll references use system axes.
+//! Attitude guidance: thruster-limited rotation fractions in ordinary flight,
+//! bubble turn rates in warp. It never edits orientation or spin. All vectors
+//! and roll references use system axes.
 use super::*;
 use glam::DMat3;
 
@@ -35,9 +36,6 @@ impl Craft {
     /// Engage pointing. An optional up vector fixes roll (projected onto the
     /// plane normal to the target); without one the initial roll is retained.
     pub fn point(&mut self, target: PointTarget, up: Option<[f64; 3]>) -> Result<(), &'static str> {
-        if self.warp.engaged {
-            return Err("Disengage warp before pointing");
-        }
         if let PointTarget::Vector(v) = &target
             && unit(*v).is_none()
         {
@@ -67,9 +65,49 @@ impl Craft {
     }
 
     pub(super) fn guidance(&mut self, field: &impl Gravity) -> [f64; 3] {
+        if matches!(self.autopilot, AttitudePilot::Manual) {
+            return self.input.controls.rotation;
+        }
+        let error = self.attitude_error(field);
+        let spin = self.spin;
+        let limits = self.thrusters.angular;
+        std::array::from_fn(|i| {
+            let limit = limits[i];
+            if limit <= 0.0 {
+                return 0.0;
+            }
+            // Slow down well before the ideal stopping boundary. The linear
+            // near-target branch is overdamped; the last step cannot reverse
+            // the remaining rate. No attitude or spin snapping is used.
+            let desired = error[i].signum()
+                * (0.8 * error[i].abs())
+                    .min((limit * error[i].abs()).sqrt())
+                    .min(0.5);
+            let acceleration = ((desired - spin[i]) / 0.25).clamp(-limit, limit);
+            acceleration / limit
+        })
+    }
+
+    /// The warp bubble's target turn rate in rad/s, body axes: manual input
+    /// scaled by the turn rate, or pointing at a gain that critically damps
+    /// the bubble's rate response, so a turn from rest does not overshoot.
+    /// The extra step allows for holding each target for a whole step.
+    /// The total rate never exceeds the turn rate.
+    pub(super) fn steering(&mut self, field: &impl Gravity) -> DVec3 {
+        let most = self.warp.turn_rate_dps.to_radians();
+        let rate = match self.autopilot {
+            AttitudePilot::Manual => DVec3::from_array(self.input.controls.rotation) * most,
+            _ => self.attitude_error(field) / (4.0 * (warp::RAMP_SECONDS + STEP_SECONDS)),
+        };
+        rate.clamp_length_max(most)
+    }
+
+    /// The shortest rotation from the current attitude to the pilot's goal,
+    /// as a body-axis scaled axis. Zero to brake, or while the target is
+    /// undefined. Advances the transported goal of a pointing pilot.
+    fn attitude_error(&mut self, field: &impl Gravity) -> DVec3 {
         let direction = match &self.autopilot {
-            AttitudePilot::Manual => return self.input.controls.rotation,
-            AttitudePilot::Stop => None,
+            AttitudePilot::Manual | AttitudePilot::Stop => None,
             AttitudePilot::Point { target, .. } => target.direction(
                 self.state(),
                 self.seconds(),
@@ -100,23 +138,7 @@ impl Craft {
             }
             error = difference.to_scaled_axis();
         }
-        let spin = self.spin;
-        let limits = self.thrusters.angular;
-        std::array::from_fn(|i| {
-            let limit = limits[i];
-            if limit <= 0.0 {
-                return 0.0;
-            }
-            // Slow down well before the ideal stopping boundary. The linear
-            // near-target branch is overdamped; the last step cannot reverse
-            // the remaining rate. No attitude or spin snapping is used.
-            let desired = error[i].signum()
-                * (0.8 * error[i].abs())
-                    .min((limit * error[i].abs()).sqrt())
-                    .min(0.5);
-            let acceleration = ((desired - spin[i]) / 0.25).clamp(-limit, limit);
-            acceleration / limit
-        })
+        error
     }
 }
 

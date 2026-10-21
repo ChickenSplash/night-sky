@@ -128,23 +128,36 @@ fn unsafe_warp_can_engage_inside_a_planet() {
 }
 
 #[test]
-fn warp_orders_reject_thrust_and_turning_and_validate_speed() {
+fn warp_orders_reject_thrust_steer_the_bubble_and_validate_speed() {
     let mut live = live();
     let voyage = &mut live.voyage;
     let (craft, field) = (&mut voyage.craft, Some(&voyage.field));
     let order = |command| Order::Warp { command };
     order(WarpOrder::Engage).apply(craft, field).unwrap();
     assert!(Order::Throttle { value: 0.1 }.apply(craft, field).is_err());
+    Order::Rotate {
+        pitch: 0.1,
+        yaw: 0.0,
+        roll: 0.0,
+    }
+    .apply(craft, field)
+    .unwrap();
+    let planet = field.unwrap().bodies(0.0)[1].id.clone();
+    Order::Point {
+        target: space_simulation::craft::PointTarget::Body(planet),
+        up: None,
+    }
+    .apply(craft, field)
+    .unwrap();
+    Order::Stop.apply(craft, field).unwrap();
     assert!(
-        Order::Rotate {
-            pitch: 0.1,
-            yaw: 0.0,
-            roll: 0.0
+        Order::Point {
+            target: space_simulation::craft::PointTarget::Body("nowhere".into()),
+            up: None,
         }
         .apply(craft, field)
         .is_err()
     );
-    assert!(Order::Stop.apply(craft, field).is_err());
     assert!(
         order(WarpOrder::Set { speed_ms: f64::NAN })
             .apply(craft, field)
@@ -239,7 +252,7 @@ fn maximum_warp_dropout_then_continues_in_galactic_space() {
     live.craft.engage_warp().unwrap();
     catch_up(&mut live, &mut charts, 20.0 * STEP_SECONDS);
     assert!(live.voyage.in_galaxy());
-    live.craft.warp.stop("manual");
+    live.craft.disengage_warp("manual");
     // Slow again, it asks for the systems around it before each step.
     catch_up(&mut live, &mut charts, 40.0 * STEP_SECONDS);
     assert!(live.voyage.in_galaxy());

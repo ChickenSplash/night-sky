@@ -248,7 +248,8 @@ in memory only: nothing is saved or shared yet.
   the manoeuvre cap and either hold.
   Pending sublight or pointing orders also conservatively apply the manoeuvre
   cap, so a catch-up frame cannot run a newly scheduled burn at the high
-  coasting rate. Pending warp-only orders do not apply that cap.
+  coasting rate. Pending warp-only orders do not apply that cap, and neither
+  does steering the bubble of an engaged warp.
 - **Forecasts:** each craft keeps its last finished
   [coast prediction](#coast-prediction) (`craft::Forecast`) on show while a
   newer one is worked on. `craft::forecast` runs after stepping and shares
@@ -327,18 +328,17 @@ or on streamed stars.
 
 ## Warp core
 
-Warp is straight-line bubble transport along the ship's nose, commanded through
-the CLI/API. It is not a destination autopilot. There is no steering,
-approach assist, fuel or energy budget yet. Explicit matched dropout is described
+Warp is bubble transport along the ship's nose, commanded through the CLI/API,
+and steered by turning the nose (see [warp steering](#warp-steering)). It is
+not a destination autopilot. There is no turn-limit, collision or approach
+assist, fuel or energy budget yet. Explicit matched dropout is described
 below. Manual warp is deliberately unsafe:
 there are no body collision checks, atmosphere exclusions or missing-data stops.
 It can engage inside a body and pass through stars and planets, with no crash
 or damage response. Arrival detection is separate and does not stop the drive.
 
 - **Two motions:** each 0.05 s step adds ordinary drift and bubble displacement.
-  Bubble motion never becomes ordinary velocity on dropout. Attitude is held
-  during phase 4 travel. Existing appreciable spin, turning inputs or an engaged
-  attitude controller prevent engagement; stop rotation, then release the pilot.
+  Bubble motion never becomes ordinary velocity on dropout.
 - **Orders take effect from the next step:** every order, warp included, changes
   the craft's input or drive state and acts from its next fixed step (its
   `tick`), so a server can key inputs by step number. Physics brackets the clock with a step that may
@@ -347,8 +347,9 @@ or damage response. Arrival detection is separate and does not stop the drive.
   more step (up to 0.5 ly at 10,000 ly/s). Ordered while paused, that last step
   is seen once time resumes.
 - **Drive interlock:** all sublight thrust must be zero before engaging warp.
-  Nonzero throttle, fine/legacy translation, turning and pointing orders are
-  refused during warp, not silently cleared. Disengage before using them.
+  Nonzero throttle and fine/legacy translation orders are refused during warp,
+  not silently cleared. Disengage before using them. Turning is not
+  interlocked: during warp it steers the bubble.
 - **Gravity policy:** `active` by default, evaluated at the current travelled
   positions and integrated into ordinary velocity. The developer alternative
   `suspended` retains ordinary velocity but not position. At and above light
@@ -374,6 +375,37 @@ or damage response. Arrival detection is separate and does not stop the drive.
 - **One step for both drives:** `Craft::step` integrates ordinary flight or,
   while warp is engaged, bubble transport, so anything stepping a craft
   (client, tests, a future server) moves it the same way.
+
+### Warp steering
+
+The drive turns the bubble and the ship inside it together, without the
+turning thrusters. This is a game rule, in keeping with steering above light
+speed (see the [plan](../plans/flight-sim.md#warp-drive-rules)): in the
+Alcubierre picture the ship floats freely in flat space inside the bubble, so
+rotating it with the bubble resembles frame dragging, not anything the metric
+predicts. The crew would feel no turning force.
+
+- **Rate, not acceleration:** the same rotation fractions and attitude pilot
+  as ordinary flight set a target turn rate in body axes. Manual input is the
+  fraction times `turn_rate_dps`, a per-ship setting from 1 to 360 °/s
+  (default 30) that can change engaged or not. Several axes share it: the
+  total rate never exceeds it.
+- **Ramp:** the bubble's rate (`spin`) approaches the target with the same
+  0.3 s exponential response as speed, integrated exactly over each step.
+  Releasing steering ends the turn with no residual spin.
+- **The path bends with the nose:** each step's bubble displacement runs along
+  the step's midpoint attitude, so a steady turn traces a circle of radius
+  speed over turn rate. Roll turns the ship about its direction of travel
+  without changing the path. Ordinary velocity is never rotated.
+- **Pointing:** `point` drives the bubble's rate in proportion to the
+  attitude error, at a gain that critically damps the rate ramp with an
+  allowance for each step's held target. Turns from rest settle without
+  overshoot in the regression tests, never above the turn rate. `stop` and
+  `cut` target zero rate.
+- **Engaging and dropout:** engagement takes over any spin and eases it to
+  the steering target. Disengaging or a matched dropout leaves the ship with
+  no spin; a held rotation input or pointing pilot then passes back to the
+  turning thrusters, unchanged.
 
 Below the gravity cutoff, active warp retains its final gravity sample for
 the next step, including ordinary flight after dropout. Samples use the

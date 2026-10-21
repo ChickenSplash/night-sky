@@ -314,6 +314,12 @@ fn manoeuvres_cap_the_clock_before_physics_and_preserve_pause_and_requested_rate
     assert_eq!(fleet.safe_rate(86_400.0), 10.0);
     fleet.craft[0].craft.spin = [0.0; 3];
     assert_eq!(fleet.safe_rate(86_400.0), 86_400.0);
+    // Steering the warp bubble is not a sublight manoeuvre.
+    let craft = &mut fleet.craft[0].craft;
+    craft.engage_warp().unwrap();
+    craft.input.controls.rotation = [0.0, 0.5, 0.0];
+    craft.spin = [0.0, 0.1, 0.0];
+    assert_eq!(fleet.safe_rate(86_400.0), 86_400.0);
 }
 
 fn planet_system() -> (StarSystem, u32, String) {

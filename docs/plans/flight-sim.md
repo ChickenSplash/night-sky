@@ -585,6 +585,36 @@ In-app selection-to-command controls remain phase 11 work.
 - **Done when:** from the CLI, steer round a planet to its night side, turn
   towards another planet and leave the system, with the assist on and off.
 
+Decisions agreed with the user on 2026-10-21:
+
+- **The drive turns the bubble,** with the ship inside it, not the turning
+  thrusters: a game rule like frame dragging. Steering sets a turn rate, eased
+  in and out over 0.3 s, so releasing it ends the turn and dropout leaves no
+  spin. See [warp steering](../simulation/craft.md#warp-steering).
+- **One input path:** `rotate`, `point`, `stop` and `cut` steer the bubble
+  while engaged and the thrusters otherwise, so a stick or mouse later sends
+  the same orders in both modes.
+- **Engaging while spinning is allowed:** the bubble takes over the spin and
+  eases it to the steering input, rather than refusing.
+- **Pointing works during warp,** which "turn towards another planet" needs and
+  phase 9's autopilot reuses.
+- **Turn rate is ship state,** set with `ns ship warp turn-rate <°/s>`, from 1
+  to 360 °/s (default 30), engaged or not.
+- **The turn-limit assist comes after steering,** as a later checkpoint.
+
+Checkpoints:
+
+1. ✅ **Steering in the simulation:** rate-commanded bubble turning, midpoint
+   path bending, spin takeover and spinless dropout, pointing during warp,
+   the turn rate order, `ns ship warp turn-rate`, readouts and docs. Tests
+   cover the turning circle, shared rate limit, release, roll, takeover and
+   overshoot-free pointing at 1 to 360 °/s.
+2. **Live CLI steering flight:** round a planet to its night side, towards
+   another planet and out of the system.
+3. **Turn-limit assist:** the rate cap falling with speed, its switch and the
+   reason for any limit in `ns ship state`, then the done-when flight with it
+   on and off.
+
 ### 7 · Collision assist
 
 - Assist 2: slow down or disengage ahead of a predicted impact or too-close

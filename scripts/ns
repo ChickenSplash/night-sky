@@ -84,10 +84,13 @@ def parser():
         epilog="Example: ship point prograde; ship throttle 0.2; ship cut. "
         "stop brakes spin only; cut cancels all drive inputs and brakes spin; release disables the attitude pilot.")
     ships = ship.add_subparsers(dest="ship", required=True)
-    warp = ships.add_parser("warp", help="straight-line bubble transport, separate from sublight thrust")
+    warp = ships.add_parser("warp", help="bubble transport along the nose, separate from sublight thrust",
+        description="While engaged, rotate, point, stop and cut steer the bubble instead of the turning "
+        "thrusters: pitch and yaw bend the path, roll turns the ship about it. Steering sets a turn rate "
+        "(fraction x turn-rate) that eases in and out over about 0.3 s; dropout leaves no spin.")
     warps = warp.add_subparsers(dest="warp", required=True)
     for name, about in (
-        ("engage", "start bubble travel along the nose; needs no spin, pointing or thrust"),
+        ("engage", "start bubble travel along the nose; needs no thrust, takes over any spin"),
         ("disengage", "drop out keeping ordinary velocity"),
         ("up", "multiply requested speed by √10"),
         ("down", "divide requested speed by √10"),
@@ -97,6 +100,9 @@ def parser():
     speed = warps.add_parser("set", help="requested speed in m/s, 1 to about 9.46e19 (10,000 ly/s)")
     speed.add_argument("speed_ms", type=float)
     speed.add_argument("--id")
+    turn = warps.add_parser("turn-rate", help="bubble turn rate at full steering, 1 to 360 °/s (default 30)")
+    turn.add_argument("degrees_per_second", type=float)
+    turn.add_argument("--id")
     gravity = warps.add_parser("gravity", help="developer policy, change only while disengaged")
     gravity.add_argument("policy", choices=("active", "suspended"))
     gravity.add_argument("--id")
@@ -125,7 +131,7 @@ def parser():
     translate = ships.add_parser("translate", help="fine translation fractions; omitted axes reset to zero")
     for axis in ("forward", "up", "right"):
         translate.add_argument("--" + axis, type=float, default=0.0)
-    rotate = ships.add_parser("rotate", help="manual turning fractions; releases pointing, omitted axes reset to zero")
+    rotate = ships.add_parser("rotate", help="manual turning fractions (in warp, bubble steering); releases pointing, omitted axes reset to zero")
     for axis in ("pitch", "yaw", "roll"):
         rotate.add_argument("--" + axis, type=float, default=0.0)
     point = ships.add_parser("point", help="turn to and track an orbital direction, body or fixed system vector")
@@ -359,9 +365,11 @@ def vector(text, name):
 def ship_command(args):
     """The app command for a ship action, or None for a read."""
     if args.ship == "warp":
-        command = {"command": args.warp}
+        command = {"command": args.warp.replace("-", "_")}
         if args.warp == "set":
             command["speed_ms"] = args.speed_ms
+        elif args.warp == "turn-rate":
+            command["degrees_per_second"] = args.degrees_per_second
         elif args.warp == "gravity":
             command["policy"] = args.policy
         elif args.warp == "match":

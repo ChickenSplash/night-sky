@@ -255,13 +255,10 @@ impl Craft {
     }
 
     /// Accept a complete manual input atomically, rejecting unsupported or
-    /// non-finite commands instead of silently clipping them.
+    /// non-finite commands instead of silently clipping them. During warp,
+    /// rotation steers the bubble rather than firing turning thrusters.
     pub fn control(&mut self, controls: Controls) -> Result<(), &'static str> {
-        if self.warp.engaged
-            && (controls.throttle != 0.0
-                || controls.translation != [0.0; 3]
-                || controls.rotation != [0.0; 3])
-        {
+        if self.warp.engaged && (controls.throttle != 0.0 || controls.translation != [0.0; 3]) {
             return Err("Disengage warp before using thrusters");
         }
         if !std::iter::once(&controls.throttle)

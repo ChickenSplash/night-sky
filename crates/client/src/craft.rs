@@ -171,15 +171,18 @@ impl Fleet {
         let active = self.craft.iter().any(|live| {
             let craft = &live.craft;
             let input = craft.input;
+            // In warp, turning steers the bubble rather than the thrusters.
+            let turning = !craft.warp.engaged
+                && (input.controls.rotation != [0.0; 3]
+                    || craft
+                        .spin
+                        .iter()
+                        .any(|v| v.abs() > space_simulation::craft::warp::SPIN_TOLERANCE)
+                    || !matches!(craft.autopilot, AttitudePilot::Manual));
             input.thrust != [0.0; 3]
                 || input.controls.throttle != 0.0
                 || input.controls.translation != [0.0; 3]
-                || input.controls.rotation != [0.0; 3]
-                || craft
-                    .spin
-                    .iter()
-                    .any(|v| v.abs() > space_simulation::craft::warp::SPIN_TOLERANCE)
-                || !matches!(craft.autopilot, AttitudePilot::Manual)
+                || turning
                 || live.scheduled().any(|(_, order)| match order {
                     Order::Throttle { value } => *value != 0.0,
                     Order::Translate { right, up, forward } => [*right, *up, *forward] != [0.0; 3],

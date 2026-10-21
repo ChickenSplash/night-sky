@@ -70,6 +70,10 @@ pub enum WarpOrder {
     Set {
         speed_ms: f64,
     },
+    /// Turn rate at full steering, in degrees per second.
+    TurnRate {
+        degrees_per_second: f64,
+    },
     Up,
     Down,
     Gravity {
@@ -131,6 +135,11 @@ impl Order {
                 super::warp::Warp::validate_speed(*speed_ms)?;
             }
             Self::Warp {
+                command: WarpOrder::TurnRate { degrees_per_second },
+            } => {
+                super::warp::Warp::validate_turn_rate(*degrees_per_second)?;
+            }
+            Self::Warp {
                 command: WarpOrder::Match { body, .. },
             } => body_id(body)?,
             _ => {}
@@ -143,19 +152,19 @@ impl Order {
     /// `field` is the craft's system, when it is in one, to check bodies.
     pub fn apply(&self, craft: &mut Craft, field: Option<&Field>) -> Result<(), String> {
         self.validate()?;
-        if craft.warp.engaged && matches!(self, Self::Point { .. } | Self::Stop | Self::Cut) {
-            return Err("Disengage warp before engaging turning thrusters or pointing".into());
-        }
         let mut controls = craft.input.controls;
         match self {
             Self::Warp { command } => {
                 match command {
                     WarpOrder::Engage => craft.engage_warp()?,
-                    WarpOrder::Disengage => craft.warp.stop("Manual disengagement"),
+                    WarpOrder::Disengage => craft.disengage_warp("Manual disengagement"),
                     WarpOrder::Match { body, orbit } => {
                         craft.matched_dropout(field, body, *orbit)?;
                     }
                     WarpOrder::Set { speed_ms } => craft.warp.set_speed(*speed_ms)?,
+                    WarpOrder::TurnRate { degrees_per_second } => {
+                        craft.warp.set_turn_rate(*degrees_per_second)?
+                    }
                     WarpOrder::Up => craft
                         .warp
                         .set_speed((craft.warp.requested_ms * SPEED_FACTOR).min(MAX_SPEED))?,
