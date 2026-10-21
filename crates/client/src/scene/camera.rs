@@ -149,33 +149,32 @@ pub fn measure_velocity(
         return;
     }
     velocity.previous_follow = None;
-    velocity.metres_per_second = if let Some((frame, eye)) = velocity.previous {
-        if dt > 0.0 {
-            if frame != rig.frame_ly {
-                // Switching a star-relative frame subtracts interstellar-sized
-                // numbers. Do not interpret the rounding residual as motion.
-                velocity.previous = Some(current);
-                velocity.metres_per_second = DVec3::ZERO;
-                velocity.marker_metres_per_second = DVec3::ZERO;
-                return;
-            }
-            // Subtract local eyes first: adding the distant galactic origin to
-            // each position would lose metre-scale motion to f64 precision.
-            (pose.eye - eye) / dt
-        } else {
-            DVec3::ZERO
+    let previous = velocity.previous.replace(current);
+    if dt <= 0.0 {
+        velocity.metres_per_second = DVec3::ZERO;
+        velocity.marker_metres_per_second = DVec3::ZERO;
+        return;
+    }
+    let exact = motion.steered && !motion.orbiting && !rig.flying();
+    velocity.metres_per_second = match previous {
+        // Free flight knows its displacement exactly, whatever rounding the
+        // eye far from its origin or a re-anchoring frame switch adds.
+        _ if exact => motion.moved_metres / dt,
+        // Switching a star-relative frame subtracts interstellar-sized
+        // numbers. Do not interpret the rounding residual as motion.
+        Some((frame, _)) if frame != rig.frame_ly => {
+            velocity.marker_metres_per_second = DVec3::ZERO;
+            velocity.metres_per_second = DVec3::ZERO;
+            return;
         }
-    } else {
-        DVec3::ZERO
+        // Subtract local eyes first: adding the distant galactic origin to
+        // each position would lose metre-scale motion to f64 precision.
+        Some((_, eye)) => (pose.eye - eye) / dt,
+        None => DVec3::ZERO,
     };
     velocity.marker_metres_per_second = if motion.orbiting {
-        if dt > 0.0 {
-            motion.travel_metres / dt
-        } else {
-            DVec3::ZERO
-        }
+        motion.travel_metres / dt
     } else {
         velocity.metres_per_second
     };
-    velocity.previous = Some(current);
 }

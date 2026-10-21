@@ -446,6 +446,7 @@ fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
         Vec3::Y
     };
     nav.visit = None;
+    nav.open_origin_ly = DVec3::ZERO;
     nav.page = 0;
     nav.selection = None;
     nav.following = false;

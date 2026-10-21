@@ -70,6 +70,7 @@ pub fn save(report: &serde_json::Value) {
 
 pub fn at_home(nav: &mut Navigation) {
     nav.visit = None;
+    nav.open_origin_ly = DVec3::ZERO;
     nav.eye = Some(DVec3::ZERO);
     nav.rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
     nav.move_speed = SPEED;
@@ -86,6 +87,7 @@ pub fn advance(
     };
     flight.elapsed = (flight.elapsed + time.delta_secs_f64()).min(SECONDS);
     nav.visit = None;
+    nav.open_origin_ly = DVec3::ZERO;
     nav.following = false;
     nav.fly = false;
     nav.presentation_mode = crate::presentation::PresentationMode::Simulation;

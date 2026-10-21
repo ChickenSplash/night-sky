@@ -14,8 +14,14 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   (at, flying to, or showing as a constellation): `Visit::List` (a list index,
   at `Navigation::page`) or `Visit::Generated` (task-free planets built from
   the star's ID, never added to the lists' `Universe`). `None` is open space,
-  relative to home in galactic axes. A visit moves the camera frame to its
-  star in f64, and the same `Flight` shifts the displayed pose.
+  in galactic axes relative to a floating origin, `Navigation::open_origin_ly`.
+  A visit moves the camera frame to its star in f64, and the same `Flight`
+  shifts the displayed pose.
+- Open space's origin is the star just left, a followed craft's origin, or
+  home for the galaxy reference views. Once the free-flight eye is more than
+  `REANCHOR_METRES` (1e12 m) from it, `scene::locate` moves the origin to the
+  camera. Measured from home, an eye thousands of parsecs out resolves only
+  tens of kilometres, which would swallow slow keyboard steps.
 - `presentation.rs` owns `PresentationMode`: `Simulation` (simulated orbital
   positions), `Table` (comparison row), and `Constellation` (connected stars).
   They work on any visited system. `Navigation::presentation_mode` describes
@@ -115,9 +121,13 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 - In free-look/free flight, `Navigation::eye` is the authoritative f64 position
   in the current page frame. `target` remains for orbiting and flights; never
   reconstruct a close-up eye by cancelling a distant target against range.
-  Velocity uses differences of local eyes and ignores rounding residuals on
-  frame switches. Right-drag measures the eye's orbit in the speed readout,
-  but the direction marker uses only intentional keyboard travel.
+  Free-flight velocity is the exact displacement the controls applied
+  (`CameraMotion::moved_metres`), not a difference of eyes: hundreds of AU
+  from a star an eye resolves centimetres, enough to swing the marker of a
+  slow step by degrees. Flights and followed planets use differences of local
+  eyes and ignore rounding residuals on frame switches. Right-drag measures
+  the eye's orbit in the speed readout, but the direction marker uses only
+  intentional keyboard travel.
 - Free-look and roll update the local quaternion. Left-drag turns about current
   screen axes and repositions the target to keep the eye fixed; right-drag
   orbits the fixed target about those axes.

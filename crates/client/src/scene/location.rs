@@ -25,6 +25,9 @@ pub(super) const APPROACH_METRES: f64 = 0.02 * LY_METRES;
 /// The camera leaves a system beyond this multiple of its `system_range`, so
 /// the boundary cannot flicker.
 pub(super) const LEAVE_FACTOR: f64 = 2.0;
+/// Open-space free flight moves its origin to the camera beyond this eye
+/// distance, where an f64 position still resolves about 0.1 mm.
+pub(super) const REANCHOR_METRES: f64 = 1e12;
 
 /// Within this range of its star the camera arrives at a system. Even unusually
 /// wide systems include their initial fitted range and an outer planet being
@@ -61,7 +64,7 @@ fn rebase(
         None => None,
     };
     let new_tilt = new_system.map_or(DQuat::IDENTITY, |s| page_frame(s, page));
-    let new_frame = new_system.map_or(DVec3::ZERO, |s| page_origin_ly(s, page));
+    let new_frame = new_system.map_or(nav.open_origin_ly, |s| page_origin_ly(s, page));
     let old_eye = nav
         .eye
         .unwrap_or_else(|| old_tilt.inverse() * displayed_eye);
@@ -123,29 +126,44 @@ pub fn locate(
         return;
     }
     if nav.system(&lists.0).is_some() {
+        // Open space stays anchored at the star just left.
+        nav.open_origin_ly = rig.frame_ly;
         rebase(&mut nav, &rig, pose.eye, &lists.0, None, 0);
         // Let place_camera switch the displayed frame before another handoff.
         return;
     }
     let eye_pc =
         DVec3::from_array(GalaxyModel::milky_way().home_pc) + eye_ly * (LY_METRES / PC_METRES);
+    if let Some((visit, page)) = approached(&field, &mut metrics, &lists.0, eye_pc) {
+        rebase(&mut nav, &rig, pose.eye, &lists.0, Some(visit), page);
+        nav.arrived = true;
+    } else if nav.open_origin_ly == rig.frame_ly
+        && let Some(eye) = nav.eye.filter(|eye| eye.length() > REANCHOR_METRES)
+    {
+        nav.open_origin_ly = rig.frame_ly + eye / LY_METRES;
+        rebase(&mut nav, &rig, pose.eye, &lists.0, None, 0);
+    }
+}
+
+/// The streamed system free flight at `eye_pc` has come close enough to enter.
+fn approached(
+    field: &crate::stars::stream::Starfield,
+    metrics: &mut crate::stars::stream::StreamMetrics,
+    lists: &space_shared::Galaxy,
+    eye_pc: DVec3,
+) -> Option<(crate::Visit, u32)> {
     let reach_pc = APPROACH_METRES / PC_METRES;
-    let Some((_, cell, star)) = field.nearest(eye_pc, reach_pc, &mut metrics) else {
-        return;
-    };
+    let (_, cell, star) = field.nearest(eye_pc, reach_pc, metrics)?;
     let (id, position_pc) = (star.id(cell), star.position_pc);
     let position_ly = (DVec3::from_array(position_pc)
         - DVec3::from_array(GalaxyModel::milky_way().home_pc))
         * (PC_METRES / LY_METRES);
-    let (visit, page) = if let Some((list, page)) = crate::galaxy_nav::mapped(&lists.0, &id) {
-        (crate::Visit::List(list), page)
-    } else if let Some(system) = crate::galaxy_nav::generated(&id, position_ly) {
-        (crate::Visit::Generated(Box::new(system)), 0)
+    if let Some((list, page)) = crate::galaxy_nav::mapped(lists, &id) {
+        Some((crate::Visit::List(list), page))
     } else {
-        return;
-    };
-    rebase(&mut nav, &rig, pose.eye, &lists.0, Some(visit), page);
-    nav.arrived = true;
+        crate::galaxy_nav::generated(&id, position_ly)
+            .map(|system| (crate::Visit::Generated(Box::new(system)), 0))
+    }
 }
 
 /// Measure planets after camera placement, so a followed planet and the eye

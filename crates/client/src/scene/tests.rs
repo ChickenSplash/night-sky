@@ -110,8 +110,111 @@ fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
     app.update();
     let nav = app.world().resource::<Navigation>();
     assert!(nav.visit.is_none() && !nav.arrived);
-    let restored_eye = nav.eye.unwrap();
-    assert!((restored_eye - (frame * LY_METRES + departing_eye)).length() < 100_000.0);
+    // Open space stays anchored at the star, so the eye keeps its precision.
+    assert_eq!(nav.open_origin_ly, frame);
+    assert!((nav.eye.unwrap() - departing_eye).length() < 1.0);
+}
+
+/// Open space with the eye `eye` metres from an origin at home.
+fn open_space(eye: DVec3) -> App {
+    let nav = Navigation {
+        eye: Some(eye),
+        ..default()
+    };
+    let rig = CameraRig {
+        shown: Some(Pose {
+            target: nav.target,
+            distance: nav.distance,
+            rotation: nav.rotation,
+            layout: 0.0,
+        }),
+        ..default()
+    };
+    let mut app = App::new();
+    app.insert_resource(crate::stars::stream::Starfield::default())
+        .init_resource::<Clock>()
+        .insert_resource(Universe(space_simulation::demo_galaxy()))
+        .insert_resource(rig)
+        .insert_resource(CameraPose {
+            eye,
+            distance: nav.distance,
+            ..default()
+        })
+        .insert_resource(nav)
+        .init_resource::<crate::stars::stream::StreamMetrics>()
+        .add_systems(Update, locate);
+    app
+}
+
+#[test]
+fn open_space_free_flight_reanchors_its_origin_near_the_camera() {
+    // About 5,000 pc from home, where the eye alone resolves only ~30 km.
+    let far = DVec3::new(1.6e20, -2.0e18, 3.0e17);
+    let mut app = open_space(far);
+    app.update();
+    let nav = app.world().resource::<Navigation>();
+    assert!(nav.visit.is_none() && !nav.arrived);
+    let eye = nav.eye.unwrap();
+    assert!(eye.length() < REANCHOR_METRES);
+    // The camera has not moved, to the precision of the old far eye.
+    assert!((nav.open_origin_ly * LY_METRES + eye - far).length() < 100_000.0);
+    // A 30 m/s keyboard step now survives intact.
+    let step = DVec3::new(0.3, -0.2, 0.4);
+    assert!(((eye + step) - eye - step).length() < 1e-6);
+    let target = nav.target;
+    assert!((target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance - eye).length() < 1.0);
+
+    // Within reach of the origin it stays put.
+    let near = DVec3::X * (REANCHOR_METRES * 0.5);
+    let mut app = open_space(near);
+    app.update();
+    let nav = app.world().resource::<Navigation>();
+    assert_eq!((nav.open_origin_ly, nav.eye), (DVec3::ZERO, Some(near)));
+}
+
+#[test]
+fn slow_free_flight_far_from_the_star_keeps_an_exact_travel_marker() {
+    let mut app = App::new();
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(CameraRig::default())
+        .insert_resource(CameraPose {
+            // About 900 AU out, where a stored eye resolves ~3 cm.
+            eye: DVec3::new(1.1e14, -6.3e13, 4.7e13),
+            ..default()
+        })
+        .init_resource::<CameraMotion>()
+        .init_resource::<CameraVelocity>()
+        .add_systems(Update, measure_velocity);
+    let frame = std::time::Duration::from_micros(16_667);
+    app.world_mut().resource_mut::<Time>().advance_by(frame);
+    app.update();
+    let ahead = DVec3::new(0.48, 0.6, -0.64);
+    let step = ahead * (30.0 * frame.as_secs_f64());
+    for i in 0..120 {
+        *app.world_mut().resource_mut::<CameraMotion>() = CameraMotion {
+            steered: true,
+            travel_metres: step,
+            moved_metres: step,
+            ..default()
+        };
+        app.world_mut().resource_mut::<CameraPose>().eye += step;
+        // A re-anchoring frame switch must not interrupt the readout.
+        if i == 60 {
+            app.world_mut().resource_mut::<CameraRig>().frame_ly = DVec3::X * 1e-3;
+            app.world_mut().resource_mut::<CameraPose>().eye -= DVec3::X * 1e-3 * LY_METRES;
+        }
+        app.world_mut().resource_mut::<Time>().advance_by(frame);
+        app.update();
+        let velocity = app.world().resource::<CameraVelocity>();
+        assert!((velocity.metres_per_second.length() - 30.0).abs() < 1e-6);
+        assert!(
+            velocity
+                .marker_metres_per_second
+                .normalize()
+                .angle_between(ahead)
+                < 1e-9
+        );
+    }
 }
 
 /// A visited list's star, with the camera placed `eye` from it in `presentation_mode`.

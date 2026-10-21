@@ -104,18 +104,18 @@ pub fn place_camera(
         rotation: frame_tilt.as_quat() * nav.rotation,
         layout: f64::from(u8::from(nav.presentation_mode == PresentationMode::Table)),
     };
-    let frame = system.map_or_else(
-        || {
-            if nav.following {
-                nav.selected_craft()
-                    .and_then(|id| fleet.get(id))
-                    .map_or(DVec3::ZERO, |live| live.origin_ly())
-            } else {
-                DVec3::ZERO
-            }
-        },
-        |system| page_origin_ly(system, frame_page),
-    );
+    // A followed craft's origin stays open space's origin once it is let go,
+    // so the eye relative to it remains valid.
+    if system.is_none()
+        && nav.following
+        && let Some(live) = nav.selected_craft().and_then(|id| fleet.get(id))
+    {
+        nav.open_origin_ly = live.origin_ly();
+    }
+    let system = nav.system(&universe.0);
+    let frame = system.map_or(nav.open_origin_ly, |system| {
+        page_origin_ly(system, frame_page)
+    });
     let mut shown = rig.shown.unwrap_or(desired);
     let frame_shift_ly = (frame - rig.frame_ly).length();
     if rig.shown.is_some() && frame != rig.frame_ly {

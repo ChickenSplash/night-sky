@@ -30,6 +30,13 @@ pub(super) fn scroll_speed(speed: f64, scroll: f32) -> f64 {
 pub struct CameraMotion {
     pub(super) orbiting: bool,
     pub(super) travel_metres: DVec3,
+    /// Whether these controls alone placed the eye this frame (free flight,
+    /// not following). Velocity then uses `moved_metres`: differencing eyes
+    /// far from their origin would add rounding as large as a slow step.
+    pub(super) steered: bool,
+    /// Every eye displacement applied here, keyboard travel and Shift + scroll
+    /// zoom, in galactic axes.
+    pub(super) moved_metres: DVec3,
     /// Keyboard controls, eased towards the pressed keys so starts, stops and
     /// turns take a moment: travel in camera axes as a fraction of
     /// `move_speed` (x, y, z), and roll as a fraction of `ROLL_SPEED` (w).
@@ -67,6 +74,7 @@ pub fn controls(
 ) {
     camera_motion.orbiting = false;
     camera_motion.travel_metres = DVec3::ZERO;
+    camera_motion.moved_metres = DVec3::ZERO;
     let (keys, buttons) = input;
     let scroll = wheel
         .read()
@@ -110,7 +118,9 @@ pub fn controls(
             let old_distance = nav.distance;
             nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
                 .clamp(MIN_DISTANCE, 40_000.0 * LY_METRES);
-            let eye = old_eye + (nav.rotation * Vec3::Z).as_dvec3() * (nav.distance - old_distance);
+            let zoom = (nav.rotation * Vec3::Z).as_dvec3() * (nav.distance - old_distance);
+            camera_motion.moved_metres += tilt * zoom;
+            let eye = old_eye + zoom;
             nav.eye = Some(eye);
             nav.target = eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
         }
@@ -145,7 +155,8 @@ pub fn controls(
         }
     }
     // Flights, tracking and presets take the camera over: no coasting into them.
-    camera_motion.thrust = if free && !nav.following {
+    camera_motion.steered = free && !nav.following;
+    camera_motion.thrust = if camera_motion.steered {
         ease_thrust(camera_motion.thrust, wanted, time.delta_secs())
     } else {
         Vec4::ZERO
@@ -164,6 +175,7 @@ pub fn controls(
         let rotation = nav.rotation;
         let step = (rotation * travel).as_dvec3() * nav.move_speed * time.delta_secs_f64();
         camera_motion.travel_metres += tilt * step;
+        camera_motion.moved_metres += tilt * step;
         let eye = nav.eye.get_or_insert_with(|| tilt.inverse() * pose.eye);
         *eye += step;
         nav.target = *eye - (rotation * Vec3::Z).as_dvec3() * nav.distance;

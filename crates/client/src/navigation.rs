@@ -49,8 +49,13 @@ pub struct Navigation {
     pub viewport: Option<bevy::camera::Viewport>,
     /// The system the camera is anchored to: the one it is at, is flying to,
     /// or whose list is shown as a constellation. `None` in open space, where
-    /// the camera is relative to home. See `location` for where it actually is.
+    /// the camera is relative to `open_origin_ly`. See `location` for where
+    /// it actually is.
     pub visit: Option<Visit>,
+    /// Open space's floating origin, in light years from home. Free flight
+    /// re-anchors it near the camera (`scene::locate`), so the eye stays small
+    /// enough for metre-scale steps far from home.
+    pub open_origin_ly: DVec3,
     /// Whether the camera is at the visited star, by physical distance. Set
     /// each frame by `scene::locate`.
     pub arrived: bool,
@@ -108,6 +113,7 @@ impl Default for Navigation {
             presentation_mode: presentation::PresentationMode::Simulation,
             viewport: None,
             visit: None,
+            open_origin_ly: DVec3::ZERO,
             arrived: false,
             selection: None,
             inspection: None,
