@@ -576,14 +576,15 @@ In-app selection-to-command controls remain phase 11 work.
 - **Done when:** both exits work from the CLI as documented and are visible
   in `ns ship state`, including a rough orbit after a matched exit.
 
-### 6 · Warp steering and the turn-limit assist
+### 6 · Warp steering ✅ Done
 
 - Pitch and yaw inputs curve the warp path; roll does not change the
   direction of travel. Engaging handles existing spin safely.
-- Assist 1, the turn limit, switchable in `ns ship`.
 - CLI first. Mouse steering arrives with in-app piloting in phase 11.
 - **Done when:** from the CLI, steer round a planet to its night side, turn
-  towards another planet and leave the system, with the assist on and off.
+  towards another planet and leave the system.
+- The turn-limit assist is deferred: the user will decide whether it is
+  needed once mouse steering in phase 11 gives a feel for the controls.
 
 Decisions agreed with the user on 2026-10-21:
 
@@ -600,7 +601,7 @@ Decisions agreed with the user on 2026-10-21:
   phase 9's autopilot reuses.
 - **Turn rate is ship state,** set with `ns ship warp turn-rate <°/s>`, from 1
   to 360 °/s (default 30), engaged or not.
-- **The turn-limit assist comes after steering,** as a later checkpoint.
+- **The turn-limit assist is deferred,** to be decided after phase 11.
 
 Checkpoints:
 
@@ -609,11 +610,16 @@ Checkpoints:
    the turn rate order, `ns ship warp turn-rate`, readouts and docs. Tests
    cover the turning circle, shared rate limit, release, roll, takeover and
    overshoot-free pointing at 1 to 360 °/s.
-2. **Live CLI steering flight:** round a planet to its night side, towards
-   another planet and out of the system.
-3. **Turn-limit assist:** the rate cap falling with speed, its switch and the
-   reason for any limit in `ns ship state`, then the done-when flight with it
-   on and off.
+2. ✅ **Live CLI steering flight** (2026-10-21, system `gf008000016.2.34`):
+   two half turns at 15 °/s round planet c at 20,000 km altitude, night side
+   to day side and back; pointing turned onto planet b and flew 1.44 million
+   km; rough-orbit dropout was refused outside b's sphere of influence, then
+   gave eccentricity 1.4e-5 at 8,400 km; re-engaged with pointing active, left
+   the system at about 2,500 AU and yawed in galactic space, with no spin
+   after disengaging. The user confirmed it visually.
+
+Deferred: **turn-limit assist** (the rate cap falling with speed, its switch
+and the reason for any limit), decided after phase 11's mouse steering.
 
 ### 7 · Collision assist
 
@@ -659,7 +665,9 @@ Checkpoints:
 - Manual warp in the app: mouse steering while held (a flight stick later),
   warp speed up and down on the logarithmic scale, and looking sideways
   without steering.
-- The three warp assist toggles, the selected target, requested and actual
+- Decide whether the deferred turn-limit assist (phase 6) is needed, once
+  mouse steering can be felt.
+- The warp assist toggles, the selected target, requested and actual
   speed and the reason for any limit.
 - **Autopilot:** pick a target; everything else is handled.
 - **Assisted:** the pointing assists from phase 2, plus circularise, hold
