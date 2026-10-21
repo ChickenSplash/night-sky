@@ -73,7 +73,10 @@ impl<B: Backend> Loader<B> {
             if let Some(result) = B::poll(&mut self.running[i].1) {
                 let (wait, _) = self.running.remove(i);
                 match result {
-                    Ok(reply) => self.cache.accept(&wait, reply, lists),
+                    Ok(reply) => {
+                        self.error = None;
+                        self.cache.accept(&wait, reply, lists);
+                    }
                     Err(error) => self.error = Some(error),
                 }
             } else {

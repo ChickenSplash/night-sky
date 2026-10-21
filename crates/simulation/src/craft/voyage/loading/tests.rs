@@ -130,6 +130,13 @@ fn failed_jobs_are_retryable_without_inline_generation() {
     loader.dispatch();
     assert_eq!(fake.submitted.borrow().len(), 2);
     assert!(loader.cache.region(Region([0; 3])).is_none());
+    // A successful retry clears the reported failure.
+    *fake.submitted.borrow()[1].1.borrow_mut() = Some(Ok(Reply::Region {
+        candidates: Vec::new(),
+    }));
+    loader.begin_round(2, &lists);
+    assert!(loader.error.is_none());
+    assert!(loader.request(&region(0), true, &lists));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

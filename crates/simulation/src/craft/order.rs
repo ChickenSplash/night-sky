@@ -7,6 +7,15 @@ use serde::{Deserialize, Serialize};
 
 /// Most legacy frame-axis thrust an order may hold, in m/s².
 pub const MAX_THRUST: f64 = 100.0;
+/// Longest body ID an order may name, so queued inputs stay small.
+pub const MAX_BODY_ID: usize = 256;
+
+fn body_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || id.len() > MAX_BODY_ID {
+        return Err(format!("body ID must be 1 to {MAX_BODY_ID} bytes"));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
@@ -86,6 +95,9 @@ impl Order {
         }
         match self {
             Self::Point { target, up } => {
+                if let PointTarget::Body(id) = target {
+                    body_id(id)?;
+                }
                 if let PointTarget::Vector(v) = target
                     && super::attitude::unit(*v).is_none()
                 {
@@ -118,6 +130,9 @@ impl Order {
             } => {
                 super::warp::Warp::validate_speed(*speed_ms)?;
             }
+            Self::Warp {
+                command: WarpOrder::Match { body, .. },
+            } => body_id(body)?,
             _ => {}
         }
         Ok(())

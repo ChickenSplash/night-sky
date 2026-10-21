@@ -141,6 +141,16 @@ fn future_orders_reject_invalid_values_and_excessive_horizons_at_submission() {
         Order::Warp {
             command: WarpOrder::Set { speed_ms: f64::NAN },
         },
+        Order::Point {
+            target: PointTarget::Body(String::new()),
+            up: None,
+        },
+        Order::Warp {
+            command: WarpOrder::Match {
+                body: "x".repeat(crate::craft::MAX_BODY_ID + 1),
+                orbit: false,
+            },
+        },
     ];
     let before = voyage.craft.clone();
     for order in invalid {

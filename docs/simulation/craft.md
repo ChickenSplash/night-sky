@@ -476,9 +476,12 @@ Without `--orbit`, the result is the body's analytic velocity at that tick.
 This alone does not support the ship against gravity. With `--orbit`, the drive
 adds tangential speed `sqrt(GM/r)` at the existing position. Direction follows
 the tangential part of the ship's ordinary velocity relative to the body;
-if absent, it uses the projected ship-forward direction, then ship-up. Heading
-is unchanged, and no teleport or thrust burn occurs. A position inside/on the
-reference's surface or at a barycentre's centre cannot request a rough orbit.
+if absent or under about 0.06° off radial, it uses the projected ship-forward
+direction, then ship-up. Heading is unchanged, and no teleport or thrust burn
+occurs. A position inside/on the reference's surface, at a barycentre's centre,
+or outside the reference's reach (a planet's Hill sphere, a star's or
+barycentre's stable zone) cannot request a rough orbit, as another body
+dominates there. Velocity-only matching has no reach limit.
 This is only an instantaneous two-body circular estimate: perturbations, nearby
 bodies and unstable regions can spoil it. It does not certify a safe orbit or
 replace later circularisation control.

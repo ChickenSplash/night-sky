@@ -178,6 +178,26 @@ fn rough_orbit_exit_is_tangential_and_circular_in_two_body_estimate() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_near_radial_course_falls_back_to_the_ship_axes_not_noise() {
+    let field = triple();
+    let body = "t#A/0";
+    let mut craft = dropout_ship(&field, body);
+    let reference = field.reference_by_id(body, craft.seconds()).unwrap();
+    // Falling straight out at 1 km/s with a 1 mm/s sideways wobble.
+    craft.motion = Motion::Free(State {
+        position: craft.state().position,
+        velocity: (DVec3::from_array(reference.state.velocity) + DVec3::new(1000.0, 0.0, 1e-3))
+            .to_array(),
+    });
+    // Nose radial (+X), so the tangent comes from ship-up (+Y).
+    craft.orientation = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2).to_array();
+    craft.matched_dropout(Some(&field), body, true).unwrap();
+    let v = DVec3::from_array(craft.state().velocity) - DVec3::from_array(reference.state.velocity);
+    assert!(v.normalize().dot(DVec3::Y) > 1.0 - 1e-12);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn refused_matched_exits_are_atomic_and_do_not_stop_warp() {
     let field = triple();
     let mut craft = dropout_ship(&field, "t#A/0");
@@ -200,6 +220,17 @@ fn refused_matched_exits_are_atomic_and_do_not_stop_warp() {
     let before = craft.clone();
     assert!(craft.matched_dropout(Some(&field), "t#A/0", true).is_err());
     assert_eq!(craft, before);
+    // Outside the planet's Hill sphere the star dominates: no rough orbit.
+    let planet = field.reference_by_id("t#A/0", craft.seconds()).unwrap();
+    assert!(planet.reach_m.is_finite());
+    state.position =
+        (DVec3::from_array(planet.state.position) + DVec3::X * planet.reach_m * 1.5).to_array();
+    craft.motion = Motion::Free(state);
+    let before = craft.clone();
+    assert!(craft.matched_dropout(Some(&field), "t#A/0", true).is_err());
+    assert_eq!(craft, before);
+    craft.matched_dropout(Some(&field), "t#A/0", false).unwrap();
+    craft = before;
     craft.frame = Frame::Galaxy {
         origin_pc: [0.0; 3],
     };

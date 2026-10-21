@@ -43,7 +43,7 @@ pub fn tick_at(seconds: f64) -> i64 {
 mod attitude;
 pub use attitude::{AttitudePilot, PointTarget};
 mod order;
-pub use order::{MAX_THRUST, Order, WarpOrder};
+pub use order::{MAX_BODY_ID, MAX_THRUST, Order, WarpOrder};
 mod reference;
 pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
 pub mod predict;

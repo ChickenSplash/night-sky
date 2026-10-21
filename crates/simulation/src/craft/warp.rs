@@ -115,14 +115,22 @@ impl Craft {
                     "Rough-orbit dropout requires a position outside the reference body".into(),
                 );
             }
+            // Beyond its Hill sphere or stable zone another body dominates,
+            // so a two-body circular speed would not describe an orbit.
+            if r >= reference.reach_m {
+                return Err(format!(
+                    "Rough-orbit dropout requires a position within `{body}`'s sphere of influence"
+                ));
+            }
             let speed = circular_speed(reference.gm, r);
             if !speed.is_finite() || speed <= 0.0 {
                 return Err("Reference has no valid orbital speed".into());
             }
             let radial = radial / r;
             let attitude = DQuat::from_array(self.orientation);
-            // Preserve the current orbital sense when defined. At rest or
-            // on a radial course use the nose, then ship-up, without turning.
+            // Preserve the current orbital sense when clearly defined. At rest
+            // or on a (near) radial course use the nose, then ship-up, without
+            // turning. A tangential share under about 0.06° is treated as noise.
             let tangent = [
                 DVec3::from_array(state.velocity) - velocity,
                 attitude * -DVec3::Z,
@@ -131,7 +139,7 @@ impl Craft {
             .into_iter()
             .find_map(|v| {
                 let tangent = v - radial * v.dot(radial);
-                (tangent.length() > 1e-9 * v.length().max(1.0)).then(|| tangent.normalize())
+                (tangent.length() > 1e-3 * v.length()).then(|| tangent.normalize())
             })
             .ok_or("Cannot determine an orbital direction")?;
             velocity += tangent * speed;

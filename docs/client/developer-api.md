@@ -276,7 +276,9 @@ not navigate to the body. The API order is
 `{"action":"warp","command":{"command":"match","body":"body-id","orbit":true}}`.
 Matching requires engaged warp and a reference in the current system; a refused
 match leaves warp running unchanged. Rough-orbit exits require being outside
-the reference body and are two-body estimates, not guaranteed safe orbits.
+the reference body but within its reach (Hill sphere or stable zone), and are
+two-body estimates, not guaranteed safe orbits. Body IDs in orders are 1 to
+256 bytes.
 See [matched dropout](../simulation/craft.md#matched-dropout) for direction rules.
 `warp_mode` (`unsafe_manual`), `arrival` (whether it can enter systems, or
 what its next step waits for while the clock is held) and galactocentric
