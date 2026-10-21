@@ -621,7 +621,9 @@ Checkpoints:
 Deferred: **turn-limit assist** (the rate cap falling with speed, its switch
 and the reason for any limit), decided after phase 11's mouse steering.
 
-### 7 · Collision assist
+### 7 · Collision assist (deferred)
+
+Deferred with phase 6's turn limit and phase 8, to be decided after phase 11.
 
 - Assist 2: slow down or disengage ahead of a predicted impact or too-close
   pass, and recover speed gradually once clear.
@@ -631,11 +633,13 @@ and the reason for any limit), decided after phase 11's mouse steering.
   passing beside one does not slow the ship needlessly, and with it off manual
   warp has no collision protection.
 
-### 8 · Approach assist
+### 8 · Approach assist (deferred)
+
+Deferred with phase 6's turn limit and phase 7, to be decided after phase 11.
 
 - Assist 3: with a body selected, the maximum warp speed falls on approach
-  and warp disengages at a safe standoff distance. Shares its speed profile
-  with plotted trips.
+  and warp disengages at a safe standoff distance. Reuses phase 9's speed
+  profile.
 - Unsafe or unreachable targets are reported.
 - **Done when:** steering towards a selected planet by hand ends at the
   standoff distance without precise speed juggling.
@@ -646,6 +650,9 @@ and the reason for any limit), decided after phase 11's mouse steering.
   manual flight. Autopilot only adds steering and route management.
 - In-system first, then interstellar. Allows for moving destinations and
   bodies in the way, and aims for the 20 to 60 second trip profile.
+- With the assists deferred, the autopilot owns its speed profile (cruise,
+  then a slowing approach to a standoff distance) and keeps its own route
+  clear of bodies. Phase 8 later reuses that profile for manual flight.
 - Choosing a destination, progress, cancelling and manual takeover through
   the CLI. A plotted orbital arrival asks for a matched, rough-orbit exit.
 - **Done when:** the core loop runs end to end from the CLI: leave orbit, warp
@@ -665,8 +672,8 @@ and the reason for any limit), decided after phase 11's mouse steering.
 - Manual warp in the app: mouse steering while held (a flight stick later),
   warp speed up and down on the logarithmic scale, and looking sideways
   without steering.
-- Decide whether the deferred turn-limit assist (phase 6) is needed, once
-  mouse steering can be felt.
+- Decide whether the deferred warp assists are needed, once mouse steering
+  can be felt: turn limit (phase 6), collision (7) and approach (8).
 - The warp assist toggles, the selected target, requested and actual
   speed and the reason for any limit.
 - **Autopilot:** pick a target; everything else is handled.
