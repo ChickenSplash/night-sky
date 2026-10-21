@@ -96,6 +96,8 @@ class CliTests(unittest.TestCase):
         cases = [
             (["warp", "engage"], {"action": "warp", "command": {"command": "engage"}}),
             (["warp", "disengage"], {"action": "warp", "command": {"command": "disengage"}}),
+            (["warp", "match", "sun/0"], {"action": "warp", "command": {"command": "match", "body": "sun/0", "orbit": False}}),
+            (["warp", "match", "sun/0", "--orbit"], {"action": "warp", "command": {"command": "match", "body": "sun/0", "orbit": True}}),
             (["warp", "up"], {"action": "warp", "command": {"command": "up"}}),
             (["warp", "down"], {"action": "warp", "command": {"command": "down"}}),
             (["warp", "set", "1000000"], {"action": "warp", "command": {"command": "set", "speed_ms": 1000000.0}}),

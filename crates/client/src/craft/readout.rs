@@ -53,7 +53,8 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
         })
         .collect();
     json!({"craft": craft, "held_clock": fleet.held, "step_seconds": STEP_SECONDS,
-        "system_loading_error": fleet.charts.error})
+        "system_loading_error": fleet.charts.error(),
+        "system_loading": fleet.charts.loading_status()})
 }
 
 /// The shown coast prediction, for `ns ship state`.
@@ -139,6 +140,20 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
         "Unsafe manual (no collision protection)".into(),
     ));
     rows.push(("Arrival".into(), live.arrival_status()));
+    if let Some(exit) = &live.craft.warp.last_match {
+        rows.push((
+            "Last matched dropout".into(),
+            format!(
+                "{} · {}",
+                body_label(live, galaxy, &exit.body),
+                if exit.orbit {
+                    "rough orbit"
+                } else {
+                    "body velocity"
+                }
+            ),
+        ));
+    }
     if let Some(reason) = &live.craft.warp.stop_reason {
         rows.push(("Warp stopped".into(), reason.clone()));
     }

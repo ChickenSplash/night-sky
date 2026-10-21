@@ -328,8 +328,9 @@ or on streamed stars.
 ## Warp core
 
 Warp is straight-line bubble transport along the ship's nose, commanded through
-the CLI/API. It is not a destination autopilot. There is no steering, matching,
-approach assist, fuel or energy budget yet. Manual warp is deliberately unsafe:
+the CLI/API. It is not a destination autopilot. There is no steering,
+approach assist, fuel or energy budget yet. Explicit matched dropout is described
+below. Manual warp is deliberately unsafe:
 there are no body collision checks, atmosphere exclusions or missing-data stops.
 It can engage inside a body and pass through stars and planets, with no crash
 or damage response. Arrival detection is separate and does not stop the drive.
@@ -406,7 +407,7 @@ inputs give the same path on any machine, wherever the camera is.
   pages with no cell star are added as candidates of their own.
 - **Waiting, not guessing:** when a step needs a region or a system's bodies
   that its `Atlas` does not have yet, it returns `Wait` and changes nothing.
-  `Library` answers at once, as a server or test would. The client asks its
+  `Library` answers synchronously for tests and offline replay. The client asks its
   background worker and holds the clock until the answer arrives, so a slow
   machine arrives at the same step, only later in real time.
 - **Cost:** every star of every tier is placed to know whether it is near, and
@@ -416,8 +417,9 @@ inputs give the same path on any machine, wherever the camera is.
   time while coarse cells are integrated. The browser's single-threaded
   worker takes about 30 ms near home (450 ms the first time), 550 ms in the
   inner disc and 1.3 s in the bulge. Workers keep their `Sky` warm. A
-  region is asked once, and below light speed a craft takes years of
-  simulated time to cross one.
+  region is reused while cached, and below light speed a craft takes years of
+  simulated time to cross one. The figures above are historical query timings,
+  not timings for the bounded live worker pool described below.
 - **Transformations:** position, attitude and ordinary velocity transform
   together (`Rebase`), and the client applies the same change to its
   interpolation states. System velocities are added/subtracted when converting
@@ -455,13 +457,83 @@ inputs give the same path on any machine, wherever the camera is.
   estimated cache storage exceeds 32 MiB, retaining coarse cells through
   level 3. This bounds retained fine-cell growth on long voyages, not the
   temporary memory needed to answer one query or allocator overhead.
-- **In the client:** `Fleet::charts` shares that cache between every craft,
-  worked out on one native thread or the browser's
-  craft worker. If no worker can start, it works them out on the frame
-  instead and reports `system_loading_error`.
+- **In the client:** `Fleet::charts` uses the shared background loader below.
+  Worker failure reports `system_loading_error` and leaves the dependent step
+  waiting for a retry. There is no synchronous generation fallback in live
+  updates. Spawn-origin lookup remains synchronous, as documented above.
+
+### Matched dropout
+
+`ns ship warp disengage` preserves ordinary momentum. The explicit alternative,
+`ns ship warp match <body-id> [--orbit]`, ends warp and replaces ordinary velocity
+at the command's application tick. It resolves the same stable planet, star or
+barycentre IDs used by inspection, selection and orbit references, against the
+craft's current system. Galactic-space and remote matching are refused. There
+is no separate target picker, persistent matching setting or automatic arrival;
+in-app selection-to-flight actions remain later work.
+
+Without `--orbit`, the result is the body's analytic velocity at that tick.
+This alone does not support the ship against gravity. With `--orbit`, the drive
+adds tangential speed `sqrt(GM/r)` at the existing position. Direction follows
+the tangential part of the ship's ordinary velocity relative to the body;
+if absent, it uses the projected ship-forward direction, then ship-up. Heading
+is unchanged, and no teleport or thrust burn occurs. A position inside/on the
+reference's surface or at a barycentre's centre cannot request a rough orbit.
+This is only an instantaneous two-body circular estimate: perturbations, nearby
+bodies and unstable regions can spoil it. It does not certify a safe orbit or
+replace later circularisation control.
+
+Matching requires engaged warp and a valid reference. Refusal changes nothing,
+including the engaged drive. Successful matching is recorded in
+`warp.last_match` with body ID, orbit flag, tick and system-frame velocity at
+exit; the inspector shows its body and mode. This is a historical receipt,
+not the current velocity or a standing target. A new engagement clears it.
+Both gravity policies use this explicit replacement; unmatched exits retain
+their existing ordinary momentum rules. Position, heading, tick and inputs
+are unchanged, and ordinary gravity resumes on the following step.
+
+### Background preparation and future server hosting
+
+`craft::voyage::loading::Loader` shares the atlas cache, request deduplication,
+priority and prefetch rules between the native client, browser transport and a
+future server. Generation never runs in its polling or stepping methods.
+
+- At most 128 requests are queued and two are in flight. Required step data
+  displaces speculative queued work and dispatches first. Queued interests
+  expire each host round and are refreshed by the fleet, so turns, speed changes
+  and despawns discard obsolete work. Already running work finishes and may be
+  cached; it cannot be preempted, but is bounded to two jobs.
+- Native generation uses two warm workers with one generation thread each,
+  rather than an all-core lookup per ship. The browser retains its single
+  generation worker, with the same two-request in-flight bound. Failures are
+  retried without running expensive work on the caller.
+- Prefetch considers the current region and a five-simulated-second projected
+  endpoint, then only candidate bodies whose upper entry range intersects
+  that short segment. It requests at most eight dependencies per ship per round.
+  Ships well inside a system need no regional census. Sustained FTL cruise does
+  none either. On a requested slowdown below light speed, the exponential ramp
+  predicts one endpoint five seconds after crossing below light speed, not an
+  arbitrarily long chain of regions. Turns and abrupt dropout can still miss.
+- A server calls `begin_round` once, `catch_up` for each voyage towards the
+  host's target tick, then `dispatch` once. A missing dependency returns that
+  ship's `waiting` state without advancing its tick or consuming its orders.
+  Other ships continue. Later updates catch up the delayed ship within a step
+  budget, preserving tick-keyed input order and reporting any refused orders.
+  The host must also enforce an aggregate fleet step budget and network limits.
+- This is a server-ready hosting path, not a running authoritative backend.
+  The standalone client intentionally retains its shared offline-clock hold
+  while data is missing, keeping its existing time controls and presentation.
+  Future multiplayer collision/interaction rules must handle a temporarily
+  delayed ship explicitly; this loader does not pretend it is at the host tick.
+
+Prefetch improves smoothness only. Cache warmth, completion order and prediction
+accuracy never authorize a different frame handoff or skipping gravity.
 
 `ns ship state` and the inspector expose requested/actual speed, gravity policy,
 `warp_mode: "unsafe_manual"`, `arrival` (whether it can enter systems, or
 what its next step waits for) and stop reason. Waiting holds time, never the
 drive. Phase 4 has joint native live acceptance; browser flight visuals have
 not been manually tested.
+
+The fleet-level `system_loading` readout reports queued/running jobs and cached
+region/system counts; `system_loading_error` retains the last transport failure.

@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 pub const REGIONS: usize = 8;
 pub const ARRIVALS: usize = 64;
 
-/// Where a voyage's systems come from. A server answers from seeds and its
-/// lists at once; a client from caches it fills in the background.
+/// Where a voyage's systems come from. Live hosts fill a cache in the
+/// background; tools and tests may resolve dependencies synchronously.
 pub trait Atlas {
     /// Systems that may reach into a region, or `None` until known.
     fn region(&self, region: Region) -> Option<&[Candidate]>;
@@ -195,8 +195,9 @@ fn evict<K: Clone + Ord + Eq + std::hash::Hash, T>(
     }
 }
 
-/// An atlas that works out what a step waits for there and then, as a
-/// server or test would, with the same lists and cache rules as a client.
+/// A synchronous atlas for tools, tests and offline replay, with the same
+/// lists and cache rules as a live host. Never use its blocking `step` in a
+/// live server tick: use `loading::Loader` and independent per-ship catch-up.
 pub struct Library {
     sky: crate::cells::Sky,
     cache: Cache,

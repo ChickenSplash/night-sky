@@ -124,6 +124,20 @@ curl 'http://127.0.0.1:4322/perf?history=1'
 curl -H 'X-Night-Sky-Client: cli' --data 'set_debug split_multiples false' http://127.0.0.1:4322/command
 ```
 
+## Terminal control panel
+
+`./scripts/ns-tui` is a Textual app over the same API, for trying commands
+before they have in-app UI. It builds its command list and forms from
+`GET /commands`, so a new `USAGE` entry appears with no TUI change. Forms send
+`name field=value` text (blank fields are left out) through `POST /command`
+and log the reply or refusal. A free-text line takes any command, a side panel
+polls chosen `/state` paths every second, and Ctrl+S captures a screenshot.
+Fields are untyped text, as `USAGE` names fields but not their types.
+
+Textual is the one dependency outside the standard library. The first run makes
+a virtual environment in `tools/tui/` and installs it there; delete that
+folder to reinstall. Agents should keep using `ns`, which has no dependencies.
+
 ## Inspector readout
 
 `ns inspect` reads `/state/inspector`, the active top-left inspector, which
@@ -235,6 +249,9 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 ./scripts/ns ship warp up          # multiply requested speed by √10
 ./scripts/ns ship warp down
 ./scripts/ns ship warp disengage
+# Alternative exits while engaged, using a body in the ship's current system:
+./scripts/ns ship warp match 'body-id'          # match only the body's velocity
+./scripts/ns ship warp match 'body-id' --orbit  # add speed for a rough orbit
 ./scripts/ns ship warp gravity suspended  # developer policy, only while off
 ./scripts/ns ship warp gravity active     # default
 ```
@@ -251,10 +268,22 @@ The API uses `steer_craft`, for example
 or `{"type":"steer_craft","order":{"action":"warp","command":{"command":"set","speed_ms":1000000}}}`.
 `/state/craft/craft/<index>/warp` contains `engaged`, `requested_ms`, `actual_ms`,
 `gravity`, `stop_reason` and the last step's `bubble_delta_m` in frame axes.
+`last_match` is null or the last successful matched exit's `body`, `orbit`,
+`tick` and `velocity_ms` (system-frame velocity at exit, not current velocity).
+It clears on the next engagement. Matching uses existing planet, star and
+barycentre IDs, not camera location or a separate flight selection. It does
+not navigate to the body. The API order is
+`{"action":"warp","command":{"command":"match","body":"body-id","orbit":true}}`.
+Matching requires engaged warp and a reference in the current system; a refused
+match leaves warp running unchanged. Rough-orbit exits require being outside
+the reference body and are two-body estimates, not guaranteed safe orbits.
+See [matched dropout](../simulation/craft.md#matched-dropout) for direction rules.
 `warp_mode` (`unsafe_manual`), `arrival` (whether it can enter systems, or
 what its next step waits for while the clock is held) and galactocentric
-`position_pc` are alongside it; `system_loading_error` reports a failed
-background loader. `velocity_ms`
+`position_pc` are alongside it. Fleet-level `system_loading` reports `queued`,
+`running`, `cached_regions` and `cached_systems`; `system_loading_error` retains
+the last background loader failure. Failures retry without inline generation.
+`velocity_ms`
 remains ordinary velocity in the named frame, never bubble speed. During warp
 or galactic flight, prediction reports unavailable rather than an old orbit.
 

@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 mod atlas;
 pub use atlas::*;
+pub mod loading;
 
 /// Fastest warp at which a craft enters systems. Below it a star's pull on a
 /// passing craft can matter; above it a craft crosses a system's range in a

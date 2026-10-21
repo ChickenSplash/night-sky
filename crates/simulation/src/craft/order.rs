@@ -51,10 +51,21 @@ pub enum Order {
 pub enum WarpOrder {
     Engage,
     Disengage,
-    Set { speed_ms: f64 },
+    /// Explicit matched dropout, resolved in the craft's current system at
+    /// the application tick. This never changes heading or position.
+    Match {
+        body: String,
+        #[serde(default)]
+        orbit: bool,
+    },
+    Set {
+        speed_ms: f64,
+    },
     Up,
     Down,
-    Gravity { policy: GravityPolicy },
+    Gravity {
+        policy: GravityPolicy,
+    },
 }
 
 impl Order {
@@ -126,6 +137,9 @@ impl Order {
                 match command {
                     WarpOrder::Engage => craft.engage_warp()?,
                     WarpOrder::Disengage => craft.warp.stop("Manual disengagement"),
+                    WarpOrder::Match { body, orbit } => {
+                        craft.matched_dropout(field, body, *orbit)?;
+                    }
                     WarpOrder::Set { speed_ms } => craft.warp.set_speed(*speed_ms)?,
                     WarpOrder::Up => craft
                         .warp

@@ -505,6 +505,63 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+#[test]
+fn matched_dropout_command_reaches_physics_and_ship_readout() {
+    use space_simulation::craft::WarpOrder;
+    for orbit in [false, true] {
+        let mut app = app();
+        let (_, _, planet) = planet_system();
+        send(
+            &mut app,
+            UiCommand::SpawnShip {
+                body: Some(planet.clone()),
+                altitude_km: 400.0,
+                speed_kms: None,
+                velocity_kms: None,
+            },
+        );
+        send(
+            &mut app,
+            UiCommand::SteerCraft {
+                id: None,
+                tick: None,
+                order: Order::Warp {
+                    command: WarpOrder::Engage,
+                },
+            },
+        );
+        let before = app.world().resource::<Fleet>().craft[0].craft.clone();
+        let command: UiCommand = serde_json::from_value(serde_json::json!({
+            "type": "steer_craft", "order": {"action": "warp", "command": {
+                "command": "match", "body": planet, "orbit": orbit,
+            }}
+        }))
+        .unwrap();
+        send(&mut app, command);
+        let fleet = app.world().resource::<Fleet>();
+        let live = &fleet.craft[0];
+        assert!(!live.craft.warp.engaged);
+        assert_eq!(live.craft.state().position, before.state().position);
+        assert_eq!(live.craft.orientation, before.orientation);
+        let reference = live
+            .field
+            .reference_by_id(&planet, live.craft.seconds())
+            .unwrap();
+        if !orbit {
+            assert_eq!(live.craft.state().velocity, reference.state.velocity);
+        }
+        let readout = super::readout(fleet, live.craft.seconds());
+        let exit = &readout["craft"][0]["warp"]["last_match"];
+        assert_eq!(exit["body"], planet);
+        assert_eq!(exit["orbit"], orbit);
+        assert_eq!(exit["tick"], live.craft.tick);
+        assert_eq!(
+            exit["velocity_ms"],
+            serde_json::json!(live.craft.state().velocity)
+        );
+    }
+}
+
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| a[i] * b[i]).sum()
 }

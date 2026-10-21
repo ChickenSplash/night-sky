@@ -86,7 +86,9 @@ The shared native/browser client in `crates/client`, with browser workers in
   path, can be followed across systems, and have unsafe straight-line CLI warp
   up to 10,000 ly/s, without collision or missing-data stops. Above light
   speed they enter no systems; below it, entering an uncharted system can
-  briefly hold the clock while its region and bodies load. No in-app piloting
+  briefly hold the clock while its region and bodies load. Explicit CLI dropout
+  can match a local body's velocity or add speed for a rough orbit, without
+  navigating to it. No in-app piloting
   controls, warp steering, automatic arrivals, atmospheric exclusion, saving or collisions yet;
   predicted impacts outside warp are shown but not enforced. Phase 4 warp has
   native live acceptance; browser flight visuals have not been manually tested.

@@ -404,7 +404,9 @@ pub fn step(
         reached = reached.min(live.craft.seconds());
         timing.stepping_ms += stepping_start.elapsed().as_secs_f64() * 1000.0;
         timing.steps += steps;
+        charts.prefetch(&live.voyage, &galaxy.0);
     }
+    charts.dispatch();
     fleet.held = reached < until;
     if fleet.held {
         clock.0.seconds = reached;

@@ -198,6 +198,7 @@ fn background_loading_holds_the_clock_and_never_changes_the_path() {
     for _ in 0..20_000 {
         background.poll(&galaxy);
         slow.catch_up(&mut background, &galaxy, until, &mut 0.0);
+        background.dispatch();
         if slow.craft.seconds() >= until {
             break;
         }
@@ -205,7 +206,7 @@ fn background_loading_holds_the_clock_and_never_changes_the_path() {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert!(waited > 0, "it waited for the background worker");
-    assert!(background.error.is_none(), "{:?}", background.error);
+    assert!(background.error().is_none(), "{:?}", background.error());
     assert_eq!(slow.craft, prompt.craft);
     assert!(!slow.voyage.in_galaxy());
 }

@@ -332,7 +332,10 @@ exit marker, after the slow-escape horizon fix, by tests only).
 Circumbinary and nested-triple references and barycentre anchoring are
 covered by tests only, and browser rendering was not visually tested.
 
-### 4 · Warp core
+### 4 · Warp core ✅ Done
+
+User approved phase 4 on 2026-10-18, including proceeding after the foundation
+revisions below. This approval does not claim additional browser visual testing.
 
 Complete, accepted by the user after the final joint native 10 ly/s flight.
 `./scripts/check.sh` passes: formatting, CLI transport tests, native workspace
@@ -437,8 +440,27 @@ same voyage step as a server and consumes its interpolation state, while
 inspector/API readouts live in their own client module. Light-speed and spin
 thresholds share constants. Automated tests cover replay after a snapshot,
 order timing/refusals, cache pressure and identical client/server list arrivals.
-This does not add a live authoritative server, network ownership checks or
-background server prefetch. No new live or browser visual acceptance is claimed.
+This does not add a live authoritative server or network ownership checks.
+No new live or browser visual acceptance is claimed.
+
+A subsequent loading pass adds a shared nonblocking loader with a bounded,
+deduplicated, demand-first queue, two single-thread native generation workers
+and the existing browser worker transport. Local lookahead prepares region and
+approached-system data, including a predicted slowdown endpoint rather than an
+FTL route scan. Obsolete queued interests expire each update; in-flight work is
+bounded. Transport failures never trigger synchronous generation in live updates.
+The reusable server catch-up path defers only a dependent ship, retaining its
+tick and orders while other ships advance. The standalone client uses the same
+loader and prefetch, retaining its offline shared-clock hold. A live server and
+multiplayer interaction rules for delayed ships remain later work. See
+[background preparation](../simulation/craft.md#background-preparation-and-future-server-hosting).
+`./scripts/check.sh` passes after this pass. Seven loader regressions run both
+natively and under Node/WASM: bounded/deduplicated priority and expiry, request
+promotion, transport retry, independent ship deferral and identical catch-up
+with queued inputs, boundary/turn/slowdown lookahead, approached bodies only,
+and no regional census for an ordinary in-system orbit. The native client
+background-arrival regression also passes. No new live-flight or browser visual
+acceptance is claimed.
 Verified on 2026-10-18 with `./scripts/check.sh`: formatting, CLI transport,
 native workspace tests, strict native/WASM Clippy and 45 craft tests under
 Node. The generation worker also releases fine-cell caches above an estimated
@@ -501,6 +523,22 @@ Accepted behaviour (including the later unsafe-manual-warp revision):
   targets.
 
 ### 5 · Dropout velocity
+
+Implementation: explicit `ns ship warp match <body-id> [--orbit]`, shared
+fixed-tick simulation/API order, inspector and `warp.last_match` receipt.
+Existing stable body IDs and phase 3 reference resolution are reused; no
+separate selection model or automatic route is introduced. Rough-orbit
+direction preserves relative tangential velocity, falling back to ship-forward
+then ship-up projected perpendicular to the radial direction. All checks are
+atomic; an invalid match leaves warp engaged. See
+[matched dropout](../simulation/craft.md#matched-dropout).
+Verified on 2026-10-18 with `./scripts/check.sh`: CLI transport tests, formatting,
+native workspace tests, strict native/WASM Clippy and 59 craft tests under
+Node/WASM. New regressions cover planet/star/barycentre matches under both gravity
+policies, tangential rough-orbit estimates and direction fallbacks, atomic
+refusals, tick-keyed replay after snapshots and client API/readout integration.
+Live acceptance remains pending: the native developer API was not running.
+In-app selection-to-command controls remain phase 11 work.
 
 - **Frame decision:** keep the existing static-star approximation and
   galactic momentum convention. Matching in this phase uses a body in the

@@ -95,6 +95,10 @@ def parser():
     gravity = warps.add_parser("gravity", help="developer policy, change only while disengaged")
     gravity.add_argument("policy", choices=("active", "suspended"))
     gravity.add_argument("--id")
+    match = warps.add_parser("match", help="drop out matching a body in the ship's current system")
+    match.add_argument("body", help="existing planet, star or barycentre ID")
+    match.add_argument("--orbit", action="store_true", help="add tangential speed for a rough orbit")
+    match.add_argument("--id")
     spawn = ships.add_parser(
         "spawn", help="place a ship above a body, by default in a circular orbit",
         description="The body is a planet, star or barycentre ID, or a system's key; without --body, "
@@ -355,6 +359,8 @@ def ship_command(args):
             command["speed_ms"] = args.speed_ms
         elif args.warp == "gravity":
             command["policy"] = args.policy
+        elif args.warp == "match":
+            command.update(body=args.body, orbit=args.orbit)
         return {"type": "steer_craft", "id": args.id,
                 "order": {"action": "warp", "command": command}}
     if args.ship in ("throttle", "translate", "rotate", "point", "stop", "release", "cut", "configure"):

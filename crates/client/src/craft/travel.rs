@@ -2,54 +2,32 @@
 //! background and cached. It never decides a frame change, only supplies
 //! data; `Voyage` decides from the craft's own state. Charted list pages take
 //! the place of the generated systems they are assigned to.
-use super::loading::{Pending, Reply, Request};
+use super::loading::Transport;
 use super::*;
 use bevy::math::DVec3;
 use space_simulation::{
     LY_METRES,
-    craft::voyage::{Arrival, Atlas, Cache, Rebase, Wait},
+    craft::voyage::{Arrival, Atlas, Rebase, Request, Wait, loading::Loader},
     galaxy::{GalaxyModel, PC_METRES},
     neighbourhood::{Candidate, Region},
 };
-use std::collections::HashMap;
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum Key {
-    Region(Region),
-    System(String),
-}
-
-impl Key {
-    fn of(wait: &Wait) -> Self {
-        match wait {
-            Wait::Region(region) => Self::Region(*region),
-            Wait::System(candidate) => Self::System(candidate.id.clone()),
-        }
-    }
-}
 
 pub struct Charts {
-    cache: Cache,
+    loader: Loader<Transport>,
     /// Frames polled, each one cache round.
     frames: i64,
-    pending: HashMap<Key, (Wait, Pending)>,
-    /// Works out on the frame itself a spawned craft's seeded origin, and
-    /// waits without a background worker or when none can be started.
+    /// Works out a spawned craft's seeded origin, and synchronous test waits.
     sky: Option<space_simulation::cells::Sky>,
-    pub error: Option<String>,
-    /// Work waits out on a background worker. Off in tests, which then step
-    /// without waiting frames for one.
+    /// Off only in the synchronous test harness, never a failure fallback.
     pub background: bool,
 }
 
 impl Default for Charts {
     fn default() -> Self {
         Self {
-            cache: Cache::default(),
+            loader: Loader::default(),
             frames: 0,
-            pending: HashMap::new(),
             sky: None,
-            error: None,
             background: !cfg!(test),
         }
     }
@@ -57,11 +35,11 @@ impl Default for Charts {
 
 impl Atlas for Charts {
     fn region(&self, region: Region) -> Option<&[Candidate]> {
-        self.cache.region(region)
+        self.loader.cache.region(region)
     }
 
     fn arrival(&self, star: &str) -> Option<&Arrival> {
-        self.cache.arrival(star)
+        self.loader.cache.arrival(star)
     }
 }
 
@@ -69,51 +47,46 @@ impl Charts {
     /// Start a frame's cache round and collect finished background work.
     pub fn poll(&mut self, galaxy: &Galaxy) {
         self.frames += 1;
-        self.cache.round(self.frames);
-        let done: Vec<(Key, Result<Reply, ()>)> = self
-            .pending
-            .iter()
-            .filter_map(|(key, (_, job))| Some((key.clone(), job.poll()?)))
-            .collect();
-        for (key, result) in done {
-            let (wait, _) = self.pending.remove(&key).unwrap();
-            match result {
-                Ok(reply) => self.cache.accept(&wait, reply, galaxy),
-                // Asked again on the next wait, never silently skipped.
-                Err(()) => {
-                    self.error = Some(format!("Background system loading failed for {key:?}"));
-                }
-            }
-        }
+        self.loader.begin_round(self.frames, galaxy);
     }
 
     /// Start working out what a craft waits for. Returns whether it is
     /// already known, so the craft can step again at once.
     pub fn offer(&mut self, wait: &Wait, galaxy: &Galaxy) -> bool {
-        if self.cache.chart(wait, galaxy) {
+        if self.loader.request(wait, true, galaxy) {
             return true;
         }
-        let key = Key::of(wait);
-        if self.pending.contains_key(&key) {
+        if self.background {
             return false;
         }
-        let request = Request::of(wait);
-        let job = if !self.background {
-            None
-        } else {
-            let job = Pending::start(request.clone());
-            if job.is_none() {
-                self.error = Some("Cannot start the system loader; loading on the frame".into());
-            }
-            job
-        };
-        if let Some(job) = job {
-            self.pending.insert(key, (wait.clone(), job));
-            return false;
-        }
-        let reply = request.answer(self.sky(), space_simulation::craft::voyage::threads());
-        self.cache.accept(wait, reply, galaxy);
+        // Explicit synchronous test harness only, never a worker-failure fallback.
+        let reply =
+            Request::of(wait).answer(self.sky(), space_simulation::craft::voyage::threads());
+        self.loader.cache.accept(wait, reply, galaxy);
         true
+    }
+
+    pub fn prefetch(&mut self, voyage: &Voyage, galaxy: &Galaxy) {
+        if self.background {
+            self.loader.prefetch(voyage, galaxy);
+        }
+    }
+
+    pub fn dispatch(&mut self) {
+        if self.background {
+            self.loader.dispatch();
+        }
+    }
+
+    pub fn error(&self) -> &Option<String> {
+        &self.loader.error
+    }
+
+    pub fn loading_status(&self) -> serde_json::Value {
+        let (queued, running) = self.loader.counts();
+        let (regions, systems) = self.loader.cache.counts();
+        serde_json::json!({"queued": queued, "running": running,
+            "cached_regions": regions, "cached_systems": systems})
     }
 
     /// The sky this frame works seeded positions out on, kept warm.
@@ -124,7 +97,7 @@ impl Charts {
     /// How many regions and systems are kept.
     #[cfg(test)]
     pub fn counts(&self) -> (usize, usize) {
-        self.cache.counts()
+        self.loader.cache.counts()
     }
 }
 
