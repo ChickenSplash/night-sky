@@ -60,3 +60,31 @@ field appears in the CLI and the TUI with no client change.
    unchanged apart from `thrust`. Adds `ns ship tree` and `--tick`.
 4. ✅ `ns-tui` Ship tab, smoke-tested headless against the running app.
 5. The user tries the TUI against a live ship, after rebuilding the app.
+6. **Timed orders** (agreed 2026-10-22, not started), below.
+
+## Timed orders
+
+Trying the TUI showed that `tick`, an absolute world step (about 173 million
+by then), reads like a duration. Orders hold until changed, so a timed burn
+took two hand-scheduled orders. People and AI agents should say when and for
+how long, in seconds, never work out step numbers.
+
+- **`in <seconds>`:** start after a delay, rounded to whole 0.05 s steps from
+  the craft's current step. It replaces `tick` in the TUI's forms; `--tick`
+  stays in `ns` and the API for scripts that need exact steps.
+- **`for <seconds>`:** on orders with an obvious off state (throttle,
+  translate, rotate), schedule the matching off order (zero on the order's
+  axes) when the time is up, so `ns ship throttle 0.5 --for 1` is a one-second
+  burn. Combines with `in`.
+- **Where:** first as two scheduled orders sent together, which the app
+  already queues, so a client closing mid-burn changes nothing. Move it into
+  the simulation as a timed order if phase 9 or 10 needs it, for instance to
+  show a burn's remaining time.
+- **From the schema:** which orders take `for`, and their off order, should
+  come from the Rust types (such as an `x-off` extension or a method on
+  `Order`), not a client list.
+- **Open:** whether a new order on the same axes cancels a pending off order,
+  so a later manual throttle is not cut by an earlier burn's end. Pending
+  orders are capped, so each timed order uses two of the queue's slots.
+- **Done when:** `ns ship throttle 0.5 --for 1` and the TUI's `for` field
+  each give a one-second burn, and the readout shows the pending end.
