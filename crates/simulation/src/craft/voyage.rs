@@ -276,7 +276,7 @@ pub struct Refused {
 
 /// A step-keyed input, suitable for a replay log or saving pending orders
 /// alongside the craft. Orders sharing a tick retain their submitted order.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledOrder {
     pub tick: i64,

@@ -31,6 +31,199 @@ def interval(value):
     raise argparse.ArgumentTypeError("interval must be finite and at least 0.1 seconds")
 
 
+SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "craft-schema.json")
+# Ship commands written here rather than generated from the schema.
+MANAGEMENT = (
+    ("spawn --altitude <km> [--body <id>] [--speed <km/s> | --velocity x,y,z]", "circular orbit by default"),
+    ("despawn [id]", "one ship, or all of them"),
+    ("list", "IDs, names, frames, active pilots"),
+    ("state [id]", "position, attitude, spin, inputs, orbit, warp"),
+    ("follow <id>", "fly the camera to a ship and follow it"),
+    ("tree", "this tree"),
+)
+
+
+def craft_schema():
+    """Ship orders, generated from the simulation's types by a Rust test."""
+    with open(SCHEMA, encoding="utf-8") as file:
+        return json.load(file)
+
+
+def kebab(name):
+    return name.replace("_", "-")
+
+
+def field_hint(field):
+    """Range and unit, e.g. "1 to 360 °/s"."""
+    unit = field.get("unit") if field.get("unit") not in (None, "", "fraction") else None
+    if "min" in field and "max" in field:
+        return f"{field['min']:g} to {field['max']:g}" + (f" {unit}" if unit else "")
+    if "min" in field:
+        return f"at least {field['min']:g}" + (f" {unit}" if unit else "")
+    return unit
+
+
+def field_help(field):
+    parts = [field.get("help", "").rstrip(".")]
+    hint = field_hint(field)
+    if field["kind"] == "vector":
+        hint = ",".join("xyzw"[:field["length"]]) + (f" {hint}" if hint else "")
+    if hint:
+        parts.append(f"({hint})")
+    if field["kind"] == "variant":
+        parts.append("; ".join(f"{kebab(o['name'])}: {o['help'].rstrip('.')}" for o in field["options"]))
+        valued = [kebab(o["name"]) for o in field["options"] if o["value"]]
+        parts.append(f"· {'/'.join(valued)} take a value (use -- before negative vectors)")
+    return " ".join(p for p in parts if p).replace(" ;", ";").replace("%", "%%")
+
+
+def add_field(parser, field):
+    dest = "field." + ".".join(field["key"])
+    kinds = {"number": float, "integer": int}
+    options = {"help": field_help(field)}
+    if field["kind"] in kinds:
+        options["type"] = kinds[field["kind"]]
+    if field["kind"] == "choice":
+        options["choices"] = [kebab(o["name"]) for o in field["options"]]
+    if field["kind"] == "variant":
+        options["choices"] = [kebab(o["name"]) for o in field["options"]]
+        parser.add_argument(dest, **options)
+        shapes = {"vector": lambda v: ",".join("xyzw"[:v.get("length", 3)]), "text": lambda v: "text"}
+        parser.add_argument(dest + ".value", metavar="value", nargs="?", help="; ".join(
+            f"{kebab(o['name'])}: {shapes.get(o['value']['kind'], lambda v: v['kind'])(o['value'])}"
+            for o in field["options"] if o["value"]))
+        return
+    if field["cli"] == "positional":
+        # Choices show themselves in the usage line; other values show their name.
+        parser.add_argument(dest, metavar=None if "choices" in options else field["name"], **options)
+        return
+    if field["kind"] == "boolean":
+        options["action"] = "store_true"
+    else:
+        options["required"] = field["required"]
+        options["default"] = field.get("default")
+        if "choices" not in options:
+            options["metavar"] = ",".join("XYZW"[:field["length"]]) if field["kind"] == "vector" \
+                else field["name"].upper()
+    parser.add_argument("--" + kebab(field["name"]), dest=dest, **options)
+
+
+def add_orders(ships, schema):
+    """One subcommand per order, nested under menus such as `warp`."""
+    menus = {tuple(menu["words"]): menu for menu in schema["menus"]}
+    made = {(): ships}
+    for order in schema["orders"]:
+        words = order["words"]
+        for depth in range(1, len(words)):
+            prefix = tuple(words[:depth])
+            if prefix not in made:
+                menu = menus.get(prefix, {})
+                parent = made[prefix[:-1]].add_parser(
+                    prefix[-1], help=(menu.get("help") or "").replace("%", "%%"),
+                    description=" ".join(filter(None, (menu.get("help"), menu.get("about")))).replace("%", "%%"))
+                made[prefix] = parent.add_subparsers(dest="menu." + ".".join(prefix), required=True)
+        command = made[tuple(words[:-1])].add_parser(
+            words[-1], help=(order.get("help") or "").replace("%", "%%"),
+            description=" ".join(filter(None, (order.get("help"), order.get("about")))).replace("%", "%%"))
+        command.set_defaults(order=order)
+        for field in order["fields"] + schema["common"]:
+            add_field(command, field)
+
+
+def option_value(field, args):
+    """A variant field's JSON, such as {"target": "body", "value": "sun/0"}."""
+    dest = "field." + ".".join(field["key"])
+    name = getattr(args, dest).replace("-", "_")
+    raw = getattr(args, dest + ".value")
+    option = next(o for o in field["options"] if o["name"] == name)
+    if bool(option["value"]) != (raw is not None):
+        valued = "/".join(kebab(o["name"]) for o in field["options"] if o["value"])
+        raise RuntimeError(f"{valued} needs one value; the other {field['name']}s take none")
+    result = {field["tag"]: name}
+    if raw is not None:
+        value = option["value"]
+        result[field["content"]] = vector(raw, "direction", value.get("length", 3)) \
+            if value["kind"] == "vector" else raw
+    return result
+
+
+def order_json(order, args):
+    """The order an `ns ship` subcommand describes, from its catalogue entry."""
+    built = json.loads(json.dumps(order["order"]))
+    target = built
+    for key in order["at"]:
+        target = target[key]
+    for field in order["fields"]:
+        if field["kind"] == "variant":
+            value = option_value(field, args)
+        else:
+            value = getattr(args, "field." + ".".join(field["key"]))
+            if value is None and "default" not in field:
+                continue
+            if value is not None and field["kind"] == "vector":
+                value = vector(value, field["name"], field["length"])
+            if field["kind"] == "choice":
+                value = value.replace("-", "_")
+        place = target
+        for key in field["key"][:-1]:
+            place = place.setdefault(key, {})
+        place[field["key"][-1]] = value
+    return built
+
+
+def ship_tree(schema):
+    """`ns ship` as a tree: hand-written management, then generated orders."""
+    def synopsis(order):
+        parts = []
+        for field in order["fields"]:
+            name = field["name"]
+            if field["kind"] == "variant":
+                parts.append(f"<{name}> [value]")
+            elif field["cli"] == "positional":
+                parts.append(f"<{name}>")
+            elif field["kind"] == "boolean":
+                parts.append(f"[--{kebab(name)}]")
+            elif field["required"]:
+                parts.append(f"--{kebab(name)} <{name}>")
+            else:
+                parts.append(f"[--{kebab(name)}]")
+        return " ".join(parts)
+
+    def rows(entries, indent):
+        lines = []
+        for i, (text, about) in enumerate(entries):
+            branch = "└── " if i == len(entries) - 1 else "├── "
+            lines.append(f"{indent}{branch}{text.ljust(44 - len(indent))}  {about}".rstrip())
+        return lines
+
+    lines = ["ns ship  (orders also take --id and --tick)"]
+    sections = [("Managing ships", "", [(text, about) for text, about in MANAGEMENT], [])]
+    for group in schema["groups"]:
+        orders = [o for o in schema["orders"] if o["group"] == group["id"]]
+        top = [(" ".join(o["words"] + [synopsis(o)]).strip(), o.get("help") or "") for o in orders
+               if len(o["words"]) == 1]
+        nested = {}
+        for o in orders:
+            if len(o["words"]) > 1:
+                nested.setdefault(o["words"][0], []).append(
+                    (" ".join(o["words"][1:] + [synopsis(o)]).strip(), o.get("help") or ""))
+        if not top and len(nested) == 1:
+            # A group that is one menu, like warp, shows the menu directly.
+            (name, children), = nested.items()
+            sections.append((name, group["note"], children, []))
+        else:
+            sections.append((group["label"], group["note"], top, list(nested.items())))
+    for index, (label, note, top, nested) in enumerate(sections):
+        last = index == len(sections) - 1
+        lines.append(("└── " if last else "├── ") + label + (f"  ({note})" if note else ""))
+        indent = "    " if last else "│   "
+        entries = top + [(name, "") for name, _ in nested]
+        lines += rows(entries, indent)
+        for name, children in nested:
+            lines += rows(children, indent + ("    " if name == entries[-1][0] else "│   "))
+    return "\n".join(lines)
+
+
 def parser():
     result = argparse.ArgumentParser(
         description="Night Sky developer CLI. Start the app with ./scripts/run.sh first.",
@@ -84,32 +277,6 @@ def parser():
         epilog="Example: ship point prograde; ship throttle 0.2; ship cut. "
         "stop brakes spin only; cut cancels all drive inputs and brakes spin; release disables the attitude pilot.")
     ships = ship.add_subparsers(dest="ship", required=True)
-    warp = ships.add_parser("warp", help="bubble transport along the nose, separate from sublight thrust",
-        description="While engaged, rotate, point, stop and cut steer the bubble instead of the turning "
-        "thrusters: pitch and yaw bend the path, roll turns the ship about it. Steering sets a turn rate "
-        "(fraction x turn-rate) that eases in and out over about 0.3 s; dropout leaves no spin.")
-    warps = warp.add_subparsers(dest="warp", required=True)
-    for name, about in (
-        ("engage", "start bubble travel along the nose; needs no thrust, takes over any spin"),
-        ("disengage", "drop out keeping ordinary velocity"),
-        ("up", "multiply requested speed by √10"),
-        ("down", "divide requested speed by √10"),
-    ):
-        command = warps.add_parser(name, help=about)
-        command.add_argument("--id", help="craft ID (default: selected or only ship)")
-    speed = warps.add_parser("set", help="requested speed in m/s, 1 to about 9.46e19 (10,000 ly/s)")
-    speed.add_argument("speed_ms", type=float)
-    speed.add_argument("--id")
-    turn = warps.add_parser("turn-rate", help="bubble turn rate at full steering, 1 to 360 °/s (default 30)")
-    turn.add_argument("degrees_per_second", type=float)
-    turn.add_argument("--id")
-    gravity = warps.add_parser("gravity", help="developer policy, change only while disengaged")
-    gravity.add_argument("policy", choices=("active", "suspended"))
-    gravity.add_argument("--id")
-    match = warps.add_parser("match", help="drop out matching a body in the ship's current system")
-    match.add_argument("body", help="existing planet, star or barycentre ID")
-    match.add_argument("--orbit", action="store_true", help="add tangential speed for a rough orbit")
-    match.add_argument("--id")
     spawn = ships.add_parser(
         "spawn", help="place a ship above a body, by default in a circular orbit",
         description="The body is a planet, star or barycentre ID, or a system's key; without --body, "
@@ -123,35 +290,12 @@ def parser():
     ships.add_parser("list", help="list ship IDs, names, frames and active attitude pilots")
     state = ships.add_parser("state", help="full position, attitude, spin, inputs, thruster limits and orbit")
     state.add_argument("id", nargs="?", help="one craft (default: all)")
-    thrust = ships.add_parser("thrust", help="legacy debug acceleration, x,y,z m/s² in system axes")
-    thrust.add_argument("vector", help="x,y,z, e.g. 0,0,1")
-    thrust.add_argument("--id", help="craft ID (default: the selected or only craft)")
-    throttle = ships.add_parser("throttle", help="main drive fraction [-1,1]; negative uses reverse, 0 cuts main only")
-    throttle.add_argument("value", type=float)
-    translate = ships.add_parser("translate", help="fine translation fractions; omitted axes reset to zero")
-    for axis in ("forward", "up", "right"):
-        translate.add_argument("--" + axis, type=float, default=0.0)
-    rotate = ships.add_parser("rotate", help="manual turning fractions (in warp, bubble steering); releases pointing, omitted axes reset to zero")
-    for axis in ("pitch", "yaw", "roll"):
-        rotate.add_argument("--" + axis, type=float, default=0.0)
-    point = ships.add_parser("point", help="turn to and track an orbital direction, body or fixed system vector")
-    point.add_argument("target", choices=("prograde", "retrograde", "normal", "antinormal", "radial-in", "radial-out", "body", "vector"))
-    point.add_argument("value", nargs="?", help="body ID or x,y,z system direction (use -- before negative vectors)")
-    point.add_argument("--up", help="x,y,z system up direction to align roll; otherwise preserve roll")
-    stop = ships.add_parser("stop", help="brake rotation only, leaving translation and throttle unchanged")
-    release = ships.add_parser("release", help="disable attitude pilot without braking or changing drives")
-    cut = ships.add_parser("cut", help="cut all drives and engage spin braking; does not stop linear motion")
-    configure = ships.add_parser("configure", help="replace thruster limits (m/s² and rad/s²); reverse=0 disables reverse")
-    configure.add_argument("--forward", type=float, required=True)
-    configure.add_argument("--reverse", type=float, required=True)
-    configure.add_argument("--fine", type=float, required=True)
-    configure.add_argument("--angular", required=True, help="pitch,yaw,roll rad/s²")
-    for command in (throttle, translate, rotate, point, stop, release, cut, configure):
-        command.add_argument("--id", help="craft ID (default: selected or only ship)")
     follow = ships.add_parser("follow", help="fly to a craft and follow it")
     follow.add_argument("id")
     despawn = ships.add_parser("despawn", help="remove a craft, or all of them")
     despawn.add_argument("id", nargs="?", help="one craft (default: all)")
+    ships.add_parser("tree", help="print every ship command as a tree, without connecting")
+    add_orders(ships, craft_schema())
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
     watch.add_argument("target", choices=("state", "perf"))
     watch.add_argument("path", nargs="?", default="", help="optional nested path")
@@ -351,51 +495,26 @@ def searches_text(entries):
         for e in entries) or "no searches yet"
 
 
-def vector(text, name):
+def vector(text, name, length=3):
     import math
     try:
         values = [float(part) for part in text.split(",")]
     except ValueError:
         values = []
-    if len(values) != 3 or not all(math.isfinite(v) for v in values):
-        raise RuntimeError(f"{name} is x,y,z, e.g. 0,7.5,0")
+    if len(values) != length or not all(math.isfinite(v) for v in values):
+        raise RuntimeError(f"{name} is {','.join('xyzw'[:length])}, e.g. {','.join(['0'] * (length - 1) + ['1'])}")
     return values
 
 
 def ship_command(args):
     """The app command for a ship action, or None for a read."""
-    if args.ship == "warp":
-        command = {"command": args.warp.replace("-", "_")}
-        if args.warp == "set":
-            command["speed_ms"] = args.speed_ms
-        elif args.warp == "turn-rate":
-            command["degrees_per_second"] = args.degrees_per_second
-        elif args.warp == "gravity":
-            command["policy"] = args.policy
-        elif args.warp == "match":
-            command.update(body=args.body, orbit=args.orbit)
-        return {"type": "steer_craft", "id": args.id,
-                "order": {"action": "warp", "command": command}}
-    if args.ship in ("throttle", "translate", "rotate", "point", "stop", "release", "cut", "configure"):
-        order = {"action": args.ship}
-        if args.ship == "throttle":
-            order["value"] = args.value
-        elif args.ship in ("translate", "rotate"):
-            axes = ("right", "up", "forward") if args.ship == "translate" else ("pitch", "yaw", "roll")
-            order.update({axis: getattr(args, axis) for axis in axes})
-        elif args.ship == "point":
-            needs_value = args.target in ("body", "vector")
-            if needs_value != (args.value is not None):
-                raise RuntimeError("body/vector needs one value; orbital directions take no value")
-            order["target"] = {"target": args.target.replace("-", "_")}
-            # The simulation's serde names have no underscore for antinormal.
-            if needs_value:
-                order["target"]["value"] = vector(args.value, "direction") if args.target == "vector" else args.value
-            order["up"] = vector(args.up, "--up") if args.up else None
-        elif args.ship == "configure":
-            order["thrusters"] = {"forward": args.forward, "reverse": args.reverse,
-                "fine": args.fine, "angular": vector(args.angular, "--angular")}
-        return {"type": "steer_craft", "id": args.id, "order": order}
+    order = getattr(args, "order", None)
+    if order:
+        command = {"type": "steer_craft", "id": getattr(args, "field.id"),
+                   "order": order_json(order, args)}
+        if getattr(args, "field.tick") is not None:
+            command["tick"] = getattr(args, "field.tick")
+        return command
     if args.ship == "spawn":
         command = {"type": "spawn_ship", "altitude_km": args.altitude}
         if args.body:
@@ -407,11 +526,6 @@ def ship_command(args):
         if args.velocity:
             command["velocity_kms"] = vector(args.velocity, "--velocity")
         return command
-    if args.ship == "thrust":
-        command = {"type": "set_thrust", "thrust": vector(args.vector, "thrust")}
-        if args.id:
-            command["id"] = args.id
-        return command
     if args.ship == "follow":
         return {"type": "fly_to_craft", "id": args.id}
     if args.ship == "despawn":
@@ -420,6 +534,9 @@ def ship_command(args):
 
 
 def ship(args):
+    if args.ship == "tree":
+        print(ship_tree(craft_schema()))
+        return None
     command = ship_command(args)
     if command is None:
         craft = request(args.port, endpoint("state", "craft"))
@@ -488,7 +605,9 @@ def main(argv=None):
                 print(searches_text(value) if args.action == "searches" else catalogue_text(value), flush=True)
             return 0
         elif args.action == "ship":
-            output(ship(args), args.json)
+            result = ship(args)
+            if result is not None:
+                output(result, args.json)
             return 0
         elif args.action == "lists":
             output(lists(request(args.port, endpoint("state", "lists"))), args.json)

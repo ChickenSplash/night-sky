@@ -82,11 +82,15 @@ impl Charts {
         &self.loader.error
     }
 
-    pub fn loading_status(&self) -> serde_json::Value {
+    pub fn loading_status(&self) -> LoadingStatus {
         let (queued, running) = self.loader.counts();
-        let (regions, systems) = self.loader.cache.counts();
-        serde_json::json!({"queued": queued, "running": running,
-            "cached_regions": regions, "cached_systems": systems})
+        let (cached_regions, cached_systems) = self.loader.cache.counts();
+        LoadingStatus {
+            queued,
+            running,
+            cached_regions,
+            cached_systems,
+        }
     }
 
     /// The sky this frame works seeded positions out on, kept warm.
@@ -99,6 +103,15 @@ impl Charts {
     pub fn counts(&self) -> (usize, usize) {
         self.loader.cache.counts()
     }
+}
+
+/// Background system loading, for the developer readout.
+#[derive(Clone, Copy, Debug, serde::Serialize, schemars::JsonSchema)]
+pub struct LoadingStatus {
+    pub queued: usize,
+    pub running: usize,
+    pub cached_regions: usize,
+    pub cached_systems: usize,
 }
 
 impl Live {

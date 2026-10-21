@@ -127,12 +127,19 @@ curl -H 'X-Night-Sky-Client: cli' --data 'set_debug split_multiples false' http:
 ## Terminal control panel
 
 `./scripts/ns-tui` is a Textual app over the same API, for trying commands
-before they have in-app UI. It builds its command list and forms from
+before they have in-app UI. It opens on a **Ship** tab built from the
+[ship schema](#ship-schema): a ship picker, order buttons grouped as sublight,
+turning and warp (orders without settings run when pressed, others open a
+typed form with ranges and units), and the picked ship's live state, grouped
+with readable units and refreshed twice a second. It reads the live schema,
+or the committed copy when the app is older or offline.
+
+The **Commands** tab builds its command list and forms from
 `GET /commands`, so a new `USAGE` entry appears with no TUI change. Forms send
 `name field=value` text (blank fields are left out) through `POST /command`
 and log the reply or refusal. A free-text line takes any command, a side panel
 polls chosen `/state` paths every second, and Ctrl+S captures a screenshot.
-Fields are untyped text, as `USAGE` names fields but not their types.
+Its fields are untyped text, as `USAGE` names fields but not their types.
 
 Textual is the one dependency outside the standard library. The first run makes
 a virtual environment in `tools/tui/` and installs it there; delete that
@@ -154,6 +161,38 @@ arrays of UiCommand JSON accepted by `ns cmd` or `POST /command`. List-system
 buttons also export follow-up `InspectObject` to preserve the list tab. Task
 links export a URL and no app commands; CLI reads never open them. These reads
 do not select or move the camera and use the normal snapshot refresh rate.
+
+## Ship schema
+
+Ship orders and the ship state readout are described by the Rust types
+themselves. `schemars` derives JSON Schema from `Order`, the readout structs
+and the simulation types inside them; doc comments become help text, range
+attributes use the constants validation uses, and `x-group`/`x-unit`
+extensions add display groups and units. `craft/schema.rs` flattens that into
+a catalogue that clients read without knowing JSON Schema:
+
+- `orders`: each order's words (`warp set`), group, help, JSON skeleton, the
+  path its fields go under, and its fields: key path, kind (number, integer,
+  boolean, text, choice, vector, variant), range, unit, default, and whether
+  the CLI takes it as a positional argument or a flag;
+- `common`: `id` and `tick`, which every order takes from `steer_craft`;
+- `state`: display groups and every readout field with its group, label and
+  unit, so new state fields appear in the TUI's state panel.
+
+`GET /craft/schema` serves it, and a client test keeps a copy in
+`scripts/craft-schema.json`, rewriting it and failing while it is stale:
+commit the rewritten file. `ns ship` builds its order subcommands from that
+copy, so it needs no app for `--help` or `ns ship tree`. Tests require every
+order to have help and a group, every catalogue order to build an order the
+simulation accepts, and every number to declare a unit (`""` for none,
+`fraction` for [-1, 1] inputs).
+
+Adding an order or a state field therefore needs only the Rust change, its
+doc comment and attributes, and the rewritten copy. Generation rules:
+required fields are positional in declaration order; defaulted fields are
+flags; a nested struct becomes flags; an order holding only a tagged enum,
+like `warp`, becomes a menu of subcommands. Spawning, listing, state, follow
+and despawn are hand-written in `ns`.
 
 ## Craft
 

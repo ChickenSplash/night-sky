@@ -8,6 +8,7 @@
 //! - A craft changes only through its `Input`, applied at every step, so a
 //!   server can run the same craft from the same inputs.
 use glam::{DQuat, DVec3};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use space_shared::{Planet, StarSystem};
 
@@ -50,7 +51,7 @@ pub mod predict;
 pub mod voyage;
 pub mod warp;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CraftKind {
     Ship,
@@ -83,14 +84,17 @@ impl CraftKind {
 }
 
 /// What a craft's position is measured from.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "frame", rename_all = "snake_case")]
 pub enum Frame {
     /// A star system, by its page star's ID: metres from the page's outermost
     /// barycentre, in the system's plane axes.
     System { star: String },
     /// Local metres in galactic axes, anchored at a fixed galactocentric point.
-    Galaxy { origin_pc: [f64; 3] },
+    Galaxy {
+        #[schemars(extend("x-unit" = "pc"))]
+        origin_pc: [f64; 3],
+    },
 }
 
 impl Frame {
@@ -112,9 +116,10 @@ pub enum Motion {
 }
 
 /// What the craft is told to do, held until changed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Input {
-    /// Thrust acceleration in metres per second squared, in frame axes.
+    /// Legacy thrust acceleration, in frame axes.
+    #[schemars(extend("x-unit" = "m/s²"))]
     pub thrust: [f64; 3],
     #[serde(default)]
     pub controls: Controls,
@@ -122,23 +127,35 @@ pub struct Input {
 
 /// Body axes: +X right, +Y up, -Z forward. Rotation is right-handed about
 /// X (pitch), Y (yaw), Z (roll). Commands persist until replaced.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Controls {
+    /// Main drive, or reverse when negative.
+    #[schemars(extend("x-unit" = "fraction"))]
     pub throttle: f64,
     /// Right, up, back, each in [-1, 1]. Independent fine thrusters.
+    #[schemars(extend("x-unit" = "fraction"))]
     pub translation: [f64; 3],
     /// Pitch, yaw, roll, each in [-1, 1].
+    #[schemars(extend("x-unit" = "fraction"))]
     pub rotation: [f64; 3],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Thrusters {
-    /// Main and reverse acceleration in m/s²; zero disables a drive.
+    /// Main drive acceleration; zero disables it.
+    #[schemars(range(min = 0.0), extend("x-unit" = "m/s²"))]
     pub forward: f64,
+    /// Reverse drive acceleration; zero disables it.
+    #[schemars(range(min = 0.0), extend("x-unit" = "m/s²"))]
     pub reverse: f64,
+    /// Fine translation acceleration on each axis.
+    #[schemars(range(min = 0.0), extend("x-unit" = "m/s²"))]
     pub fine: f64,
-    /// Angular acceleration in rad/s² about each body axis. This is not g:
-    /// a future inertia model can derive it from torque and hull geometry.
+    /// Angular acceleration about each body axis (pitch, yaw, roll).
+    ///
+    /// This is not g: a future inertia model can derive it from torque and
+    /// hull geometry.
+    #[schemars(extend("x-unit" = "rad/s²"))]
     pub angular: [f64; 3],
 }
 

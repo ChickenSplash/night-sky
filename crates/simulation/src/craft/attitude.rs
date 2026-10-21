@@ -4,30 +4,43 @@
 use super::*;
 use glam::DMat3;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "target", content = "value", rename_all = "snake_case")]
 pub enum PointTarget {
+    /// Along the velocity relative to the orbited body.
     Prograde,
+    /// Against the velocity relative to the orbited body.
     Retrograde,
+    /// Along the orbit's angular momentum.
     Normal,
+    /// Against the orbit's angular momentum.
     Antinormal,
+    /// Towards the orbited body.
     RadialIn,
+    /// Away from the orbited body.
     RadialOut,
+    /// Towards a body in the craft's system, by ID.
     Body(String),
-    Vector([f64; 3]),
+    /// A fixed direction in system axes.
+    Vector(#[schemars(extend("x-unit" = ""))] [f64; 3]),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum AttitudePilot {
+    /// No pilot: rotation inputs act directly.
     #[default]
     Manual,
+    /// Braking spin to zero.
     Stop,
+    /// Turning to and tracking a target.
     Point {
         target: PointTarget,
+        #[schemars(extend("x-unit" = ""))]
         up: Option<[f64; 3]>,
         /// Parallel-transported desired attitude retains roll without an
         /// arbitrary world-up discontinuity as a target completes an orbit.
+        #[schemars(extend("x-unit" = ""))]
         attitude: [f64; 4],
     },
 }

@@ -21,6 +21,9 @@ pub use forecast::{Forecast, forecast};
 mod loading;
 mod readout;
 pub use readout::{facts, readout};
+// Served only by the native developer API.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod schema;
 mod shape;
 mod travel;
 pub use shape::{HULL_EDGES, HULL_VERTICES};

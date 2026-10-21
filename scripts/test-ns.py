@@ -271,7 +271,10 @@ class CliTests(unittest.TestCase):
             (("ship", "spawn", "--altitude", "400", "--velocity", "0,7.5,0"),
              {"type": "spawn_ship", "altitude_km": 400.0, "velocity_kms": [0.0, 7.5, 0.0]}),
             (("ship", "thrust", "0,0,1", "--id", "craft-1"),
-             {"type": "set_thrust", "thrust": [0.0, 0.0, 1.0], "id": "craft-1"}),
+             {"type": "steer_craft", "id": "craft-1", "order": {"action": "thrust", "thrust": [0.0, 0.0, 1.0]}}),
+            (("ship", "warp", "set", "1e6", "--tick", "42"),
+             {"type": "steer_craft", "id": None, "tick": 42,
+              "order": {"action": "warp", "command": {"command": "set", "speed_ms": 1e6}}}),
             (("ship", "follow", "craft-1"), {"type": "fly_to_craft", "id": "craft-1"}),
             (("ship", "despawn"), {"type": "despawn_craft", "id": None}),
         ]:

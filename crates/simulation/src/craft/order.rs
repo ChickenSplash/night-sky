@@ -1,8 +1,11 @@
 //! Orders a pilot, autopilot or remote player gives a craft. Each patches only
 //! the input it names, leaving other drives alone. Checks and application
 //! share this one path, so any client or server refuses the same orders.
-use super::warp::{GravityPolicy, MAX_SPEED, MIN_SPEED, SPEED_FACTOR};
+use super::warp::{
+    GravityPolicy, MAX_SPEED, MAX_TURN_RATE_DPS, MIN_SPEED, MIN_TURN_RATE_DPS, SPEED_FACTOR,
+};
 use super::{Craft, Field, PointTarget, Thrusters};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Most legacy frame-axis thrust an order may hold, in m/s².
@@ -17,68 +20,121 @@ fn body_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Doc comments here are the CLI and TUI help: the first paragraph is the
+/// short help, the rest its description. `x-group` sorts orders for display.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Order {
+    /// Main drive fraction [-1, 1]; negative uses reverse, 0 cuts main only.
+    #[schemars(extend("x-group" = "sublight"))]
     Throttle {
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         value: f64,
     },
+    /// Fine translation fractions [-1, 1]; omitted axes reset to zero.
+    #[schemars(extend("x-group" = "sublight"))]
     Translate {
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         right: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         up: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         forward: f64,
     },
+    /// Manual turning fractions [-1, 1] (in warp, bubble steering); releases
+    /// pointing, omitted axes reset to zero.
+    #[schemars(extend("x-group" = "turning"))]
     Rotate {
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         pitch: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         yaw: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         roll: f64,
     },
+    /// Turn to and track an orbital direction, body or fixed system vector.
+    #[schemars(extend("x-group" = "turning"))]
     Point {
         target: PointTarget,
+        /// System up direction to align roll; otherwise roll is preserved.
         #[serde(default)]
+        #[schemars(extend("x-unit" = ""))]
         up: Option<[f64; 3]>,
     },
+    /// Brake rotation only, leaving translation and throttle unchanged.
+    #[schemars(extend("x-group" = "turning"))]
     Stop,
+    /// Disable the attitude pilot without braking or changing drives.
+    #[schemars(extend("x-group" = "turning"))]
     Release,
+    /// Cut all drives and engage spin braking; does not stop linear motion.
+    #[schemars(extend("x-group" = "turning"))]
     Cut,
-    /// Change the craft's own thruster limits. A server should accept this
-    /// only from an administrator, never from a player.
-    Configure {
-        thrusters: Thrusters,
-    },
-    /// Legacy debug acceleration in m/s², in the frame's axes.
+    /// Replace thruster limits; reverse 0 disables the reverse drive.
+    ///
+    /// A server should accept this only from an administrator, never from a
+    /// player.
+    #[schemars(extend("x-group" = "sublight"))]
+    Configure { thrusters: Thrusters },
+    /// Legacy debug acceleration, in the frame's axes.
+    #[schemars(extend("x-group" = "sublight"))]
     Thrust {
+        #[schemars(extend("x-unit" = "m/s²"))]
         thrust: [f64; 3],
     },
-    Warp {
-        command: WarpOrder,
-    },
+    /// Bubble transport along the nose, separate from sublight thrust.
+    ///
+    /// While engaged, rotate, point, stop and cut steer the bubble instead of
+    /// the turning thrusters: pitch and yaw bend the path, roll turns the ship
+    /// about it. Steering sets a turn rate (fraction × turn rate) that eases
+    /// in and out over about 0.3 s; dropout leaves no spin.
+    #[schemars(extend("x-group" = "warp"))]
+    Warp { command: WarpOrder },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WarpOrder {
+    /// Start bubble travel along the nose; needs no thrust, takes over any spin.
     Engage,
+    /// Drop out keeping ordinary velocity.
     Disengage,
-    /// Explicit matched dropout, resolved in the craft's current system at
-    /// the application tick. This never changes heading or position.
+    /// Drop out matching a body in the ship's current system.
+    ///
+    /// Resolved in the craft's current system at the application tick. This
+    /// never changes heading or position.
     Match {
+        /// Existing planet, star or barycentre ID.
         body: String,
+        /// Add tangential speed for a rough orbit.
         #[serde(default)]
         orbit: bool,
     },
+    /// Requested speed, from 1 m/s to 10,000 ly/s; does not engage.
     Set {
+        #[schemars(range(min = MIN_SPEED, max = MAX_SPEED), extend("x-unit" = "m/s"))]
         speed_ms: f64,
     },
-    /// Turn rate at full steering, in degrees per second.
+    /// Bubble turn rate at full steering (default 30 °/s).
     TurnRate {
+        #[schemars(
+            range(min = MIN_TURN_RATE_DPS, max = MAX_TURN_RATE_DPS),
+            extend("x-unit" = "°/s")
+        )]
         degrees_per_second: f64,
     },
+    /// Multiply the requested speed by √10.
     Up,
+    /// Divide the requested speed by √10.
     Down,
-    Gravity {
-        policy: GravityPolicy,
-    },
+    /// Developer gravity policy; change only while disengaged.
+    Gravity { policy: GravityPolicy },
 }
 
 impl Order {

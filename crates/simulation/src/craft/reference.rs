@@ -10,7 +10,7 @@ use crate::multiple::s_type_limit;
 /// of the region's radius, so it does not flicker on a boundary.
 pub const SWITCH_MARGIN: f64 = 0.1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferenceKind {
     Planet,

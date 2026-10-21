@@ -74,6 +74,8 @@ The shared native/browser client in `crates/client`, with browser workers in
   historical measurements and future ideas. This is not the current UI specification.
 - [Flight simulator](plans/flight-sim.md): alpha proposal for a walkable ship with
   warp and sublight drives, real gravity and layered autopilot.
+- [Ship schema](plans/ship-schema.md): one source of truth for ship orders and
+  state, generating `ns ship` and the TUI's Ship tab.
 
 ## Current limitations
 

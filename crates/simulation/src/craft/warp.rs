@@ -26,7 +26,10 @@ pub const DEFAULT_TURN_RATE_DPS: f64 = 30.0;
 /// light-second-long step would give large, arbitrary kicks deep in a body.
 pub const GRAVITY_CUTOFF_MS: f64 = crate::LIGHT_SPEED_MS;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Whether gravity changes ordinary velocity during warp below the cutoff.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum GravityPolicy {
     #[default]
@@ -34,18 +37,24 @@ pub enum GravityPolicy {
     Suspended,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Warp {
     pub engaged: bool,
+    /// The speed warp ramps towards while engaged.
+    #[schemars(extend("x-unit" = "m/s"))]
     pub requested_ms: f64,
+    /// The bubble's current speed.
+    #[schemars(extend("x-unit" = "m/s"))]
     pub actual_ms: f64,
     pub gravity: GravityPolicy,
     pub stop_reason: Option<String>,
     /// Turn rate at full steering, in degrees per second. Steering on several
     /// axes together shares it, and pointing never exceeds it.
     #[serde(default = "default_turn_rate")]
+    #[schemars(extend("x-unit" = "°/s"))]
     pub turn_rate_dps: f64,
     /// The displacement from bubble motion alone on the last physics step.
+    #[schemars(extend("x-unit" = "m"))]
     pub bubble_delta_m: [f64; 3],
     /// Last successful matched exit, retained for inspection, not a standing
     /// order. Subsequent ordinary motion changes velocity normally.
@@ -53,12 +62,13 @@ pub struct Warp {
     pub last_match: Option<MatchedExit>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MatchedExit {
     pub body: String,
     pub orbit: bool,
     pub tick: i64,
     /// Velocity in the system frame at dropout, before ordinary integration.
+    #[schemars(extend("x-unit" = "m/s"))]
     pub velocity_ms: [f64; 3],
 }
 

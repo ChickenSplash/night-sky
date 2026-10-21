@@ -8,6 +8,7 @@ license.workspace = true
 glam = "0.30.7"
 fake = "5.1"
 serde.workspace = true
+schemars.workspace = true
 space-shared.workspace = true
 
 [dev-dependencies]
