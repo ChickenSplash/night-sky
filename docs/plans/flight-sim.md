@@ -522,7 +522,26 @@ Accepted behaviour (including the later unsafe-manual-warp revision):
   then disengage, with no position jumps or unwanted automatic stops, on both
   targets.
 
-### 5 · Dropout velocity
+### 5 · Dropout velocity ✅ Done
+
+User approved phase 5 on 2026-10-21 after a native live CLI flight they
+watched. A follow-up hardening pass refuses rough orbits outside the
+reference's reach, treats near-radial courses (under about 0.06° tangential)
+as radial when choosing direction, bounds body IDs in orders and clears the
+loader error after a successful retry. The live run, around a rocky planet in
+the triple system `gd.3.378`:
+
+- Plain match onto the planet about 97,000 km out: zero relative speed,
+  unchanged position and heading, then the expected slow radial fall.
+- Rough orbit onto the planet from a radial-in course: circular (eccentricity
+  6e-11) at 76,900 km altitude, using the ship-up direction fallback.
+- Refusals with HTTP 409 and warp left engaged and unchanged: `--orbit` outside
+  the planet's Hill sphere, and a planet in another system with and without
+  `--orbit`. A plain match from the same distance was accepted.
+- Rough orbit around Star A at 54 AU: circular (eccentricity 2e-12), keeping
+  the current orbital sense.
+
+Browser flight visuals remain untested.
 
 Implementation: explicit `ns ship warp match <body-id> [--orbit]`, shared
 fixed-tick simulation/API order, inspector and `warp.last_match` receipt.
@@ -537,7 +556,6 @@ native workspace tests, strict native/WASM Clippy and 59 craft tests under
 Node/WASM. New regressions cover planet/star/barycentre matches under both gravity
 policies, tangential rough-orbit estimates and direction fallbacks, atomic
 refusals, tick-keyed replay after snapshots and client API/readout integration.
-Live acceptance remains pending: the native developer API was not running.
 In-app selection-to-command controls remain phase 11 work.
 
 - **Frame decision:** keep the existing static-star approximation and

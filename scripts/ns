@@ -86,10 +86,15 @@ def parser():
     ships = ship.add_subparsers(dest="ship", required=True)
     warp = ships.add_parser("warp", help="straight-line bubble transport, separate from sublight thrust")
     warps = warp.add_subparsers(dest="warp", required=True)
-    for name in ("engage", "disengage", "up", "down"):
-        command = warps.add_parser(name)
+    for name, about in (
+        ("engage", "start bubble travel along the nose; needs no spin, pointing or thrust"),
+        ("disengage", "drop out keeping ordinary velocity"),
+        ("up", "multiply requested speed by √10"),
+        ("down", "divide requested speed by √10"),
+    ):
+        command = warps.add_parser(name, help=about)
         command.add_argument("--id", help="craft ID (default: selected or only ship)")
-    speed = warps.add_parser("set", help="requested speed in m/s, 1 to 299792458000000")
+    speed = warps.add_parser("set", help="requested speed in m/s, 1 to about 9.46e19 (10,000 ly/s)")
     speed.add_argument("speed_ms", type=float)
     speed.add_argument("--id")
     gravity = warps.add_parser("gravity", help="developer policy, change only while disengaged")
