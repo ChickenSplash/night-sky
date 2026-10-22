@@ -645,7 +645,7 @@ Deferred with phase 6's turn limit and phase 7, to be decided after phase 11.
 - **Done when:** steering towards a selected planet by hand ends at the
   standoff distance without precise speed juggling.
 
-### 9 · Plotted warp autopilot
+### 9 · Plotted warp autopilot ✅ Done
 
 - Plot and fly a route with the same drive and explicitly enabled assists as
   manual flight. Autopilot only adds steering and route management.
@@ -862,13 +862,37 @@ Checkpoints:
      from a system, two ships chasing each other in both update orders, a
      despawned target, refusals and manual formation matching, and a chase
      through the app's command path to a ship in low orbit.
-5. **Live CLI core loop:** leave orbit, fly to another system, drop into a
+5. ✅ **Live CLI core loop:** leave orbit, fly to another system, drop into a
    rough orbit, fly to a second ship and match it, wrap round a planet in
    the way, then cancel and take over mid-route without discontinuities.
    Craft update timings in the performance console confirm the per-step
    checks stay cheap. Then the docs and the phase marked done.
+   - Done 2026-10-22; the user confirmed it visually. From System 1
+     (`g78040000.2.813`): round planet d into orbit round planet e, 30 s, on
+     time (eccentricity 1.5e-7); 3.9 ly to `g1e010000005fe.2.0` in 60 s, on
+     time, into a circular orbit 334,594 km above its star; a second ship
+     matched the first across 3.9 ly in 60 s, holding 1,039 m off at under
+     1 cm/s, and `warp match <ship-id>` by hand left 1 mm/s; a route to
+     planet c with the star on the line skirted it about 57,000 km up and
+     arrived on time into an orbit of eccentricity 8e-4; cancelling kept
+     warp's speed and released pointing, and manual drive, turning and
+     stop then responded. Stepping both ships peaked at 0.07 ms a frame.
+   - Found while testing: a followed ship's destination system popped in
+     only at dropout, because the camera took its system from the ship's
+     frame. While the ship is in galactic space the camera now arrives and
+     leaves by its own distance, as in free flight (see
+     [navigation](../client/navigation.md)); the light-speed entry rule
+     is unchanged.
+   - Still open: a 20 s chase of a ship orbiting at 173 km/s ran 5.4 s
+     late with no cause in the readout, like earlier chases of orbiting
+     targets; and the inspector's attitude pilot row shows a raw vector
+     during routes.
 
-### 10 · Orbit autopilot
+### 10 · Orbit autopilot (deferred)
+
+Deferred with the assists, to be decided after phase 11. Phase 5's rough-orbit
+exit, used by `warp to --orbit`, already ends near-circular (eccentricity 1e-7
+to 1e-3 in the phase 9 live test), so "go to planet" needs no player input.
 
 - After drop-out, a short sublight burn (seconds to a minute) circularises the orbit.
 - Close-range correction only; no interplanetary transfer planning.
@@ -881,8 +905,8 @@ Checkpoints:
 - Manual warp in the app: mouse steering while held (a flight stick later),
   warp speed up and down on the logarithmic scale, and looking sideways
   without steering.
-- Decide whether the deferred warp assists are needed, once mouse steering
-  can be felt: turn limit (phase 6), collision (7) and approach (8).
+- Decide whether the deferred assists are needed, once mouse steering can
+  be felt: turn limit (phase 6), collision (7), approach (8) and orbit (10).
 - The warp assist toggles, the selected target, requested and actual
   speed and the reason for any limit.
 - **Autopilot:** pick a target; everything else is handled.
