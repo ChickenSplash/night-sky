@@ -4,7 +4,9 @@
 //! The drive also turns the bubble and the ship inside it together, without
 //! turning thrusters: a game rule. Steering sets a turn rate, not an angular
 //! acceleration, so releasing it stops the turn, and dropout leaves no spin.
-use super::{Craft, Field, Frame, Gravity, Motion, STEP_SECONDS, Target, circular_speed};
+use super::{
+    Craft, Field, Frame, Gravity, Motion, STEP_SECONDS, Target, circular_speed, is_craft_id,
+};
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 
@@ -138,8 +140,33 @@ impl Craft {
         body: &str,
         orbit: bool,
     ) -> Result<(), String> {
+        self.matched_dropout_among(field, &[], body, orbit)
+    }
+
+    /// A matched dropout that may also match one of the other craft in
+    /// `ships`, anywhere: formation flying, leaving its warp bubble behind.
+    pub fn matched_dropout_among(
+        &mut self,
+        field: Option<&Field>,
+        ships: &[Target],
+        body: &str,
+        orbit: bool,
+    ) -> Result<(), String> {
         if !self.warp.engaged {
             return Err("Engage warp before requesting a matched dropout".into());
+        }
+        if body == self.id {
+            return Err("A ship cannot match itself".into());
+        }
+        if let Some(ship) = ships.iter().find(|ship| ship.id == body) {
+            if orbit {
+                return Err(format!("`{body}` cannot be orbited"));
+            }
+            self.drop_matched(DVec3::from_array(ship.state.velocity), body, false);
+            return Ok(());
+        }
+        if is_craft_id(body) {
+            return Err(format!("No craft `{body}`"));
         }
         if !matches!(self.frame, Frame::System { .. }) {
             return Err("Matched dropout requires a body in the ship's current system".into());

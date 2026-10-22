@@ -85,6 +85,20 @@ impl CraftKind {
     }
 }
 
+/// Nose-to-tail length of the test hull, in metres.
+pub const SHIP_LENGTH_M: f64 = 30.0;
+
+/// A craft's ID from its number, as hosts give them.
+pub fn craft_id(number: u64) -> String {
+    format!("craft-{number}")
+}
+
+/// Whether an ID has the form of a craft's, whether or not it still exists.
+pub fn is_craft_id(id: &str) -> bool {
+    id.strip_prefix("craft-")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// What a craft's position is measured from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "frame", rename_all = "snake_case")]

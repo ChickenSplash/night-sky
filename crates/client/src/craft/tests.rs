@@ -677,6 +677,81 @@ fn a_route_to_another_system_flies_through_the_command_path() {
     );
 }
 
+#[test]
+fn a_ship_flies_to_another_and_holds_formation_through_the_command_path() {
+    let mut app = app();
+    let (_, _, planet) = planet_system();
+    for altitude_km in [400.0, 200_000.0] {
+        send(
+            &mut app,
+            UiCommand::SpawnShip {
+                body: Some(planet.clone()),
+                altitude_km,
+                speed_kms: None,
+                velocity_kms: None,
+            },
+        );
+    }
+    let command: UiCommand = serde_json::from_value(serde_json::json!({
+        "type": "steer_craft", "id": "craft-2", "order": {"action": "warp", "command": {
+            "command": "to", "target": "craft-1", "match": true,
+        }}
+    }))
+    .unwrap();
+    send(&mut app, command);
+    let route = |app: &App| {
+        let fleet = app.world().resource::<Fleet>();
+        super::readout(fleet, fleet.craft[1].craft.seconds())["craft"][1]["route"].clone()
+    };
+    assert_eq!(route(&app)["stage"], "align", "{}", route(&app));
+    // Lowest the chaser goes, in the planet's radii.
+    let mut lowest = f64::INFINITY;
+    for _ in 0..(25.0 / STEP_SECONDS) as usize {
+        app.world_mut().resource_mut::<Clock>().0.seconds += STEP_SECONDS;
+        app.update();
+        let fleet = app.world().resource::<Fleet>();
+        let live = &fleet.craft[1];
+        let body = live
+            .field
+            .reference_by_id(&planet, live.craft.seconds())
+            .unwrap();
+        let at = live.craft.state().position;
+        let r = (0..3)
+            .map(|i| (at[i] - body.state.position[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        lowest = lowest.min(r / body.radius_m);
+    }
+    let fleet = app.world().resource::<Fleet>();
+    let live = &fleet.craft[0];
+    let body = live
+        .field
+        .reference_by_id(&planet, live.craft.seconds())
+        .unwrap();
+    let at = live.craft.state().position;
+    let r = (0..3)
+        .map(|i| (at[i] - body.state.position[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    // The target orbits inside the planet's keep-clear sphere: the route
+    // skims round at its height, never lower.
+    assert!(lowest > 0.999 * r / body.radius_m, "{lowest} radii");
+    let route = route(&app);
+    assert_eq!(route["stage"], "arrived", "{route}");
+    let fleet = app.world().resource::<Fleet>();
+    let (one, two) = (fleet.craft[0].craft.state(), fleet.craft[1].craft.state());
+    let gap = (0..3)
+        .map(|i| (one.position[i] - two.position[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!((900.0..1_100.0).contains(&gap), "{gap} m");
+    let drift = (0..3)
+        .map(|i| (one.velocity[i] - two.velocity[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(drift < 0.1, "{drift} m/s");
+}
+
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| a[i] * b[i]).sum()
 }

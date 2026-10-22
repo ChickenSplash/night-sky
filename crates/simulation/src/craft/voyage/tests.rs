@@ -929,3 +929,5 @@ fn a_whole_system_is_matched_on_arrival_wherever_the_ship_drops_out() {
         DVec3::from_array(voyage.craft.state().velocity) - DVec3::from_array(root.state.velocity);
     assert!(relative.length() < 1.0, "{relative}");
 }
+
+mod ships;

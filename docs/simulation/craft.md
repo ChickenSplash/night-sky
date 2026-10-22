@@ -249,6 +249,12 @@ in memory only: nothing is saved or shared yet.
 - **Stepping:** `craft::step` runs after the clock advances each frame and
   steps every craft until it reaches the clock, at most
   `MAX_STEPS_PER_FRAME` (1,000, about 50 s of simulation time) per frame.
+  Craft step in lockstep (`Fleet::catch_up`): each round steps those
+  furthest behind, every one given the others as they were as its step
+  began (`Voyage::traffic`, a `Sighting` per craft), so craft that target
+  each other fly the same paths whatever order they are stepped in. A craft
+  waiting for system data stops the whole fleet for the frame, so none
+  reads another that loading has left behind.
   A craft that cannot keep up **holds the clock** back to its own time, so
   bodies and craft never disagree; the time HUD then reads `· held by craft`.
   At the default 1 day/s, time runs at roughly 3,000 times real time with a
@@ -512,18 +518,28 @@ itself, so replays and servers run it from the same inputs.
   the ship crosses most of the destination's range in galactic space and
   enters on the slowdown, typically a few hundred thousand kilometres out.
   A 2 ly trip in 40 s peaks near 0.6 ly/s.
+- **Other craft:** a craft ID targets that craft, in any frame. The pilot
+  sees it as it was at the start of the step, converted into the ship's
+  frame, and aims along its whole motion, warp bubble included, correcting
+  every step; a target pulling away shows a growing ETA. The standoff is
+  1 km (`CRAFT_STANDOFF_M`), `--match` gives formation flying beside it,
+  matching its ordinary velocity only, never its bubble, and `--orbit` is
+  refused. A target that despawns releases the route as cancelling does,
+  with "`craft-2` is gone", warp left engaged.
+- **Targets in low orbit:** a body whose keep-clear sphere holds the target,
+  as a planet's does a ship 400 km up, shrinks to pass through it, so the
+  route skims round at the target's height and never lower.
 - **Refused when given, leaving the ship unchanged:** an unknown ID in the
-  ship's own system, the ship itself, no safe standoff, already within the
-  standoff, sublight thrust still on, or a trip time out of range.
-- **Readout:** `route` in the ship state holds the target and its system,
+  ship's own system, a craft ID with no craft, the ship itself, `--orbit` on
+  a craft, no safe standoff, already within the standoff, sublight thrust
+  still on, or a trip time out of range.
+- **Readout:** `route` in the ship state holds the target and its system
+  (empty for a craft),
   arrival mode, stage (`plotting`, `align`, `cruise`, `approach`, `arrived`,
   `released`), trip time, τ,
   standoff, distance, ETA, lateness and its cause, the detour beyond the
   straight line, the body being steered round, whether the top speed
   stretches it and how it ended. It is kept after the route ends.
-
-Ships as targets are a later
-checkpoint of [phase 9](../plans/flight-sim.md#9--plotted-warp-autopilot).
 
 Below the gravity cutoff, active warp retains its final gravity sample for
 the next step, including ordinary flight after dropout. Samples use the
@@ -620,7 +636,10 @@ inputs give the same path on any machine, wherever the camera is.
 at the command's application tick. It resolves the same stable planet, star or
 barycentre IDs used by inspection, selection and orbit references, against the
 craft's current system, or a system key as its star or outermost barycentre.
-Galactic-space and remote matching are refused. A plotted route's `--match`
+Galactic-space and remote matching are refused, except of another craft:
+`warp match <craft-id>` takes its ordinary velocity as it was at the start of
+the step, from any frame, for formation flying (`--orbit` refused). A
+plotted route's `--match`
 and `--orbit` arrivals use the same rules, except that a route to another
 system sees its target converted into the ship's frame, so it can match on
 arrival before the ship has entered the system. There is no separate target picker

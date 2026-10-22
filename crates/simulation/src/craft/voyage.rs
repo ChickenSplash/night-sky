@@ -3,7 +3,7 @@
 //! whatever a camera has loaded, the same inputs give the same path: when the
 //! data a decision needs is missing, the step waits for it rather than
 //! carrying on without it.
-use super::{Craft, Field, Frame, Gravity, Order};
+use super::{Craft, Field, Frame, Gravity, Order, Target};
 use crate::galaxy::PC_METRES;
 use crate::neighbourhood::{Candidate, Region};
 use crate::{LY_METRES, State};
@@ -271,6 +271,24 @@ pub struct Voyage {
     /// after the craft's `tick`: an order is applied as soon as the craft
     /// reaches its step.
     orders: BTreeMap<i64, Vec<Queued>>,
+    /// Every craft as it was at the start of this craft's step, given by its
+    /// host before each step and order, so craft that read each other give
+    /// the same paths whatever order they are stepped in. Not saved.
+    pub traffic: Vec<Sighting>,
+}
+
+/// A craft as others see it: its state at a step, in its own frame, with
+/// what converting it into another frame needs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sighting {
+    pub id: String,
+    pub tick: i64,
+    pub state: State,
+    /// Its warp bubble's velocity, in its frame's axes.
+    pub warp_velocity: [f64; 3],
+    pub frame: Frame,
+    pub origin_pc: [f64; 3],
+    pub basis: DQuat,
 }
 
 /// A kept order, and for the end of a timed order the step it began at.
@@ -320,7 +338,49 @@ impl Voyage {
             field,
             origin_pc,
             orders: BTreeMap::new(),
+            traffic: Vec::new(),
         }
+    }
+
+    /// This craft as others see it now.
+    pub fn sighting(&self) -> Sighting {
+        let warp = &self.craft.warp;
+        let nose = DQuat::from_array(self.craft.orientation) * -DVec3::Z;
+        Sighting {
+            id: self.craft.id.clone(),
+            tick: self.craft.tick,
+            state: self.craft.state(),
+            warp_velocity: if warp.engaged {
+                (nose * warp.actual_ms).to_array()
+            } else {
+                [0.0; 3]
+            },
+            frame: self.craft.frame.clone(),
+            origin_pc: self.origin_pc,
+            basis: self.basis(),
+        }
+    }
+
+    /// The other craft in `traffic` as route targets in this frame, carried
+    /// on at their speed to this craft's step should a sighting be from
+    /// another.
+    pub fn ships(&self) -> Vec<Target> {
+        self.traffic
+            .iter()
+            .filter(|seen| seen.id != self.craft.id)
+            .map(|seen| {
+                let rebase = self.rebase_from(&seen.frame, seen.origin_pc, seen.basis);
+                let mut state = rebase.state(seen.state);
+                let warp = rebase.direction(seen.warp_velocity);
+                let dt = self.craft.seconds() - super::tick_seconds(seen.tick);
+                if dt != 0.0 {
+                    state.position = std::array::from_fn(|i| {
+                        state.position[i] + (state.velocity[i] + warp[i]) * dt
+                    });
+                }
+                Target::craft(&seen.id, state, warp)
+            })
+            .collect()
     }
 
     /// The craft's system, for checking orders, when it is in one.
@@ -381,8 +441,9 @@ impl Voyage {
             ends_from,
         } = input;
         if tick == self.craft.tick {
+            let ships = self.ships();
             let in_system = !self.in_galaxy();
-            order.apply(&mut self.craft, in_system.then_some(&self.field))?;
+            order.apply_among(&mut self.craft, in_system.then_some(&self.field), &ships)?;
             if ends_from.is_none() {
                 self.replace_ends(tick, &order);
             }
@@ -425,7 +486,7 @@ impl Voyage {
 
     /// Whether an order would be accepted now, without applying it.
     pub fn check(&self, order: &Order) -> Result<(), String> {
-        order.apply(&mut self.craft.clone(), self.system_field())
+        order.apply_among(&mut self.craft.clone(), self.system_field(), &self.ships())
     }
 
     /// Check submission without changing the voyage. Future orders are
@@ -473,7 +534,7 @@ impl Voyage {
     }
 
     /// Apply the orders kept for the step the craft has reached.
-    fn apply_due(&mut self) -> Vec<Refused> {
+    fn apply_due(&mut self, ships: &[Target]) -> Vec<Refused> {
         let tick = self.craft.tick;
         let Some(mut orders) = self.orders.remove(&tick) else {
             return Vec::new();
@@ -483,7 +544,7 @@ impl Voyage {
         let mut refused = Vec::new();
         let in_system = !self.in_galaxy();
         for Queued { order, ends_from } in orders {
-            match order.apply(&mut self.craft, in_system.then_some(&self.field)) {
+            match order.apply_among(&mut self.craft, in_system.then_some(&self.field), ships) {
                 Ok(()) if ends_from.is_none() => self.replace_ends(tick, &order),
                 Ok(()) => {}
                 Err(reason) => {
@@ -574,19 +635,23 @@ impl Voyage {
     }
 
     /// From another system's frame into this one.
-    fn rebase_from(&self, arrival: &Arrival) -> Rebase {
+    fn rebase_from_system(&self, arrival: &Arrival) -> Rebase {
         let (system, page) = (arrival.field.system(), arrival.field.page());
         let frame = Frame::System {
             star: page_star_id(system, page),
         };
+        self.rebase_from(&frame, arrival.origin_pc, page_basis(system, page))
+    }
+
+    /// From another frame into this one. The same frame gives no change.
+    fn rebase_from(&self, frame: &Frame, origin_pc: [f64; 3], basis: DQuat) -> Rebase {
         let inverse = self.basis().inverse();
         Rebase {
-            rotation: inverse * page_basis(system, page),
+            rotation: inverse * basis,
             translation: inverse
-                * ((DVec3::from_array(arrival.origin_pc) - DVec3::from_array(self.origin_pc))
-                    * PC_METRES),
-            velocity: inverse * (frame_velocity(&frame, arrival.origin_pc) - self.frame_velocity()),
-            frame_changed: true,
+                * ((DVec3::from_array(origin_pc) - DVec3::from_array(self.origin_pc)) * PC_METRES),
+            velocity: inverse * (frame_velocity(frame, origin_pc) - self.frame_velocity()),
+            frame_changed: *frame != self.craft.frame,
         }
     }
 
@@ -662,8 +727,10 @@ impl Voyage {
 
     /// Moves the craft by one fixed step in its current frame, then applies
     /// the orders kept for the step it reaches. A route to another system
-    /// sees `destination`'s target and bodies from this frame.
+    /// sees `destination`'s target and bodies from this frame, and one to a
+    /// craft sees it in `traffic`.
     pub fn advance(&mut self, destination: Option<&Arrival>) -> Vec<Refused> {
+        let ships = self.ships();
         let remote = destination
             .filter(|arrival| {
                 self.in_galaxy()
@@ -672,20 +739,22 @@ impl Voyage {
             })
             .map(|arrival| Remote {
                 field: &arrival.field,
-                rebase: self.rebase_from(arrival),
+                rebase: self.rebase_from_system(arrival),
             });
         if self.in_galaxy() {
             self.craft.step(&Bound {
                 local: &Empty,
                 remote,
+                ships: &ships,
             });
         } else {
             self.craft.step(&Bound {
                 local: &self.field,
                 remote,
+                ships: &ships,
             });
         }
-        self.apply_due()
+        self.apply_due(&ships)
     }
 
     /// Re-express the craft in another frame. Position, attitude and
@@ -751,11 +820,12 @@ pub fn frame_velocity(frame: &Frame, origin_pc: [f64; 3]) -> DVec3 {
 }
 
 /// The gravity a craft steps in, with the target and bodies of another
-/// system its route flies to, seen from the craft's frame. They steer the
-/// route only: gravity is the local system's alone.
+/// system its route flies to and the other craft, seen from the craft's
+/// frame. They steer the route only: gravity is the local system's alone.
 struct Bound<'a, G> {
     local: &'a G,
     remote: Option<Remote<'a>>,
+    ships: &'a [Target],
 }
 
 struct Remote<'a> {
@@ -786,7 +856,10 @@ impl<G: Gravity> Gravity for Bound<'_, G> {
         self.local.closest(position, seconds)
     }
 
-    fn target(&self, id: &str, seconds: f64) -> Option<super::Target> {
+    fn target(&self, id: &str, seconds: f64) -> Option<Target> {
+        if let Some(ship) = self.ships.iter().find(|ship| ship.id == id) {
+            return Some(ship.clone());
+        }
         self.local.target(id, seconds).or_else(|| {
             let remote = self.remote.as_ref()?;
             let mut target = remote.field.target(id, seconds)?;

@@ -840,10 +840,28 @@ Checkpoints:
      leaving from behind a planet, a whole system matched on arrival, an ID
      naming no system, a slow loader giving the identical path, and a trip
      through the app's command path.
-4. **Ships as targets:** the craft source, start-of-step reads, formation
+4. ✅ **Ships as targets:** the craft source, start-of-step reads, formation
    matching, `warp match <ship-id>` and a despawned target. Tests with a
    coasting, a thrusting and a warping target, and two ships chasing each
    other.
+   - Done 2026-10-22. Each voyage is given every craft as a `Sighting` (its
+     state, warp bubble and frame) before each step and order, converted
+     into its own frame. The client now steps its fleet in lockstep, the
+     craft furthest behind first, and a craft waiting for data stops them
+     all, so no read depends on update order or loading speed.
+   - The pilot tracks a target's whole motion, bubble included, but a
+     match takes its ordinary velocity: a warping ship is left behind at
+     rest with where it was.
+   - Found while testing: a ship in low orbit sits inside its planet's
+     keep-clear sphere, so the route circled the planet for ever. A sphere
+     that holds the target now shrinks to pass through it, so the route
+     skims round at the target's height.
+   - A warping target (1,000 km/s) pins τ at its minimum, arrives about
+     5 s late and drops out a step early, at 1.3 km.
+   - Tests: coasting, thrusting and warping targets, one in galactic space
+     from a system, two ships chasing each other in both update orders, a
+     despawned target, refusals and manual formation matching, and a chase
+     through the app's command path to a ship in low orbit.
 5. **Live CLI core loop:** leave orbit, fly to another system, drop into a
    rough orbit, fly to a second ship and match it, wrap round a planet in
    the way, then cancel and take over mid-route without discontinuities.

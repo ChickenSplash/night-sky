@@ -534,7 +534,8 @@ fn fly_watched(craft: &mut Craft, field: &Field) -> Flight {
         flight.around.extend(route.around.clone());
         craft.step(field);
         let target = &craft.route.as_ref().unwrap().target;
-        for obstacle in others(field, target, craft.seconds()) {
+        let obstacles = field.obstacles(craft.seconds());
+        for obstacle in obstacles.into_iter().filter(|o| o.id != *target) {
             let share = obstacle
                 .centre
                 .distance(DVec3::from_array(craft.state().position))

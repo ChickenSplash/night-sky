@@ -505,14 +505,14 @@
       ]
     },
     {
-      "about": "Resolved in the craft's current system at the application tick. This never changes heading or position.",
+      "about": "Resolved in the craft's current system at the application tick, or as the other ship was at the start of the step. This never changes heading or position.",
       "at": [
         "command"
       ],
       "fields": [
         {
           "cli": "positional",
-          "help": "Existing planet, star or barycentre ID.",
+          "help": "Existing planet, star or barycentre ID, or another craft's ID.",
           "key": [
             "body"
           ],
@@ -533,7 +533,7 @@
         }
       ],
       "group": "warp",
-      "help": "Drop out matching a body in the ship's current system.",
+      "help": "Drop out matching a body in the ship's current system, or another ship anywhere.",
       "off": null,
       "order": {
         "action": "warp",
@@ -699,7 +699,7 @@
       "fields": [
         {
           "cli": "positional",
-          "help": "Planet, star or barycentre ID, or a system's key.",
+          "help": "Planet, star or barycentre ID, a system's key, or another craft's ID.",
           "key": [
             "target"
           ],
@@ -745,7 +745,7 @@
         }
       ],
       "group": "warp",
-      "help": "Fly to a body, here or in another system, and drop out near it.",
+      "help": "Fly to a body, here or in another system, or to another ship, and drop out near it.",
       "off": null,
       "order": {
         "action": "warp",
@@ -1542,7 +1542,7 @@
       },
       {
         "group": "route",
-        "help": "The page star of the target's system.",
+        "help": "The page star of the target's system; empty for another craft.",
         "key": [
           "route",
           "system"

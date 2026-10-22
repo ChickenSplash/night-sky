@@ -1,7 +1,7 @@
 //! Orders a pilot, autopilot or remote player gives a craft. Each patches only
 //! the input it names, leaving other drives alone. Checks and application
 //! share this one path, so any client or server refuses the same orders.
-use super::route::{ArrivalMode, MAX_TRIP_S, MIN_TRIP_S, TAKEOVER};
+use super::route::{ArrivalMode, MAX_TRIP_S, MIN_TRIP_S, TAKEOVER, Target};
 use super::warp::{
     GravityPolicy, MAX_SPEED, MAX_TURN_RATE_DPS, MIN_SPEED, MIN_TURN_RATE_DPS, SPEED_FACTOR,
 };
@@ -106,12 +106,14 @@ pub enum WarpOrder {
     Engage,
     /// Drop out keeping ordinary velocity.
     Disengage,
-    /// Drop out matching a body in the ship's current system.
+    /// Drop out matching a body in the ship's current system, or another
+    /// ship anywhere.
     ///
-    /// Resolved in the craft's current system at the application tick. This
-    /// never changes heading or position.
+    /// Resolved in the craft's current system at the application tick, or
+    /// as the other ship was at the start of the step. This never changes
+    /// heading or position.
     Match {
-        /// Existing planet, star or barycentre ID.
+        /// Existing planet, star or barycentre ID, or another craft's ID.
         body: String,
         /// Add tangential speed for a rough orbit.
         #[serde(default)]
@@ -136,7 +138,8 @@ pub enum WarpOrder {
     Down,
     /// Developer gravity policy; change only while disengaged.
     Gravity { policy: GravityPolicy },
-    /// Fly to a body, here or in another system, and drop out near it.
+    /// Fly to a body, here or in another system, or to another ship, and
+    /// drop out near it.
     ///
     /// Engages warp, turns to the target, curves round bodies in the way,
     /// then slows all the way in, dropping out at a standoff of a few times
@@ -144,7 +147,8 @@ pub enum WarpOrder {
     /// slowdown. Moving targets are tracked every step. Turning, warp speed,
     /// disengage and match orders take over; warp is left as it was.
     To {
-        /// Planet, star or barycentre ID, or a system's key.
+        /// Planet, star or barycentre ID, a system's key, or another
+        /// craft's ID.
         target: String,
         /// Drop out at the target's velocity.
         #[serde(default, rename = "match")]
@@ -301,6 +305,16 @@ impl Order {
     /// step (`Craft::tick`), so a server can key orders by step number.
     /// `field` is the craft's system, when it is in one, to check bodies.
     pub fn apply(&self, craft: &mut Craft, field: Option<&Field>) -> Result<(), String> {
+        self.apply_among(craft, field, &[])
+    }
+
+    /// As `apply`, with the other craft as targets, in the craft's frame.
+    pub fn apply_among(
+        &self,
+        craft: &mut Craft,
+        field: Option<&Field>,
+        ships: &[Target],
+    ) -> Result<(), String> {
         self.validate()?;
         let mut controls = craft.input.controls;
         match self {
@@ -312,7 +326,7 @@ impl Order {
                         craft.disengage_warp("Manual disengagement");
                     }
                     WarpOrder::Match { body, orbit } => {
-                        craft.matched_dropout(field, body, *orbit)?;
+                        craft.matched_dropout_among(field, ships, body, *orbit)?;
                         craft.end_route(TAKEOVER);
                     }
                     WarpOrder::Set { speed_ms } => {
@@ -345,7 +359,7 @@ impl Order {
                             (true, false) => ArrivalMode::Match,
                             (false, false) => ArrivalMode::Keep,
                         };
-                        craft.fly_to(field, target, arrival, *time)?;
+                        craft.fly_to(field, ships, target, arrival, *time)?;
                     }
                     WarpOrder::Cancel => {
                         if !craft.end_route("Cancelled") {

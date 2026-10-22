@@ -23,6 +23,8 @@ pub const SHORT_TRIP_S: f64 = 20.0;
 pub const LONG_TRIP_S: f64 = 60.0;
 /// Standoff from a target's centre, in multiples of its size.
 pub const STANDOFF_SIZES: f64 = 4.0;
+/// Standoff from another craft: formation distance, well clear of its hull.
+pub const CRAFT_STANDOFF_M: f64 = 1_000.0;
 /// Keep-clear distance from a body's centre, in multiples of its radius.
 pub const KEEP_CLEAR: f64 = 1.5;
 /// Share of a target's orbit reach the standoff stays within, so a rough
@@ -86,7 +88,7 @@ pub struct Route {
     /// The target's ID: a system's key resolves to its star or outermost
     /// barycentre.
     pub target: String,
-    /// The page star of the target's system.
+    /// The page star of the target's system; empty for another craft.
     #[serde(default)]
     pub system: String,
     pub arrival: ArrivalMode,
@@ -159,11 +161,29 @@ pub struct Target {
     pub gm: f64,
     /// Surface radius; zero for a barycentre.
     pub radius_m: f64,
-    /// The page star of its system.
+    /// The page star of its system; empty for a craft.
     pub system: String,
+    /// What a warp bubble adds to its motion: tracked, never matched.
+    pub warp_velocity: [f64; 3],
 }
 
 impl Target {
+    /// Another craft, as it was at the start of the step: flown to within
+    /// formation distance, never orbited.
+    pub fn craft(id: &str, state: State, warp_velocity: [f64; 3]) -> Self {
+        Self {
+            id: id.into(),
+            state,
+            size_m: SHIP_LENGTH_M,
+            clear_m: CRAFT_STANDOFF_M,
+            reach_m: None,
+            gm: 0.0,
+            radius_m: SHIP_LENGTH_M / 2.0,
+            system: String::new(),
+            warp_velocity,
+        }
+    }
+
     /// A comfortable multiple of its size, never closer than its keep-clear
     /// distance and never further than its orbit reach.
     pub fn standoff(&self) -> Result<f64, String> {
@@ -220,6 +240,7 @@ impl Field {
             gm: reference.gm,
             radius_m: reference.radius_m,
             system: voyage::page_star_id(&self.system, self.page),
+            warp_velocity: [0.0; 3],
         })
     }
 
@@ -309,9 +330,16 @@ fn slowed_by(align_s: f64, bends: &[Bend], turn_rate: f64, capped: bool) -> Opti
 }
 
 /// Every obstacle but the target, which the route ends outside of anyway.
-fn others(field: &impl Gravity, target: &str, seconds: f64) -> Vec<Obstacle> {
+/// One whose keep-clear sphere holds the target, as a planet's does a ship
+/// in low orbit, shrinks to pass through it, so the route skims round at the
+/// target's own height and never lower.
+fn others(field: &impl Gravity, target: &Target, seconds: f64) -> Vec<Obstacle> {
+    let goal = DVec3::from_array(target.state.position);
     let mut obstacles = field.obstacles(seconds);
-    obstacles.retain(|obstacle| obstacle.id != target);
+    obstacles.retain(|obstacle| obstacle.id != target.id);
+    for obstacle in &mut obstacles {
+        obstacle.clear_m = obstacle.clear_m.min(obstacle.centre.distance(goal));
+    }
     obstacles
 }
 
@@ -336,20 +364,32 @@ pub fn align_seconds(angle: f64, turn_rate: f64) -> f64 {
 }
 
 impl Craft {
-    /// Plot a route to `id` and engage warp. A target in the ship's system
-    /// is plotted at once, with every check first, so a refused order leaves
-    /// the ship unchanged. One in another system, or from galactic space,
-    /// waits in `Stage::Plotting` for its system's data and is plotted on the
-    /// first step that has it; a refusal then ends the route with its reason.
+    /// Plot a route to `id` and engage warp. A target in the ship's system,
+    /// or one of the other craft in `ships`, is plotted at once, with every
+    /// check first, so a refused order leaves the ship unchanged. One in
+    /// another system, or from galactic space, waits in `Stage::Plotting` for
+    /// its system's data and is plotted on the first step that has it; a
+    /// refusal then ends the route with its reason.
     pub fn fly_to(
         &mut self,
         field: Option<&Field>,
+        ships: &[Target],
         id: &str,
         arrival: ArrivalMode,
         requested_s: Option<f64>,
     ) -> Result<(), String> {
         if id == self.id {
             return Err("A ship cannot fly to itself".into());
+        }
+        if let Some(ship) = ships.iter().find(|ship| ship.id == id) {
+            let ship = ship.clone();
+            return match field {
+                Some(field) => self.plot(field, ship, arrival, requested_s),
+                None => self.plot(&voyage::Empty, ship, arrival, requested_s),
+            };
+        }
+        if is_craft_id(id) {
+            return Err(format!("No craft `{id}`"));
         }
         let system = crate::multiple::system_key(id);
         if let Some(field) = field {
@@ -412,7 +452,7 @@ impl Craft {
             ));
         }
         // Timed along the path round bodies in the way, with its bends.
-        let obstacles = others(field, &target.id, seconds);
+        let obstacles = others(field, &target, seconds);
         let aim = wrap::aim(&obstacles, from, goal, standoff);
         let (path, bends) = wrap::path(&obstacles, from, goal, standoff);
         let turn_rate = self.turn_rate();
@@ -513,7 +553,11 @@ impl Craft {
         }
         let seconds = self.seconds();
         let Some(target) = field.target(&route.target, seconds) else {
-            let reason = format!("Lost track of `{}`", route.target);
+            let reason = if is_craft_id(&route.target) {
+                format!("`{}` is gone", route.target)
+            } else {
+                format!("Lost track of `{}`", route.target)
+            };
             self.end_route(&reason);
             return;
         };
@@ -526,7 +570,7 @@ impl Craft {
             self.arrive(&target, distance);
             return;
         }
-        let obstacles = others(field, &target.id, seconds);
+        let obstacles = others(field, &target, seconds);
         let aim = wrap::aim(&obstacles, from, goal, route.standoff_m);
         let nose = DQuat::from_array(self.orientation) * -DVec3::Z;
         let turn_rate = self.turn_rate();
@@ -564,7 +608,9 @@ impl Craft {
         // in the way, and cancel the drift of the ship's ordinary velocity
         // against the target's.
         let sight = offset / distance;
-        let drift = DVec3::from_array(target.state.velocity) - DVec3::from_array(state.velocity);
+        let drift = DVec3::from_array(target.state.velocity)
+            + DVec3::from_array(target.warp_velocity)
+            - DVec3::from_array(state.velocity);
         let remaining = distance + route.detour_m;
         let mut speed = profile_speed(remaining, route.tau_s);
         // Flying off the line turns the line of sight, faster than pointing
