@@ -902,9 +902,78 @@ to 1e-3 in the phase 9 live test), so "go to planet" needs no player input.
 
 - In-app piloting: a piloting state where the keys fly the ship instead of
   the camera, with a key layout for all six axes and the throttle.
+  - A key (Tab) toggles piloting while a ship is selected. The camera
+    follows the ship as today's follow camera does, by position only: it
+    does not turn with the ship. Tab or Esc leaves piloting.
+  - Leaving changes nothing on the ship: warp continues and the throttle
+    keeps burning. Fine thrusters stop, as their keys are no longer read.
+  - Piloting holds the clock at 1× real time, so the controls feel direct.
+    Leaving keeps 1×; the previous rate is not restored.
+  - Mouse steering is a virtual joystick: while right mouse is held, the
+    pointer's offset from where it was pressed gives pitch (up and down)
+    and yaw (left and right) from -1 to 1, reaching full deflection at a
+    ring about 150 points out, past a small dead zone. An on-screen reticle
+    shows the press point, ring and stick; the pointer is hidden while
+    steering, so the screen edge never stops it. Holding still keeps the
+    value; releasing returns it to zero. Arrow keys give full deflection.
+    Mouse up is nose up; an invert option can come with the bindings.
+  - The value is the existing `rotate` input, read as it is today:
+    - In warp, a fraction of the bubble's turn rate (default 30 °/s): a
+      steady turn while held, stopping within about 0.3 s of release.
+    - In sublight, a fraction of the turning thrusters' power: held, the
+      spin keeps growing (about 5.7 °/s per second at full); released, it
+      persists until countered or stopped with T.
 - Manual warp in the app: mouse steering while held (a flight stick later),
   warp speed up and down on the logarithmic scale, and looking sideways
   without steering.
+- **One layout, read two ways.** Most keys mean the same in both modes and
+  keep their free-camera meanings; Shift/Ctrl is the one "how fast" control.
+  Thrust and warp stay mutually exclusive (phase 4), so thruster keys do
+  nothing in warp.
+
+  | Control | Thrusters (sublight) | Warp engaged |
+  | --- | --- | --- |
+  | Hold right mouse, or arrow keys | Pitch and yaw | Steer the bubble's path |
+  | Q / E | Roll | Roll, direction of travel unchanged |
+  | W / S | Fine thrusters forward and back | Nothing |
+  | A / D, R / F | Fine thrusters left, right, up and down | Nothing |
+  | Shift / Ctrl (held) | Main drive throttle up and down; below zero is reverse | Warp speed up and down, sweeping the logarithmic scale |
+  | Z / X | Full throttle / cut throttle | X: slowest warp speed; Z: nothing |
+  | G | Cut throttle and fine thrust, then engage warp | Disengage |
+  | T | Stop rotation | Stop rotation |
+  | Left drag | Look around the ship without steering | Same |
+  | Mouse wheel | Camera follow distance | Same |
+  | Tab or Esc | Leave piloting | Leave piloting (warp continues) |
+
+  - Fine thrusters fire only while held. The throttle and warp speed are
+    levers: they stay where they are left, so releasing warp speed holds
+    the cruise.
+  - Warp speed sweeps at a steady rate on the logarithmic scale, starting at
+    2 decades per second (about 10 s from 1 m/s to the top speed), so every
+    factor of ten takes as long and a tap nudges it. It is a held,
+    fixed-step input like the throttle (a warp speed rate from -1 to 1), not
+    a stream of set commands; `warp up`, `down` and `set` stay for the CLI
+    and autopilot.
+  - Warp engages at the last warp speed used, shown in the readout before G.
+    G cutting the throttle is shown there too, so it is never silent.
+  - Assists are deferred, all of them, until the user asks for them. That
+    includes a sublight rate hold (the stick setting a target spin rate,
+    with releasing braking to zero), which would need a new fixed-step
+    order in `crates/simulation` like stop rotation.
+  - Point orders (prograde and so on), circularise and match target belong
+    to the Assisted layer, on number keys or a small menu, not this layout.
+- **Rebindable later.** A controls menu where the player can rebind
+  everything, the free camera included, is out of scope, but the input code
+  must make it easy:
+  - Input is read through named actions (`PitchUp`, `ThrottleUp`,
+    `EngageWarp`, `Look`...) and one binding table mapping keys, mouse
+    buttons and axes to them. Systems never test a key code directly.
+  - The free camera's keys move onto the same table in this phase, so there
+    is one source of truth, and the controls help reads from it.
+  - Axis actions take a value from -1 to 1, so a flight stick or gamepad
+    axis can later bind to the same action as a pair of keys.
+  - Bindings are plain serializable data with the current layout as the
+    default, ready to be saved and edited by a future menu.
 - Decide whether the deferred assists are needed, once mouse steering can
   be felt: turn limit (phase 6), collision (7), approach (8) and orbit (10).
 - The warp assist toggles, the selected target, requested and actual
@@ -913,6 +982,21 @@ to 1e-3 in the phase 9 live test), so "go to planet" needs no player input.
 - **Assisted:** the pointing assists from phase 2, plus circularise, hold
   orbit and match target.
 - **Manual:** assists off.
+
+Checkpoints, each checked live by the user and committed:
+
+1. **Actions and piloting:** the binding table with the free camera moved
+   onto it, the piloting state (Tab, Esc, 1× clock), keyboard thrusters,
+   throttle and rotation, and a minimal readout.
+2. **Manual warp:** G, the warp speed rate input, virtual-joystick steering
+   with its reticle, arrow-key steering and free look.
+3. **The pilot readout:** assists, target, requested and actual speed and
+   the reason for any limit. Its look is decided at this checkpoint.
+4. **The layers:** how Autopilot, Assisted and Manual are chosen (decided
+   at this checkpoint), and an in-app target pick for the autopilot.
+   Assisted, including the sublight rate hold, waits for the user's go.
+5. **Fly it,** then decide on the deferred assists; docs and the phase
+   marked done.
 
 ### 12 · Walking inside the ship
 
