@@ -1,26 +1,33 @@
-//! The `controls` tab: camera, selection, time and console shortcuts.
+//! The `controls` tab: camera, piloting, selection, time and console
+//! shortcuts. Bound actions are labelled from the binding table.
+use crate::input::{Action::*, Bindings};
 use crate::ui::terminal;
 use bevy_egui::egui;
 
-pub fn controls(ui: &mut egui::Ui) {
+pub fn controls(ui: &mut egui::Ui, bindings: &Bindings) {
+    let keys = |actions: &[crate::input::Action]| bindings.label(actions);
+    let with = |a, b| format!("{} + {}", keys(&[a]), keys(&[b]));
     terminal::heading(ui, "controls");
     terminal::facts(
         ui,
         "debug-controls",
         &[
             ("Click", "Select a body, again to visit/follow".into()),
-            ("Enter", "Visit the selected star".into()),
-            ("Left drag", "Look around".into()),
-            ("Right drag", "Orbit".into()),
-            ("Shift + left drag", "Field of view".into()),
+            (&keys(&[Visit]), "Visit the selected star".into()),
+            (&keys(&[Look]), "Drag to look around".into()),
+            (&keys(&[Orbit]), "Drag to orbit".into()),
+            (&with(Alternate, Look), "Drag for field of view".into()),
             ("Scroll", "Adjust movement speed".into()),
-            ("Shift + scroll", "Zoom".into()),
-            ("W A S D", "Move".into()),
-            ("Shift", "Move faster".into()),
-            ("Q / E", "Roll left / right".into()),
-            ("R / F", "Up / down".into()),
-            ("Space", "Pause / resume".into()),
-            ("Esc", "Leave text input, reframe, clear or move up".into()),
+            (&format!("{} + scroll", keys(&[Alternate])), "Zoom".into()),
+            (&keys(&[Forward, Left, Backward, Right]), "Move".into()),
+            (&keys(&[RollLeft, RollRight]), "Roll left / right".into()),
+            (&keys(&[Up, Down]), "Up / down".into()),
+            (&keys(&[Pause]), "Pause / resume".into()),
+            (
+                &keys(&[Cancel]),
+                "Leave text input, reframe, clear or move up".into(),
+            ),
+            (&keys(&[Pilot]), "Pilot the selected ship".into()),
             ("F3 / ` / cog", "Toggle debug console".into()),
             ("Drag set speed", "Adjust movement speed".into()),
             ("Click time rate", "Pause / resume".into()),
@@ -34,6 +41,41 @@ pub fn controls(ui: &mut egui::Ui) {
                 "Drag Magnitude limit",
                 "Adjust visible stars on release".into(),
             ),
+        ],
+    );
+    terminal::heading(ui, "piloting");
+    terminal::facts(
+        ui,
+        "debug-piloting",
+        &[
+            (
+                &format!("{} or {}", keys(&[Pilot]), keys(&[Cancel])),
+                "Stop piloting; the ship keeps its throttle".into(),
+            ),
+            (
+                &keys(&[Forward, Left, Backward, Right]),
+                "Fine thrusters".into(),
+            ),
+            (&keys(&[Up, Down]), "Fine thrusters up / down".into()),
+            (
+                &keys(&[ThrottleUp, ThrottleDown]),
+                "Hold: throttle up / down, below zero is reverse".into(),
+            ),
+            (
+                &keys(&[FullThrottle, CutThrottle]),
+                "Full / cut throttle".into(),
+            ),
+            (
+                &keys(&[PitchUp, PitchDown, YawLeft, YawRight]),
+                "Pitch and yaw".into(),
+            ),
+            (&keys(&[RollLeft, RollRight]), "Roll left / right".into()),
+            (&keys(&[StopRotation]), "Stop rotation".into()),
+            (
+                &format!("{} or {}", keys(&[Look]), keys(&[Orbit])),
+                "Drag to look round the ship".into(),
+            ),
+            ("Scroll", "Camera distance".into()),
         ],
     );
 }

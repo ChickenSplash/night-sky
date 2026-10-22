@@ -24,6 +24,14 @@ use hud::{exposure_controls, magnitude_control, speed_readout, time_controls};
 const ICON_SIZE: f32 = 20.0;
 
 type Overlay<'w> = (Res<'w, Markers>, Res<'w, CameraVelocity>);
+type CameraState<'w> = (
+    Res<'w, CameraRig>,
+    Res<'w, CameraPose>,
+    Res<'w, crate::stars::stream::Starfield>,
+    Res<'w, crate::craft::Fleet>,
+    Res<'w, crate::pilot::Pilot>,
+    Res<'w, crate::input::Bindings>,
+);
 
 /// Interface state that is not part of the scene.
 #[derive(Default)]
@@ -51,17 +59,12 @@ pub fn draw_ui(
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
     overlay: Overlay,
-    camera_state: (
-        Res<CameraRig>,
-        Res<CameraPose>,
-        Res<crate::stars::stream::Starfield>,
-        Res<crate::craft::Fleet>,
-    ),
+    camera_state: CameraState,
     mut hud: Local<Hud>,
 ) {
     let (mut contexts, mut writer, mut tools, mut browser, searches) = interaction;
     let (markers, velocity) = overlay;
-    let (rig, pose, starfield, fleet) = camera_state;
+    let (rig, pose, starfield, fleet, pilot, bindings) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -127,6 +130,9 @@ pub fn draw_ui(
         &mut hud.time_drag_start,
         &mut out,
     );
+    if let Some(live) = pilot.ship.as_deref().and_then(|id| fleet.get(id)) {
+        hud::pilot_readout(ctx, rect, &crate::pilot::readout(live, &bindings));
+    }
     let moving_with = match &nav.anchor {
         // The location's deepest crumb, named as the breadcrumb names it.
         Some(crate::Anchor::Body(_)) => crate::ui::breadcrumb::trail(&nav, &universe.0)

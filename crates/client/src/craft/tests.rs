@@ -1142,7 +1142,9 @@ fn orders_make_a_forecast_obsolete_and_burns_still_finish_theirs() {
     // The old one stays on show, marked as no longer current.
     assert!(live.forecast.updating() && !live.forecast.current(&live.craft));
     assert_eq!(live.forecast.shown.as_ref(), Some(&coasting));
-    // A burn keeps refreshing, yet every refresh finishes.
+    // A burn keeps refreshing, yet every refresh finishes, and the
+    // inspector says so steadily rather than as each one comes and goes.
+    let galaxy = space_simulation::demo_galaxy();
     let mut finished = 0;
     for _ in 0..60 {
         let live = &mut fleet.craft[0];
@@ -1157,6 +1159,12 @@ fn orders_make_a_forecast_obsolete_and_burns_still_finish_theirs() {
             .as_ref()
             .map(|p| p.start_seconds);
         finished += usize::from(before != after);
+        let live = &fleet.craft[0];
+        if finished > 0 {
+            let (_, rows) = facts(live, &galaxy, live.craft.seconds());
+            let prediction = rows.iter().find(|(l, _)| l == "Prediction").unwrap();
+            assert!(prediction.1.ends_with(" · updating"), "{}", prediction.1);
+        }
     }
     assert!(finished >= 3, "{finished}");
     let live = &fleet.craft[0];

@@ -15,7 +15,7 @@ bevy = { version = "=0.18.1", default-features = false, features = [
     "bevy_core_pipeline", "bevy_render", "bevy_camera", "bevy_image",
     "bevy_mesh", "bevy_shader", "bevy_window", "bevy_winit", "bevy_log",
     "bevy_gizmos", "bevy_gizmos_render", "bevy_pbr", "bevy_post_process", "default_font",
-    "tonemapping_luts", "png", "zstd_rust"
+    "tonemapping_luts", "png", "zstd_rust", "serialize"
 ] }
 big_space = "=0.12.0"
 bytemuck = { version = "1.25", features = ["derive"] }

@@ -154,6 +154,27 @@ pub(super) fn time_controls(
         });
 }
 
+/// The piloted ship's lines, centred above the time controls' two lines.
+pub(super) fn pilot_readout(ctx: &egui::Context, rect: egui::Rect, lines: &[String]) {
+    let height = ctx.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(SIZE)));
+    let above = HUD_PADDING + 2.0 * (height + HUD_LINE_GAP) + 2.0 * HUD_LINE_GAP;
+    egui::Area::new(egui::Id::new("pilot-readout"))
+        .order(egui::Order::Background)
+        .movable(false)
+        .interactable(false)
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(rect.center_bottom() - egui::vec2(0.0, above))
+        .show(ctx, |ui| {
+            ui.set_width(420.0);
+            ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
+            ui.vertical_centered(|ui| {
+                for line in lines {
+                    halo_text(ui, line, egui::Sense::hover(), |_| CURRENT);
+                }
+            });
+        });
+}
+
 fn elapsed_text(days: f64) -> String {
     if days >= 365.25 {
         format!("T + {:.2} yr", days / 365.25)

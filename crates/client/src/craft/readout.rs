@@ -530,7 +530,7 @@ fn prediction_facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> Vec<(String, 
     };
     let state = if !forecast.current(&live.craft) {
         " · out of date"
-    } else if forecast.updating() {
+    } else if forecast.refreshing(&live.craft) {
         " · updating"
     } else {
         ""

@@ -13,7 +13,6 @@ breadcrumb inspects it without changing selection or moving the camera.
 | Orbit the camera target | Right mouse drag |
 | Roll | Q / E |
 | Move | W/A/S/D, R/F for up/down |
-| Move faster | Left Shift |
 | Zoom | Shift + mouse wheel |
 | Adjust movement speed | Mouse wheel or drag bottom-left set speed |
 | Adjust field of view | Debug console's `render` tab or Shift + left drag |
@@ -27,6 +26,33 @@ Simulation time is integrated continuously; rate changes never jump orbit phase.
 Exposure and compression apply immediately, with defaults of 0 stops and 50%.
 Compression balances individual bodies, not the galaxy. Neither is persisted.
 See [realistic rendering](rendering.md) for the physical model.
+
+Keys and mouse buttons are read as named actions through one binding table
+(`input.rs`), shared by the free camera and piloting, so a later controls menu
+can rebind both. The debug console's `controls` tab labels keys from it.
+
+## Piloting
+
+With a ship selected, Tab pilots it: the camera follows it by position and the
+keys fly the ship. Piloting holds the clock at 1×, and leaving keeps 1×.
+
+| Action | Control |
+| --- | --- |
+| Stop piloting | Tab or Esc; throttle, warp and spin carry on |
+| Fine thrusters (while held) | W/A/S/D, R/F for up/down |
+| Throttle lever up / down | Hold Shift / Ctrl; below zero is reverse |
+| Full / cut throttle | Z / X |
+| Pitch and yaw | Arrow keys |
+| Roll | Q / E |
+| Stop rotation | T |
+| Look round the ship | Left or right mouse drag |
+| Camera distance | Mouse wheel |
+
+Keys become ordinary ship orders only when they change, at the ship's next
+step, so piloting uses the same order path as the CLI. Turning is the raw
+`rotate` input: in sublight the spin keeps growing while held and persists when
+released; in warp it steers the bubble. Fine thrusters and the throttle do
+nothing in warp.
 
 ## Selection, inspection and travel
 

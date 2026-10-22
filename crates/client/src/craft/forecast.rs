@@ -49,6 +49,12 @@ impl Forecast {
         self.working.is_some()
     }
 
+    /// Whether a newer prediction is on its way: being worked on, or always
+    /// during a burn, which starts the next one as each finishes.
+    pub fn refreshing(&self, craft: &Craft) -> bool {
+        self.updating() || thrusting(&craft.input)
+    }
+
     /// Whether the shown prediction was made under the craft's current
     /// inputs and reference.
     pub fn current(&self, craft: &Craft) -> bool {
