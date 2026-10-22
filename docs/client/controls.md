@@ -36,6 +36,7 @@ See [realistic rendering](rendering.md) for the physical model.
 | Visit its system | Click the selected star again or press Enter |
 | Select a planet/task | Click its marker or the task index |
 | Select a star or pair of the loaded system | Click its marker (a pair's is a small cross) |
+| Reach a marker hidden by a crowd | Zoom in until it separates, or use the breadcrumb or search |
 | Follow a planet | Click the selected planet again or use `follow` |
 | Inspect without travel | Click an item in either breadcrumb trail |
 | Fly to/frame a system | Inspector's Fly to system / Frame system |
@@ -66,6 +67,11 @@ Toggle the object browser with the 🔍 icon or Ctrl+K. Browser shortcuts can
 also be intercepted by the web browser; the icon is always available.
 There is no separate Settings window. Display options and realistic lighting
 live in `render`; shortcut help lives in `controls`.
+Scene overlays (`set_display overlays false`) hides everything drawn over the
+scene that is not in it: markers, rings, labels, the velocity marker, orbital
+and predicted craft paths, wireframes over lit bodies and constellation lines.
+Each of those keeps its own switch, nested beneath it. Clicks still select
+bodies while overlays are hidden.
 Click the left side of a checkbox row to toggle it. The square `+` / `-` button
 on the right expands or collapses its explanation without changing the switch.
 Only the console header (including its padding) moves the window, indicated by

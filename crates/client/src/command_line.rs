@@ -260,7 +260,7 @@ pub const USAGE: [Usage; 32] = [
     Usage {
         name: "set_display",
         fields: &["option", "on"],
-        about: "orbits, labels, markers, velocity_marker, realistic, galaxy_glow or wireframe; true or false",
+        about: "overlays, orbits, labels, markers, velocity_marker, predicted_paths, wireframe, realistic or galaxy_glow; true or false",
     },
     Usage {
         name: "set_fov",

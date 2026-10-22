@@ -23,6 +23,8 @@ use std::f64::consts::TAU;
 #[derive(Clone)]
 pub struct Marker {
     pub point: Vec2,
+    /// Distance from the camera in render units, only to order markers.
+    pub depth: f32,
     pub radius: f32,
     pub label: String,
     pub colour: [u8; 3],
@@ -183,6 +185,10 @@ impl Canvas<'_> {
         self.camera.world_to_viewport(self.view, point).ok()
     }
 
+    fn depth(&self, point: Vec3) -> f32 {
+        point.distance(self.view.translation())
+    }
+
     /// On-screen radius in logical pixels, or `None` when the centre is off-screen.
     /// Measured as if the body sat at the screen centre: perspective stretches
     /// bodies towards the edges, which would switch their line density there.
@@ -300,7 +306,7 @@ impl Canvas<'_> {
         basis: DQuat,
         flat: bool,
     ) -> Option<f32> {
-        match (self.nav.realistic, self.nav.wireframe) {
+        match (self.nav.realistic, self.nav.overlay(self.nav.wireframe)) {
             // Without realistic lighting a small body is a dot: its marker is the ring.
             (false, _) => match self.pixels(centre, radius) {
                 Some(p) if p < RING_PIXELS => {
@@ -384,11 +390,13 @@ impl Canvas<'_> {
                 continue;
             };
             let star = drawn.iter().find(|(body, _)| body.id == *id);
-            let Some(point) = self.screen(self.world(self.frame * self.member(id))) else {
+            let centre = self.world(self.frame * self.member(id));
+            let Some(point) = self.screen(centre) else {
                 continue;
             };
             markers.push(Marker {
                 point,
+                depth: self.depth(centre),
                 radius: star.and_then(|(_, pixels)| *pixels).unwrap_or(0.0).max(5.0),
                 label: crate::objects::page_member_label(self.galaxy, system, pose.page, id),
                 colour: star.map_or(BARYCENTRE_COLOUR, |(body, _)| body.colour),
@@ -512,7 +520,9 @@ impl Canvas<'_> {
         let (nav, pose, system) = (self.nav, self.pose, self.system);
         let layout = TableLayout::new(system, pose.page);
         let place = |local: DVec3| self.frame * local;
-        if nav.orbits && nav.presentation_mode == PresentationMode::Simulation && pose.layout <= 0.5
+        if nav.overlay(nav.orbits)
+            && nav.presentation_mode == PresentationMode::Simulation
+            && pose.layout <= 0.5
         {
             self.star_orbits(gizmos);
             for planet in system.on_page(pose.page) {
@@ -554,6 +564,7 @@ impl Canvas<'_> {
             if let Some(point) = self.screen(centre) {
                 markers.push(Marker {
                     point,
+                    depth: self.depth(centre),
                     radius: pixels.unwrap_or(6.0).max(5.0),
                     label: planet.label().to_owned(),
                     colour: planet.colour(),
@@ -595,13 +606,15 @@ impl Canvas<'_> {
             if let Some(point) = self.screen(centre) {
                 markers.push(Marker {
                     point,
+                    depth: self.depth(centre),
                     radius: pixels.unwrap_or(0.0).max(5.0),
                     label: live.craft.name.clone(),
                     colour: CRAFT_COLOUR,
                     object: Marked::Craft(live.craft.id.clone()),
                 });
             }
-            if self.nav.selection == Some(crate::Selection::Craft(live.craft.id.clone()))
+            if self.nav.overlay(self.nav.predicted_paths)
+                && self.nav.selection == Some(crate::Selection::Craft(live.craft.id.clone()))
                 && live.star() == crate::objects::star_id(self.system, self.pose.page)
             {
                 self.trajectory(gizmos, live);
@@ -691,7 +704,7 @@ pub fn draw(
         frame_ly: rig.frame_ly,
     };
     let markers = &mut markers.0;
-    if nav.presentation_mode == PresentationMode::Constellation {
+    if nav.overlays && nav.presentation_mode == PresentationMode::Constellation {
         canvas.constellation(&mut gizmos);
     }
     if let Some(range) = body_range(&nav, system, &pose) {

@@ -155,8 +155,9 @@ pub(super) fn publish(
         // Live craft for `ns ship`; their facts are also in the inspector.
         "craft": crate::craft::readout(&fleet, clock.0.seconds),
         "display": {
-            "orbits": nav.orbits, "labels": nav.labels,
+            "overlays": nav.overlays, "orbits": nav.orbits, "labels": nav.labels,
             "markers": nav.markers, "velocity_marker": nav.velocity_marker,
+            "predicted_paths": nav.predicted_paths,
             "realistic": nav.realistic, "galaxy_glow": nav.galaxy_glow,
             "exposure": nav.exposure, "compression": nav.compression, "wireframe": nav.wireframe,
         },

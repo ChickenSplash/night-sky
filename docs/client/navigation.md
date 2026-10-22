@@ -135,7 +135,21 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   ("System 2 B", "System 2 AB"). Clicking one selects it (`SelectStar` with
   the member ID, or `SelectBarycentre`); a second click does nothing yet, as
   stars and pairs are not followed. Selecting the whole system rings its
-  outermost pair's marker. The table shows only the primary's marker. Following a craft targets its blended position
+  outermost pair's marker. The table shows only the primary's marker.
+- Crowded markers give way, so a binary seen from afar is its cross, then
+  its stars as they part, then their planets (`ui::canvas::shown`). By rank
+  (barycentre, star, planet, craft), a marker is hidden while a shown one of
+  higher rank is within `MARKER_SPACING` (24 points) of it; of two pairs'
+  crosses, the outer pair's stays. Markers of one kind never hide each other.
+  The selection, and so anything followed, is never hidden. The table and
+  constellation views hide nothing, as they exist to show every body. A
+  hidden marker has no ring, label, hover or click: zoom in, or use the
+  breadcrumb or search.
+- A click goes to the shown marker whose centre is nearest the pointer, then
+  to the one nearer the camera (`Marker::depth`), and only that one has a
+  hover ring (`ui::canvas::under_pointer`). A marker beats the star points
+  behind it: galaxy picking runs only when no marker is under the pointer.
+- Following a craft targets its blended position
   each frame (`craft::followed`), from 200 m. It uses the craft's retained body
   data, not visible-star reachability, and tracks system/galactic handoffs
   without starting another camera flight. Open-space following uses the craft's

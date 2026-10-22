@@ -102,11 +102,16 @@ pub struct Navigation {
     /// Faintest apparent magnitude drawn as a star point, within
     /// `MAGNITUDE`. Fainter stars are part of the galaxy glow.
     pub magnitude: f64,
+    /// Everything drawn over the scene that is not in it: markers, labels,
+    /// paths and wireframes. Each of those has its own switch beneath this.
+    pub overlays: bool,
     pub labels: bool,
     pub orbits: bool,
     /// Rings marking bodies too small to see. Hover and selection rings stay.
     pub markers: bool,
     pub velocity_marker: bool,
+    /// The selected craft's predicted coast path.
+    pub predicted_paths: bool,
     /// Lit and glowing bodies in HDR under the wireframes.
     pub realistic: bool,
     pub galaxy_glow: bool,
@@ -147,10 +152,12 @@ impl Default for Navigation {
             rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
             fov_deg: 50.0,
             magnitude: space_simulation::population::VISIBLE_MAGNITUDE,
+            overlays: true,
             labels: true,
             orbits: true,
             markers: true,
             velocity_marker: true,
+            predicted_paths: true,
             realistic: true,
             galaxy_glow: true,
             exposure: 0.0,
@@ -160,6 +167,13 @@ impl Default for Navigation {
             notice: "Connecting to local API…".into(),
             fly: false,
         }
+    }
+}
+
+impl Navigation {
+    /// Whether an overlay is drawn: its own switch, and scene overlays on.
+    pub fn overlay(&self, on: bool) -> bool {
+        self.overlays && on
     }
 }
 

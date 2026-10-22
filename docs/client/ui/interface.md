@@ -85,6 +85,14 @@ streamed. Unreachable actions are hidden, not disabled. The read-only
 [developer inspector](../developer-api.md#inspector-readout) exports these
 same facts/actions without selecting or travelling.
 
+## Scene canvas
+
+`ui/canvas.rs` draws marker rings, labels, the selected star's ring and the
+velocity marker over the 3D view, and turns clicks on it into selections.
+Which crowded markers it hides and which one a click reaches are described in
+[navigation](../navigation.md#selection-and-picking). With Scene overlays
+off it draws nothing, but clicks still select (see [controls](../controls.md#debug-tools)).
+
 ## Text HUDs
 
 - `ui/hud.rs` places two centred lines at the bottom using the breadcrumb

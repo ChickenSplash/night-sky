@@ -11,6 +11,8 @@ what it orbits.
   orbit; flying to another body moves with that one instead.
 - The breadcrumb Location and the camera's motion never disagree.
 - Stars and barycentres of a loaded system can be clicked like planets.
+- Crowded markers give way to the most important one, and a click goes to
+  the marker nearest the pointer.
 
 ## Where the work stands
 
@@ -18,12 +20,20 @@ what it orbits.
   location rule (`location_body`, `Field::select_reference_floored`) and a
   steady velocity readout: open space re-anchors on the eye, and free flight
   reads exact velocities instead of differencing positions.
-- **Markers (checkpoint 2):** built, tested and documented: star and
+- **Done and checked live (checkpoint 2, `966ce64`):** star and
   small-cross barycentre markers, `Selection::Barycentre`, the CLI's
-  `select_barycentre`, and member stars and pairs in the Selected trail;
-  awaiting the user's live check. Until checkpoint 3 they are hit-tested
-  after planets and craft, so those still win where markers overlap.
-- **Click priority (checkpoint 3):** not started.
+  `select_barycentre`, and member stars and pairs in the Selected trail.
+- **Done and checked live (checkpoint 3):** marker priority and click
+  priority (decision 4: `canvas::shown`, `canvas::under_pointer`,
+  `Marker::depth`, `MARKER_SPACING` of 24 points, kept after the live check).
+- **Added during checkpoint 3, at the user's request:** a Scene overlays
+  switch (`Navigation::overlays`, `set_display overlays`) in the render tab,
+  with the overlay switches nested beneath it, including a new Craft
+  predicted paths switch and Wireframes over bodies moved from realistic
+  rendering. Off, it hides everything drawn over the scene that is not in
+  it; clicks still select.
+- **Done (checkpoint 4):** navigation, controls, interface and debug console
+  docs. The plan is complete; next is flight-sim phase 11.
 
 ## Decisions
 
@@ -90,16 +100,39 @@ Only while a system is loaded (arrived), as planet markers are.
 - `Marked` gains `Star(id)` and `Barycentre(id)`; drawn in
   `scene/draw.rs` beside the planets, hit-tested in `ui/canvas.rs`.
 
-### 4. Click priority
+### 4. Marker priority and click priority
+
+**Crowded markers give way by rank.**
+
+- Rank: barycentre, then star, then planet, then craft.
+- Going from the highest rank down, a marker is hidden when a shown marker
+  of higher rank has its centre within a fixed screen distance, about 24
+  logical pixels (to tune live). Pair by pair, so two markers are enough.
+- A hidden marker is gone: no ring, label, hover or click. Zooming in brings
+  markers back as they spread apart: a binary seen from afar is its cross,
+  then its stars, then their planets.
+- Within a rank nothing hides, except pairs: of two barycentre crosses
+  together, the outer pair (nearer the whole system) stays. Planets, stars
+  and craft stay side by side as now.
+- The selection and a followed object are always shown. They hide lower
+  ranks near them as their rank does, and are never hidden themselves.
+- No hiding in the table or constellation views, which exist to show every
+  body side by side.
+- No "+n" count of hidden markers for now: zooming in or the breadcrumb and
+  search reach them.
+- Trade-off accepted: zoomed out to a whole system, inner planets near
+  their star cannot be clicked until the camera is closer.
+
+**Clicks go to the nearest shown marker.**
 
 - **Now:** any marker beats the star points behind it: a click falls
   through to star picking only when no marker is under the pointer. Among
-  overlapping markers, though, the first drawn wins (planets, then craft),
-  not the one nearest the pointer.
-- **Change:** of the markers under the pointer, the one whose centre is
-  nearest wins; on a tie, the nearer to the camera. Markers still beat star
-  points. This matters once star and barycentre markers sit on top of
-  planets and each other.
+  overlapping markers, though, the first drawn wins (planets, then craft,
+  then stars and pairs), and every overlapping marker shows a hover ring.
+- **Change:** of the shown markers under the pointer, the one whose centre
+  is nearest wins; on a tie, the nearer to the camera (a depth on
+  `Marker`). Only that marker shows a hover ring. Markers still beat star
+  points.
 
 ### Deferred
 
@@ -118,7 +151,13 @@ Only while a system is loaded (arrived), as planet markers are.
 2. **Star and barycentre markers:** drawing, labels, selection,
    `Selection::Barycentre`, inspector, CLI selection. Tests: markers only
    when arrived, one per star and pair, selecting each.
-3. **Click priority:** nearest marker wins. Tests: overlapping planet and
-   star markers, and a marker in front of a star point.
+3. **Marker priority and click priority** (decision 4), in `ui/canvas.rs`
+   as pure functions over the frame's markers: which are shown, and which
+   one is under the pointer. Tests: each rank hiding the next within the
+   distance and not beyond it; the outer of two pair crosses kept; planets
+   side by side kept; the selected and followed markers never hidden; no
+   hiding in the table or constellation views; nearest-centre and
+   nearer-camera clicks; one hover ring; a hidden marker never clicked; a
+   marker beating a star point.
 4. Docs (`navigation.md`, `controls.md`, `interface.md`), `./scripts/check.sh`,
    a live check by the user, then flight-sim phase 11.

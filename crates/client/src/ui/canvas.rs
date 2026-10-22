@@ -6,7 +6,7 @@ use crate::actions::UiCommand;
 use crate::presentation::PresentationMode;
 use crate::{
     Navigation,
-    scene::{CameraPose, CameraRig, CameraVelocity, Marked, Markers},
+    scene::{CameraPose, CameraRig, CameraVelocity, Marked, Marker, Markers},
 };
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::egui;
@@ -37,12 +37,16 @@ pub(super) fn canvas_overlay(
                 ui.label("Systems appear as each list finishes loading.");
             });
     }
-    let painter = ctx
+    let mut painter = ctx
         .layer_painter(egui::LayerId::new(
             egui::Order::Background,
             egui::Id::new("annotations"),
         ))
         .with_clip_rect(rect);
+    // Without scene overlays, markers are still click targets, unseen.
+    if !nav.overlays {
+        painter.set_invisible();
+    }
 
     if nav.velocity_marker {
         draw_velocity_marker(
@@ -95,16 +99,24 @@ pub(super) fn canvas_overlay(
         .map(|pair| (pair[1].point.x - pair[0].point.x).abs() / scale)
         .filter(|gap| *gap > 1.0)
         .fold(f32::INFINITY, f32::min);
-    for marker in &markers.0 {
-        let point = egui::pos2(marker.point.x / scale, marker.point.y / scale);
-        if !rect.contains(point) {
+    let selection: Vec<bool> = markers.0.iter().map(|m| selected(&m.object)).collect();
+    let mut shown = shown(&markers.0, &selection, nav.presentation_mode, scale);
+    for (shown, marker) in shown.iter_mut().zip(&markers.0) {
+        *shown &= rect.contains(centre(marker, scale));
+    }
+    let under = pointer
+        .filter(|p| rect.contains(*p))
+        .and_then(|p| under_pointer(&markers.0, &shown, p, scale));
+    for (index, marker) in markers.0.iter().enumerate() {
+        let point = centre(marker, scale);
+        if !shown[index] {
             continue;
         }
         let c = marker.colour;
         let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
         let radius = (marker.radius / scale).max(7.0);
-        let hovered = pointer.is_some_and(|p| rect.contains(p) && p.distance(point) < radius + 8.0);
-        let selected = selected(&marker.object);
+        let hovered = under == Some(index);
+        let selected = selection[index];
         if selected || hovered {
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }
@@ -205,6 +217,81 @@ pub(super) fn canvas_overlay(
     {
         out.push(UiCommand::PickStar { id: star.id });
     }
+}
+
+/// How far apart, in egui points, two markers' centres must be before one
+/// stops hiding the other of lower rank.
+pub(super) const MARKER_SPACING: f32 = 24.0;
+
+/// Which marker gives way where they crowd: a barycentre, then a star, then
+/// a planet, then a craft.
+fn rank(object: &Marked) -> u8 {
+    match object {
+        Marked::Barycentre(_) => 0,
+        Marked::Star(_) => 1,
+        Marked::Planet(_) => 2,
+        Marked::Craft(_) => 3,
+    }
+}
+
+fn centre(marker: &Marker, scale: f32) -> egui::Pos2 {
+    egui::pos2(marker.point.x / scale, marker.point.y / scale)
+}
+
+/// Which markers are shown. A marker is hidden near a shown one of higher
+/// rank, and a pair's cross near an outer pair's, which `barycentres_on`
+/// lists after it. The `selected` ones are always shown, and the table and
+/// constellation views, made to show every body, hide none.
+pub(super) fn shown(
+    markers: &[Marker],
+    selected: &[bool],
+    mode: PresentationMode,
+    scale: f32,
+) -> Vec<bool> {
+    let mut shown = vec![true; markers.len()];
+    if mode != PresentationMode::Simulation {
+        return shown;
+    }
+    let mut order: Vec<usize> = (0..markers.len()).collect();
+    order.sort_by_key(|&i| {
+        let pair = matches!(markers[i].object, Marked::Barycentre(_));
+        (
+            rank(&markers[i].object),
+            if pair { usize::MAX - i } else { i },
+        )
+    });
+    for (place, &i) in order.iter().enumerate() {
+        if selected[i] {
+            continue;
+        }
+        let at = centre(&markers[i], scale);
+        shown[i] = !order[..place].iter().any(|&j| {
+            let outranks = rank(&markers[j].object) < rank(&markers[i].object)
+                || matches!(markers[i].object, Marked::Barycentre(_));
+            shown[j] && outranks && centre(&markers[j], scale).distance(at) < MARKER_SPACING
+        });
+    }
+    shown
+}
+
+/// The shown marker under the pointer: the one whose centre is nearest,
+/// then the one nearer the camera when centres are within a point.
+pub(super) fn under_pointer(
+    markers: &[Marker],
+    shown: &[bool],
+    pointer: egui::Pos2,
+    scale: f32,
+) -> Option<usize> {
+    let reach = |i: usize| {
+        let distance = centre(&markers[i], scale).distance(pointer);
+        (shown[i] && distance < (markers[i].radius / scale).max(7.0) + 8.0).then_some(distance)
+    };
+    let nearest = (0..markers.len())
+        .filter_map(reach)
+        .fold(f32::INFINITY, f32::min);
+    (0..markers.len())
+        .filter(|&i| reach(i).is_some_and(|distance| distance <= nearest + 1.0))
+        .min_by(|&a, &b| markers[a].depth.total_cmp(&markers[b].depth))
 }
 
 /// Whether a marker's object is the selection. Selecting a multiple system

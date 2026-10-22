@@ -161,10 +161,12 @@ pub enum UiCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Display {
+    Overlays,
     Orbits,
     Labels,
     Markers,
     VelocityMarker,
+    PredictedPaths,
     Realistic,
     GalaxyGlow,
     Wireframe,
@@ -726,10 +728,12 @@ pub fn apply(
                 }
             }
             UiCommand::SetDisplay { option, on } => match option {
+                Display::Overlays => nav.overlays = *on,
                 Display::Orbits => nav.orbits = *on,
                 Display::Labels => nav.labels = *on,
                 Display::Markers => nav.markers = *on,
                 Display::VelocityMarker => nav.velocity_marker = *on,
+                Display::PredictedPaths => nav.predicted_paths = *on,
                 Display::Realistic => nav.realistic = *on,
                 Display::GalaxyGlow => nav.galaxy_glow = *on,
                 Display::Wireframe => nav.wireframe = *on,
