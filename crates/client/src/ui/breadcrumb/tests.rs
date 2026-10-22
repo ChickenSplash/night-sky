@@ -125,7 +125,7 @@ fn physical_planet_location_is_independent_of_selection() {
             .level,
         Level::Planet
     );
-    nav.location_planet = Some(planet.id.clone());
+    nav.location_body = Some(planet.id.clone());
     nav.select(None);
     let trail = trail(&nav, &galaxy);
     assert_eq!(trail.last().unwrap().label, planet.designation);
@@ -175,6 +175,44 @@ fn not_yet_arrived_shows_no_star() {
 }
 
 #[test]
+fn a_star_of_a_multiple_system_is_a_location_below_the_whole_system() {
+    let galaxy = space_simulation::demo_galaxy();
+    let system = &galaxy.systems[0];
+    let mut nav = at_list(&galaxy, 1);
+    let root = system.barycentres_on(nav.page).last().unwrap();
+    let star = system
+        .stars_on(nav.page)
+        .find(|s| {
+            system
+                .pair_of(nav.page, &s.id)
+                .is_some_and(|pair| pair.id == root.id)
+        })
+        .unwrap();
+    let letter = space_simulation::multiple::member_letters(&star.id);
+    nav.location_body = Some(star.id.clone());
+    let location = trail(&nav, &galaxy);
+    assert_eq!(
+        location.iter().map(|c| c.label.clone()).collect::<Vec<_>>(),
+        [
+            "Milky Way".to_owned(),
+            system.name.clone(),
+            format!("System 2 {}", root.component),
+            format!("System 2 {letter}"),
+        ]
+    );
+    assert_eq!(
+        location[3].object,
+        ObjectRef::Star {
+            id: star.id.clone()
+        }
+    );
+    assert_eq!(
+        up(&nav, &galaxy),
+        Some(UiCommand::ShowPage { page: nav.page })
+    );
+}
+
+#[test]
 fn a_companions_planet_is_reached_through_the_barycentre_and_its_star() {
     let galaxy = space_simulation::demo_galaxy();
     let system = &galaxy.systems[0];
@@ -196,7 +234,7 @@ fn a_companions_planet_is_reached_through_the_barycentre_and_its_star() {
         format!("System 2 {letter}"),
         planet.designation.clone(),
     ];
-    nav.location_planet = Some(planet.id.clone());
+    nav.location_body = Some(planet.id.clone());
     let location = trail(&nav, &galaxy);
     assert_eq!(
         location.iter().map(|c| &c.label).collect::<Vec<_>>(),
@@ -214,7 +252,7 @@ fn a_companions_planet_is_reached_through_the_barycentre_and_its_star() {
             id: planet.host.clone()
         }
     );
-    nav.location_planet = None;
+    nav.location_body = None;
     nav.select(Some(Selection::Planet(planet.id.clone())));
     let selected = selection_trail(&nav, &galaxy, crate::craft::Now::none());
     assert_eq!(

@@ -14,8 +14,15 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   (at, flying to, or showing as a constellation): `Visit::List` (a list index,
   at `Navigation::page`) or `Visit::Generated` (task-free planets built from
   the star's ID, never added to the lists' `Universe`). `None` is open space,
-  relative to home in galactic axes. A visit moves the camera frame to its
-  star in f64, and the same `Flight` shifts the displayed pose.
+  in galactic axes relative to `Navigation::galactic_origin_ly`. A visit
+  moves the camera frame to its star in f64, and the same `Flight` shifts the
+  displayed pose.
+- Open space keeps the camera's position small, since light years from home
+  are only precise to tens of kilometres across the galaxy (about 54 km per
+  f64 step 26,000 ly out). Its origin is a nearby craft's anchor, else the
+  system just left, moved onto the eye whenever the eye is 10⁹ m from it
+  (`REANCHOR_METRES`). Commands that place the camera relative to home
+  reset it with `Navigation::leave_for_home_frame`.
 - `presentation.rs` owns `PresentationMode`: `Simulation` (simulated orbital
   positions), `Table` (comparison row), and `Constellation` (connected stars).
   They work on any visited system. `Navigation::presentation_mode` describes
@@ -50,12 +57,66 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 - The render scale tightens near any loaded star within 20 ly even before its
   system activates, independently of selected range. Preserve the visited
   body's physical-proximity fallback when its cell has not loaded yet.
-- Planet location uses simulated f64 positions: enter within 20 physical
-  planet radii, leave beyond 30. `scene::locate_planet` runs after camera
-  placement, using the same simulation instant as the eye, including when
-  following at high time rates. Render exaggeration, selection and following
-  never affect this threshold; table/constellation layouts have no physical
-  planet location.
+- The body location (`Navigation::location_body`) uses simulated f64
+  positions and the rule that picks a craft's orbit reference
+  (`Field::select_reference`, see [craft](../simulation/craft.md)), so the
+  breadcrumb, the camera's motion and a ship there agree:
+  - a planet within its Hill sphere, the nearest if several;
+  - else the innermost star or pair of a multiple system whose stable zone
+    holds the camera. A zone comes from the pair's masses and separation, so
+    a star with no planets has one too;
+  - else none: the whole system is the star level, so a single star adds
+    nothing.
+  Each is kept until 10% past its region (`SWITCH_MARGIN`). One difference
+  from craft: the camera is at a planet within at least 30 of its radii
+  (`PLANET_MIN_RADII`), because a close-in planet's Hill sphere (about 7
+  radii for a hot Jupiter) can be smaller than the following distance. A
+  ship that close really does orbit the star, so craft have no minimum.
+  `scene::locate_body` runs after camera placement, using the same
+  simulation instant as the eye, including when following at high time
+  rates. Render exaggeration, selection and following never affect it;
+  table/constellation layouts have no physical body location.
+
+## Moving with objects
+
+- The camera moves with `Navigation::anchor`, set each frame by
+  `scene::locate_anchor` from its position alone:
+  - a craft within 1,000 km (`CRAFT_NEIGHBOURHOOD_M`), the nearest first,
+    kept until 10% past that;
+  - else the body it is at, exactly the body location above (a planet, or
+    a star or pair of a multiple system as it orbits), so the breadcrumb
+    and the camera's motion never disagree;
+  - else nothing: the camera stays still in its system's or galactic frame.
+- `place_camera` adds the anchor's motion since the last frame to the free
+  eye and target, so WASD, R/F and mouse-look move relative to it and a
+  planet never races off along its orbit. Following, flights and other
+  presentation modes leave the camera to them.
+- Following only centres the selected object; Fly to or Follow reaches its
+  neighbourhood, and stopping following keeps moving with it. Flying into
+  another body's region moves with that one instead; leaving hands
+  up to the frame. A handoff changes speed at once, by the anchor's speed
+  relative to the frame: small at a sphere of influence's edge.
+- In galactic space the frame is the anchoring craft's own galactic anchor,
+  as when following, and moves with it. The eye keeps its offset from the
+  craft directly, never through the frames' light-year origins, so
+  re-anchoring loses no precision.
+- The HUD shows "Moving with" above the velocity, named as the breadcrumb's
+  last crumb, and the snapshot `anchor` (`craft` or `body`).
+  Velocity stays measured in the frame, not relative to the anchor.
+
+## Velocity readout
+
+- `measure_velocity` gives the HUD velocity and the velocity marker, in
+  galactic axes. In free flight it is the controls' exact travel this frame
+  plus the exact velocity of what carries the camera (the anchor, or a
+  followed planet), times the effective time rate.
+- It never differences positions there: orbital positions millions of
+  kilometres from their barycentre round to centimetres, and a clock
+  thousands of years in steps by about 15 µs, both large errors over one
+  frame. A craft carries the camera at its displayed velocity, its last
+  step's motion, which includes warp.
+- Flights, right-drag orbiting (whose sweep is in the speed, never the
+  marker) and a followed craft are measured from displayed positions.
 
 ## Selection and picking
 
@@ -85,7 +146,9 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   marker. Pausing still yields zero travel; camera-orbit marker rules are unchanged.
 - Esc while following reframes the system and clears selection; otherwise it
   clears selection, or with nothing selected goes up physically. Leaving a
-  system keeps either selection and stops tracking.
+  system keeps either selection and stops tracking. Moving or looking stops
+  following but not moving with the object
+  ([moving with objects](#moving-with-objects)).
 - `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a
   mapped list page (`galaxy_nav::mapped`) opens that page, any other opens its
   generated system. A new snapshot moves the visit with its star

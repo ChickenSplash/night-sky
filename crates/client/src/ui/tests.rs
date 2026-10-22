@@ -223,7 +223,7 @@ fn set_speed_drag_is_continuous_and_captures_input_without_click_actions() {
                 events,
                 ..Default::default()
             },
-            |ctx| speed_readout(ctx, rect, speed, 0.0, &mut drag, &mut commands),
+            |ctx| speed_readout(ctx, rect, None, speed, 0.0, &mut drag, &mut commands),
         );
         for command in &commands {
             let UiCommand::SetMoveSpeed { speed: value } = command else {
@@ -468,7 +468,7 @@ fn text_huds_share_edge_padding_and_bottom_baseline() {
                         &mut commands,
                     );
                     time_controls(ctx, rect, &clock, false, &mut drag, &mut commands);
-                    speed_readout(ctx, rect, 1000.0, 0.0, &mut speed_drag, &mut commands);
+                    speed_readout(ctx, rect, None, 1000.0, 0.0, &mut speed_drag, &mut commands);
                     magnitude_control(ctx, rect, 6.5, &mut magnitude_drag, &mut commands);
                 },
             );

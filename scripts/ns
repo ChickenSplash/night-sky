@@ -379,7 +379,7 @@ def settle(api_port, after_ms, timeout):
         state = request(api_port, endpoint("state"))
         if state.get("sampled_unix_ms", 0) > after_ms and not state["camera"]["flying"]:
             return {"trail": state["trail"], "presentation_mode": state["presentation_mode"],
-                    "location_planet": state["location_planet"], "camera": state["camera"]}
+                    "location_body": state["location_body"], "camera": state["camera"]}
         if time.monotonic() > deadline:
             raise RuntimeError(f"Camera still flying after {timeout:g} s")
         time.sleep(0.1)

@@ -44,6 +44,7 @@ See [realistic rendering](rendering.md) for the physical model.
 | Browse list systems | Previous system / Next system or a System n line |
 | Visit a list | Click it in Tasks |
 | Stop following and reframe | Escape while tracking |
+| Look or move round a followed object | Mouse or WASD: it stops centring, but the camera keeps moving with it |
 | Clear selection | Escape when not tracking |
 | Move up physically | Escape with nothing selected |
 

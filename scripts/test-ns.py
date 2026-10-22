@@ -31,7 +31,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Flying on the first read after a command, landed on the next.
             self.server.flights = getattr(self.server, "flights", 0) + 1
             self.reply(200, {"sampled_unix_ms": 2 ** 53, "trail": ["Milky Way", "Demo"],
-                             "presentation_mode": "simulation", "location_planet": None,
+                             "presentation_mode": "simulation", "location_body": None,
                              "camera": {"flying": self.server.flights == 1}})
         else:
             self.reply(200, ["split"])

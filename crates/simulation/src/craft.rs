@@ -46,7 +46,7 @@ pub use attitude::{AttitudePilot, PointTarget};
 mod order;
 pub use order::{MAX_BODY_ID, MAX_THRUST, Order, WarpOrder};
 mod reference;
-pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
+pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN, planet_reach_m};
 pub mod route;
 pub use route::{ArrivalMode, Route, Target};
 pub mod predict;

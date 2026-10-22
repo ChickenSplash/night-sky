@@ -116,6 +116,19 @@ impl Field {
         position: [f64; 3],
         seconds: f64,
     ) -> Option<Reference> {
+        self.select_reference_floored(current, position, seconds, 0.0)
+    }
+
+    /// `select_reference`, with each planet's region never under
+    /// `planet_radii` of its radii. Only the camera uses a floor: a craft
+    /// that close to a hot Jupiter really does orbit the star.
+    pub fn select_reference_floored(
+        &self,
+        current: Option<&str>,
+        position: [f64; 3],
+        seconds: f64,
+        planet_radii: f64,
+    ) -> Option<Reference> {
         let held = current.map(|id| self.lineage(id)).unwrap_or_default();
         let limit = |id: &str, radius: f64| {
             if held.iter().any(|h| h == id) {
@@ -127,10 +140,11 @@ impl Field {
         let planet = self
             .planets
             .iter()
-            .filter_map(|(planet, gm, _, host)| {
+            .filter_map(|(planet, gm, radius, host)| {
                 let centre = crate::planet_position(&self.system, planet, seconds);
                 let d = distance(centre, position);
-                (d < limit(&planet.id, hill(planet, *gm, *host))).then_some((&planet.id, d))
+                let reach = hill(planet, *gm, *host).max(radius * planet_radii);
+                (d < limit(&planet.id, reach)).then_some((&planet.id, d))
             })
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((id, _)) = planet {
@@ -154,6 +168,16 @@ impl Field {
         }
         self.reference_by_id(node, seconds)
     }
+}
+
+/// A planet's sphere of influence in metres: the region round it where it
+/// is a craft's reference.
+pub fn planet_reach_m(system: &StarSystem, planet: &Planet) -> f64 {
+    hill(
+        planet,
+        planet.mass_earth * EARTH_SOLAR * SUN_GM,
+        system.host_mass(planet),
+    )
 }
 
 /// A planet's Hill sphere at its periapsis, in metres.

@@ -108,27 +108,30 @@ pub fn trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
             id: objects::star_id(system, nav.page),
         },
     });
-    if let Some(planet) = nav
-        .location_planet
-        .as_ref()
-        .and_then(|id| system.planets.iter().find(|planet| planet.id == *id))
-        .filter(|planet| planet.page() == nav.page)
-    {
-        trail.extend(members(system, nav.page, &planet.host, &name));
-        trail.push(Crumb {
-            level: Level::Planet,
-            label: planet.designation.clone(),
-            object: ObjectRef::Planet {
-                id: planet.id.clone(),
-            },
-        });
+    let Some(id) = &nav.location_body else {
+        return trail;
+    };
+    match system.planets.iter().find(|planet| planet.id == *id) {
+        Some(planet) if planet.page() == nav.page => {
+            trail.extend(members(system, nav.page, &planet.host, &name));
+            trail.push(Crumb {
+                level: Level::Planet,
+                label: planet.designation.clone(),
+                object: ObjectRef::Planet {
+                    id: planet.id.clone(),
+                },
+            });
+        }
+        Some(_) => {}
+        // A star or pair of a multiple system, below the whole system.
+        None => trail.extend(members(system, nav.page, id, &name)),
     }
     trail
 }
 
 /// Keyboard navigation stays separate from breadcrumb inspection.
 pub fn up(nav: &Navigation, galaxy: &Galaxy) -> Option<UiCommand> {
-    if nav.location_planet.is_some() {
+    if nav.location_body.is_some() {
         return Some(UiCommand::ShowPage { page: nav.page });
     }
     if nav.location(galaxy).is_some()

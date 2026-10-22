@@ -111,6 +111,7 @@ pub fn controls(
             nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
                 .clamp(MIN_DISTANCE, 40_000.0 * LY_METRES);
             let eye = old_eye + (nav.rotation * Vec3::Z).as_dvec3() * (nav.distance - old_distance);
+            camera_motion.travel_metres += tilt * (eye - old_eye);
             nav.eye = Some(eye);
             nav.target = eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
         }

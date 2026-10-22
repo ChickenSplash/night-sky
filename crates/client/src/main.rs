@@ -24,7 +24,7 @@ use space_simulation::{AU_METRES, SimulationClock};
 use std::sync::{Mutex, mpsc};
 
 use navigation::follow_visited_star;
-pub use navigation::{FOV_DEG, MAGNITUDE, Navigation, Selection, Visit};
+pub use navigation::{Anchor, FOV_DEG, MAGNITUDE, Navigation, Selection, Visit};
 
 #[derive(Resource)]
 pub struct Universe(pub Galaxy);
@@ -129,7 +129,8 @@ fn main() {
             devtools::benchmark::advance,
             scene::locate,
             scene::place_camera,
-            scene::locate_planet,
+            scene::locate_body,
+            scene::locate_anchor,
             scene::measure_velocity,
         )
             .chain(),

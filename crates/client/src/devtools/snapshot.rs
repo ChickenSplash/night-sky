@@ -139,7 +139,12 @@ pub(super) fn publish(
         "trail": trail.iter().map(|c| &c.label).collect::<Vec<_>>(),
         "selection_trail": selection_trail.iter().map(|c| &c.label).collect::<Vec<_>>(),
         "selection": nav.selection.as_ref().map(crate::Selection::object),
-        "location_planet": nav.location_planet,
+        "location_body": nav.location_body,
+        // What the camera moves with, by its position alone.
+        "anchor": nav.anchor.as_ref().map(|anchor| match anchor {
+            crate::Anchor::Body(id) => json!({"kind": "body", "id": id}),
+            crate::Anchor::Craft(id) => json!({"kind": "craft", "id": id}),
+        }),
         "inspection": inspection,
         "inspector": readout,
         "page": nav.page, "presentation_mode": nav.presentation_mode,

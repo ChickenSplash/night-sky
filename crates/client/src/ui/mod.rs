@@ -127,9 +127,18 @@ pub fn draw_ui(
         &mut hud.time_drag_start,
         &mut out,
     );
+    let moving_with = match &nav.anchor {
+        // The location's deepest crumb, named as the breadcrumb names it.
+        Some(crate::Anchor::Body(_)) => crate::ui::breadcrumb::trail(&nav, &universe.0)
+            .pop()
+            .map(|crumb| crumb.label),
+        Some(crate::Anchor::Craft(id)) => fleet.get(id).map(|live| live.craft.name.clone()),
+        None => None,
+    };
     speed_readout(
         ctx,
         rect,
+        moving_with.as_deref(),
         nav.move_speed,
         velocity.metres_per_second.length(),
         &mut hud.speed_drag_start,

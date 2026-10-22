@@ -42,6 +42,15 @@ impl Selection {
     }
 }
 
+/// What the camera moves with: the innermost neighbourhood it is in, set
+/// each frame by `scene::locate_anchor`. Free movement is relative to it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    /// The `location_body`: a planet, or a star or pair of a multiple system.
+    Body(String),
+    Craft(String),
+}
+
 #[derive(Resource)]
 pub struct Navigation {
     pub page: u32,
@@ -59,13 +68,25 @@ pub struct Navigation {
     pub selection: Option<Selection>,
     /// Which trail and object currently drive the floating inspector.
     pub inspection: Option<ui::breadcrumb::Inspection>,
-    /// Physical planet neighbourhood, unrelated to selection or following.
-    pub location_planet: Option<String>,
+    /// The body the camera is physically at, unrelated to selection or
+    /// following: a planet, or a star or inner pair of a multiple system,
+    /// by the rule that picks a craft's orbit reference. Never the whole
+    /// system, which `arrived` already covers.
+    pub location_body: Option<String>,
+    /// What the camera moves with, by its own position alone.
+    pub anchor: Option<Anchor>,
+    /// Whether the camera keeps the selected object centred. Moving or
+    /// looking ends it, not the camera's motion with its `anchor`.
     pub following: bool,
     pub target: DVec3,
     /// Authoritative free-flight eye in the current page's local frame.
     /// Avoids cancelling a distant target against the camera range.
     pub eye: Option<DVec3>,
+    /// In open space, what `target` and `eye` are relative to, in light
+    /// years from home: a followed or nearby craft's anchor, else one that
+    /// moves with the camera (`scene::place_camera`), so they stay precise
+    /// anywhere in the galaxy.
+    pub galactic_origin_ly: DVec3,
     pub distance: f64,
     /// Selected free-flight speed in metres per real second, independent of zoom.
     pub move_speed: f64,
@@ -111,7 +132,9 @@ impl Default for Navigation {
             arrived: false,
             selection: None,
             inspection: None,
-            location_planet: None,
+            location_body: None,
+            anchor: None,
+            galactic_origin_ly: DVec3::ZERO,
             following: false,
             target: DVec3::ZERO,
             eye: None,
@@ -144,6 +167,13 @@ pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
 pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=10.5;
 
 impl Navigation {
+    /// Leave any system for open space, with `target` and `eye` then given
+    /// relative to home.
+    pub fn leave_for_home_frame(&mut self) {
+        self.visit = None;
+        self.galactic_origin_ly = DVec3::ZERO;
+    }
+
     pub fn set_exposure(&mut self, stops: f64) {
         if stops.is_finite() {
             self.exposure = stops.clamp(

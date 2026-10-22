@@ -33,7 +33,8 @@ to `crates/client/src/`.
   on dark space. Reuse `kit::halo::halo_text`/`halo_wrapped_text` for scene
   text, or `halo_galley` for manually placed text such as canvas planet labels.
 - `breadcrumb::trail` is physical location: `Milky Way`, the current star's
-  list if any, the star, then `Navigation::location_planet`. An open list or
+  list if any, the star, then `Navigation::location_body` with the stars and
+  pairs above it (such as `System 2 AB › System 2 B › b`). An open list or
   destination is not a location until arrival. `selection_trail` independently
   shows the selected object's hierarchy, including remote planets. List stars
   are `System n`; other stars use catalogue names.

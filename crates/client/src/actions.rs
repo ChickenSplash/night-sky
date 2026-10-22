@@ -443,7 +443,7 @@ fn spawn_body(
         Some(Selection::Star(star)) => return Some(star.id.clone()),
         _ => {}
     }
-    nav.location_planet.clone().or_else(|| {
+    nav.location_body.clone().or_else(|| {
         nav.system(galaxy)
             .map(|system| crate::objects::star_id(system, nav.page))
     })
@@ -482,7 +482,7 @@ fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
     } else {
         Vec3::Y
     };
-    nav.visit = None;
+    nav.leave_for_home_frame();
     nav.page = 0;
     nav.selection = None;
     nav.following = false;

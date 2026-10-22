@@ -162,10 +162,13 @@ fn elapsed_text(days: f64) -> String {
     }
 }
 
-/// Measured velocity above a draggable set speed, like the time controls.
+/// What the camera moves with, then measured velocity above a draggable set
+/// speed, like the time controls.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn speed_readout(
     ctx: &egui::Context,
     rect: egui::Rect,
+    moving_with: Option<&str>,
     set_speed: f64,
     velocity: f64,
     drag_start: &mut Option<f64>,
@@ -178,6 +181,14 @@ pub(super) fn speed_readout(
         .fixed_pos(rect.left_bottom() + egui::vec2(HUD_PADDING, -HUD_PADDING))
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
+            if let Some(anchor) = moving_with {
+                halo_text(
+                    ui,
+                    &format!("Moving with {anchor}"),
+                    egui::Sense::hover(),
+                    |_| CURRENT,
+                );
+            }
             halo_text(
                 ui,
                 &format!("Velocity {}", speed_label(velocity)),

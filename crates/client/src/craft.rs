@@ -139,6 +139,14 @@ impl Live {
         }
     }
 
+    /// How fast `state_at` moves the craft, warp included: its last step's
+    /// motion, in metres per simulated second and its frame's axes.
+    pub fn display_velocity(&self) -> bevy::math::DVec3 {
+        let (from, to) = (self.previous.position, self.craft.state().position);
+        bevy::math::DVec3::from_array(std::array::from_fn(|i| to[i] - from[i]))
+            / space_simulation::craft::STEP_SECONDS
+    }
+
     /// The craft at `seconds`, and the reference its orbit is described
     /// around, kept from its last step within the switching margin.
     pub fn surroundings(&self, seconds: f64) -> (State, Option<Reference>) {
