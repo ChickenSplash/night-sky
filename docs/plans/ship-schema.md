@@ -59,12 +59,13 @@ field appears in the CLI and the TUI with no client change.
 3. ✅ `ns ship` generated from the file; the existing CLI mapping tests pass
    unchanged apart from `thrust`. Adds `ns ship tree` and `--tick`.
 4. ✅ `ns-tui` Ship tab, smoke-tested headless against the running app.
-5. The user tries the TUI against a live ship, after rebuilding the app.
+5. ✅ The user tries the TUI against a live ship; this led to timed orders.
 6. ✅ **Timed orders**, below, built 2026-10-22: `--in` on every order,
    `--for` on throttle, translate, rotate, point, thrust and warp engage.
    Resolved in the app rather than by the client, and a later order on the
-   same controls cancels a pending end. Still to do: the user tries it
-   live, after rebuilding the app.
+   same controls cancels a pending end. The user tried it live on
+   2026-10-22. The detour is done; [flight simulator](flight-sim.md) phase 9
+   is next.
 
 ## Timed orders
 
