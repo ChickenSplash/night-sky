@@ -46,9 +46,12 @@ pub fn place_camera(
 ) {
     // Following changes the camera's coordinate frame, never the craft's.
     // Re-express orientation without starting a navigation flight at a handoff.
+    // A craft in a system brings the camera there; one in galactic space
+    // leaves arriving and leaving to the camera's own proximity (`locate`).
     if nav.following
         && let Some(id) = nav.selected_craft()
         && let Some(live) = fleet.get(id)
+        && !live.star().is_empty()
     {
         let old_basis = nav
             .system(&universe.0)
@@ -56,40 +59,19 @@ pub fn place_camera(
         let same = nav
             .system(&universe.0)
             .is_some_and(|s| crate::objects::star_id(s, nav.page) == live.star());
-        if !same && (!live.star().is_empty() || nav.visit.is_some()) {
+        if !same {
             nav.rotation =
                 ((live.basis().inverse() * old_basis).as_quat() * nav.rotation).normalize();
-            nav.visit = if live.star().is_empty() {
-                None
-            } else {
-                Some(crate::Visit::Generated(Box::new(
-                    live.field.system().clone(),
-                )))
-            };
+            nav.visit = Some(crate::Visit::Generated(Box::new(
+                live.field.system().clone(),
+            )));
             nav.page = live.field.page();
-            nav.arrived = !live.star().is_empty();
+            nav.arrived = true;
         }
     }
     nav.fit_preset(&universe.0);
     if nav.fly || nav.following || nav.presentation_mode != PresentationMode::Simulation {
         nav.eye = None;
-    }
-    let craft = crate::craft::followed(&nav, &universe.0, &fleet, clock.0.seconds);
-    if nav.following
-        && let Some(followed) = craft
-            .map(|state| DVec3::from_array(state.position))
-            .or_else(|| {
-                nav.system(&universe.0).and_then(|system| {
-                    let planet = system.planets.get(nav.selected_planet(&universe.0)?)?;
-                    Some(DVec3::from_array(planet_position(
-                        system,
-                        planet,
-                        clock.0.seconds,
-                    )))
-                })
-            })
-    {
-        nav.target = followed;
     }
     let fly = std::mem::take(&mut nav.fly);
     let system = nav.system(&universe.0);
@@ -98,12 +80,6 @@ pub fn place_camera(
     // open space the camera is relative to home, in galactic axes.
     let frame_page = system.map_or(0, |system| nav.frame_page(system));
     let frame_tilt = system.map_or(DQuat::IDENTITY, |system| page_frame(system, frame_page));
-    let desired = Pose {
-        target: frame_tilt * nav.target,
-        distance: nav.distance,
-        rotation: frame_tilt.as_quat() * nav.rotation,
-        layout: f64::from(u8::from(nav.presentation_mode == PresentationMode::Table)),
-    };
     let frame = system.map_or_else(
         || {
             if nav.following {
@@ -116,6 +92,31 @@ pub fn place_camera(
         },
         |system| page_origin_ly(system, frame_page),
     );
+    let craft = crate::craft::followed(&nav, &universe.0, &fleet, clock.0.seconds);
+    let followed = nav
+        .following
+        .then(|| {
+            craft
+                .zip(nav.selected_craft().and_then(|id| fleet.get(id)))
+                .map(|(state, live)| in_camera_frame(live, state, frame, frame_tilt))
+                .or_else(|| {
+                    system.and_then(|system| {
+                        let planet = system.planets.get(nav.selected_planet(&universe.0)?)?;
+                        Some(DVec3::from_array(planet_position(
+                            system,
+                            planet,
+                            clock.0.seconds,
+                        )))
+                    })
+                })
+        })
+        .flatten();
+    let desired = Pose {
+        target: frame_tilt * followed.unwrap_or(nav.target),
+        distance: nav.distance,
+        rotation: frame_tilt.as_quat() * nav.rotation,
+        layout: f64::from(u8::from(nav.presentation_mode == PresentationMode::Table)),
+    };
     let mut shown = rig.shown.unwrap_or(desired);
     let frame_shift_ly = (frame - rig.frame_ly).length();
     if rig.shown.is_some() && frame != rig.frame_ly {
@@ -178,6 +179,9 @@ pub fn place_camera(
             nav.presentation_mode
         );
         rig.flight = None;
+    }
+    if let Some(followed) = followed {
+        nav.target = followed;
     }
     rig.shown = Some(shown);
     pose.page = frame_page;
@@ -243,4 +247,20 @@ pub(super) fn proximity_scale_distance(
             selected_range.min(distance * PC_METRES)
         })
         .max(super::scale_floor(selected_range))
+}
+
+/// A followed craft's position in the camera's frame: from `frame_ly`, in the
+/// axes `tilt` turns into galactic ones. Its own frame needs no conversion.
+fn in_camera_frame(
+    live: &crate::craft::Live,
+    state: space_simulation::State,
+    frame_ly: DVec3,
+    tilt: DQuat,
+) -> DVec3 {
+    let position = DVec3::from_array(state.position);
+    let (origin, basis) = (live.origin_ly(), live.basis());
+    if origin == frame_ly && basis == tilt {
+        return position;
+    }
+    tilt.inverse() * ((origin - frame_ly) * LY_METRES + basis * position)
 }

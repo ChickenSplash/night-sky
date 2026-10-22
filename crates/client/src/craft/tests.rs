@@ -392,7 +392,12 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
         .init_resource::<crate::scene::CameraPose>()
         .init_resource::<crate::scene::CameraRig>()
         .init_resource::<crate::stars::stream::StreamMetrics>()
-        .add_systems(Update, crate::scene::place_camera.after(step));
+        .add_systems(
+            Update,
+            (crate::scene::locate, crate::scene::place_camera)
+                .chain()
+                .after(step),
+        );
     let (_, _, planet) = planet_system();
     send(
         &mut app,
@@ -423,6 +428,8 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
     app.world_mut()
         .resource_mut::<Time>()
         .advance_by(std::time::Duration::from_secs(10));
+    app.update();
+    // The camera then finds itself far from the system and leaves it.
     app.update();
     let nav = app.world().resource::<Navigation>();
     assert!(nav.following);

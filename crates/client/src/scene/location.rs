@@ -87,7 +87,11 @@ pub(super) fn within(arrived: bool, distance: f64, range: f64) -> bool {
 /// free flight uses the same star body and planetary system as clicking Visit;
 /// only cells already streamed in are eligible, and it never starts a flight or
 /// re-frames the camera. Leaving a system in simulation mode, however it was
-/// reached, returns to open space without moving the eye.
+/// reached, returns to open space without moving the eye. Following a craft in
+/// galactic space arrives and leaves the same way, so a system comes into view
+/// as the camera nears it, not when the craft slows enough to enter it; a
+/// craft in a system brings the camera there itself (`place_camera`).
+#[allow(clippy::too_many_arguments)]
 pub fn locate(
     #[cfg(target_arch = "wasm32")] benchmark: Option<
         Res<crate::devtools::benchmark::BenchmarkFlight>,
@@ -97,6 +101,7 @@ pub fn locate(
     lists: Res<Universe>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
+    fleet: Res<crate::craft::Fleet>,
     mut nav: ResMut<Navigation>,
 ) {
     let eye_ly = rig.galactic_ly(&pose);
@@ -112,9 +117,13 @@ pub fn locate(
     if benchmark.is_some() {
         return;
     }
+    let craft = nav
+        .following
+        .then(|| nav.selected_craft().and_then(|id| fleet.get(id)))
+        .flatten();
     // Flights and presets are deliberate: wait until they land.
     if nav.presentation_mode != PresentationMode::Simulation
-        || (nav.following && nav.selected_craft().is_some())
+        || craft.is_some_and(|live| !live.star().is_empty())
         || rig.flying()
         || nav.fly
         || !rig.placed()
@@ -122,8 +131,10 @@ pub fn locate(
     {
         return;
     }
+    let following = craft.is_some();
     if nav.system(&lists.0).is_some() {
         rebase(&mut nav, &rig, pose.eye, &lists.0, None, 0);
+        nav.following = following;
         // Let place_camera switch the displayed frame before another handoff.
         return;
     }
@@ -145,6 +156,7 @@ pub fn locate(
         return;
     };
     rebase(&mut nav, &rig, pose.eye, &lists.0, Some(visit), page);
+    nav.following = following;
     nav.arrived = true;
 }
 

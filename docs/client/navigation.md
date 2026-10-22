@@ -68,9 +68,12 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   each frame (`craft::followed`), from 200 m. It uses the craft's retained body
   data, not visible-star reachability, and tracks system/galactic handoffs
   without starting another camera flight. Open-space following uses the craft's
-  local galactic anchor for close-up precision. Camera-driven automatic system
-  entry/exit is suspended while following a craft; its physical proximity still
-  determines arrival and body visibility.
+  local galactic anchor for close-up precision. A followed craft in a system
+  brings the camera to that system. One in galactic space leaves arriving and
+  leaving to the camera's own proximity, as in free flight, so a ship warping
+  in shows its destination from 0.02 ly out, not only once it slows below
+  light speed and enters the system's frame. The craft is then drawn and
+  followed from its galactic anchor, converted into the system's frame.
 - Craft following retains the target-to-eye offset separately from the large
   local position. Both hull and label use that exact camera-relative centre,
   rather than adding a 200 m offset to a light-year-sized number and subtracting
