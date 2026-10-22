@@ -342,9 +342,9 @@ or on streamed stars.
 ## Warp core
 
 Warp is bubble transport along the ship's nose, commanded through the CLI/API,
-and steered by turning the nose (see [warp steering](#warp-steering)). It is
-not a destination autopilot. There is no turn-limit, collision or approach
-assist, fuel or energy budget yet. Explicit matched dropout is described
+and steered by turning the nose (see [warp steering](#warp-steering)), by
+hand or by the [route pilot](#plotted-routes). There is no turn-limit,
+collision or approach assist, fuel or energy budget yet. Explicit matched dropout is described
 below. Manual warp is deliberately unsafe:
 there are no body collision checks, atmosphere exclusions or missing-data stops.
 It can engage inside a body and pass through stars and planets, with no crash
@@ -419,6 +419,61 @@ predicts. The crew would feel no turning force.
   the steering target. Disengaging or a matched dropout leaves the ship with
   no spin; a held rotation input or pointing pilot then passes back to the
   turning thrusters, unchanged.
+
+### Plotted routes
+
+`ns ship warp to <id> [--match | --orbit] [--time <s>]` plots a trip to a
+planet, star, barycentre or system key (its star or outermost barycentre) in
+the ship's current system, engages warp and flies it (`craft::route`). The
+route pilot is ship state beside the attitude pilot. Each step, before the
+ship moves, it gives the orders a player would: pointing at a direction,
+the requested speed and, at the standoff, dropout. It never moves the ship
+itself, so replays and servers run it from the same inputs.
+
+- **Target facts:** each step the pilot asks the field for the target's
+  state, size, keep-clear distance, orbit reach, GM and system (`Target`),
+  and never checks what kind of object it is. A body's size is its radius;
+  a barycentre's is its pair's separation, and it keeps clear of its stars.
+- **Standoff:** four sizes from the centre, at least the keep-clear distance
+  (1.5 radii, or a barycentre's farthest star plus 1.5 of its radii) and at
+  most 90% of the orbit reach, so `--orbit` works on arrival. A star of a
+  tight pair whose stable zone barely clears its surface has none, and the
+  order is refused.
+- **Speed profile:** requested speed is the distance to the target's centre
+  over a time constant τ, so every second covers the same share of what is
+  left, reaching the standoff after τ × ln(distance ÷ standoff). The request
+  is lowered by (1 − 0.3 s ÷ τ) so the lagging speed ramp still flies the
+  profile; τ is at least 0.6 s. Speed is 1 m/s while the nose is more than
+  10° off, ramping up to full by 2°.
+- **Trip time:** 10 to 3,600 s, or by default 20 s plus 10 s for each tenfold
+  distance beyond 1 AU, up to 60 s. It includes the first turn, estimated
+  from the turn rate and pointing's easing. τ is fitted to it at plotting,
+  again once lined up, and once a second until the approach (the last ten
+  standoffs), so a trip whose turn ran long catches up. A time that cannot
+  be met (a 10 s trip facing away) is accepted and shows as `late_s`.
+- **Aim:** the bubble's wanted velocity closes along the line of sight and
+  cancels the drift between the ship's ordinary velocity and the target's,
+  so moving targets are met. Flying off the line turns the line of sight
+  faster than pointing (a 1.4 s response) can follow once τ is short, which
+  would diverge; the pilot aims ahead by the line of sight's turn over that
+  response (at most 45°), which keeps the nose on it.
+- **Arrival:** at the standoff, `keep` disengages with ordinary velocity,
+  `match` takes the target's velocity and `orbit` adds rough-orbit speed, as
+  [matched dropout](#matched-dropout) does. The attitude pilot returns to
+  manual, with no spin.
+- **Takeover:** `warp cancel`, any turning order (`rotate`, `point`, `stop`,
+  `release`, `cut`), a warp speed order, `disengage` or `match` ends the
+  route. Warp is left as it was, so nothing jumps; turning returns to manual.
+- **Refused when given, leaving the ship unchanged:** an unknown ID, the ship
+  itself, no safe standoff, already within the standoff, galactic space,
+  sublight thrust still on, or a trip time out of range.
+- **Readout:** `route` in the ship state holds the target, arrival mode,
+  stage (`align`, `cruise`, `approach`, `arrived`, `released`), trip time, τ,
+  standoff, distance, ETA, lateness, whether the top speed stretches it and
+  how it ended. It is kept after the route ends.
+
+Bodies in the way, interstellar routes and ships as targets are later
+checkpoints of [phase 9](../plans/flight-sim.md#9--plotted-warp-autopilot).
 
 Below the gravity cutoff, active warp retains its final gravity sample for
 the next step, including ordinary flight after dropout. Samples use the
@@ -513,9 +568,11 @@ inputs give the same path on any machine, wherever the camera is.
 `ns ship warp match <body-id> [--orbit]`, ends warp and replaces ordinary velocity
 at the command's application tick. It resolves the same stable planet, star or
 barycentre IDs used by inspection, selection and orbit references, against the
-craft's current system. Galactic-space and remote matching are refused. There
-is no separate target picker, persistent matching setting or automatic arrival;
-in-app selection-to-flight actions remain later work.
+craft's current system, or a system key as its star or outermost barycentre.
+Galactic-space and remote matching are refused. A plotted route's `--match`
+and `--orbit` arrivals use the same rules. There is no separate target picker
+or persistent matching setting; in-app selection-to-flight actions remain
+later work.
 
 Without `--orbit`, the result is the body's analytic velocity at that tick.
 This alone does not support the ship against gravity. With `--orbit`, the drive

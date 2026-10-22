@@ -580,6 +580,44 @@ fn matched_dropout_command_reaches_physics_and_ship_readout() {
     }
 }
 
+#[test]
+fn a_plotted_route_reaches_its_target_and_the_readout_shows_it() {
+    let mut app = app();
+    let (system, page, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let star = objects::star_id(&system, page);
+    let command: UiCommand = serde_json::from_value(serde_json::json!({
+        "type": "steer_craft", "order": {"action": "warp", "command": {
+            "command": "to", "target": star, "match": true, "time": 20.0,
+        }}
+    }))
+    .unwrap();
+    send(&mut app, command);
+    let readout = |app: &App| {
+        let fleet = app.world().resource::<Fleet>();
+        super::readout(fleet, fleet.craft[0].craft.seconds())["craft"][0]["route"].clone()
+    };
+    assert_eq!(readout(&app)["stage"], "align");
+    assert_eq!(readout(&app)["arrival"], "match");
+    for _ in 0..(25.0 / STEP_SECONDS) as usize {
+        app.world_mut().resource_mut::<Clock>().0.seconds += STEP_SECONDS;
+        app.update();
+    }
+    let route = readout(&app);
+    assert_eq!(route["stage"], "arrived", "{route}");
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert!(!live.craft.warp.engaged);
+    assert_eq!(live.craft.warp.last_match.as_ref().unwrap().body, star);
+}
+
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| a[i] * b[i]).sum()
 }

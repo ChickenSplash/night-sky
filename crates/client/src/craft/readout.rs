@@ -90,6 +90,9 @@ pub struct CraftReadout {
     pub prediction: PredictionReadout,
     #[schemars(extend("x-group" = "warp"))]
     pub warp: space_simulation::craft::warp::Warp,
+    /// The plotted warp route, kept after it ends.
+    #[schemars(extend("x-group" = "route"))]
+    pub route: Option<space_simulation::craft::Route>,
     /// Orders scheduled for later steps.
     #[schemars(extend("x-group" = "drives"))]
     pub pending_orders: Vec<PendingOrder>,
@@ -244,6 +247,7 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 autopilot: live.craft.autopilot.clone(),
                 prediction: prediction_readout(live, seconds),
                 warp: live.craft.warp.clone(),
+                route: live.craft.route.clone(),
                 pending_orders: live
                     .pending_orders()
                     .into_iter()
@@ -373,6 +377,9 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
         "Unsafe manual (no collision protection)".into(),
     ));
     rows.push(("Arrival".into(), live.arrival_status()));
+    if let Some(route) = &live.craft.route {
+        rows.extend(route_facts(live, galaxy, route));
+    }
     if let Some(exit) = &live.craft.warp.last_match {
         rows.push((
             "Last matched dropout".into(),
@@ -449,6 +456,53 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
         },
     ));
     (live.craft.name.clone(), rows)
+}
+
+/// The inspector's route facts: target, stage and progress, or how it ended.
+fn route_facts(
+    live: &Live,
+    galaxy: &Galaxy,
+    route: &space_simulation::craft::Route,
+) -> Vec<(String, String)> {
+    use crate::format::{duration_text, km_text};
+    use space_simulation::craft::{ArrivalMode, route::Stage};
+    let arrival = match route.arrival {
+        ArrivalMode::Keep => "keep velocity",
+        ArrivalMode::Match => "match velocity",
+        ArrivalMode::Orbit => "rough orbit",
+    };
+    let mut rows = vec![(
+        "Route".into(),
+        format!("{} · {arrival}", body_label(live, galaxy, &route.target)),
+    )];
+    if !route.active() {
+        rows.push(("Route ended".into(), route.end.clone().unwrap_or_default()));
+        return rows;
+    }
+    let stage = match route.stage {
+        Stage::Align => "Turning to target",
+        Stage::Cruise => "Cruise",
+        Stage::Approach => "Approach",
+        Stage::Arrived | Stage::Released => "",
+    };
+    rows.push(("Route stage".into(), stage.into()));
+    rows.push((
+        "Route distance".into(),
+        km_text((route.distance_m - route.standoff_m).max(0.0) / 1_000.0) + " to standoff",
+    ));
+    let mut eta = format!(
+        "{} · trip {}",
+        duration_text(route.eta_s),
+        duration_text(route.trip_s)
+    );
+    if route.late_s > 0.5 {
+        eta += &format!(" · {} late", duration_text(route.late_s));
+    }
+    if route.capped {
+        eta += " · top speed";
+    }
+    rows.push(("Route ETA".into(), eta));
+    rows
 }
 
 /// The inspector's prediction facts: reference, age and upcoming events.

@@ -1,6 +1,7 @@
 //! Orders a pilot, autopilot or remote player gives a craft. Each patches only
 //! the input it names, leaving other drives alone. Checks and application
 //! share this one path, so any client or server refuses the same orders.
+use super::route::{ArrivalMode, MAX_TRIP_S, MIN_TRIP_S, TAKEOVER};
 use super::warp::{
     GravityPolicy, MAX_SPEED, MAX_TURN_RATE_DPS, MIN_SPEED, MIN_TURN_RATE_DPS, SPEED_FACTOR,
 };
@@ -135,6 +136,29 @@ pub enum WarpOrder {
     Down,
     /// Developer gravity policy; change only while disengaged.
     Gravity { policy: GravityPolicy },
+    /// Fly to a body in the ship's system and drop out near it.
+    ///
+    /// Engages warp, turns to the target, then slows all the way in, dropping
+    /// out at a standoff of a few times the target's size. Moving targets are
+    /// tracked every step. Turning, warp speed, disengage and match orders
+    /// take over; warp is left as it was.
+    To {
+        /// Planet, star or barycentre ID, or a system's key.
+        target: String,
+        /// Drop out at the target's velocity.
+        #[serde(default, rename = "match")]
+        matched: bool,
+        /// Drop out into a rough orbit around the target; matches too.
+        #[serde(default)]
+        orbit: bool,
+        /// Trip time, including the first turn (default 20 to 60 s by
+        /// distance).
+        #[serde(default)]
+        #[schemars(range(min = MIN_TRIP_S, max = MAX_TRIP_S), extend("x-unit" = "s"))]
+        time: Option<f64>,
+    },
+    /// End the route, leaving warp engaged at its current speed.
+    Cancel,
 }
 
 /// Controls an order sets, as bits of `Order::controls`.
@@ -186,7 +210,12 @@ impl Order {
             Self::Cut => THROTTLE | TRANSLATION | TURNING | THRUST,
             Self::Thrust { .. } => THRUST,
             Self::Warp {
-                command: WarpOrder::Engage | WarpOrder::Disengage | WarpOrder::Match { .. },
+                command:
+                    WarpOrder::Engage
+                    | WarpOrder::Disengage
+                    | WarpOrder::Match { .. }
+                    | WarpOrder::To { .. }
+                    | WarpOrder::Cancel,
             } => WARP,
             Self::Configure { .. } | Self::Warp { .. } => 0,
         }
@@ -252,6 +281,16 @@ impl Order {
             Self::Warp {
                 command: WarpOrder::Match { body, .. },
             } => body_id(body)?,
+            Self::Warp {
+                command: WarpOrder::To { target, time, .. },
+            } => {
+                body_id(target)?;
+                if time.is_some_and(|t| !(MIN_TRIP_S..=MAX_TRIP_S).contains(&t)) {
+                    return Err(format!(
+                        "Trip time must be {MIN_TRIP_S} to {MAX_TRIP_S} seconds"
+                    ));
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -267,20 +306,51 @@ impl Order {
             Self::Warp { command } => {
                 match command {
                     WarpOrder::Engage => craft.engage_warp()?,
-                    WarpOrder::Disengage => craft.disengage_warp("Manual disengagement"),
+                    WarpOrder::Disengage => {
+                        craft.end_route(TAKEOVER);
+                        craft.disengage_warp("Manual disengagement");
+                    }
                     WarpOrder::Match { body, orbit } => {
                         craft.matched_dropout(field, body, *orbit)?;
+                        craft.end_route(TAKEOVER);
                     }
-                    WarpOrder::Set { speed_ms } => craft.warp.set_speed(*speed_ms)?,
+                    WarpOrder::Set { speed_ms } => {
+                        craft.warp.set_speed(*speed_ms)?;
+                        craft.end_route(TAKEOVER);
+                    }
                     WarpOrder::TurnRate { degrees_per_second } => {
                         craft.warp.set_turn_rate(*degrees_per_second)?
                     }
-                    WarpOrder::Up => craft
-                        .warp
-                        .set_speed((craft.warp.requested_ms * SPEED_FACTOR).min(MAX_SPEED))?,
-                    WarpOrder::Down => craft
-                        .warp
-                        .set_speed((craft.warp.requested_ms / SPEED_FACTOR).max(MIN_SPEED))?,
+                    WarpOrder::Up => {
+                        craft
+                            .warp
+                            .set_speed((craft.warp.requested_ms * SPEED_FACTOR).min(MAX_SPEED))?;
+                        craft.end_route(TAKEOVER);
+                    }
+                    WarpOrder::Down => {
+                        craft
+                            .warp
+                            .set_speed((craft.warp.requested_ms / SPEED_FACTOR).max(MIN_SPEED))?;
+                        craft.end_route(TAKEOVER);
+                    }
+                    WarpOrder::To {
+                        target,
+                        matched,
+                        orbit,
+                        time,
+                    } => {
+                        let arrival = match (*matched, *orbit) {
+                            (_, true) => ArrivalMode::Orbit,
+                            (true, false) => ArrivalMode::Match,
+                            (false, false) => ArrivalMode::Keep,
+                        };
+                        craft.fly_to(field, target, arrival, *time)?;
+                    }
+                    WarpOrder::Cancel => {
+                        if !craft.end_route("Cancelled") {
+                            return Err("No route is being flown".into());
+                        }
+                    }
                     WarpOrder::Gravity { policy } => {
                         if craft.warp.engaged {
                             return Err("Disengage warp before changing its gravity policy".into());

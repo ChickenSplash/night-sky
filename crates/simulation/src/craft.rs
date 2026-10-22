@@ -47,6 +47,8 @@ mod order;
 pub use order::{MAX_BODY_ID, MAX_THRUST, Order, WarpOrder};
 mod reference;
 pub use reference::{Reference, ReferenceKind, SWITCH_MARGIN};
+pub mod route;
+pub use route::{ArrivalMode, Route, Target};
 pub mod predict;
 pub mod voyage;
 pub mod warp;
@@ -197,6 +199,9 @@ pub struct Craft {
     pub input: Input,
     #[serde(default)]
     pub warp: warp::Warp,
+    /// The plotted warp route, kept after it ends for inspection.
+    #[serde(default)]
+    pub route: Option<Route>,
     /// Gravity at the current state, kept from the last step's end. Any
     /// client or server recomputes the same value when it is missing.
     #[serde(skip)]
@@ -228,6 +233,11 @@ pub trait Gravity {
     fn closest(&self, _position: [f64; 3], _seconds: f64) -> Option<Closest> {
         None
     }
+    /// What the route pilot needs to know about a target. Fields without
+    /// targets may omit it.
+    fn target(&self, _id: &str, _seconds: f64) -> Option<Target> {
+        None
+    }
 }
 
 /// The body with the shortest free-fall time from a point.
@@ -256,6 +266,7 @@ impl Craft {
             tick,
             input: Input::default(),
             warp: warp::Warp::default(),
+            route: None,
             gravity: None,
         }
     }
@@ -332,8 +343,9 @@ impl Craft {
 
     /// One fixed step: kick, drift, kick (velocity Verlet), which keeps
     /// orbital energy from drifting over many laps; or bubble transport
-    /// while warp is engaged.
+    /// while warp is engaged, after the route pilot's orders.
     pub fn step(&mut self, gravity: &impl Gravity) {
+        self.fly_route(gravity);
         if self.warp.engaged {
             self.warp_step(gravity);
             return;
@@ -506,6 +518,10 @@ impl Gravity for Field {
         seconds: f64,
     ) -> Option<Reference> {
         self.select_reference(current, position, seconds)
+    }
+
+    fn target(&self, id: &str, seconds: f64) -> Option<Target> {
+        Field::target(self, id, seconds)
     }
 
     fn closest(&self, position: [f64; 3], seconds: f64) -> Option<Closest> {

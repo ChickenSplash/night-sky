@@ -4,7 +4,7 @@
 //! The drive also turns the bubble and the ship inside it together, without
 //! turning thrusters: a game rule. Steering sets a turn rate, not an angular
 //! acceleration, so releasing it stops the turn, and dropout leaves no spin.
-use super::{Craft, Field, Frame, Gravity, Motion, STEP_SECONDS, circular_speed};
+use super::{Craft, Field, Frame, Gravity, Motion, STEP_SECONDS, Target, circular_speed};
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 
@@ -144,28 +144,37 @@ impl Craft {
         if !matches!(self.frame, Frame::System { .. }) {
             return Err("Matched dropout requires a body in the ship's current system".into());
         }
-        let reference = field
-            .and_then(|field| field.reference_by_id(body, self.seconds()))
+        let target = field
+            .and_then(|field| field.target(body, self.seconds()))
             .ok_or_else(|| format!("No body `{body}` in this ship's frame"))?;
-        let mut state = self.state();
-        let mut velocity = DVec3::from_array(reference.state.velocity);
+        let velocity = self.matched_velocity(&target, orbit)?;
+        self.drop_matched(velocity, &target.id, orbit);
+        Ok(())
+    }
+
+    /// The velocity a matched dropout gives: the target's, plus for a rough
+    /// orbit sqrt(GM/r) sideways.
+    pub(super) fn matched_velocity(&self, target: &Target, orbit: bool) -> Result<DVec3, String> {
+        let state = self.state();
+        let mut velocity = DVec3::from_array(target.state.velocity);
         if orbit {
             let radial =
-                DVec3::from_array(state.position) - DVec3::from_array(reference.state.position);
+                DVec3::from_array(state.position) - DVec3::from_array(target.state.position);
             let r = radial.length();
-            if !r.is_finite() || r <= reference.radius_m || r <= 0.0 {
+            if !r.is_finite() || r <= target.radius_m || r <= 0.0 {
                 return Err(
                     "Rough-orbit dropout requires a position outside the reference body".into(),
                 );
             }
             // Beyond its Hill sphere or stable zone another body dominates,
             // so a two-body circular speed would not describe an orbit.
-            if r >= reference.reach_m {
+            if r >= target.reach_m.unwrap_or(0.0) {
                 return Err(format!(
-                    "Rough-orbit dropout requires a position within `{body}`'s sphere of influence"
+                    "Rough-orbit dropout requires a position within `{}`'s sphere of influence",
+                    target.id
                 ));
             }
-            let speed = circular_speed(reference.gm, r);
+            let speed = circular_speed(target.gm, r);
             if !speed.is_finite() || speed <= 0.0 {
                 return Err("Reference has no valid orbital speed".into());
             }
@@ -190,6 +199,12 @@ impl Craft {
         if !velocity.is_finite() {
             return Err("Reference velocity is not finite".into());
         }
+        Ok(velocity)
+    }
+
+    /// Leave warp at `velocity`, recording the match.
+    pub(super) fn drop_matched(&mut self, velocity: DVec3, body: &str, orbit: bool) {
+        let mut state = self.state();
         state.velocity = velocity.to_array();
         self.motion = Motion::Free(state);
         self.gravity = None;
@@ -205,7 +220,6 @@ impl Craft {
             tick: self.tick,
             velocity_ms: state.velocity,
         });
-        Ok(())
     }
 
     /// Validate without changing motion or silently cutting other drives.

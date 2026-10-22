@@ -690,6 +690,93 @@
         "warp",
         "gravity"
       ]
+    },
+    {
+      "about": "Engages warp, turns to the target, then slows all the way in, dropping out at a standoff of a few times the target's size. Moving targets are tracked every step. Turning, warp speed, disengage and match orders take over; warp is left as it was.",
+      "at": [
+        "command"
+      ],
+      "fields": [
+        {
+          "cli": "positional",
+          "help": "Planet, star or barycentre ID, or a system's key.",
+          "key": [
+            "target"
+          ],
+          "kind": "text",
+          "name": "target",
+          "required": true
+        },
+        {
+          "cli": "flag",
+          "default": false,
+          "help": "Drop out at the target's velocity.",
+          "key": [
+            "match"
+          ],
+          "kind": "boolean",
+          "name": "match",
+          "required": false
+        },
+        {
+          "cli": "flag",
+          "default": false,
+          "help": "Drop out into a rough orbit around the target; matches too.",
+          "key": [
+            "orbit"
+          ],
+          "kind": "boolean",
+          "name": "orbit",
+          "required": false
+        },
+        {
+          "cli": "flag",
+          "default": null,
+          "help": "Trip time, including the first turn (default 20 to 60 s by distance).",
+          "key": [
+            "time"
+          ],
+          "kind": "number",
+          "max": 3600.0,
+          "min": 10.0,
+          "name": "time",
+          "required": false,
+          "unit": "s"
+        }
+      ],
+      "group": "warp",
+      "help": "Fly to a body in the ship's system and drop out near it.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "to"
+        }
+      },
+      "words": [
+        "warp",
+        "to"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [],
+      "group": "warp",
+      "help": "End the route, leaving warp engaged at its current speed.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "cancel"
+        }
+      },
+      "words": [
+        "warp",
+        "cancel"
+      ]
     }
   ],
   "state": {
@@ -1266,6 +1353,152 @@
         "unit": "°"
       },
       {
+        "group": "route",
+        "help": "The target's ID: a system's key resolves to its star or outermost barycentre.",
+        "key": [
+          "route",
+          "target"
+        ],
+        "kind": "text",
+        "label": "target"
+      },
+      {
+        "group": "route",
+        "help": "How the ship leaves warp at the standoff.",
+        "key": [
+          "route",
+          "arrival"
+        ],
+        "kind": "choice",
+        "label": "arrival"
+      },
+      {
+        "group": "route",
+        "key": [
+          "route",
+          "stage"
+        ],
+        "kind": "choice",
+        "label": "stage"
+      },
+      {
+        "group": "route",
+        "help": "Planned trip time, from the order's step.",
+        "key": [
+          "route",
+          "trip_s"
+        ],
+        "kind": "number",
+        "label": "trip",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "The step the order applied at.",
+        "key": [
+          "route",
+          "start_tick"
+        ],
+        "kind": "integer",
+        "label": "start tick"
+      },
+      {
+        "group": "route",
+        "help": "Distance from the target's centre where the ship drops out.",
+        "key": [
+          "route",
+          "standoff_m"
+        ],
+        "kind": "number",
+        "label": "standoff",
+        "unit": "m"
+      },
+      {
+        "group": "route",
+        "help": "Speed is the remaining distance over this.",
+        "key": [
+          "route",
+          "tau_s"
+        ],
+        "kind": "number",
+        "label": "tau",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "From the target's centre, at the last step.",
+        "key": [
+          "route",
+          "distance_m"
+        ],
+        "kind": "number",
+        "label": "distance",
+        "unit": "m"
+      },
+      {
+        "group": "route",
+        "help": "Estimated time to arrival.",
+        "key": [
+          "route",
+          "eta_s"
+        ],
+        "kind": "number",
+        "label": "eta",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "Expected arrival after the planned trip time; negative when early.",
+        "key": [
+          "route",
+          "late_s"
+        ],
+        "kind": "number",
+        "label": "late",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "The top warp speed stretches the trip.",
+        "key": [
+          "route",
+          "capped"
+        ],
+        "kind": "boolean",
+        "label": "capped"
+      },
+      {
+        "group": "route",
+        "help": "The nose has lined up once.",
+        "key": [
+          "route",
+          "aligned"
+        ],
+        "kind": "boolean",
+        "label": "aligned"
+      },
+      {
+        "group": "route",
+        "help": "How the route ended.",
+        "key": [
+          "route",
+          "end"
+        ],
+        "kind": "text",
+        "label": "end"
+      },
+      {
+        "group": "route",
+        "help": "Trip time asked for; none for the distance-scaled default.",
+        "key": [
+          "route",
+          "requested_s"
+        ],
+        "kind": "number",
+        "label": "requested",
+        "unit": "s"
+      },
+      {
         "group": "attitude",
         "help": "Where the pointing pilot is aiming, in frame axes.",
         "key": [
@@ -1361,6 +1594,10 @@
       {
         "id": "warp",
         "label": "Warp"
+      },
+      {
+        "id": "route",
+        "label": "Route"
       },
       {
         "id": "prediction",

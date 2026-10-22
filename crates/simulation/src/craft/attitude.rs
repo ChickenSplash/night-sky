@@ -4,6 +4,11 @@
 use super::*;
 use glam::DMat3;
 
+/// Pointing in warp turns at the attitude error over this, in seconds, up
+/// to the turn rate.
+pub const WARP_POINT_SECONDS: f64 = 4.0 * (warp::RAMP_SECONDS + STEP_SECONDS);
+use route::TAKEOVER;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "target", content = "value", rename_all = "snake_case")]
 pub enum PointTarget {
@@ -48,6 +53,7 @@ pub enum AttitudePilot {
 impl Craft {
     /// Engage pointing. An optional up vector fixes roll (projected onto the
     /// plane normal to the target); without one the initial roll is retained.
+    /// Like every turning order, it takes over from a route.
     pub fn point(&mut self, target: PointTarget, up: Option<[f64; 3]>) -> Result<(), &'static str> {
         if let PointTarget::Vector(v) = &target
             && unit(*v).is_none()
@@ -57,6 +63,7 @@ impl Craft {
         if up.is_some_and(|v| unit(v).is_none()) {
             return Err("up must be finite and nonzero");
         }
+        self.end_route(TAKEOVER);
         self.input.controls.rotation = [0.0; 3];
         self.autopilot = AttitudePilot::Point {
             target,
@@ -68,12 +75,14 @@ impl Craft {
 
     /// Brake angular velocity only. Linear velocity and throttle are untouched.
     pub fn stop_rotation(&mut self) {
+        self.end_route(TAKEOVER);
         self.input.controls.rotation = [0.0; 3];
         self.autopilot = AttitudePilot::Stop;
     }
 
     /// Return to manual rotation, with no residual autopilot thruster input.
     pub fn release(&mut self) {
+        self.end_route(TAKEOVER);
         self.autopilot = AttitudePilot::Manual;
     }
 
@@ -110,7 +119,7 @@ impl Craft {
         let most = self.warp.turn_rate_dps.to_radians();
         let rate = match self.autopilot {
             AttitudePilot::Manual => DVec3::from_array(self.input.controls.rotation) * most,
-            _ => self.attitude_error(field) / (4.0 * (warp::RAMP_SECONDS + STEP_SECONDS)),
+            _ => self.attitude_error(field) / WARP_POINT_SECONDS,
         };
         rate.clamp_length_max(most)
     }

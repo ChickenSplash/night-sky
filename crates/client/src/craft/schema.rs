@@ -22,19 +22,20 @@ const GROUPS: [(&str, &str, &str); 3] = [
 ];
 
 /// State display groups in order: id and label.
-const STATE_GROUPS: [(&str, &str); 6] = [
+const STATE_GROUPS: [(&str, &str); 7] = [
     ("ship", "Ship"),
     ("position", "Position"),
     ("attitude", "Attitude"),
     ("drives", "Drives"),
     ("warp", "Warp"),
+    ("route", "Route"),
     ("prediction", "Prediction"),
 ];
 
 /// Name endings that only repeat the unit, left out of display labels. A
 /// schema `title` replaces the label altogether.
-const UNIT_SUFFIXES: [&str; 10] = [
-    "_xyzw", "_kms", "_ms", "_km", "_m", "_deg", "_dps", "_rads", "_pc", "_seconds",
+const UNIT_SUFFIXES: [&str; 11] = [
+    "_xyzw", "_kms", "_ms", "_km", "_m", "_deg", "_dps", "_rads", "_pc", "_seconds", "_s",
 ];
 
 /// The longest delay or duration an order may be given, in seconds.

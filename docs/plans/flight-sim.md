@@ -787,12 +787,20 @@ when given, with the reason, not on arrival.
 
 Checkpoints:
 
-1. **In-system pilot:** the target facts with natural bodies as the first
+1. ✅ **In-system pilot:** the target facts with natural bodies as the first
    source, the speed profile and trip time, aiming at moving targets, the
    standoff rule, the three arrival modes, `warp to` and `warp cancel`,
    takeover, progress readouts and refusals. Tests for each target kind,
    both gravity policies, trip times from 10 to 3,600 s and replay from
    a snapshot.
+   - Done 2026-10-22. Found while testing: with a short τ, flying even a
+     few degrees off the line turns the line of sight faster than pointing
+     follows, and the nose never settled. The pilot now aims ahead by the
+     line of sight's turn over pointing's response, which keeps it stable.
+   - τ is fitted again once lined up and once a second, so a turn that ran
+     long is made up. A 10 s trip facing away runs about 4 s late: the
+     turn alone takes about 9 s at 30 °/s, not the 6 s guessed above.
+   - `--match` with `--orbit` is accepted as `--orbit`, which matches too.
 2. **Bodies in the way:** the per-step clearance check, aiming at the edge,
    the bend speed cap, and the wrapped path in the trip time, best
    achievable time and ETA. Tests with a target directly and barely behind
