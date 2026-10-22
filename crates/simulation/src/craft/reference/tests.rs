@@ -269,7 +269,7 @@ fn queued_matched_exit_resolves_at_execution_tick_and_replays() {
     let inputs: Vec<crate::craft::voyage::ScheduledOrder> =
         serde_json::from_str(&serde_json::to_string(&voyage.pending_orders()).unwrap()).unwrap();
     for input in inputs {
-        restored.order(input.tick, input.order).unwrap();
+        restored.schedule(input).unwrap();
     }
     while voyage.craft.tick < tick {
         assert!(voyage.craft.warp.engaged);

@@ -143,6 +143,31 @@ fn fields_carry_kinds_ranges_units_and_cli_shape() {
     );
 }
 
+#[test]
+fn timed_orders_name_their_off_order() {
+    let catalogue = catalogue();
+    let off = |words| &order(&catalogue, words)["off"];
+    assert_eq!(
+        off("throttle"),
+        &json!({"action": "throttle", "value": 0.0})
+    );
+    assert_eq!(off("point")["action"], "rotate");
+    assert_eq!(
+        off("warp engage"),
+        &json!({"action": "warp", "command": {"command": "disengage"}})
+    );
+    for words in ["stop", "cut", "configure", "warp set", "warp disengage"] {
+        assert_eq!(off(words), &Value::Null, "{words}");
+    }
+    let names: Vec<_> = catalogue["common"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["id", "tick", "in", "for"]);
+}
+
 /// Every number a client shows or sends must say what it measures.
 #[test]
 fn every_number_declares_its_unit() {

@@ -130,8 +130,10 @@ curl -H 'X-Night-Sky-Client: cli' --data 'set_debug split_multiples false' http:
 before they have in-app UI. It opens on a **Ship** tab built from the
 [ship schema](#ship-schema): a ship picker, order buttons grouped as sublight,
 turning and warp (orders without settings run when pressed, others open a
-typed form with ranges and units), and the picked ship's live state, grouped
-with readable units and refreshed twice a second. It reads the live schema,
+typed form with ranges and units, plus `in` and, on orders that can be
+timed, `for` in seconds), and the picked ship's live state, grouped with
+readable units and refreshed twice a second. Pending orders show as
+"in 0.95 s: throttle value=0 (timed end)". It reads the live schema,
 or the committed copy when the app is older or offline.
 
 The **Commands** tab builds its command list and forms from
@@ -174,8 +176,11 @@ a catalogue that clients read without knowing JSON Schema:
 - `orders`: each order's words (`warp set`), group, help, JSON skeleton, the
   path its fields go under, and its fields: key path, kind (number, integer,
   boolean, text, choice, vector, variant), range, unit, default, and whether
-  the CLI takes it as a positional argument or a flag;
-- `common`: `id` and `tick`, which every order takes from `steer_craft`;
+  the CLI takes it as a positional argument or a flag; and `off`, the order
+  that ends it when timed (`Order::off`), or null when it cannot be timed;
+- `common`: `id`, `tick`, `in` and `for`, which orders take from
+  `steer_craft` (key `in_s` and `for_s`); `for`, marked `timed`, applies only
+  to orders with an `off`;
 - `state`: display groups and every readout field with its group, label and
   unit, so new state fields appear in the TUI's state panel.
 
@@ -261,10 +266,24 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   limited to 300 simulated seconds ahead and 1,024 pending orders per craft.
   Queue acceptance is not execution acceptance:
   drive/frame interlocks are checked at that future boundary and refusals
-  are logged. `ship state` exposes `pending_orders` as tick/order pairs.
-  See [step-keyed orders](../simulation/craft.md#body-axis-control-simulation)
-  for queue limits and replay semantics. Use the generic JSON command API
-  for explicit ticks; the `ns ship` convenience commands still mean now.
+  are logged. `ship state` exposes `pending_orders`, each with its `tick`,
+  `order`, `in_s` (seconds until it applies) and, for a timed order's end,
+  `ends_from`. See [step-keyed orders](../simulation/craft.md#body-axis-control-simulation)
+  for queue limits and replay semantics.
+- People and agents should give times in seconds rather than steps:
+  `in_s` delays an order from the ship's next step (instead of `tick`), and
+  `for_s` ends it with its off order after that long, both rounded to whole
+  0.05 s steps. Throttle, translate, rotate, point, thrust and warp engage
+  can be timed; their off order is zero on the order's axes (a zero `rotate`
+  for point, which keeps any spin) or disengage. The app queues both halves
+  at once, so a client closing mid-burn changes nothing, and a later order
+  on the same controls cancels a pending end. In `ns` these are `--in` and
+  `--for` on every order that takes them, and `--tick` remains for exact
+  steps:
+  `ns ship throttle 0.5 --for 1` is a one-second burn,
+  `ns ship warp engage --in 5 --for 30` a delayed 30-second warp hop, and
+  `{"type":"steer_craft","in_s":2,"for_s":1,"order":{"action":"throttle","value":0.5}}`
+  the same through the API.
 - Legacy `ns ship thrust x,y,z` / `set_thrust [x,y,z]` remains a system-axis
   debug acceleration, at most 100 m/s². It is the `thrust` order underneath
   (`{"action":"thrust","thrust":[x,y,z]}`), validated like the others. A

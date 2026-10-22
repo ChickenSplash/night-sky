@@ -136,6 +136,8 @@ fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
         id: None,
         order,
         tick: None,
+        in_s: None,
+        for_s: None,
     };
     send(
         &mut app,
@@ -193,6 +195,8 @@ fn body_orders_validate_and_patch_inputs_without_cancelling_pointing() {
         id: None,
         order,
         tick: None,
+        in_s: None,
+        for_s: None,
     };
     send(
         &mut app,
@@ -291,6 +295,8 @@ fn manoeuvres_cap_the_clock_before_physics_and_preserve_pause_and_requested_rate
         &mut app,
         UiCommand::SteerCraft {
             tick: None,
+            in_s: None,
+            for_s: None,
             id: None,
             order: Order::Throttle { value: 0.5 },
         },
@@ -353,6 +359,8 @@ fn warp_respects_pause_without_the_sublight_time_cap() {
         &mut app,
         UiCommand::SteerCraft {
             tick: None,
+            in_s: None,
+            for_s: None,
             id: None,
             order: Order::Warp {
                 command: WarpOrder::Engage,
@@ -472,6 +480,8 @@ fn manual_dropout_takes_effect_from_the_next_fixed_step() {
         &mut app,
         UiCommand::SteerCraft {
             tick: None,
+            in_s: None,
+            for_s: None,
             id: None,
             order: Order::Warp {
                 command: WarpOrder::Disengage,
@@ -531,6 +541,8 @@ fn matched_dropout_command_reaches_physics_and_ship_readout() {
             UiCommand::SteerCraft {
                 id: None,
                 tick: None,
+                in_s: None,
+                for_s: None,
                 order: Order::Warp {
                     command: WarpOrder::Engage,
                 },
@@ -719,6 +731,78 @@ fn developer_orders_can_target_a_future_tick_without_acting_early() {
             .actual_ms
             > 0.0
     );
+}
+
+#[test]
+fn developer_orders_can_wait_and_last_for_seconds() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Clock>().0.seconds = 0.0;
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let steer = |extra: serde_json::Value| {
+        let mut value = serde_json::json!({"type": "steer_craft",
+                                           "order": {"action": "throttle", "value": 0.5}});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value::<UiCommand>(value).unwrap()
+    };
+    let refused = |command: UiCommand| {
+        let world = app.world();
+        command
+            .check(
+                &world.resource::<crate::Universe>().0,
+                world.resource::<Navigation>(),
+                world.resource::<crate::stars::stream::Starfield>(),
+                world.resource::<Fleet>(),
+            )
+            .is_err()
+    };
+    assert!(refused(steer(serde_json::json!({"tick": 2, "in_s": 0.1}))));
+    assert!(refused(steer(serde_json::json!({"for_s": 0.01}))));
+    assert!(refused(steer(serde_json::json!({"in_s": -1.0}))));
+    let stop: UiCommand = serde_json::from_value(
+        serde_json::json!({"type": "steer_craft", "order": {"action": "stop"}, "for_s": 1}),
+    )
+    .unwrap();
+    assert!(refused(stop));
+    send(
+        &mut app,
+        steer(serde_json::json!({"in_s": 0.1, "for_s": 1})),
+    );
+    let pending =
+        readout(app.world().resource::<Fleet>(), 0.0)["craft"][0]["pending_orders"].clone();
+    assert_eq!(pending[0]["tick"], 2);
+    assert!((pending[0]["in_s"].as_f64().unwrap() - 0.1).abs() < 1e-9);
+    assert_eq!(
+        (&pending[1]["tick"], &pending[1]["ends_from"]),
+        (&22.into(), &2.into())
+    );
+    let throttle = |app: &App| {
+        app.world().resource::<Fleet>().craft[0]
+            .craft
+            .input
+            .controls
+            .throttle
+    };
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(2);
+    app.update();
+    assert_eq!(throttle(&app), 0.5);
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(21);
+    app.update();
+    assert_eq!(throttle(&app), 0.5);
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(22);
+    app.update();
+    assert_eq!(throttle(&app), 0.0);
 }
 
 #[test]

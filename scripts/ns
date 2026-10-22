@@ -125,9 +125,35 @@ def add_orders(ships, schema):
         command = made[tuple(words[:-1])].add_parser(
             words[-1], help=(order.get("help") or "").replace("%", "%%"),
             description=" ".join(filter(None, (order.get("help"), order.get("about")))).replace("%", "%%"))
-        command.set_defaults(order=order)
-        for field in order["fields"] + schema["common"]:
+        common = common_fields(order, schema)
+        command.set_defaults(order=order, common=common)
+        for field in order["fields"] + common:
             add_field(command, field)
+
+
+def order_text(order):
+    """An order as words, e.g. "warp disengage" or "throttle value=0"."""
+    words, values = [], []
+    for key, value in order.items():
+        if isinstance(value, dict):
+            words.append(order_text(value))
+        elif isinstance(value, str):
+            words.append(value)
+        else:
+            values.append(f"{key}={value:g}" if isinstance(value, float) else f"{key}={json.dumps(value)}")
+    return " ".join(words + values)
+
+
+def common_fields(order, schema):
+    """The fields every order takes, with `for` only on orders that have an off order."""
+    fields = []
+    for field in schema["common"]:
+        if field.get("timed"):
+            if not order.get("off"):
+                continue
+            field = dict(field, help=f"{field['help'].rstrip('.')}; here {order_text(order['off'])}.")
+        fields.append(field)
+    return fields
 
 
 def option_value(field, args):
@@ -187,6 +213,8 @@ def ship_tree(schema):
                 parts.append(f"--{kebab(name)} <{name}>")
             else:
                 parts.append(f"[--{kebab(name)}]")
+        if order.get("off"):
+            parts.append("[--for]")
         return " ".join(parts)
 
     def rows(entries, indent):
@@ -196,7 +224,7 @@ def ship_tree(schema):
             lines.append(f"{indent}{branch}{text.ljust(44 - len(indent))}  {about}".rstrip())
         return lines
 
-    lines = ["ns ship  (orders also take --id and --tick)"]
+    lines = ["ns ship  (orders also take --id, --tick and --in <s>; --for <s> then sends the off order)"]
     sections = [("Managing ships", "", [(text, about) for text, about in MANAGEMENT], [])]
     for group in schema["groups"]:
         orders = [o for o in schema["orders"] if o["group"] == group["id"]]
@@ -506,15 +534,21 @@ def vector(text, name, length=3):
     return values
 
 
+def steer_command(order, args, craft, common):
+    """The `steer_craft` command for an order and its common fields, such as --in and --for."""
+    command = {"type": "steer_craft", "id": craft, "order": order_json(order, args)}
+    for field in common:
+        value = getattr(args, "field." + ".".join(field["key"]), None)
+        if field["name"] != "id" and value is not None:
+            command[field["key"][-1]] = value
+    return command
+
+
 def ship_command(args):
     """The app command for a ship action, or None for a read."""
     order = getattr(args, "order", None)
     if order:
-        command = {"type": "steer_craft", "id": getattr(args, "field.id"),
-                   "order": order_json(order, args)}
-        if getattr(args, "field.tick") is not None:
-            command["tick"] = getattr(args, "field.tick")
-        return command
+        return steer_command(order, args, getattr(args, "field.id"), args.common)
     if args.ship == "spawn":
         command = {"type": "spawn_ship", "altitude_km": args.altitude}
         if args.body:

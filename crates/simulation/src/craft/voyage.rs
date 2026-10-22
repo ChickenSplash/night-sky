@@ -30,6 +30,15 @@ pub const MAX_PENDING_ORDERS: usize = 1_024;
 /// Live submission horizon: five simulated minutes. Long replays should feed
 /// their log incrementally rather than occupy the live queue indefinitely.
 pub const MAX_ORDER_AHEAD_TICKS: i64 = 300 * super::STEPS_PER_SECOND;
+
+/// A delay or duration in seconds as whole steps, to the nearest step.
+pub fn steps(seconds: f64) -> Result<i64, String> {
+    let most = (MAX_ORDER_AHEAD_TICKS / super::STEPS_PER_SECOND) as f64;
+    if !(0.0..=most).contains(&seconds) {
+        return Err(format!("Times must be 0 to {most} seconds"));
+    }
+    Ok((seconds * super::STEPS_PER_SECOND as f64).round() as i64)
+}
 /// Approximate retained generation-cache budget between requests. A single
 /// query's temporary working set is additional to this.
 pub const SKY_CACHE_BYTES: usize = 32 * 1024 * 1024;
@@ -251,7 +260,14 @@ pub struct Voyage {
     /// Orders given for later world steps, by step number. Every key is
     /// after the craft's `tick`: an order is applied as soon as the craft
     /// reaches its step.
-    orders: BTreeMap<i64, Vec<Order>>,
+    orders: BTreeMap<i64, Vec<Queued>>,
+}
+
+/// A kept order, and for the end of a timed order the step it began at.
+#[derive(Clone, Debug)]
+struct Queued {
+    order: Order,
+    ends_from: Option<i64>,
 }
 
 /// One fixed step taken by `Voyage::step`.
@@ -281,6 +297,9 @@ pub struct Refused {
 pub struct ScheduledOrder {
     pub tick: i64,
     pub order: Order,
+    /// For the end of a timed order, the step the order began at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_from: Option<i64>,
 }
 
 impl Voyage {
@@ -305,14 +324,93 @@ impl Voyage {
     /// kept until the craft reaches its step, and a refusal then goes to
     /// the step's result. An order for a step already taken is refused.
     pub fn order(&mut self, tick: i64, order: Order) -> Result<(), String> {
+        self.schedule(ScheduledOrder {
+            tick,
+            order,
+            ends_from: None,
+        })
+    }
+
+    /// Give `order` from step `tick` and its `Order::off` at step `end`,
+    /// both or neither. The end is dropped if the order is refused at its
+    /// step, or once a later order on the same controls replaces it, so an
+    /// earlier burn's end never cuts a newer one.
+    pub fn timed_order(&mut self, tick: i64, end: i64, order: Order) -> Result<(), String> {
+        let off = self.check_timed_order(tick, end, &order)?;
+        self.order(tick, order)?;
+        self.orders.entry(end).or_default().push(Queued {
+            order: off,
+            ends_from: Some(tick),
+        });
+        Ok(())
+    }
+
+    /// Check a timed order without changing the voyage, returning its end.
+    pub fn check_timed_order(&self, tick: i64, end: i64, order: &Order) -> Result<Order, String> {
+        let off = order
+            .off()
+            .ok_or("This order has no off state, so it cannot be timed")?;
+        if end <= tick {
+            return Err("A timed order must last at least one step (0.05 s)".into());
+        }
+        self.check_order(tick, order)?;
+        if end.saturating_sub(self.craft.tick) > MAX_ORDER_AHEAD_TICKS {
+            return Err("Ship orders may be scheduled at most 300 simulated seconds ahead".into());
+        }
+        if self.pending() + 1 + usize::from(tick != self.craft.tick) > MAX_PENDING_ORDERS {
+            return Err("Too many pending ship orders".into());
+        }
+        Ok(off)
+    }
+
+    /// Give a step-keyed input, such as one `pending_orders` saved.
+    pub fn schedule(&mut self, input: ScheduledOrder) -> Result<(), String> {
+        let ScheduledOrder {
+            tick,
+            order,
+            ends_from,
+        } = input;
         if tick == self.craft.tick {
             let in_system = !self.in_galaxy();
-            order.apply(&mut self.craft, in_system.then_some(&self.field))
+            order.apply(&mut self.craft, in_system.then_some(&self.field))?;
+            if ends_from.is_none() {
+                self.replace_ends(tick, &order);
+            }
+            Ok(())
         } else {
             self.check_order(tick, &order)?;
-            self.orders.entry(tick).or_default().push(order);
+            self.orders
+                .entry(tick)
+                .or_default()
+                .push(Queued { order, ends_from });
             Ok(())
         }
+    }
+
+    fn pending(&self) -> usize {
+        self.orders.values().map(Vec::len).sum()
+    }
+
+    /// Drop the pending ends of timed orders begun before step `tick` that
+    /// `order`, applied at it, replaces.
+    fn replace_ends(&mut self, tick: i64, order: &Order) {
+        self.drop_queued(|q| {
+            q.ends_from.is_some_and(|from| from < tick) && order.overlaps(&q.order)
+        });
+    }
+
+    /// Drop the end of a timed order refused at its step `tick`.
+    fn drop_end(&mut self, tick: i64, order: &Order) {
+        if let Some(off) = order.off() {
+            self.drop_queued(|q| q.ends_from == Some(tick) && q.order == off);
+        }
+    }
+
+    fn drop_queued(&mut self, drop: impl Fn(&Queued) -> bool) {
+        for queued in self.orders.values_mut() {
+            queued.retain(|q| !drop(q));
+        }
+        self.orders.retain(|_, queued| !queued.is_empty());
     }
 
     /// Whether an order would be accepted now, without applying it.
@@ -336,7 +434,7 @@ impl Voyage {
             return Err("Ship orders may be scheduled at most 300 simulated seconds ahead".into());
         }
         order.validate()?;
-        if self.orders.values().map(Vec::len).sum::<usize>() >= MAX_PENDING_ORDERS {
+        if self.pending() >= MAX_PENDING_ORDERS {
             return Err("Too many pending ship orders".into());
         }
         Ok(())
@@ -346,34 +444,48 @@ impl Voyage {
     pub fn scheduled(&self) -> impl Iterator<Item = (i64, &Order)> {
         self.orders
             .iter()
-            .flat_map(|(tick, orders)| orders.iter().map(move |order| (*tick, order)))
+            .flat_map(|(tick, orders)| orders.iter().map(move |q| (*tick, &q.order)))
     }
 
     /// Save pending inputs alongside a craft snapshot. On load, submit them
-    /// through `order` after reconstructing the voyage from the saved craft.
+    /// through `schedule` after reconstructing the voyage from the saved craft.
     pub fn pending_orders(&self) -> Vec<ScheduledOrder> {
-        self.scheduled()
-            .map(|(tick, order)| ScheduledOrder {
-                tick,
-                order: order.clone(),
+        self.orders
+            .iter()
+            .flat_map(|(tick, orders)| {
+                orders.iter().map(|q| ScheduledOrder {
+                    tick: *tick,
+                    order: q.order.clone(),
+                    ends_from: q.ends_from,
+                })
             })
             .collect()
     }
 
     /// Apply the orders kept for the step the craft has reached.
     fn apply_due(&mut self) -> Vec<Refused> {
-        let Some(orders) = self.orders.remove(&self.craft.tick) else {
+        let tick = self.craft.tick;
+        let Some(mut orders) = self.orders.remove(&tick) else {
             return Vec::new();
         };
+        // Timed orders' ends yield to orders given for the same step.
+        orders.sort_by_key(|q| q.ends_from.is_none());
         let mut refused = Vec::new();
         let in_system = !self.in_galaxy();
-        for order in orders {
-            if let Err(reason) = order.apply(&mut self.craft, in_system.then_some(&self.field)) {
-                refused.push(Refused {
-                    tick: self.craft.tick,
-                    order,
-                    reason,
-                });
+        for Queued { order, ends_from } in orders {
+            match order.apply(&mut self.craft, in_system.then_some(&self.field)) {
+                Ok(()) if ends_from.is_none() => self.replace_ends(tick, &order),
+                Ok(()) => {}
+                Err(reason) => {
+                    if ends_from.is_none() {
+                        self.drop_end(tick, &order);
+                    }
+                    refused.push(Refused {
+                        tick,
+                        order,
+                        reason,
+                    });
+                }
             }
         }
         refused

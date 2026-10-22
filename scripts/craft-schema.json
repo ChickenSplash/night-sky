@@ -20,6 +20,33 @@
       "kind": "integer",
       "name": "tick",
       "required": false
+    },
+    {
+      "cli": "flag",
+      "help": "Seconds from now to apply from, in 0.05 s steps (default: at once); not with tick.",
+      "key": [
+        "in_s"
+      ],
+      "kind": "number",
+      "max": 300,
+      "min": 0,
+      "name": "in",
+      "required": false,
+      "unit": "s"
+    },
+    {
+      "cli": "flag",
+      "help": "Seconds until the order's off order ends it (only orders that have one).",
+      "key": [
+        "for_s"
+      ],
+      "kind": "number",
+      "max": 300,
+      "min": 0.05,
+      "name": "for",
+      "required": false,
+      "timed": true,
+      "unit": "s"
     }
   ],
   "groups": [
@@ -69,6 +96,10 @@
       ],
       "group": "sublight",
       "help": "Main drive fraction [-1, 1]; negative uses reverse, 0 cuts main only.",
+      "off": {
+        "action": "throttle",
+        "value": 0.0
+      },
       "order": {
         "action": "throttle"
       },
@@ -122,6 +153,12 @@
       ],
       "group": "sublight",
       "help": "Fine translation fractions [-1, 1]; omitted axes reset to zero.",
+      "off": {
+        "action": "translate",
+        "forward": 0.0,
+        "right": 0.0,
+        "up": 0.0
+      },
       "order": {
         "action": "translate"
       },
@@ -175,6 +212,12 @@
       ],
       "group": "turning",
       "help": "Manual turning fractions [-1, 1] (in warp, bubble steering); releases pointing, omitted axes reset to zero.",
+      "off": {
+        "action": "rotate",
+        "pitch": 0.0,
+        "roll": 0.0,
+        "yaw": 0.0
+      },
       "order": {
         "action": "rotate"
       },
@@ -260,6 +303,12 @@
       ],
       "group": "turning",
       "help": "Turn to and track an orbital direction, body or fixed system vector.",
+      "off": {
+        "action": "rotate",
+        "pitch": 0.0,
+        "roll": 0.0,
+        "yaw": 0.0
+      },
       "order": {
         "action": "point"
       },
@@ -273,6 +322,7 @@
       "fields": [],
       "group": "turning",
       "help": "Brake rotation only, leaving translation and throttle unchanged.",
+      "off": null,
       "order": {
         "action": "stop"
       },
@@ -286,6 +336,7 @@
       "fields": [],
       "group": "turning",
       "help": "Disable the attitude pilot without braking or changing drives.",
+      "off": null,
       "order": {
         "action": "release"
       },
@@ -299,6 +350,7 @@
       "fields": [],
       "group": "turning",
       "help": "Cut all drives and engage spin braking; does not stop linear motion.",
+      "off": null,
       "order": {
         "action": "cut"
       },
@@ -366,6 +418,7 @@
       ],
       "group": "sublight",
       "help": "Replace thruster limits; reverse 0 disables the reverse drive.",
+      "off": null,
       "order": {
         "action": "configure"
       },
@@ -391,6 +444,14 @@
       ],
       "group": "sublight",
       "help": "Legacy debug acceleration, in the frame's axes.",
+      "off": {
+        "action": "thrust",
+        "thrust": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
       "order": {
         "action": "thrust"
       },
@@ -406,6 +467,12 @@
       "fields": [],
       "group": "warp",
       "help": "Start bubble travel along the nose; needs no thrust, takes over any spin.",
+      "off": {
+        "action": "warp",
+        "command": {
+          "command": "disengage"
+        }
+      },
       "order": {
         "action": "warp",
         "command": {
@@ -425,6 +492,7 @@
       "fields": [],
       "group": "warp",
       "help": "Drop out keeping ordinary velocity.",
+      "off": null,
       "order": {
         "action": "warp",
         "command": {
@@ -466,6 +534,7 @@
       ],
       "group": "warp",
       "help": "Drop out matching a body in the ship's current system.",
+      "off": null,
       "order": {
         "action": "warp",
         "command": {
@@ -498,6 +567,7 @@
       ],
       "group": "warp",
       "help": "Requested speed, from 1 m/s to 10,000 ly/s; does not engage.",
+      "off": null,
       "order": {
         "action": "warp",
         "command": {
@@ -530,6 +600,7 @@
       ],
       "group": "warp",
       "help": "Bubble turn rate at full steering (default 30 °/s).",
+      "off": null,
       "order": {
         "action": "warp",
         "command": {
@@ -549,6 +620,7 @@
       "fields": [],
       "group": "warp",
       "help": "Multiply the requested speed by √10.",
+      "off": null,
       "order": {
         "action": "warp",
         "command": {
@@ -568,6 +640,7 @@
       "fields": [],
       "group": "warp",
       "help": "Divide the requested speed by √10.",
+      "off": null,
       "order": {
         "action": "warp",
         "command": {
@@ -606,6 +679,7 @@
       ],
       "group": "warp",
       "help": "Developer gravity policy; change only while disengaged.",
+      "off": null,
       "order": {
         "action": "warp",
         "command": {

@@ -251,12 +251,111 @@ fn orders_are_step_keyed_ordered_and_refused_atomically() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn timed_orders_end_themselves_unless_replaced() {
+    use crate::craft::{Order, WarpOrder};
+    let throttle = |value| Order::Throttle { value };
+    let steps = |voyage: &mut Voyage, n| {
+        for _ in 0..n {
+            assert!(voyage.step(&Blank).unwrap().refused.is_empty());
+        }
+    };
+    let mut voyage = empty_voyage();
+    assert!(voyage.timed_order(0, 10, Order::Stop).is_err(), "no off");
+    assert!(voyage.timed_order(5, 5, throttle(0.5)).is_err());
+    assert!(
+        voyage
+            .timed_order(0, MAX_ORDER_AHEAD_TICKS + 1, throttle(0.5))
+            .is_err()
+    );
+    assert!(voyage.pending_orders().is_empty());
+
+    // A one-second burn, surviving a snapshot.
+    voyage.timed_order(0, 20, throttle(0.5)).unwrap();
+    assert_eq!(voyage.craft.input.controls.throttle, 0.5);
+    let saved = serde_json::to_string(&voyage.pending_orders()).unwrap();
+    let mut restored = Voyage::new(voyage.craft.clone(), voyage.field.clone(), [0.0; 3]);
+    for input in serde_json::from_str::<Vec<ScheduledOrder>>(&saved).unwrap() {
+        assert_eq!(input.ends_from, Some(0));
+        restored.schedule(input).unwrap();
+    }
+    steps(&mut voyage, 19);
+    assert_eq!(voyage.craft.input.controls.throttle, 0.5);
+    steps(&mut voyage, 1);
+    assert_eq!(voyage.craft.input.controls.throttle, 0.0);
+    steps(&mut restored, 20);
+    assert_eq!(restored.craft, voyage.craft);
+
+    // A later order on the same controls replaces the end; others do not.
+    voyage.timed_order(20, 40, throttle(0.5)).unwrap();
+    steps(&mut voyage, 5);
+    voyage
+        .order(
+            25,
+            Order::Rotate {
+                pitch: 0.1,
+                yaw: 0.0,
+                roll: 0.0,
+            },
+        )
+        .unwrap();
+    assert_eq!(voyage.pending_orders().len(), 1);
+    voyage.order(30, throttle(0.8)).unwrap();
+    steps(&mut voyage, 5);
+    assert!(voyage.pending_orders().is_empty());
+    steps(&mut voyage, 20);
+    assert_eq!(voyage.craft.input.controls.throttle, 0.8);
+
+    // An order given before a delayed burn starts does not cancel its end,
+    // and one for the end's own step wins over it.
+    let now = voyage.craft.tick;
+    voyage
+        .timed_order(now + 10, now + 20, throttle(0.5))
+        .unwrap();
+    voyage.order(now, throttle(0.3)).unwrap();
+    assert_eq!(voyage.pending_orders().len(), 2);
+    steps(&mut voyage, 20);
+    assert_eq!(voyage.craft.input.controls.throttle, 0.0);
+    let now = voyage.craft.tick;
+    voyage.timed_order(now, now + 10, throttle(0.5)).unwrap();
+    voyage.order(now + 10, throttle(0.7)).unwrap();
+    steps(&mut voyage, 10);
+    assert_eq!(voyage.craft.input.controls.throttle, 0.7);
+
+    // A refused start takes its end with it.
+    let now = voyage.craft.tick;
+    let engage = Order::Warp {
+        command: WarpOrder::Engage,
+    };
+    voyage.timed_order(now + 2, now + 10, engage).unwrap();
+    assert_eq!(voyage.step(&Blank).unwrap().refused.len(), 0);
+    assert_eq!(voyage.step(&Blank).unwrap().refused.len(), 1);
+    assert!(voyage.pending_orders().is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn timed_orders_need_room_for_their_end() {
+    use crate::craft::Order;
+    let mut voyage = empty_voyage();
+    for tick in 1..MAX_PENDING_ORDERS as i64 {
+        voyage.order(tick, Order::Release).unwrap();
+    }
+    let throttle = Order::Throttle { value: 0.5 };
+    assert!(voyage.timed_order(1, 2, throttle.clone()).is_err());
+    assert_eq!(voyage.pending_orders().len(), MAX_PENDING_ORDERS - 1);
+    voyage.timed_order(0, 2, throttle).unwrap();
+    assert_eq!(voyage.pending_orders().len(), MAX_PENDING_ORDERS);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn queued_warp_orders_replay_after_a_snapshot() {
     use crate::craft::{Order, WarpOrder};
     let mut voyage = empty_voyage();
     let log = vec![
         ScheduledOrder {
             tick: 1,
+            ends_from: None,
             order: Order::Warp {
                 command: WarpOrder::Set {
                     speed_ms: 100_000.0,
@@ -265,24 +364,28 @@ fn queued_warp_orders_replay_after_a_snapshot() {
         },
         ScheduledOrder {
             tick: 1,
+            ends_from: None,
             order: Order::Warp {
                 command: WarpOrder::Engage,
             },
         },
         ScheduledOrder {
             tick: 6,
+            ends_from: None,
             order: Order::Warp {
                 command: WarpOrder::Set { speed_ms: 1_000.0 },
             },
         },
         ScheduledOrder {
             tick: 10,
+            ends_from: None,
             order: Order::Warp {
                 command: WarpOrder::Disengage,
             },
         },
         ScheduledOrder {
             tick: 10,
+            ends_from: None,
             order: Order::Throttle { value: 1.0 },
         },
     ];
@@ -298,7 +401,7 @@ fn queued_warp_orders_replay_after_a_snapshot() {
     let pending: Vec<ScheduledOrder> = serde_json::from_str(&saved).unwrap();
     let mut restored = Voyage::new(craft, voyage.field.clone(), voyage.origin_pc);
     for input in pending {
-        restored.order(input.tick, input.order).unwrap();
+        restored.schedule(input).unwrap();
     }
     // A server receives the same log just in time instead of ahead of time.
     let mut server = empty_voyage();

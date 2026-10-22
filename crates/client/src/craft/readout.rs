@@ -19,6 +19,16 @@ pub struct FleetReadout {
     pub system_loading: super::travel::LoadingStatus,
 }
 
+/// An order kept for a later step; `ends_from` marks a timed order's end.
+#[derive(Serialize, JsonSchema)]
+pub struct PendingOrder {
+    /// Seconds until it applies.
+    #[schemars(extend("x-unit" = "s"))]
+    pub in_s: f64,
+    #[serde(flatten)]
+    pub scheduled: space_simulation::craft::voyage::ScheduledOrder,
+}
+
 #[derive(Serialize, JsonSchema)]
 pub struct CraftReadout {
     #[schemars(extend("x-group" = "ship"))]
@@ -82,7 +92,7 @@ pub struct CraftReadout {
     pub warp: space_simulation::craft::warp::Warp,
     /// Orders scheduled for later steps.
     #[schemars(extend("x-group" = "drives"))]
-    pub pending_orders: Vec<space_simulation::craft::voyage::ScheduledOrder>,
+    pub pending_orders: Vec<PendingOrder>,
     /// Which assists limit warp; manual warp has none.
     #[schemars(extend("x-group" = "warp"))]
     pub warp_mode: &'static str,
@@ -234,7 +244,14 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                 autopilot: live.craft.autopilot.clone(),
                 prediction: prediction_readout(live, seconds),
                 warp: live.craft.warp.clone(),
-                pending_orders: live.pending_orders(),
+                pending_orders: live
+                    .pending_orders()
+                    .into_iter()
+                    .map(|scheduled| PendingOrder {
+                        in_s: (scheduled.tick - live.craft.tick) as f64 * STEP_SECONDS,
+                        scheduled,
+                    })
+                    .collect(),
                 warp_mode: "unsafe_manual",
                 arrival: live.arrival_status(),
                 position_pc: live.position_pc(seconds),

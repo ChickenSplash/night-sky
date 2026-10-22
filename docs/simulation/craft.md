@@ -67,10 +67,23 @@ seconds ahead of its current tick. Value checks (finite numbers, ranges and
 nonzero directions) run at submission; drive interlocks and body checks run
 at application. Long replay logs must be fed incrementally as ticks advance.
 
-`ScheduledOrder` is a serializable tick/order pair for replay;
-`pending_orders()` supplies the remaining queue to save alongside a craft
-snapshot. Reconstruct its field
-and frame origin, then resubmit those pairs to restore it. JSON parsing uses
+`Voyage::timed_order(tick, end, order)` gives an order for a time: the order
+at `tick` and its `Order::off` at `end`, queued together or refused together.
+The off order puts the order's controls at rest and keeps motion and spin:
+zero throttle, translation, rotation or legacy thrust (`point` ends as a zero
+`rotate`), and disengage for warp engage. Other orders have no rest state and
+cannot be timed. The pending end is tagged with its start step and dropped if
+its start is refused, or once a later order on the same controls (throttle,
+translation, turning, thrust or warp engagement; `cut` covers all but warp)
+applies after that start, so an earlier burn's end never cuts a newer one.
+An end due at the same step as another order applies first, so the other
+order wins. A timed order uses two of the 1,024 pending slots.
+
+`ScheduledOrder` is a serializable tick/order record for replay, with
+`ends_from` set on timed orders' ends; `pending_orders()` supplies the
+remaining queue to save alongside a craft snapshot. Reconstruct its field
+and frame origin, then resubmit the records through `Voyage::schedule` to
+restore it. JSON parsing uses
 round-trip f64 precision so a snapshot does not lose physics bits. This is
 replay infrastructure, not a multiplayer protocol: ownership, administrator
 permissions, player rate limits, acknowledgements and rollback/correction

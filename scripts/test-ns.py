@@ -275,6 +275,13 @@ class CliTests(unittest.TestCase):
             (("ship", "warp", "set", "1e6", "--tick", "42"),
              {"type": "steer_craft", "id": None, "tick": 42,
               "order": {"action": "warp", "command": {"command": "set", "speed_ms": 1e6}}}),
+            (("ship", "throttle", "0.5", "--for", "1"),
+             {"type": "steer_craft", "id": None, "for_s": 1.0, "order": {"action": "throttle", "value": 0.5}}),
+            (("ship", "warp", "engage", "--in", "2.5", "--for", "10"),
+             {"type": "steer_craft", "id": None, "in_s": 2.5, "for_s": 10.0,
+              "order": {"action": "warp", "command": {"command": "engage"}}}),
+            (("ship", "stop", "--in", "1"),
+             {"type": "steer_craft", "id": None, "in_s": 1.0, "order": {"action": "stop"}}),
             (("ship", "follow", "craft-1"), {"type": "fly_to_craft", "id": "craft-1"}),
             (("ship", "despawn"), {"type": "despawn_craft", "id": None}),
         ]:
@@ -292,6 +299,9 @@ class CliTests(unittest.TestCase):
             result = self.run_cli(*args)
             self.assertEqual(result.returncode, 1)
             self.assertIn(message, result.stderr)
+        result = self.run_cli("ship", "stop", "--for", "1")
+        self.assertEqual(result.returncode, 2, "stop has no off order, so no --for")
+        self.assertIn("--for", result.stderr)
 
     def test_watch_stops_on_interrupt(self):
         globals_ = NS["main"].__globals__

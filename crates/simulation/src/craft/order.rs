@@ -137,7 +137,61 @@ pub enum WarpOrder {
     Gravity { policy: GravityPolicy },
 }
 
+/// Controls an order sets, as bits of `Order::controls`.
+const THROTTLE: u8 = 1;
+const TRANSLATION: u8 = 2;
+const TURNING: u8 = 4;
+const THRUST: u8 = 8;
+const WARP: u8 = 16;
+
 impl Order {
+    /// The order that ends this one when it is given for a time: its axes
+    /// back to zero, or out of warp. Motion and spin are kept, as when the
+    /// controls are let go. Orders with no such rest state, like `stop` or
+    /// `warp set`, cannot be timed.
+    pub fn off(&self) -> Option<Order> {
+        Some(match self {
+            Self::Throttle { .. } => Self::Throttle { value: 0.0 },
+            Self::Translate { .. } => Self::Translate {
+                right: 0.0,
+                up: 0.0,
+                forward: 0.0,
+            },
+            Self::Rotate { .. } | Self::Point { .. } => Self::Rotate {
+                pitch: 0.0,
+                yaw: 0.0,
+                roll: 0.0,
+            },
+            Self::Thrust { .. } => Self::Thrust { thrust: [0.0; 3] },
+            Self::Warp {
+                command: WarpOrder::Engage,
+            } => Self::Warp {
+                command: WarpOrder::Disengage,
+            },
+            _ => return None,
+        })
+    }
+
+    /// Whether this order sets any control `other` does, so applying it
+    /// replaces `other`'s effect.
+    pub fn overlaps(&self, other: &Order) -> bool {
+        self.controls() & other.controls() != 0
+    }
+
+    fn controls(&self) -> u8 {
+        match self {
+            Self::Throttle { .. } => THROTTLE,
+            Self::Translate { .. } => TRANSLATION,
+            Self::Rotate { .. } | Self::Point { .. } | Self::Stop | Self::Release => TURNING,
+            Self::Cut => THROTTLE | TRANSLATION | TURNING | THRUST,
+            Self::Thrust { .. } => THRUST,
+            Self::Warp {
+                command: WarpOrder::Engage | WarpOrder::Disengage | WarpOrder::Match { .. },
+            } => WARP,
+            Self::Configure { .. } | Self::Warp { .. } => 0,
+        }
+    }
+
     /// State-independent validation, also run when future inputs are submitted.
     /// Drive interlocks and body/frame checks remain application-time rules.
     pub fn validate(&self) -> Result<(), String> {

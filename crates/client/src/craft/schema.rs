@@ -37,6 +37,10 @@ const UNIT_SUFFIXES: [&str; 10] = [
     "_xyzw", "_kms", "_ms", "_km", "_m", "_deg", "_dps", "_rads", "_pc", "_seconds",
 ];
 
+/// The longest delay or duration an order may be given, in seconds.
+const MOST_S: i64 = space_simulation::craft::voyage::MAX_ORDER_AHEAD_TICKS
+    / space_simulation::craft::STEPS_PER_SECOND;
+
 /// The catalogue `GET /craft/schema` serves and `scripts/craft-schema.json`
 /// keeps a copy of.
 pub fn catalogue() -> Value {
@@ -58,6 +62,12 @@ pub fn catalogue() -> Value {
              "help": "Craft ID (default: the selected or only ship)."},
             {"key": ["tick"], "name": "tick", "kind": "integer", "cli": "flag", "required": false,
              "help": "World step to apply from (default: the next unsimulated step)."},
+            {"key": ["in_s"], "name": "in", "kind": "number", "unit": "s", "min": 0, "max": MOST_S,
+             "cli": "flag", "required": false,
+             "help": "Seconds from now to apply from, in 0.05 s steps (default: at once); not with tick."},
+            {"key": ["for_s"], "name": "for", "kind": "number", "unit": "s", "min": space_simulation::craft::STEP_SECONDS, "max": MOST_S,
+             "cli": "flag", "required": false, "timed": true,
+             "help": "Seconds until the order's off order ends it (only orders that have one)."},
         ],
         "menus": walk.menus,
         "orders": walk.orders,
@@ -151,9 +161,10 @@ impl<'a> Walk<'a> {
                     self.field(vec![field.to_owned()], inner, required, true)
                 })
                 .collect();
+            let off = off(&skeleton, at, &fields);
             self.orders.push(json!({
                 "words": words, "group": group, "help": help, "about": about,
-                "order": skeleton, "at": at, "fields": fields,
+                "order": skeleton, "at": at, "fields": fields, "off": off,
             }));
         }
     }
@@ -332,6 +343,39 @@ impl<'a> Walk<'a> {
             _ => panic!("no catalogue kind for field {key:?}: {schema}"),
         }
     }
+}
+
+/// The order that ends a timed one (`Order::off`), or null when the order
+/// cannot be timed. Off orders do not depend on field values, so any
+/// values the order can be read with will do.
+fn off(skeleton: &Value, at: &[String], fields: &[Value]) -> Value {
+    fn sample(field: &Value) -> Value {
+        match field["kind"].as_str() {
+            Some("boolean") => false.into(),
+            Some("text") => "".into(),
+            Some("choice") => field["options"][0]["name"].clone(),
+            Some("vector") => vec![0.0; field["length"].as_u64().unwrap_or(0) as usize].into(),
+            Some("variant") => {
+                let option = &field["options"][0];
+                let mut value = json!({field["tag"].as_str().expect("tag"): option["name"]});
+                if !option["value"].is_null() {
+                    value[field["content"].as_str().expect("content")] = sample(&option["value"]);
+                }
+                value
+            }
+            _ => 0.into(),
+        }
+    }
+    let mut order = skeleton.clone();
+    for field in fields {
+        let key: Vec<String> = serde_json::from_value(field["key"].clone()).expect("key");
+        let (last, parents) = key.split_last().expect("key");
+        let path: Vec<String> = at.iter().chain(parents).cloned().collect();
+        place(&mut order, &path)[last.as_str()] = sample(field);
+    }
+    let order: Order = serde_json::from_value(order.clone())
+        .unwrap_or_else(|err| panic!("sample order {order}: {err}"));
+    serde_json::to_value(order.off()).expect("off order")
 }
 
 /// A tagged variant's tag key and value, such as `("action", "throttle")`.

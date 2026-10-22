@@ -60,7 +60,11 @@ field appears in the CLI and the TUI with no client change.
    unchanged apart from `thrust`. Adds `ns ship tree` and `--tick`.
 4. ✅ `ns-tui` Ship tab, smoke-tested headless against the running app.
 5. The user tries the TUI against a live ship, after rebuilding the app.
-6. **Timed orders** (agreed 2026-10-22, not started), below.
+6. ✅ **Timed orders**, below, built 2026-10-22: `--in` on every order,
+   `--for` on throttle, translate, rotate, point, thrust and warp engage.
+   Resolved in the app rather than by the client, and a later order on the
+   same controls cancels a pending end. Still to do: the user tries it
+   live, after rebuilding the app.
 
 ## Timed orders
 
@@ -76,15 +80,19 @@ how long, in seconds, never work out step numbers.
   translate, rotate), schedule the matching off order (zero on the order's
   axes) when the time is up, so `ns ship throttle 0.5 --for 1` is a one-second
   burn. Combines with `in`.
-- **Where:** first as two scheduled orders sent together, which the app
-  already queues, so a client closing mid-burn changes nothing. Move it into
-  the simulation as a timed order if phase 9 or 10 needs it, for instance to
-  show a burn's remaining time.
+- **Where (decided):** `steer_craft` takes `in_s` and `for_s`, and the app
+  turns them into steps from the ship's own step and queues the order and its
+  end in one call (`Voyage::timed_order`), avoiding a read-then-send race. The
+  readout's `pending_orders` gives each order's `in_s`.
 - **From the schema:** which orders take `for`, and their off order, should
   come from the Rust types (such as an `x-off` extension or a method on
   `Order`), not a client list.
-- **Open:** whether a new order on the same axes cancels a pending off order,
-  so a later manual throttle is not cut by an earlier burn's end. Pending
-  orders are capped, so each timed order uses two of the queue's slots.
+- **Decided:** an order on the same controls, applied after a timed order
+  began, cancels its pending end, so a later manual throttle is not cut by an
+  earlier burn's end. Each timed order uses two of the queue's slots.
+- **Not timed:** stop, release, cut, configure and the other warp orders
+  have no rest state; timing `warp set`, `turn-rate`, `configure` or
+  `gravity` would mean restoring the earlier value, which needs the end
+  worked out when the order applies.
 - **Done when:** `ns ship throttle 0.5 --for 1` and the TUI's `for` field
   each give a one-second burn, and the readout shows the pending end.

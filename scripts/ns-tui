@@ -158,7 +158,16 @@ def compact(value):
     return str(value)
 
 
+def pending(orders):
+    """Pending orders, soonest first, one a line: when, and what."""
+    lines = [f"in {duration(p['in_s'])}: {NS['order_text'](p['order'])}"
+             + (" (timed end)" if p.get("ends_from") is not None else "") for p in orders[:6]]
+    return "\n".join(lines + ([f"… {len(orders) - 6} more"] if len(orders) > 6 else [])) or "none"
+
+
 def shown(field, value):
+    if field["key"] == ["pending_orders"] and isinstance(value, list):
+        return Text(pending(value))
     if value is None:
         return Text("–", style="dim")
     if isinstance(value, bool):
@@ -237,7 +246,7 @@ class ShipPanel(Horizontal):
                 widgets.append(Static(group["note"], classes="note"))
             widgets.append(ItemGrid(*(Button(o["words"][-1], id=f"order-{i}", classes="order", compact=True,
                                              tooltip=o.get("help"),
-                                             variant="primary" if o["fields"] else "default")
+                                             variant="primary" if o["fields"] or o.get("off") else "default")
                                       for i, o in orders), min_column_width=12))
         await box.mount_all(widgets)
 
@@ -246,7 +255,7 @@ class ShipPanel(Horizontal):
     @on(Button.Pressed, ".order")
     async def order_pressed(self, event):
         order = self.schema["orders"][int(event.button.id.removeprefix("order-"))]
-        if not order["fields"]:
+        if not order["fields"] and not order.get("off"):
             self.send(order, {})
         else:
             await self.show_form(order)
@@ -259,8 +268,9 @@ class ShipPanel(Horizontal):
         self.inputs = {}
         about = " ".join(filter(None, (order.get("help"), order.get("about"))))
         widgets = [Static(about, classes="about")]
-        tick = next(f for f in self.schema["common"] if f["name"] == "tick")
-        for field in order["fields"] + [tick]:
+        # Delays and durations in seconds stand in for the absolute tick here.
+        timing = [f for f in NS["common_fields"](order, self.schema) if f["name"] in ("in", "for")]
+        for field in order["fields"] + timing:
             widgets.append(self.field_row(field))
         widgets.append(Button(f"Run {' '.join(order['words'])}  (ctrl+r)", classes="ship-run", variant="primary"))
         await form.mount_all(widgets)
@@ -329,16 +339,13 @@ class ShipPanel(Horizontal):
     def send(self, order, values):
         """Builds the order as `ns` does, then sends it to the picked ship."""
         args = types.SimpleNamespace(**{"field." + k: v for k, v in values.items()})
-        line = " ".join(order["words"] + [f"{k.split('.')[-1]}={v}" for k, v in values.items()
-                                          if v not in (None, False) and not k.endswith(".value")
-                                          and k != "tick"])
+        line = " ".join(order["words"] + [f"{k.split('.')[-1].removesuffix('_s')}={v}" for k, v in values.items()
+                                          if v not in (None, False) and not k.endswith(".value")])
         try:
-            command = {"type": "steer_craft", "id": self.craft, "order": NS["order_json"](order, args)}
+            command = NS["steer_command"](order, args, self.craft, NS["common_fields"](order, self.schema))
         except RuntimeError as error:
             self.log_reply(line, 0, {"error": str(error)})
             return
-        if values.get("tick") is not None:
-            command["tick"] = values["tick"]
         self.post(line, command)
 
     @work(thread=True, group="ship-command")
