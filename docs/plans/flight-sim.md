@@ -91,8 +91,9 @@ The rules:
   restoring its pre-engagement velocity. Matched, it takes a chosen body's
   velocity, optionally plus the sideways speed for a rough orbit. A realistic 1 g drive would otherwise
   need 30 to 60 minutes to match a planet's 10 to 50 km/s.
-- **Plotted trip time.** About 20 to 60 seconds at 1× simulation time, using a
-  distance-scaled cruise and slower approach. Pause stops travel. Manual trips
+- **Plotted trip time.** About 20 to 60 seconds at 1× simulation time by
+  default, using a distance-scaled cruise and slower approach; a chosen time
+  from 10 seconds to an hour can replace it. Pause stops travel. Manual trips
   have no fixed duration.
 
 ### Optional warp assists
@@ -576,16 +577,54 @@ In-app selection-to-command controls remain phase 11 work.
 - **Done when:** both exits work from the CLI as documented and are visible
   in `ns ship state`, including a rough orbit after a matched exit.
 
-### 6 · Warp steering and the turn-limit assist
+### 6 · Warp steering ✅ Done
 
 - Pitch and yaw inputs curve the warp path; roll does not change the
   direction of travel. Engaging handles existing spin safely.
-- Assist 1, the turn limit, switchable in `ns ship`.
 - CLI first. Mouse steering arrives with in-app piloting in phase 11.
 - **Done when:** from the CLI, steer round a planet to its night side, turn
-  towards another planet and leave the system, with the assist on and off.
+  towards another planet and leave the system.
+- The turn-limit assist is deferred: the user will decide whether it is
+  needed once mouse steering in phase 11 gives a feel for the controls.
 
-### 7 · Collision assist
+Decisions agreed with the user on 2026-10-21:
+
+- **The drive turns the bubble,** with the ship inside it, not the turning
+  thrusters: a game rule like frame dragging. Steering sets a turn rate, eased
+  in and out over 0.3 s, so releasing it ends the turn and dropout leaves no
+  spin. See [warp steering](../simulation/craft.md#warp-steering).
+- **One input path:** `rotate`, `point`, `stop` and `cut` steer the bubble
+  while engaged and the thrusters otherwise, so a stick or mouse later sends
+  the same orders in both modes.
+- **Engaging while spinning is allowed:** the bubble takes over the spin and
+  eases it to the steering input, rather than refusing.
+- **Pointing works during warp,** which "turn towards another planet" needs and
+  phase 9's autopilot reuses.
+- **Turn rate is ship state,** set with `ns ship warp turn-rate <°/s>`, from 1
+  to 360 °/s (default 30), engaged or not.
+- **The turn-limit assist is deferred,** to be decided after phase 11.
+
+Checkpoints:
+
+1. ✅ **Steering in the simulation:** rate-commanded bubble turning, midpoint
+   path bending, spin takeover and spinless dropout, pointing during warp,
+   the turn rate order, `ns ship warp turn-rate`, readouts and docs. Tests
+   cover the turning circle, shared rate limit, release, roll, takeover and
+   overshoot-free pointing at 1 to 360 °/s.
+2. ✅ **Live CLI steering flight** (2026-10-21, system `gf008000016.2.34`):
+   two half turns at 15 °/s round planet c at 20,000 km altitude, night side
+   to day side and back; pointing turned onto planet b and flew 1.44 million
+   km; rough-orbit dropout was refused outside b's sphere of influence, then
+   gave eccentricity 1.4e-5 at 8,400 km; re-engaged with pointing active, left
+   the system at about 2,500 AU and yawed in galactic space, with no spin
+   after disengaging. The user confirmed it visually.
+
+Deferred: **turn-limit assist** (the rate cap falling with speed, its switch
+and the reason for any limit), decided after phase 11's mouse steering.
+
+### 7 · Collision assist (deferred)
+
+Deferred with phase 6's turn limit and phase 8, to be decided after phase 11.
 
 - Assist 2: slow down or disengage ahead of a predicted impact or too-close
   pass, and recover speed gradually once clear.
@@ -595,28 +634,265 @@ In-app selection-to-command controls remain phase 11 work.
   passing beside one does not slow the ship needlessly, and with it off manual
   warp has no collision protection.
 
-### 8 · Approach assist
+### 8 · Approach assist (deferred)
+
+Deferred with phase 6's turn limit and phase 7, to be decided after phase 11.
 
 - Assist 3: with a body selected, the maximum warp speed falls on approach
-  and warp disengages at a safe standoff distance. Shares its speed profile
-  with plotted trips.
+  and warp disengages at a safe standoff distance. Reuses phase 9's speed
+  profile.
 - Unsafe or unreachable targets are reported.
 - **Done when:** steering towards a selected planet by hand ends at the
   standoff distance without precise speed juggling.
 
-### 9 · Plotted warp autopilot
+### 9 · Plotted warp autopilot ✅ Done
 
 - Plot and fly a route with the same drive and explicitly enabled assists as
   manual flight. Autopilot only adds steering and route management.
 - In-system first, then interstellar. Allows for moving destinations and
   bodies in the way, and aims for the 20 to 60 second trip profile.
+- With the assists deferred, the autopilot owns its speed profile (cruise,
+  then a slowing approach to a standoff distance) and keeps its own route
+  clear of bodies. Phase 8 later reuses that profile for manual flight.
 - Choosing a destination, progress, cancelling and manual takeover through
   the CLI. A plotted orbital arrival asks for a matched, rough-orbit exit.
 - **Done when:** the core loop runs end to end from the CLI: leave orbit, warp
   to another planet or system, drop into a rough orbit, then take over or
   cancel without discontinuities.
 
-### 10 · Orbit autopilot
+Decisions agreed with the user on 2026-10-22:
+
+- **A route pilot in the simulation, not a CLI script.** One step at
+  interstellar speed covers about half a light year, and destinations move,
+  so the aim, speed and dropout must be worked out every fixed step. A route
+  pilot is ship state beside the attitude pilot, in `crates/simulation`, and
+  each step gives the same orders a player would: pointing during warp
+  (phase 6), requested speed (phase 4) and, at the standoff, matched dropout
+  (phase 5). A server can run it from the same inputs.
+- **The command:**
+
+  ```
+  ns ship warp to <id> [--match | --orbit] [--time <seconds>]
+  ns ship warp cancel
+  ```
+
+  - One `WarpOrder` each, so `ns` and the TUI get them from the schema, and
+    `--in` and `--tick` work as on every order.
+  - `--match` drops out at the target's velocity, `--orbit` into a rough
+    orbit around it (a match included). With neither, dropout keeps the
+    ship's velocity.
+  - `--time` sets the trip time, from 10 to 3,600 s. The minimum leaves room
+    for turning round first (up to about 6 s at the default turn rate).
+    Without it, the time scales with distance: about 20 s for a short
+    in-system hop, up to 60 s between systems. The time includes the
+    initial turn; a trip that runs late shows the delay in its progress.
+- **The speed profile: always slowing.** Requested speed is the remaining
+  distance divided by a time constant τ, so every second covers the same
+  fraction of what is left: the destination looks twice as large every so
+  often, a steady zoom like the camera's logarithmic flights. A trip takes
+  about τ × ln(start distance ÷ standoff), so τ is chosen when the route is
+  plotted to fit the trip time. Speed is held low until the nose is lined
+  up, and the profile allows for the 0.3 s speed ramp so the ship does not
+  overshoot. When the 10,000 ly/s cap stretches a trip, its progress says so.
+  The profile is a standalone function for phase 8 to reuse.
+- **Moving targets:** the pilot aims at where the target will be, worked out
+  again every step.
+- **Cancelling and taking over:** `warp cancel`, or any manual turning or
+  warp speed order, releases the pilot, as turning orders release the
+  attitude pilot. Warp stays as it was, so nothing jumps.
+- **Progress** in `ns ship state` and the inspector: target, stage (align,
+  cruise, approach, arrived), distance, ETA, trip time and arrival mode.
+- **Bodies in the way: wrap round them,** like a string pulled tight from the
+  ship to the target.
+  - Every step the pilot checks the straight line to the target against a
+    keep-clear sphere round each body, a margin larger than its surface. If
+    the line is clear it aims at the target. If not, it aims at the edge of
+    the first sphere in the way, on the shorter side, so the ship curves
+    round the body and turns back to the target once it is in view.
+  - Steering needs only that next edge. Because it is worked out again every
+    step, moving bodies, moving targets and several bodies in the way need
+    no special handling, and no waypoint goes stale.
+  - The bubble's turn rate limits how tight a bend can be, so near a body
+    being skirted, speed is capped for the bend to fit, then recovers. A
+    target barely hidden needs little slowing.
+  - Bodies in the ship's current system are checked on the way out, and the
+    destination system's on the way in. Stars between systems are ignored.
+  - Cost: one line-to-sphere test per body, a few multiplications, over the
+    same bodies and positions gravity already sums each step. Galactic space
+    has none to check until the destination system is near. The whole
+    wrapped path is measured only for timing.
+- **Fitting the trip time round a detour.** At plotting, the pilot measures
+  the wrapped path, not the straight line, and allows for the initial turn
+  and the slowdown at each bend when choosing τ. It re-measures about once a
+  second for the ETA. A time that cannot be met, such as a tight detour at a
+  low turn rate, is still accepted: the reply gives the best achievable time
+  and its cause (such as "about 34 s, detour round planet b"), and progress
+  shows the delay.
+- **Interstellar, with no new frame rule.** Speed drops below light speed only
+  when the remaining distance is about light speed × τ, well inside the
+  destination's entry range, so the existing entry rule enters the system
+  on the way in. The destination's data is requested when the route is
+  plotted; until it arrives the pilot aims at the system's star, then at
+  the body. Phase 5's current-system-only matching still holds, because the
+  ship is in the destination system by the standoff.
+
+#### Targets
+
+One command for every target, and the pilot never checks what kind of object
+it is flying to. Each kind supplies the same facts, every step:
+
+- position and velocity now;
+- **size**, which sets the standoff;
+- **keep-clear distance**: its surface, or its companion stars;
+- **orbit reach**, or none when it cannot be orbited;
+- which system it is in, or galactic space.
+
+Moons and asteroids later add a source of these facts and change nothing in
+the pilot, profile, standoff rule or readout.
+
+**Standoff rule:** a comfortable multiple of the target's size, never closer
+than its keep-clear distance and never further than its orbit reach, so
+`--orbit` always works on arrival. When no such distance exists (a star in a
+tight binary, whose reach is barely beyond its surface), the order is refused
+when given, with the reason, not on arrival.
+
+| Target | Size | Orbit reach | Standoff |
+| --- | --- | --- | --- |
+| Planet | radius | sphere of influence | a few planet widths |
+| Single star | radius | stable zone | clear of the surface, inside its planets |
+| One star of a multiple | radius | its own stable zone | close to that star |
+| Barycentre | pair separation | the pair's stable zone | outside both stars, for a circumbinary orbit |
+| System, by its key | its star or outermost barycentre | as that object | as that object |
+| Ship | hull length | none: `--orbit` refused | about 1 km |
+| Moon (later) | radius | sphere of influence inside its planet's | as a planet |
+| Asteroid (later) | radius | tiny | a minimum floor, so it does not stop metres off a rock |
+
+- **A barycentre has no surface:** its stars are what the ship keeps clear of,
+  and what the route steers round.
+- **A system is fixed,** as everywhere else under the static-star
+  approximation. Planets, stars in multiple systems and inner barycentres
+  move.
+- **Ships:**
+  - They thrust and warp at will, so the pilot aims along the target's
+    current velocity and corrects every step. A target pulling away shows a
+    growing ETA.
+  - `--match` gives formation flying alongside it. `warp match <ship-id>`
+    gains the same, for manual flight.
+  - A target that despawns releases the pilot as cancelling does, with the
+    reason in the readout. Targeting the ship itself is refused.
+  - Each ship reads other craft as they were at the start of the step, so
+    ships chasing each other give the same paths whatever the update order.
+- **Refused when given, leaving the ship unchanged:** an unknown ID, the ship
+  itself, `--orbit` on a ship, or no valid standoff.
+
+Checkpoints:
+
+1. ✅ **In-system pilot:** the target facts with natural bodies as the first
+   source, the speed profile and trip time, aiming at moving targets, the
+   standoff rule, the three arrival modes, `warp to` and `warp cancel`,
+   takeover, progress readouts and refusals. Tests for each target kind,
+   both gravity policies, trip times from 10 to 3,600 s and replay from
+   a snapshot.
+   - Done 2026-10-22. Found while testing: with a short τ, flying even a
+     few degrees off the line turns the line of sight faster than pointing
+     follows, and the nose never settled. The pilot now aims ahead by the
+     line of sight's turn over pointing's response, which keeps it stable.
+   - τ is fitted again once lined up and once a second, so a turn that ran
+     long is made up. A 10 s trip facing away runs about 4 s late: the
+     turn alone takes about 9 s at 30 °/s, not the 6 s guessed above.
+   - `--match` with `--orbit` is accepted as `--orbit`, which matches too.
+2. ✅ **Bodies in the way:** the per-step clearance check, aiming at the edge,
+   the bend speed cap, and the wrapped path in the trip time, best
+   achievable time and ETA. Tests with a target directly and barely behind
+   a planet, a binary companion on the line, two bodies in the way, a moving
+   blocker, bodies well off the line, an interstellar departure from behind
+   a planet, and a trip time too short for its detour.
+   - Done 2026-10-22. The departure test flies to a far star of the same
+     system from low over a planet's night side; true interstellar
+     departures wait for checkpoint 3 but start the same way.
+   - Found while testing: aiming at the edge alone let the nose lag into
+     the keep-clear spheres. The lead now follows the edge's own turn, and
+     speed is capped when heading into a sphere so there is time to turn
+     away and slow.
+   - Timing each bend by its full turn was far too pessimistic: speed round
+     an arc recovers as the target comes into view, so a bend costs
+     (1 − cos turn), plus pointing's settling scaled by the turn.
+   - `ns ship warp to` now replies with the plotted route, including the
+     best time and `slowed_by` when the asked time cannot be met.
+3. ✅ **Interstellar routes:** requesting the destination's data at plotting,
+   aiming at its star then its body, and entry on the slowdown. Tests with a
+   seeded system and a list system, through the background loader.
+   - Done 2026-10-22. Changed from the plan: the pilot does not aim at the
+     star while the data loads. A path that changed when the data arrived
+     would depend on loading speed, which voyages forbid. The order is
+     accepted in a `plotting` stage, and each step first waits for the
+     destination's location (a new `Wait::Star`) and bodies, holding the
+     clock as entry already does; the first step that has them plots it.
+   - While outside the destination, the pilot sees its target and bodies
+     converted into the ship's frame, so wrapping and aiming need nothing
+     new. A 2 ly trip in 40 s peaks near 0.6 ly/s and enters about
+     570,000 km out, below light speed, as planned.
+   - Found while testing: with too short a time, τ pins at its minimum and
+     the speed ramp cannot brake as fast as the profile asks, so the ship
+     covered its last million kilometres in one step and passed through the
+     standoff. The pilot now drops out when the coming step would reach it.
+   - Tests: a seeded system, a charted list page from galactic space,
+     leaving from behind a planet, a whole system matched on arrival, an ID
+     naming no system, a slow loader giving the identical path, and a trip
+     through the app's command path.
+4. ✅ **Ships as targets:** the craft source, start-of-step reads, formation
+   matching, `warp match <ship-id>` and a despawned target. Tests with a
+   coasting, a thrusting and a warping target, and two ships chasing each
+   other.
+   - Done 2026-10-22. Each voyage is given every craft as a `Sighting` (its
+     state, warp bubble and frame) before each step and order, converted
+     into its own frame. The client now steps its fleet in lockstep, the
+     craft furthest behind first, and a craft waiting for data stops them
+     all, so no read depends on update order or loading speed.
+   - The pilot tracks a target's whole motion, bubble included, but a
+     match takes its ordinary velocity: a warping ship is left behind at
+     rest with where it was.
+   - Found while testing: a ship in low orbit sits inside its planet's
+     keep-clear sphere, so the route circled the planet for ever. A sphere
+     that holds the target now shrinks to pass through it, so the route
+     skims round at the target's height.
+   - A warping target (1,000 km/s) pins τ at its minimum, arrives about
+     5 s late and drops out a step early, at 1.3 km.
+   - Tests: coasting, thrusting and warping targets, one in galactic space
+     from a system, two ships chasing each other in both update orders, a
+     despawned target, refusals and manual formation matching, and a chase
+     through the app's command path to a ship in low orbit.
+5. ✅ **Live CLI core loop:** leave orbit, fly to another system, drop into a
+   rough orbit, fly to a second ship and match it, wrap round a planet in
+   the way, then cancel and take over mid-route without discontinuities.
+   Craft update timings in the performance console confirm the per-step
+   checks stay cheap. Then the docs and the phase marked done.
+   - Done 2026-10-22; the user confirmed it visually. From System 1
+     (`g78040000.2.813`): round planet d into orbit round planet e, 30 s, on
+     time (eccentricity 1.5e-7); 3.9 ly to `g1e010000005fe.2.0` in 60 s, on
+     time, into a circular orbit 334,594 km above its star; a second ship
+     matched the first across 3.9 ly in 60 s, holding 1,039 m off at under
+     1 cm/s, and `warp match <ship-id>` by hand left 1 mm/s; a route to
+     planet c with the star on the line skirted it about 57,000 km up and
+     arrived on time into an orbit of eccentricity 8e-4; cancelling kept
+     warp's speed and released pointing, and manual drive, turning and
+     stop then responded. Stepping both ships peaked at 0.07 ms a frame.
+   - Found while testing: a followed ship's destination system popped in
+     only at dropout, because the camera took its system from the ship's
+     frame. While the ship is in galactic space the camera now arrives and
+     leaves by its own distance, as in free flight (see
+     [navigation](../client/navigation.md)); the light-speed entry rule
+     is unchanged.
+   - Still open: a 20 s chase of a ship orbiting at 173 km/s ran 5.4 s
+     late with no cause in the readout, like earlier chases of orbiting
+     targets; and the inspector's attitude pilot row shows a raw vector
+     during routes.
+
+### 10 · Orbit autopilot (deferred)
+
+Deferred with the assists, to be decided after phase 11. Phase 5's rough-orbit
+exit, used by `warp to --orbit`, already ends near-circular (eccentricity 1e-7
+to 1e-3 in the phase 9 live test), so "go to planet" needs no player input.
 
 - After drop-out, a short sublight burn (seconds to a minute) circularises the orbit.
 - Close-range correction only; no interplanetary transfer planning.
@@ -626,15 +902,101 @@ In-app selection-to-command controls remain phase 11 work.
 
 - In-app piloting: a piloting state where the keys fly the ship instead of
   the camera, with a key layout for all six axes and the throttle.
+  - A key (Tab) toggles piloting while a ship is selected. The camera
+    follows the ship as today's follow camera does, by position only: it
+    does not turn with the ship. Tab or Esc leaves piloting.
+  - Leaving changes nothing on the ship: warp continues and the throttle
+    keeps burning. Fine thrusters stop, as their keys are no longer read.
+  - Piloting holds the clock at 1× real time, so the controls feel direct.
+    Leaving keeps 1×; the previous rate is not restored.
+  - Mouse steering is a virtual joystick: while right mouse is held, the
+    pointer's offset from where it was pressed gives pitch (up and down)
+    and yaw (left and right) from -1 to 1, reaching full deflection at a
+    ring about 150 points out, past a small dead zone. An on-screen reticle
+    shows the press point, ring and stick; the pointer is hidden while
+    steering, so the screen edge never stops it. Holding still keeps the
+    value; releasing returns it to zero. Arrow keys give full deflection.
+    Mouse up is nose up; an invert option can come with the bindings.
+  - The value is the existing `rotate` input, read as it is today:
+    - In warp, a fraction of the bubble's turn rate (default 30 °/s): a
+      steady turn while held, stopping within about 0.3 s of release.
+    - In sublight, a fraction of the turning thrusters' power: held, the
+      spin keeps growing (about 5.7 °/s per second at full); released, it
+      persists until countered or stopped with T.
 - Manual warp in the app: mouse steering while held (a flight stick later),
   warp speed up and down on the logarithmic scale, and looking sideways
   without steering.
-- The three warp assist toggles, the selected target, requested and actual
+- **One layout, read two ways.** Most keys mean the same in both modes and
+  keep their free-camera meanings; Shift/Ctrl is the one "how fast" control.
+  Thrust and warp stay mutually exclusive (phase 4), so thruster keys do
+  nothing in warp.
+
+  | Control | Thrusters (sublight) | Warp engaged |
+  | --- | --- | --- |
+  | Hold right mouse, or arrow keys | Pitch and yaw | Steer the bubble's path |
+  | Q / E | Roll | Roll, direction of travel unchanged |
+  | W / S | Fine thrusters forward and back | Nothing |
+  | A / D, R / F | Fine thrusters left, right, up and down | Nothing |
+  | Shift / Ctrl (held) | Main drive throttle up and down; below zero is reverse | Warp speed up and down, sweeping the logarithmic scale |
+  | Z / X | Full throttle / cut throttle | X: slowest warp speed; Z: nothing |
+  | G | Cut throttle and fine thrust, then engage warp | Disengage |
+  | T | Stop rotation | Stop rotation |
+  | Left drag | Look around the ship without steering | Same |
+  | Mouse wheel | Camera follow distance | Same |
+  | Tab or Esc | Leave piloting | Leave piloting (warp continues) |
+
+  - Fine thrusters fire only while held. The throttle and warp speed are
+    levers: they stay where they are left, so releasing warp speed holds
+    the cruise.
+  - Warp speed sweeps at a steady rate on the logarithmic scale, starting at
+    2 decades per second (about 10 s from 1 m/s to the top speed), so every
+    factor of ten takes as long and a tap nudges it. It is a held,
+    fixed-step input like the throttle (a warp speed rate from -1 to 1), not
+    a stream of set commands; `warp up`, `down` and `set` stay for the CLI
+    and autopilot.
+  - Warp engages at the last warp speed used, shown in the readout before G.
+    G cutting the throttle is shown there too, so it is never silent.
+  - Assists are deferred, all of them, until the user asks for them. That
+    includes a sublight rate hold (the stick setting a target spin rate,
+    with releasing braking to zero), which would need a new fixed-step
+    order in `crates/simulation` like stop rotation.
+  - Point orders (prograde and so on), circularise and match target belong
+    to the Assisted layer, on number keys or a small menu, not this layout.
+- **Rebindable later.** A controls menu where the player can rebind
+  everything, the free camera included, is out of scope, but the input code
+  must make it easy:
+  - Input is read through named actions (`PitchUp`, `ThrottleUp`,
+    `EngageWarp`, `Look`...) and one binding table mapping keys, mouse
+    buttons and axes to them. Systems never test a key code directly.
+  - The free camera's keys move onto the same table in this phase, so there
+    is one source of truth, and the controls help reads from it.
+  - Axis actions take a value from -1 to 1, so a flight stick or gamepad
+    axis can later bind to the same action as a pair of keys.
+  - Bindings are plain serializable data with the current layout as the
+    default, ready to be saved and edited by a future menu.
+- Decide whether the deferred assists are needed, once mouse steering can
+  be felt: turn limit (phase 6), collision (7), approach (8) and orbit (10).
+- The warp assist toggles, the selected target, requested and actual
   speed and the reason for any limit.
 - **Autopilot:** pick a target; everything else is handled.
 - **Assisted:** the pointing assists from phase 2, plus circularise, hold
   orbit and match target.
 - **Manual:** assists off.
+
+Checkpoints, each checked live by the user and committed:
+
+1. **Actions and piloting:** the binding table with the free camera moved
+   onto it, the piloting state (Tab, Esc, 1× clock), keyboard thrusters,
+   throttle and rotation, and a minimal readout.
+2. **Manual warp:** G, the warp speed rate input, virtual-joystick steering
+   with its reticle, arrow-key steering and free look.
+3. **The pilot readout:** assists, target, requested and actual speed and
+   the reason for any limit. Its look is decided at this checkpoint.
+4. **The layers:** how Autopilot, Assisted and Manual are chosen (decided
+   at this checkpoint), and an in-app target pick for the autopilot.
+   Assisted, including the sublight rate hold, waits for the user's go.
+5. **Fly it,** then decide on the deferred assists; docs and the phase
+   marked done.
 
 ### 12 · Walking inside the ship
 
@@ -654,6 +1016,8 @@ In-app selection-to-command controls remain phase 11 work.
   (spheres of influence), a deliberate simplification of the summed gravity.
 - More craft: stations on rails, rovers on planet surfaces, probes. The craft
   model and browser integration already cover them.
+- Moons and asteroids as autopilot targets, each a new source of the
+  phase 9 target facts.
 - Craft saved on the backend, then rudimentary multiplayer: other players'
   ships shown live through a WebSocket channel.
 - Then server-authoritative multiplayer: the server runs all craft from

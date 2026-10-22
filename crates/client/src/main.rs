@@ -5,9 +5,11 @@ mod devtools;
 mod flight;
 mod format;
 mod galaxy_nav;
+mod input;
 mod navigation;
 mod network;
 mod objects;
+mod pilot;
 mod presentation;
 mod render;
 mod scene;
@@ -24,7 +26,7 @@ use space_simulation::{AU_METRES, SimulationClock};
 use std::sync::{Mutex, mpsc};
 
 use navigation::follow_visited_star;
-pub use navigation::{FOV_DEG, MAGNITUDE, Navigation, Selection, Visit};
+pub use navigation::{Anchor, FOV_DEG, MAGNITUDE, Navigation, Selection, Visit};
 
 #[derive(Resource)]
 pub struct Universe(pub Galaxy);
@@ -106,6 +108,9 @@ fn main() {
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
     .init_resource::<craft::Fleet>()
+    .init_resource::<input::Bindings>()
+    .init_resource::<input::Actions>()
+    .init_resource::<pilot::Pilot>()
     .init_resource::<devtools::DevTools>()
     .init_resource::<devtools::core_load::CoreLoad>()
     .init_resource::<devtools::gpu_test::GpuTest>()
@@ -113,10 +118,18 @@ fn main() {
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
     .add_systems(
+        PreUpdate,
+        input::keep_navigation_keys
+            .after(bevy_egui::EguiPreUpdateSet::ProcessInput)
+            .before(bevy_egui::EguiPreUpdateSet::BeginPass),
+    )
+    .add_systems(
         Update,
         (
             receive_galaxy,
             actions::apply,
+            input::read,
+            pilot::fly,
             tick,
             craft::step,
             craft::forecast,
@@ -129,7 +142,8 @@ fn main() {
             devtools::benchmark::advance,
             scene::locate,
             scene::place_camera,
-            scene::locate_planet,
+            scene::locate_body,
+            scene::locate_anchor,
             scene::measure_velocity,
         )
             .chain(),

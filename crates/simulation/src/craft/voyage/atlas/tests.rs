@@ -143,3 +143,34 @@ fn library_and_async_cache_share_list_replacement_and_legacy_rules() {
         one.arrival(&legacy_candidate.id).unwrap().field.system()
     );
 }
+
+#[test]
+fn stars_are_located_from_seeds_else_as_legacy_list_pages() {
+    let lists = crate::demo_galaxy();
+    let list = &lists.systems[0];
+    let page = list.first_page();
+    let mut library = Library::new(lists.clone());
+    // A charted page's cell star is found from seeds, as regions list it.
+    let star = page_star_id(list, page);
+    library.supply(&Wait::Star(star.clone()));
+    let located = library.locate(&star).unwrap().unwrap().clone();
+    let region = Region::of(located.position_pc);
+    library.supply(&Wait::Region(region));
+    assert!(library.region(region).unwrap().contains(&located));
+    // A legacy page is placed by its list, without seeds.
+    let mut legacy = list.clone();
+    legacy.page_stars.clear();
+    let lists = Galaxy {
+        systems: vec![legacy.clone()],
+        ..Galaxy::default()
+    };
+    let id = page_star_id(&legacy, page);
+    let mut cache = Cache::default();
+    assert!(cache.chart(&Wait::Star(id.clone()), &lists));
+    let candidate = cache.locate(&id).unwrap().unwrap();
+    let region = Region::of(candidate.position_pc);
+    assert!(legacy_candidates(region, &lists).contains(candidate));
+    // An ID no cell or list holds names no system.
+    library.supply(&Wait::Star("nowhere".into()));
+    assert_eq!(library.locate("nowhere"), Some(None));
+}

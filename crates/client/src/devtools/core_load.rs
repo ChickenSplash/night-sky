@@ -30,8 +30,7 @@ pub enum CoreLoad {
 pub fn facing_centre(nav: &mut Navigation, from_pc: f64) {
     let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
     let eye = DVec3::X * from_pc;
-    nav.visit = None;
-    nav.open_origin_ly = DVec3::ZERO;
+    nav.leave_for_home_frame();
     nav.page = 0;
     nav.selection = None;
     nav.following = false;

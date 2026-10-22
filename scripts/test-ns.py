@@ -31,7 +31,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Flying on the first read after a command, landed on the next.
             self.server.flights = getattr(self.server, "flights", 0) + 1
             self.reply(200, {"sampled_unix_ms": 2 ** 53, "trail": ["Milky Way", "Demo"],
-                             "presentation_mode": "simulation", "location_planet": None,
+                             "presentation_mode": "simulation", "location_body": None,
                              "camera": {"flying": self.server.flights == 1}})
         else:
             self.reply(200, ["split"])
@@ -101,6 +101,7 @@ class CliTests(unittest.TestCase):
             (["warp", "up"], {"action": "warp", "command": {"command": "up"}}),
             (["warp", "down"], {"action": "warp", "command": {"command": "down"}}),
             (["warp", "set", "1000000"], {"action": "warp", "command": {"command": "set", "speed_ms": 1000000.0}}),
+            (["warp", "turn-rate", "90"], {"action": "warp", "command": {"command": "turn_rate", "degrees_per_second": 90.0}}),
             (["warp", "gravity", "suspended"], {"action": "warp", "command": {"command": "gravity", "policy": "suspended"}}),
             (["throttle", "-0.5"], {"action": "throttle", "value": -0.5}),
             (["translate", "--up", "0.2"], {"action": "translate", "right": 0.0, "up": 0.2, "forward": 0.0}),
@@ -270,7 +271,17 @@ class CliTests(unittest.TestCase):
             (("ship", "spawn", "--altitude", "400", "--velocity", "0,7.5,0"),
              {"type": "spawn_ship", "altitude_km": 400.0, "velocity_kms": [0.0, 7.5, 0.0]}),
             (("ship", "thrust", "0,0,1", "--id", "craft-1"),
-             {"type": "set_thrust", "thrust": [0.0, 0.0, 1.0], "id": "craft-1"}),
+             {"type": "steer_craft", "id": "craft-1", "order": {"action": "thrust", "thrust": [0.0, 0.0, 1.0]}}),
+            (("ship", "warp", "set", "1e6", "--tick", "42"),
+             {"type": "steer_craft", "id": None, "tick": 42,
+              "order": {"action": "warp", "command": {"command": "set", "speed_ms": 1e6}}}),
+            (("ship", "throttle", "0.5", "--for", "1"),
+             {"type": "steer_craft", "id": None, "for_s": 1.0, "order": {"action": "throttle", "value": 0.5}}),
+            (("ship", "warp", "engage", "--in", "2.5", "--for", "10"),
+             {"type": "steer_craft", "id": None, "in_s": 2.5, "for_s": 10.0,
+              "order": {"action": "warp", "command": {"command": "engage"}}}),
+            (("ship", "stop", "--in", "1"),
+             {"type": "steer_craft", "id": None, "in_s": 1.0, "order": {"action": "stop"}}),
             (("ship", "follow", "craft-1"), {"type": "fly_to_craft", "id": "craft-1"}),
             (("ship", "despawn"), {"type": "despawn_craft", "id": None}),
         ]:
@@ -288,6 +299,9 @@ class CliTests(unittest.TestCase):
             result = self.run_cli(*args)
             self.assertEqual(result.returncode, 1)
             self.assertIn(message, result.stderr)
+        result = self.run_cli("ship", "stop", "--for", "1")
+        self.assertEqual(result.returncode, 2, "stop has no off order, so no --for")
+        self.assertIn("--for", result.stderr)
 
     def test_watch_stops_on_interrupt(self):
         globals_ = NS["main"].__globals__

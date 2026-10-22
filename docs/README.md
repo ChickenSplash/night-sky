@@ -74,6 +74,10 @@ The shared native/browser client in `crates/client`, with browser workers in
   historical measurements and future ideas. This is not the current UI specification.
 - [Flight simulator](plans/flight-sim.md): alpha proposal for a walkable ship with
   warp and sublight drives, real gravity and layered autopilot.
+- [Camera location](plans/camera-location.md): one location rule for the
+  breadcrumb and the camera's motion, and star and barycentre markers.
+- [Ship schema](plans/ship-schema.md): one source of truth for ship orders and
+  state, generating `ns ship` and the TUI's Ship tab.
 
 ## Current limitations
 
@@ -83,13 +87,14 @@ The shared native/browser client in `crates/client`, with browser workers in
   is an approximate smooth prototype, not a detailed dust-attenuated renderer.
 - Camera flights are navigation aids, not physical spacecraft or warp simulations.
   Craft have six-axis CLI flight, pointing assists and a predicted coast
-  path, can be followed across systems, and have unsafe straight-line CLI warp
-  up to 10,000 ly/s, without collision or missing-data stops. Above light
+  path, can be followed across systems, and have unsafe CLI warp up to
+  10,000 ly/s, steered by turning the nose or pointing, without a turn limit
+  or collision or missing-data stops. Above light
   speed they enter no systems; below it, entering an uncharted system can
   briefly hold the clock while its region and bodies load. Explicit CLI dropout
   can match a local body's velocity or add speed for a rough orbit, without
   navigating to it. No in-app piloting
-  controls, warp steering, automatic arrivals, atmospheric exclusion, saving or collisions yet;
+  controls, automatic arrivals, atmospheric exclusion, saving or collisions yet;
   predicted impacts outside warp are shown but not enforced. Phase 4 warp has
   native live acceptance; browser flight visuals have not been manually tested.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.

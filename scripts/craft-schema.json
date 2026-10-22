@@ -1,0 +1,1661 @@
+{
+  "command": "steer_craft",
+  "common": [
+    {
+      "cli": "flag",
+      "help": "Craft ID (default: the selected or only ship).",
+      "key": [
+        "id"
+      ],
+      "kind": "text",
+      "name": "id",
+      "required": false
+    },
+    {
+      "cli": "flag",
+      "help": "World step to apply from (default: the next unsimulated step).",
+      "key": [
+        "tick"
+      ],
+      "kind": "integer",
+      "name": "tick",
+      "required": false
+    },
+    {
+      "cli": "flag",
+      "help": "Seconds from now to apply from, in 0.05 s steps (default: at once); not with tick.",
+      "key": [
+        "in_s"
+      ],
+      "kind": "number",
+      "max": 300,
+      "min": 0,
+      "name": "in",
+      "required": false,
+      "unit": "s"
+    },
+    {
+      "cli": "flag",
+      "help": "Seconds until the order's off order ends it (only orders that have one).",
+      "key": [
+        "for_s"
+      ],
+      "kind": "number",
+      "max": 300,
+      "min": 0.05,
+      "name": "for",
+      "required": false,
+      "timed": true,
+      "unit": "s"
+    }
+  ],
+  "groups": [
+    {
+      "id": "sublight",
+      "label": "Sublight drives",
+      "note": "Refused while warp is engaged."
+    },
+    {
+      "id": "turning",
+      "label": "Turning",
+      "note": "Turning thrusters, or the warp bubble while warp is engaged."
+    },
+    {
+      "id": "warp",
+      "label": "Warp",
+      "note": ""
+    }
+  ],
+  "menus": [
+    {
+      "about": "While engaged, rotate, point, stop and cut steer the bubble instead of the turning thrusters: pitch and yaw bend the path, roll turns the ship about it. Steering sets a turn rate (fraction × turn rate) that eases in and out over about 0.3 s; dropout leaves no spin.",
+      "group": "warp",
+      "help": "Bubble transport along the nose, separate from sublight thrust.",
+      "words": [
+        "warp"
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "about": null,
+      "at": [],
+      "fields": [
+        {
+          "cli": "positional",
+          "key": [
+            "value"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "value",
+          "required": true,
+          "unit": "fraction"
+        }
+      ],
+      "group": "sublight",
+      "help": "Main drive fraction [-1, 1]; negative uses reverse, 0 cuts main only.",
+      "off": {
+        "action": "throttle",
+        "value": 0.0
+      },
+      "order": {
+        "action": "throttle"
+      },
+      "words": [
+        "throttle"
+      ]
+    },
+    {
+      "about": null,
+      "at": [],
+      "fields": [
+        {
+          "cli": "flag",
+          "default": 0.0,
+          "key": [
+            "forward"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "forward",
+          "required": false,
+          "unit": "fraction"
+        },
+        {
+          "cli": "flag",
+          "default": 0.0,
+          "key": [
+            "right"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "right",
+          "required": false,
+          "unit": "fraction"
+        },
+        {
+          "cli": "flag",
+          "default": 0.0,
+          "key": [
+            "up"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "up",
+          "required": false,
+          "unit": "fraction"
+        }
+      ],
+      "group": "sublight",
+      "help": "Fine translation fractions [-1, 1]; omitted axes reset to zero.",
+      "off": {
+        "action": "translate",
+        "forward": 0.0,
+        "right": 0.0,
+        "up": 0.0
+      },
+      "order": {
+        "action": "translate"
+      },
+      "words": [
+        "translate"
+      ]
+    },
+    {
+      "about": null,
+      "at": [],
+      "fields": [
+        {
+          "cli": "flag",
+          "default": 0.0,
+          "key": [
+            "pitch"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "pitch",
+          "required": false,
+          "unit": "fraction"
+        },
+        {
+          "cli": "flag",
+          "default": 0.0,
+          "key": [
+            "roll"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "roll",
+          "required": false,
+          "unit": "fraction"
+        },
+        {
+          "cli": "flag",
+          "default": 0.0,
+          "key": [
+            "yaw"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "yaw",
+          "required": false,
+          "unit": "fraction"
+        }
+      ],
+      "group": "turning",
+      "help": "Manual turning fractions [-1, 1] (in warp, bubble steering); releases pointing, omitted axes reset to zero.",
+      "off": {
+        "action": "rotate",
+        "pitch": 0.0,
+        "roll": 0.0,
+        "yaw": 0.0
+      },
+      "order": {
+        "action": "rotate"
+      },
+      "words": [
+        "rotate"
+      ]
+    },
+    {
+      "about": null,
+      "at": [],
+      "fields": [
+        {
+          "cli": "positional",
+          "content": "value",
+          "key": [
+            "target"
+          ],
+          "kind": "variant",
+          "name": "target",
+          "options": [
+            {
+              "help": "Along the velocity relative to the orbited body.",
+              "name": "prograde",
+              "value": null
+            },
+            {
+              "help": "Against the velocity relative to the orbited body.",
+              "name": "retrograde",
+              "value": null
+            },
+            {
+              "help": "Along the orbit's angular momentum.",
+              "name": "normal",
+              "value": null
+            },
+            {
+              "help": "Against the orbit's angular momentum.",
+              "name": "antinormal",
+              "value": null
+            },
+            {
+              "help": "Towards the orbited body.",
+              "name": "radial_in",
+              "value": null
+            },
+            {
+              "help": "Away from the orbited body.",
+              "name": "radial_out",
+              "value": null
+            },
+            {
+              "help": "Towards a body in the craft's system, by ID.",
+              "name": "body",
+              "value": {
+                "kind": "text"
+              }
+            },
+            {
+              "help": "A fixed direction in system axes.",
+              "name": "vector",
+              "value": {
+                "kind": "vector",
+                "length": 3
+              }
+            }
+          ],
+          "required": true,
+          "tag": "target"
+        },
+        {
+          "cli": "flag",
+          "default": null,
+          "help": "System up direction to align roll; otherwise roll is preserved.",
+          "key": [
+            "up"
+          ],
+          "kind": "vector",
+          "length": 3,
+          "name": "up",
+          "required": false,
+          "unit": ""
+        }
+      ],
+      "group": "turning",
+      "help": "Turn to and track an orbital direction, body or fixed system vector.",
+      "off": {
+        "action": "rotate",
+        "pitch": 0.0,
+        "roll": 0.0,
+        "yaw": 0.0
+      },
+      "order": {
+        "action": "point"
+      },
+      "words": [
+        "point"
+      ]
+    },
+    {
+      "about": null,
+      "at": [],
+      "fields": [],
+      "group": "turning",
+      "help": "Brake rotation only, leaving translation and throttle unchanged.",
+      "off": null,
+      "order": {
+        "action": "stop"
+      },
+      "words": [
+        "stop"
+      ]
+    },
+    {
+      "about": null,
+      "at": [],
+      "fields": [],
+      "group": "turning",
+      "help": "Disable the attitude pilot without braking or changing drives.",
+      "off": null,
+      "order": {
+        "action": "release"
+      },
+      "words": [
+        "release"
+      ]
+    },
+    {
+      "about": null,
+      "at": [],
+      "fields": [],
+      "group": "turning",
+      "help": "Cut all drives and engage spin braking; does not stop linear motion.",
+      "off": null,
+      "order": {
+        "action": "cut"
+      },
+      "words": [
+        "cut"
+      ]
+    },
+    {
+      "about": "A server should accept this only from an administrator, never from a player.",
+      "at": [],
+      "fields": [
+        {
+          "cli": "flag",
+          "help": "Main drive acceleration; zero disables it.",
+          "key": [
+            "thrusters",
+            "forward"
+          ],
+          "kind": "number",
+          "min": 0.0,
+          "name": "forward",
+          "required": true,
+          "unit": "m/s²"
+        },
+        {
+          "cli": "flag",
+          "help": "Reverse drive acceleration; zero disables it.",
+          "key": [
+            "thrusters",
+            "reverse"
+          ],
+          "kind": "number",
+          "min": 0.0,
+          "name": "reverse",
+          "required": true,
+          "unit": "m/s²"
+        },
+        {
+          "cli": "flag",
+          "help": "Fine translation acceleration on each axis.",
+          "key": [
+            "thrusters",
+            "fine"
+          ],
+          "kind": "number",
+          "min": 0.0,
+          "name": "fine",
+          "required": true,
+          "unit": "m/s²"
+        },
+        {
+          "about": "This is not g: a future inertia model can derive it from torque and hull geometry.",
+          "cli": "flag",
+          "help": "Angular acceleration about each body axis (pitch, yaw, roll).",
+          "key": [
+            "thrusters",
+            "angular"
+          ],
+          "kind": "vector",
+          "length": 3,
+          "name": "angular",
+          "required": true,
+          "unit": "rad/s²"
+        }
+      ],
+      "group": "sublight",
+      "help": "Replace thruster limits; reverse 0 disables the reverse drive.",
+      "off": null,
+      "order": {
+        "action": "configure"
+      },
+      "words": [
+        "configure"
+      ]
+    },
+    {
+      "about": null,
+      "at": [],
+      "fields": [
+        {
+          "cli": "positional",
+          "key": [
+            "thrust"
+          ],
+          "kind": "vector",
+          "length": 3,
+          "name": "thrust",
+          "required": true,
+          "unit": "m/s²"
+        }
+      ],
+      "group": "sublight",
+      "help": "Legacy debug acceleration, in the frame's axes.",
+      "off": {
+        "action": "thrust",
+        "thrust": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "order": {
+        "action": "thrust"
+      },
+      "words": [
+        "thrust"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [],
+      "group": "warp",
+      "help": "Start bubble travel along the nose; needs no thrust, takes over any spin.",
+      "off": {
+        "action": "warp",
+        "command": {
+          "command": "disengage"
+        }
+      },
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "engage"
+        }
+      },
+      "words": [
+        "warp",
+        "engage"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [],
+      "group": "warp",
+      "help": "Drop out keeping ordinary velocity.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "disengage"
+        }
+      },
+      "words": [
+        "warp",
+        "disengage"
+      ]
+    },
+    {
+      "about": "Resolved in the craft's current system at the application tick, or as the other ship was at the start of the step. This never changes heading or position.",
+      "at": [
+        "command"
+      ],
+      "fields": [
+        {
+          "cli": "positional",
+          "help": "Existing planet, star or barycentre ID, or another craft's ID.",
+          "key": [
+            "body"
+          ],
+          "kind": "text",
+          "name": "body",
+          "required": true
+        },
+        {
+          "cli": "flag",
+          "default": false,
+          "help": "Add tangential speed for a rough orbit.",
+          "key": [
+            "orbit"
+          ],
+          "kind": "boolean",
+          "name": "orbit",
+          "required": false
+        }
+      ],
+      "group": "warp",
+      "help": "Drop out matching a body in the ship's current system, or another ship anywhere.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "match"
+        }
+      },
+      "words": [
+        "warp",
+        "match"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [
+        {
+          "cli": "positional",
+          "key": [
+            "speed_ms"
+          ],
+          "kind": "number",
+          "max": 9.4607304725808e+19,
+          "min": 1.0,
+          "name": "speed_ms",
+          "required": true,
+          "unit": "m/s"
+        }
+      ],
+      "group": "warp",
+      "help": "Requested speed, from 1 m/s to 10,000 ly/s; does not engage.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "set"
+        }
+      },
+      "words": [
+        "warp",
+        "set"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [
+        {
+          "cli": "positional",
+          "key": [
+            "degrees_per_second"
+          ],
+          "kind": "number",
+          "max": 360.0,
+          "min": 1.0,
+          "name": "degrees_per_second",
+          "required": true,
+          "unit": "°/s"
+        }
+      ],
+      "group": "warp",
+      "help": "Bubble turn rate at full steering (default 30 °/s).",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "turn_rate"
+        }
+      },
+      "words": [
+        "warp",
+        "turn-rate"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [],
+      "group": "warp",
+      "help": "Multiply the requested speed by √10.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "up"
+        }
+      },
+      "words": [
+        "warp",
+        "up"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [],
+      "group": "warp",
+      "help": "Divide the requested speed by √10.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "down"
+        }
+      },
+      "words": [
+        "warp",
+        "down"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [
+        {
+          "cli": "positional",
+          "help": "Whether gravity changes ordinary velocity during warp below the cutoff.",
+          "key": [
+            "policy"
+          ],
+          "kind": "choice",
+          "name": "policy",
+          "options": [
+            {
+              "name": "active"
+            },
+            {
+              "name": "suspended"
+            }
+          ],
+          "required": true
+        }
+      ],
+      "group": "warp",
+      "help": "Developer gravity policy; change only while disengaged.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "gravity"
+        }
+      },
+      "words": [
+        "warp",
+        "gravity"
+      ]
+    },
+    {
+      "about": "Engages warp, turns to the target, curves round bodies in the way, then slows all the way in, dropping out at a standoff of a few times the target's size. Another system is loaded first and entered on the slowdown. Moving targets are tracked every step. Turning, warp speed, disengage and match orders take over; warp is left as it was.",
+      "at": [
+        "command"
+      ],
+      "fields": [
+        {
+          "cli": "positional",
+          "help": "Planet, star or barycentre ID, a system's key, or another craft's ID.",
+          "key": [
+            "target"
+          ],
+          "kind": "text",
+          "name": "target",
+          "required": true
+        },
+        {
+          "cli": "flag",
+          "default": false,
+          "help": "Drop out at the target's velocity.",
+          "key": [
+            "match"
+          ],
+          "kind": "boolean",
+          "name": "match",
+          "required": false
+        },
+        {
+          "cli": "flag",
+          "default": false,
+          "help": "Drop out into a rough orbit around the target; matches too.",
+          "key": [
+            "orbit"
+          ],
+          "kind": "boolean",
+          "name": "orbit",
+          "required": false
+        },
+        {
+          "cli": "flag",
+          "default": null,
+          "help": "Trip time, including the first turn (default 20 to 60 s by distance).",
+          "key": [
+            "time"
+          ],
+          "kind": "number",
+          "max": 3600.0,
+          "min": 10.0,
+          "name": "time",
+          "required": false,
+          "unit": "s"
+        }
+      ],
+      "group": "warp",
+      "help": "Fly to a body, here or in another system, or to another ship, and drop out near it.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "to"
+        }
+      },
+      "words": [
+        "warp",
+        "to"
+      ]
+    },
+    {
+      "about": null,
+      "at": [
+        "command"
+      ],
+      "fields": [],
+      "group": "warp",
+      "help": "End the route, leaving warp engaged at its current speed.",
+      "off": null,
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "cancel"
+        }
+      },
+      "words": [
+        "warp",
+        "cancel"
+      ]
+    }
+  ],
+  "state": {
+    "craft": [
+      {
+        "group": "ship",
+        "key": [
+          "id"
+        ],
+        "kind": "text",
+        "label": "id"
+      },
+      {
+        "group": "ship",
+        "key": [
+          "name"
+        ],
+        "kind": "text",
+        "label": "name"
+      },
+      {
+        "group": "ship",
+        "key": [
+          "kind"
+        ],
+        "kind": "choice",
+        "label": "kind"
+      },
+      {
+        "group": "position",
+        "help": "What the position is measured from.",
+        "key": [
+          "frame"
+        ],
+        "kind": "variant",
+        "label": "frame"
+      },
+      {
+        "group": "ship",
+        "help": "Simulated time at the craft's latest physics step.",
+        "key": [
+          "seconds"
+        ],
+        "kind": "number",
+        "label": "seconds",
+        "unit": "s"
+      },
+      {
+        "group": "ship",
+        "help": "The world step the state describes.",
+        "key": [
+          "tick"
+        ],
+        "kind": "integer",
+        "label": "tick"
+      },
+      {
+        "group": "position",
+        "help": "Position in frame axes.",
+        "key": [
+          "position_m"
+        ],
+        "kind": "vector",
+        "label": "position",
+        "unit": "m"
+      },
+      {
+        "group": "position",
+        "help": "Ordinary velocity in frame axes; warp is separate.",
+        "key": [
+          "velocity_ms"
+        ],
+        "kind": "vector",
+        "label": "velocity",
+        "unit": "m/s"
+      },
+      {
+        "group": "position",
+        "help": "Ordinary speed in the frame; warp is separate.",
+        "key": [
+          "speed_kms"
+        ],
+        "kind": "number",
+        "label": "speed",
+        "unit": "km/s"
+      },
+      {
+        "group": "drives",
+        "help": "Legacy thrust acceleration, in frame axes.",
+        "key": [
+          "input",
+          "thrust"
+        ],
+        "kind": "vector",
+        "label": "input · thrust",
+        "unit": "m/s²"
+      },
+      {
+        "group": "drives",
+        "help": "Main drive, or reverse when negative.",
+        "key": [
+          "input",
+          "controls",
+          "throttle"
+        ],
+        "kind": "number",
+        "label": "input · controls · throttle",
+        "unit": "fraction"
+      },
+      {
+        "group": "drives",
+        "help": "Right, up, back, each in [-1, 1]. Independent fine thrusters.",
+        "key": [
+          "input",
+          "controls",
+          "translation"
+        ],
+        "kind": "vector",
+        "label": "input · controls · translation",
+        "unit": "fraction"
+      },
+      {
+        "group": "drives",
+        "help": "Pitch, yaw, roll, each in [-1, 1].",
+        "key": [
+          "input",
+          "controls",
+          "rotation"
+        ],
+        "kind": "vector",
+        "label": "input · controls · rotation",
+        "unit": "fraction"
+      },
+      {
+        "group": "attitude",
+        "help": "Attitude quaternion in frame axes.",
+        "key": [
+          "orientation_xyzw"
+        ],
+        "kind": "vector",
+        "label": "orientation",
+        "unit": ""
+      },
+      {
+        "group": "attitude",
+        "help": "Nose direction in frame axes.",
+        "key": [
+          "forward"
+        ],
+        "kind": "vector",
+        "label": "forward",
+        "unit": ""
+      },
+      {
+        "group": "attitude",
+        "help": "Roof direction in frame axes.",
+        "key": [
+          "up"
+        ],
+        "kind": "vector",
+        "label": "up",
+        "unit": ""
+      },
+      {
+        "group": "attitude",
+        "help": "Turn rate about pitch, yaw and roll; in warp, the bubble's.",
+        "key": [
+          "spin_rads"
+        ],
+        "kind": "vector",
+        "label": "spin",
+        "unit": "rad/s"
+      },
+      {
+        "group": "drives",
+        "help": "Main drive acceleration; zero disables it.",
+        "key": [
+          "thrusters",
+          "forward"
+        ],
+        "kind": "number",
+        "label": "thrusters · forward",
+        "unit": "m/s²"
+      },
+      {
+        "group": "drives",
+        "help": "Reverse drive acceleration; zero disables it.",
+        "key": [
+          "thrusters",
+          "reverse"
+        ],
+        "kind": "number",
+        "label": "thrusters · reverse",
+        "unit": "m/s²"
+      },
+      {
+        "group": "drives",
+        "help": "Fine translation acceleration on each axis.",
+        "key": [
+          "thrusters",
+          "fine"
+        ],
+        "kind": "number",
+        "label": "thrusters · fine",
+        "unit": "m/s²"
+      },
+      {
+        "group": "drives",
+        "help": "Angular acceleration about each body axis (pitch, yaw, roll).",
+        "key": [
+          "thrusters",
+          "angular"
+        ],
+        "kind": "vector",
+        "label": "thrusters · angular",
+        "unit": "rad/s²"
+      },
+      {
+        "group": "attitude",
+        "help": "The attitude pilot.",
+        "key": [
+          "autopilot"
+        ],
+        "kind": "variant",
+        "label": "autopilot"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "updating"
+        ],
+        "kind": "boolean",
+        "label": "updating"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "achieved_seconds"
+        ],
+        "kind": "number",
+        "label": "achieved",
+        "unit": "s"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "age_seconds"
+        ],
+        "kind": "number",
+        "label": "age",
+        "unit": "s"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "ahead_seconds"
+        ],
+        "kind": "number",
+        "label": "ahead",
+        "unit": "s"
+      },
+      {
+        "group": "prediction",
+        "help": "Planned for about one period of a bound orbit.",
+        "key": [
+          "prediction",
+          "bound"
+        ],
+        "kind": "boolean",
+        "label": "bound"
+      },
+      {
+        "group": "prediction",
+        "help": "The shown prediction starts from the craft's current state.",
+        "key": [
+          "prediction",
+          "current"
+        ],
+        "kind": "boolean",
+        "label": "current"
+      },
+      {
+        "group": "prediction",
+        "help": "horizon, truncated, impact:<body> or running.",
+        "key": [
+          "prediction",
+          "end"
+        ],
+        "kind": "text",
+        "label": "end"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "events"
+        ],
+        "kind": "list",
+        "label": "events"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "horizon_seconds"
+        ],
+        "kind": "number",
+        "label": "horizon",
+        "unit": "s"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "reference"
+        ],
+        "kind": "text",
+        "label": "reference"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "samples"
+        ],
+        "kind": "integer",
+        "label": "samples"
+      },
+      {
+        "group": "prediction",
+        "key": [
+          "prediction",
+          "status"
+        ],
+        "kind": "text",
+        "label": "status"
+      },
+      {
+        "group": "warp",
+        "key": [
+          "warp",
+          "engaged"
+        ],
+        "kind": "boolean",
+        "label": "engaged"
+      },
+      {
+        "group": "warp",
+        "help": "The speed warp ramps towards while engaged.",
+        "key": [
+          "warp",
+          "requested_ms"
+        ],
+        "kind": "number",
+        "label": "requested",
+        "unit": "m/s"
+      },
+      {
+        "group": "warp",
+        "help": "The bubble's current speed.",
+        "key": [
+          "warp",
+          "actual_ms"
+        ],
+        "kind": "number",
+        "label": "actual",
+        "unit": "m/s"
+      },
+      {
+        "group": "warp",
+        "help": "Whether gravity changes ordinary velocity during warp below the cutoff.",
+        "key": [
+          "warp",
+          "gravity"
+        ],
+        "kind": "choice",
+        "label": "gravity"
+      },
+      {
+        "group": "warp",
+        "help": "The displacement from bubble motion alone on the last physics step.",
+        "key": [
+          "warp",
+          "bubble_delta_m"
+        ],
+        "kind": "vector",
+        "label": "bubble delta",
+        "unit": "m"
+      },
+      {
+        "group": "warp",
+        "key": [
+          "warp",
+          "last_match",
+          "body"
+        ],
+        "kind": "text",
+        "label": "last match · body"
+      },
+      {
+        "group": "warp",
+        "key": [
+          "warp",
+          "last_match",
+          "orbit"
+        ],
+        "kind": "boolean",
+        "label": "last match · orbit"
+      },
+      {
+        "group": "warp",
+        "key": [
+          "warp",
+          "last_match",
+          "tick"
+        ],
+        "kind": "integer",
+        "label": "last match · tick"
+      },
+      {
+        "group": "warp",
+        "help": "Velocity in the system frame at dropout, before ordinary integration.",
+        "key": [
+          "warp",
+          "last_match",
+          "velocity_ms"
+        ],
+        "kind": "vector",
+        "label": "last match · velocity",
+        "unit": "m/s"
+      },
+      {
+        "group": "warp",
+        "key": [
+          "warp",
+          "stop_reason"
+        ],
+        "kind": "text",
+        "label": "stop reason"
+      },
+      {
+        "group": "warp",
+        "help": "Turn rate at full steering, in degrees per second. Steering on several axes together shares it, and pointing never exceeds it.",
+        "key": [
+          "warp",
+          "turn_rate_dps"
+        ],
+        "kind": "number",
+        "label": "turn rate",
+        "unit": "°/s"
+      },
+      {
+        "group": "drives",
+        "help": "Orders scheduled for later steps.",
+        "key": [
+          "pending_orders"
+        ],
+        "kind": "list",
+        "label": "pending orders"
+      },
+      {
+        "group": "warp",
+        "help": "Which assists limit warp; manual warp has none.",
+        "key": [
+          "warp_mode"
+        ],
+        "kind": "text",
+        "label": "warp mode"
+      },
+      {
+        "group": "position",
+        "help": "Entering systems, or why the clock is held.",
+        "key": [
+          "arrival"
+        ],
+        "kind": "text",
+        "label": "arrival"
+      },
+      {
+        "group": "position",
+        "help": "Galactic position from the galactic centre.",
+        "key": [
+          "position_pc"
+        ],
+        "kind": "vector",
+        "label": "galactic position",
+        "unit": "pc"
+      },
+      {
+        "group": "position",
+        "key": [
+          "around",
+          "id"
+        ],
+        "kind": "text",
+        "label": "around · id"
+      },
+      {
+        "group": "position",
+        "key": [
+          "around",
+          "kind"
+        ],
+        "kind": "choice",
+        "label": "around · kind"
+      },
+      {
+        "group": "position",
+        "key": [
+          "around",
+          "altitude_km"
+        ],
+        "kind": "number",
+        "label": "around · altitude",
+        "unit": "km"
+      },
+      {
+        "group": "position",
+        "help": "Speed relative to the body.",
+        "key": [
+          "around",
+          "speed_kms"
+        ],
+        "kind": "number",
+        "label": "around · speed",
+        "unit": "km/s"
+      },
+      {
+        "group": "position",
+        "key": [
+          "around",
+          "two_body_orbit",
+          "eccentricity"
+        ],
+        "kind": "number",
+        "label": "around · two body orbit · eccentricity",
+        "unit": ""
+      },
+      {
+        "group": "position",
+        "help": "Periapsis and apoapsis altitude; none when escaping.",
+        "key": [
+          "around",
+          "two_body_orbit",
+          "apsides_altitude_km"
+        ],
+        "kind": "vector",
+        "label": "around · two body orbit · apsides altitude",
+        "unit": "km"
+      },
+      {
+        "group": "position",
+        "key": [
+          "around",
+          "two_body_orbit",
+          "period_seconds"
+        ],
+        "kind": "number",
+        "label": "around · two body orbit · period",
+        "unit": "s"
+      },
+      {
+        "group": "attitude",
+        "help": "Angle between the nose and the pointing target.",
+        "key": [
+          "pointing_error_deg"
+        ],
+        "kind": "number",
+        "label": "pointing error",
+        "unit": "°"
+      },
+      {
+        "group": "route",
+        "help": "The target's ID: a system's key resolves to its star or outermost barycentre.",
+        "key": [
+          "route",
+          "target"
+        ],
+        "kind": "text",
+        "label": "target"
+      },
+      {
+        "group": "route",
+        "help": "How the ship leaves warp at the standoff.",
+        "key": [
+          "route",
+          "arrival"
+        ],
+        "kind": "choice",
+        "label": "arrival"
+      },
+      {
+        "group": "route",
+        "key": [
+          "route",
+          "stage"
+        ],
+        "kind": "choice",
+        "label": "stage"
+      },
+      {
+        "group": "route",
+        "help": "Planned trip time, from the order's step.",
+        "key": [
+          "route",
+          "trip_s"
+        ],
+        "kind": "number",
+        "label": "trip",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "The step the order applied at.",
+        "key": [
+          "route",
+          "start_tick"
+        ],
+        "kind": "integer",
+        "label": "start tick"
+      },
+      {
+        "group": "route",
+        "help": "Distance from the target's centre where the ship drops out.",
+        "key": [
+          "route",
+          "standoff_m"
+        ],
+        "kind": "number",
+        "label": "standoff",
+        "unit": "m"
+      },
+      {
+        "group": "route",
+        "help": "Speed is the remaining distance over this.",
+        "key": [
+          "route",
+          "tau_s"
+        ],
+        "kind": "number",
+        "label": "tau",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "From the target's centre, at the last step.",
+        "key": [
+          "route",
+          "distance_m"
+        ],
+        "kind": "number",
+        "label": "distance",
+        "unit": "m"
+      },
+      {
+        "group": "route",
+        "help": "Estimated time to arrival.",
+        "key": [
+          "route",
+          "eta_s"
+        ],
+        "kind": "number",
+        "label": "eta",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "Expected arrival after the planned trip time; negative when early.",
+        "key": [
+          "route",
+          "late_s"
+        ],
+        "kind": "number",
+        "label": "late",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "The top warp speed stretches the trip.",
+        "key": [
+          "route",
+          "capped"
+        ],
+        "kind": "boolean",
+        "label": "capped"
+      },
+      {
+        "group": "route",
+        "help": "How much longer the path round bodies in the way is than the straight line, as last measured.",
+        "key": [
+          "route",
+          "detour_m"
+        ],
+        "kind": "number",
+        "label": "detour",
+        "unit": "m"
+      },
+      {
+        "group": "route",
+        "help": "Time allowed for slowing round the bends still ahead.",
+        "key": [
+          "route",
+          "bends_s"
+        ],
+        "kind": "number",
+        "label": "bends",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "The nose has lined up once.",
+        "key": [
+          "route",
+          "aligned"
+        ],
+        "kind": "boolean",
+        "label": "aligned"
+      },
+      {
+        "group": "route",
+        "help": "The body being steered round now.",
+        "key": [
+          "route",
+          "around"
+        ],
+        "kind": "text",
+        "label": "around"
+      },
+      {
+        "group": "route",
+        "help": "How the route ended.",
+        "key": [
+          "route",
+          "end"
+        ],
+        "kind": "text",
+        "label": "end"
+      },
+      {
+        "group": "route",
+        "help": "Trip time asked for; none for the distance-scaled default.",
+        "key": [
+          "route",
+          "requested_s"
+        ],
+        "kind": "number",
+        "label": "requested",
+        "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "What keeps a late trip from its time, such as a detour.",
+        "key": [
+          "route",
+          "slowed_by"
+        ],
+        "kind": "text",
+        "label": "slowed by"
+      },
+      {
+        "group": "route",
+        "help": "The page star of the target's system; empty for another craft.",
+        "key": [
+          "route",
+          "system"
+        ],
+        "kind": "text",
+        "label": "system"
+      },
+      {
+        "group": "attitude",
+        "help": "Where the pointing pilot is aiming, in frame axes.",
+        "key": [
+          "target_direction"
+        ],
+        "kind": "vector",
+        "label": "target direction",
+        "unit": ""
+      }
+    ],
+    "fleet": [
+      {
+        "group": "fleet",
+        "help": "The clock is held while physics catches up or systems load.",
+        "key": [
+          "held_clock"
+        ],
+        "kind": "boolean",
+        "label": "held clock"
+      },
+      {
+        "group": "fleet",
+        "help": "The fixed physics step.",
+        "key": [
+          "step_seconds"
+        ],
+        "kind": "number",
+        "label": "step",
+        "unit": "s"
+      },
+      {
+        "group": "fleet",
+        "key": [
+          "system_loading",
+          "queued"
+        ],
+        "kind": "integer",
+        "label": "system loading · queued"
+      },
+      {
+        "group": "fleet",
+        "key": [
+          "system_loading",
+          "running"
+        ],
+        "kind": "integer",
+        "label": "system loading · running"
+      },
+      {
+        "group": "fleet",
+        "key": [
+          "system_loading",
+          "cached_regions"
+        ],
+        "kind": "integer",
+        "label": "system loading · cached regions"
+      },
+      {
+        "group": "fleet",
+        "key": [
+          "system_loading",
+          "cached_systems"
+        ],
+        "kind": "integer",
+        "label": "system loading · cached systems"
+      },
+      {
+        "group": "fleet",
+        "key": [
+          "system_loading_error"
+        ],
+        "kind": "text",
+        "label": "system loading error"
+      }
+    ],
+    "groups": [
+      {
+        "id": "ship",
+        "label": "Ship"
+      },
+      {
+        "id": "position",
+        "label": "Position"
+      },
+      {
+        "id": "attitude",
+        "label": "Attitude"
+      },
+      {
+        "id": "drives",
+        "label": "Drives"
+      },
+      {
+        "id": "warp",
+        "label": "Warp"
+      },
+      {
+        "id": "route",
+        "label": "Route"
+      },
+      {
+        "id": "prediction",
+        "label": "Prediction"
+      }
+    ]
+  },
+  "version": 1
+}

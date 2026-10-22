@@ -82,6 +82,19 @@ pub fn candidates(sky: &mut Sky, region: Region, threads: usize) -> Vec<Candidat
     found
 }
 
+/// One generated system by its page star's ID, as `candidates` lists it, or
+/// `None` for an ID no cell holds.
+pub fn candidate(sky: &mut Sky, id: &str) -> Option<Candidate> {
+    let (cell, component, index) = crate::cells::parse_cell_star(id)?;
+    let star = sky.star(id)?;
+    let key = StarKey::new(cell, component, index);
+    Some(Candidate {
+        id: star.id,
+        position_pc: star.position_pc,
+        reach_pc: reach_pc(tiered_light(key, component, cell.level()).separation_au),
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NearbyStar {
     pub id: String,

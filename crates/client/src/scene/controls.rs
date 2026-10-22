@@ -3,14 +3,14 @@ use super::{
     camera::{CameraPose, CameraRig},
     frames::page_frame,
 };
+use crate::input::{Action, Actions};
 use crate::presentation::PresentationMode;
 use crate::{Clock, Navigation, Universe};
 use bevy::{
-    input::mouse::{AccumulatedMouseMotion, MouseWheel},
+    input::mouse::AccumulatedMouseMotion,
     math::{DQuat, DVec3},
     prelude::*,
 };
-use bevy_egui::EguiContexts;
 use space_simulation::LY_METRES;
 
 pub const MIN_SPEED: f64 = 1.0;
@@ -30,13 +30,6 @@ pub(super) fn scroll_speed(speed: f64, scroll: f32) -> f64 {
 pub struct CameraMotion {
     pub(super) orbiting: bool,
     pub(super) travel_metres: DVec3,
-    /// Whether these controls alone placed the eye this frame (free flight,
-    /// not following). Velocity then uses `moved_metres`: differencing eyes
-    /// far from their origin would add rounding as large as a slow step.
-    pub(super) steered: bool,
-    /// Every eye displacement applied here, keyboard travel and Shift + scroll
-    /// zoom, in galactic axes.
-    pub(super) moved_metres: DVec3,
     /// Keyboard controls, eased towards the pressed keys so starts, stops and
     /// turns take a moment: travel in camera axes as a fraction of
     /// `move_speed` (x, y, z), and roll as a fraction of `ROLL_SPEED` (w).
@@ -57,13 +50,13 @@ pub(super) fn ease_thrust(thrust: Vec4, wanted: Vec4, dt: f32) -> Vec4 {
     }
 }
 
+/// The free camera, or while piloting the follow camera round the ship.
 #[allow(clippy::too_many_arguments)]
 pub fn controls(
     time: Res<Time>,
-    input: (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
+    actions: Res<Actions>,
+    pilot: Res<crate::pilot::Pilot>,
     motion: Res<AccumulatedMouseMotion>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut contexts: EguiContexts,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
     universe: Res<Universe>,
@@ -74,19 +67,7 @@ pub fn controls(
 ) {
     camera_motion.orbiting = false;
     camera_motion.travel_metres = DVec3::ZERO;
-    camera_motion.moved_metres = DVec3::ZERO;
-    let (keys, buttons) = input;
-    let scroll = wheel
-        .read()
-        .map(|e| match e.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => e.y,
-            bevy::input::mouse::MouseScrollUnit::Pixel => e.y / 40.0,
-        })
-        .sum::<f32>();
-    let (pointer, keyboard) = contexts
-        .ctx_mut()
-        .map(|ctx| (crate::ui::pointer_captured(ctx), ctx.wants_keyboard_input()))
-        .unwrap_or_default();
+    let scroll = actions.wheel;
     // Flights are short; camera input resumes when they land. Constellations
     // orbit their auto-framed centre, but cannot zoom or translate.
     let free = nav.presentation_mode == PresentationMode::Simulation && !rig.flying();
@@ -94,16 +75,32 @@ pub fn controls(
         nav.presentation_mode,
         PresentationMode::Simulation | PresentationMode::Constellation
     ) && !rig.flying();
-    if !pointer && rotating {
-        let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-        if buttons.pressed(MouseButton::Left) && shift {
+    if pilot.flying() {
+        // Either button looks round the ship, and the wheel sets how far
+        // the camera follows; the keys are the ship's.
+        if rotating && (actions.pressed(Action::Look) || actions.pressed(Action::Orbit)) {
+            orbit(&mut nav, motion.delta);
+        }
+        if free && scroll != 0.0 {
+            nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
+                .clamp(MIN_DISTANCE, 40_000.0 * LY_METRES);
+        }
+        if actions.just_pressed(Action::Pause) {
+            clock.0.paused = !clock.0.paused;
+        }
+        camera_motion.thrust = Vec4::ZERO;
+        return;
+    }
+    if actions.pointer_free && rotating {
+        let shift = actions.pressed(Action::Alternate);
+        if actions.pressed(Action::Look) && shift {
             drag_fov(&mut nav, motion.delta.y);
-        } else if buttons.pressed(MouseButton::Left) && free {
+        } else if actions.pressed(Action::Look) && free {
             let tilt = nav
                 .system(&universe.0)
                 .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.frame_page(s)));
             drag_look(&mut nav, motion.delta, Some(tilt.inverse() * pose.eye));
-        } else if buttons.pressed(MouseButton::Right) {
+        } else if actions.pressed(Action::Orbit) {
             nav.eye = None;
             orbit(&mut nav, motion.delta);
             camera_motion.orbiting = free;
@@ -118,45 +115,38 @@ pub fn controls(
             let old_distance = nav.distance;
             nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
                 .clamp(MIN_DISTANCE, 40_000.0 * LY_METRES);
-            let zoom = (nav.rotation * Vec3::Z).as_dvec3() * (nav.distance - old_distance);
-            camera_motion.moved_metres += tilt * zoom;
-            let eye = old_eye + zoom;
+            let eye = old_eye + (nav.rotation * Vec3::Z).as_dvec3() * (nav.distance - old_distance);
+            camera_motion.travel_metres += tilt * (eye - old_eye);
             nav.eye = Some(eye);
             nav.target = eye - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
         }
     }
     let mut wanted = Vec4::ZERO;
-    if !keyboard {
-        if keys.just_pressed(KeyCode::Enter) {
-            crate::galaxy_nav::visit_selected(&mut nav, &universe.0);
-        }
-        if keys.just_pressed(KeyCode::Space) {
-            clock.0.paused = !clock.0.paused;
-        }
-        if keys.just_pressed(KeyCode::Escape) {
-            ui.write(crate::actions::UiCommand::Up);
-        }
-        let axis = |positive, negative| {
-            f64::from(keys.pressed(positive) as u8) - f64::from(keys.pressed(negative) as u8)
-        };
-        let movement = DVec3::new(
-            axis(KeyCode::KeyD, KeyCode::KeyA),
-            axis(KeyCode::KeyR, KeyCode::KeyF),
-            axis(KeyCode::KeyS, KeyCode::KeyW),
-        );
-        let roll_input = axis(KeyCode::KeyQ, KeyCode::KeyE) as f32;
-        if roll_input != 0.0 && free {
-            nav.following = false;
-            wanted.w = roll_input;
-        }
-        if movement.length_squared() > 0.0 && free {
-            nav.following = false;
-            wanted = movement.normalize().as_vec3().extend(wanted.w);
-        }
+    if actions.just_pressed(Action::Visit) {
+        crate::galaxy_nav::visit_selected(&mut nav, &universe.0);
+    }
+    if actions.just_pressed(Action::Pause) {
+        clock.0.paused = !clock.0.paused;
+    }
+    if actions.just_pressed(Action::Cancel) {
+        ui.write(crate::actions::UiCommand::Up);
+    }
+    let movement = Vec3::new(
+        actions.axis(Action::Right, Action::Left),
+        actions.axis(Action::Up, Action::Down),
+        actions.axis(Action::Backward, Action::Forward),
+    );
+    let roll_input = actions.axis(Action::RollLeft, Action::RollRight);
+    if roll_input != 0.0 && free {
+        nav.following = false;
+        wanted.w = roll_input;
+    }
+    if movement.length_squared() > 0.0 && free {
+        nav.following = false;
+        wanted = movement.normalize().extend(wanted.w);
     }
     // Flights, tracking and presets take the camera over: no coasting into them.
-    camera_motion.steered = free && !nav.following;
-    camera_motion.thrust = if camera_motion.steered {
+    camera_motion.thrust = if free && !nav.following {
         ease_thrust(camera_motion.thrust, wanted, time.delta_secs())
     } else {
         Vec4::ZERO
@@ -175,7 +165,6 @@ pub fn controls(
         let rotation = nav.rotation;
         let step = (rotation * travel).as_dvec3() * nav.move_speed * time.delta_secs_f64();
         camera_motion.travel_metres += tilt * step;
-        camera_motion.moved_metres += tilt * step;
         let eye = nav.eye.get_or_insert_with(|| tilt.inverse() * pose.eye);
         *eye += step;
         nav.target = *eye - (rotation * Vec3::Z).as_dvec3() * nav.distance;

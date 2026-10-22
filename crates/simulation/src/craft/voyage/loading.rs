@@ -47,6 +47,7 @@ fn same(a: &Wait, b: &Wait) -> bool {
     match (a, b) {
         (Wait::Region(a), Wait::Region(b)) => a == b,
         (Wait::System(a), Wait::System(b)) => a.id == b.id,
+        (Wait::Star(a), Wait::Star(b)) => a == b,
         _ => false,
     }
 }
@@ -91,6 +92,7 @@ impl<B: Backend> Loader<B> {
         let known = match wait {
             Wait::Region(region) => self.cache.region(*region).is_some(),
             Wait::System(candidate) => self.cache.arrival(&candidate.id).is_some(),
+            Wait::Star(id) => self.cache.locate(id).is_some(),
         };
         if known || self.cache.chart(wait, lists) {
             return true;

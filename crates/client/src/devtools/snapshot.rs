@@ -139,7 +139,12 @@ pub(super) fn publish(
         "trail": trail.iter().map(|c| &c.label).collect::<Vec<_>>(),
         "selection_trail": selection_trail.iter().map(|c| &c.label).collect::<Vec<_>>(),
         "selection": nav.selection.as_ref().map(crate::Selection::object),
-        "location_planet": nav.location_planet,
+        "location_body": nav.location_body,
+        // What the camera moves with, by its position alone.
+        "anchor": nav.anchor.as_ref().map(|anchor| match anchor {
+            crate::Anchor::Body(id) => json!({"kind": "body", "id": id}),
+            crate::Anchor::Craft(id) => json!({"kind": "craft", "id": id}),
+        }),
         "inspection": inspection,
         "inspector": readout,
         "page": nav.page, "presentation_mode": nav.presentation_mode,
@@ -150,8 +155,9 @@ pub(super) fn publish(
         // Live craft for `ns ship`; their facts are also in the inspector.
         "craft": crate::craft::readout(&fleet, clock.0.seconds),
         "display": {
-            "orbits": nav.orbits, "labels": nav.labels,
+            "overlays": nav.overlays, "orbits": nav.orbits, "labels": nav.labels,
             "markers": nav.markers, "velocity_marker": nav.velocity_marker,
+            "predicted_paths": nav.predicted_paths,
             "realistic": nav.realistic, "galaxy_glow": nav.galaxy_glow,
             "exposure": nav.exposure, "compression": nav.compression, "wireframe": nav.wireframe,
         },

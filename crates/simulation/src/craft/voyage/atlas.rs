@@ -20,6 +20,9 @@ pub trait Atlas {
     fn region(&self, region: Region) -> Option<&[Candidate]>;
     /// A candidate system's bodies, or `None` until loaded.
     fn arrival(&self, star: &str) -> Option<&Arrival>;
+    /// Where a system is, by its page star's ID: `None` until known, then
+    /// `Some(None)` for an ID that names no system.
+    fn locate(&self, star: &str) -> Option<Option<&Candidate>>;
 }
 
 /// An atlas that knows nothing yet, for steps that need no system data.
@@ -30,6 +33,9 @@ impl Atlas for Blank {
         None
     }
     fn arrival(&self, _: &str) -> Option<&Arrival> {
+        None
+    }
+    fn locate(&self, _: &str) -> Option<Option<&Candidate>> {
         None
     }
 }
@@ -62,18 +68,24 @@ pub fn legacy_candidates(region: Region, lists: &Galaxy) -> Vec<Candidate> {
             if system.page_star(page).is_some() {
                 continue;
             }
-            let origin_pc = listed_origin_pc(system, page);
-            let range_pc = super::range_m(&Field::new(system.clone(), page)) / PC_METRES;
+            let candidate = legacy_candidate(system, page);
+            let (origin_pc, range_pc) = (candidate.position_pc, candidate.reach_pc);
             if crate::search::engine::gap_sq(min, REGION_PC, origin_pc) < range_pc * range_pc {
-                found.push(Candidate {
-                    id: page_star_id(system, page),
-                    position_pc: origin_pc,
-                    reach_pc: range_pc,
-                });
+                found.push(candidate);
             }
         }
     }
     found
+}
+
+/// A list page with no cell star, as a candidate: where its list puts it,
+/// reaching as far as its exact entry range.
+fn legacy_candidate(system: &StarSystem, page: u32) -> Candidate {
+    Candidate {
+        id: page_star_id(system, page),
+        position_pc: listed_origin_pc(system, page),
+        reach_pc: super::range_m(&Field::new(system.clone(), page)) / PC_METRES,
+    }
 }
 
 /// A value kept in a `Cache`, with the round it was last used in.
@@ -93,6 +105,7 @@ struct Kept<T> {
 pub struct Cache {
     regions: HashMap<Region, Kept<Vec<Candidate>>>,
     arrivals: HashMap<String, Kept<Arrival>>,
+    stars: HashMap<String, Kept<Option<Candidate>>>,
     round: i64,
 }
 
@@ -105,6 +118,9 @@ impl Atlas for Cache {
     fn arrival(&self, star: &str) -> Option<&Arrival> {
         self.arrivals.get(star).map(|kept| self.touch(kept))
     }
+    fn locate(&self, star: &str) -> Option<Option<&Candidate>> {
+        self.stars.get(star).map(|kept| self.touch(kept).as_ref())
+    }
 }
 
 impl Cache {
@@ -114,6 +130,7 @@ impl Cache {
         self.round = self.round.max(round);
         evict(&mut self.regions, REGIONS, self.round);
         evict(&mut self.arrivals, ARRIVALS, self.round);
+        evict(&mut self.stars, ARRIVALS, self.round);
     }
 
     fn touch<'a, T>(&self, kept: &'a Kept<T>) -> &'a T {
@@ -134,8 +151,18 @@ impl Cache {
     }
 
     /// Answer a system wait from the lists, when a charted page takes the
-    /// generated system's place. Returns whether it did.
+    /// generated system's place, or locate a legacy page, which seeds cannot.
+    /// Returns whether it did.
     pub fn chart(&mut self, wait: &Wait, lists: &Galaxy) -> bool {
+        if let Wait::Star(id) = wait {
+            let Some((system, page)) =
+                listed_page(lists, id).filter(|(system, page)| system.page_star(*page).is_none())
+            else {
+                return false;
+            };
+            self.insert_star(id.clone(), Some(legacy_candidate(system, page)));
+            return true;
+        }
         let Wait::System(candidate) = wait else {
             return false;
         };
@@ -162,8 +189,18 @@ impl Cache {
             (Wait::System(candidate), Reply::System { system }) if !self.chart(wait, lists) => {
                 self.insert_arrival(candidate.id.clone(), seeded_arrival(candidate, system));
             }
+            (Wait::Star(id), Reply::Star { candidate }) if !self.chart(wait, lists) => {
+                self.insert_star(id.clone(), candidate);
+            }
             _ => {}
         }
+    }
+
+    fn insert_star(&mut self, id: String, candidate: Option<Candidate>) {
+        let kept = self.kept(candidate);
+        self.stars.insert(id, kept);
+        let round = self.round;
+        evict(&mut self.stars, ARRIVALS, round);
     }
 
     fn insert_arrival(&mut self, id: String, arrival: Arrival) {
@@ -259,6 +296,9 @@ impl Atlas for Library {
     }
     fn arrival(&self, star: &str) -> Option<&Arrival> {
         self.cache.arrival(star)
+    }
+    fn locate(&self, star: &str) -> Option<Option<&Candidate>> {
+        self.cache.locate(star)
     }
 }
 

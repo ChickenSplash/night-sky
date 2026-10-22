@@ -16,6 +16,10 @@ pub enum UiCommand {
     SelectStar {
         id: String,
     },
+    /// Select a pair of the loaded system by member ID, such as `…#AB`.
+    SelectBarycentre {
+        id: String,
+    },
     /// Open a list's constellation from any view.
     Jump {
         list: String,
@@ -83,6 +87,12 @@ pub enum UiCommand {
         /// World step to apply from; absent means the next unsimulated step.
         #[serde(default)]
         tick: Option<i64>,
+        /// Seconds from the ship's next step to apply from, instead of `tick`.
+        #[serde(default)]
+        in_s: Option<f64>,
+        /// Seconds until the order's off order, for orders that have one.
+        #[serde(default)]
+        for_s: Option<f64>,
     },
     /// Select a craft by ID without moving the camera.
     SelectCraft {
@@ -151,10 +161,12 @@ pub enum UiCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Display {
+    Overlays,
     Orbits,
     Labels,
     Markers,
     VelocityMarker,
+    PredictedPaths,
     Realistic,
     GalaxyGlow,
     Wireframe,
@@ -310,6 +322,11 @@ impl UiCommand {
                         format!("Star `{id}` is not loaded, visited, mapped or found by search")
                     })
             }
+            UiCommand::SelectBarycentre { id } => nav
+                .system(galaxy)
+                .and_then(|system| system.barycentre(id))
+                .map(|_| ())
+                .ok_or_else(|| format!("The visited system has no barycentre `{id}`")),
             UiCommand::Jump { list: id } => list(id).map(|_| ()),
             UiCommand::FindTask { list: id, task } => {
                 let index = list(id)?;
@@ -379,16 +396,47 @@ impl UiCommand {
                 let live = fleet.get(&id).ok_or("No craft")?;
                 live.check(&crate::craft::Order::Thrust { thrust: *thrust })
             }
-            UiCommand::SteerCraft { id, order, tick } => {
+            UiCommand::SteerCraft {
+                id,
+                order,
+                tick,
+                in_s,
+                for_s,
+            } => {
                 let id = thrust_target(id.as_deref(), nav, fleet)?;
                 let live = fleet.get(&id).ok_or("No craft")?;
-                live.check_order(tick.unwrap_or(live.craft.tick), order)
+                match steer_steps(live.craft.tick, *tick, *in_s, *for_s)? {
+                    (start, Some(end)) => live.check_timed_order(start, end, order).map(|_| ()),
+                    (start, None) => live.check_order(start, order),
+                }
             }
             UiCommand::SelectCraft { id } => craft(id).map(|_| ()),
             UiCommand::FlyToCraft { id } => craft(id).map(|_| ()),
             _ => self.check_values(),
         }
     }
+}
+
+/// The steps a ship order applies from and, when timed, ends at, from a
+/// ship at step `now`.
+fn steer_steps(
+    now: i64,
+    tick: Option<i64>,
+    in_s: Option<f64>,
+    for_s: Option<f64>,
+) -> Result<(i64, Option<i64>), String> {
+    use space_simulation::craft::voyage::steps;
+    let start = match (tick, in_s) {
+        (Some(_), Some(_)) => return Err("Give tick or in, not both".into()),
+        (Some(tick), None) => tick,
+        (None, Some(seconds)) => now + steps(seconds)?,
+        (None, None) => now,
+    };
+    let end = for_s
+        .map(steps)
+        .transpose()?
+        .map(|length| start.saturating_add(length));
+    Ok((start, end))
 }
 
 /// The body a ship spawns at: the one given, else the selected planet or
@@ -404,9 +452,10 @@ fn spawn_body(
     match &nav.selection {
         Some(Selection::Planet(id)) => return Some(id.clone()),
         Some(Selection::Star(star)) => return Some(star.id.clone()),
+        Some(Selection::Barycentre(id)) => return Some(id.clone()),
         _ => {}
     }
-    nav.location_planet.clone().or_else(|| {
+    nav.location_body.clone().or_else(|| {
         nav.system(galaxy)
             .map(|system| crate::objects::star_id(system, nav.page))
     })
@@ -445,8 +494,7 @@ fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
     } else {
         Vec3::Y
     };
-    nav.visit = None;
-    nav.open_origin_ly = DVec3::ZERO;
+    nav.leave_for_home_frame();
     nav.page = 0;
     nav.selection = None;
     nav.following = false;
@@ -494,6 +542,14 @@ pub fn apply(
             UiCommand::SelectStar { id } => {
                 if let Some(star) = crate::galaxy_nav::selectable_star(&nav, galaxy, &field, id) {
                     nav.select(Some(Selection::Star(star)));
+                }
+            }
+            UiCommand::SelectBarycentre { id } => {
+                if nav
+                    .system(galaxy)
+                    .is_some_and(|system| system.barycentre(id).is_some())
+                {
+                    nav.select(Some(Selection::Barycentre(id.clone())));
                 }
             }
             UiCommand::Jump { list: id } => {
@@ -612,12 +668,24 @@ pub fn apply(
                     warn!(target: "craft", "Thrust refused: {err}");
                 }
             }
-            UiCommand::SteerCraft { id, order, tick } => {
+            UiCommand::SteerCraft {
+                id,
+                order,
+                tick,
+                in_s,
+                for_s,
+            } => {
                 if let Ok(id) = thrust_target(id.as_deref(), &nav, &fleet)
                     && let Some(live) = fleet.get_mut(&id)
-                    && let Err(err) = live
-                        .voyage
-                        .order(tick.unwrap_or(live.craft.tick), order.clone())
+                    && let Err(err) =
+                        steer_steps(live.craft.tick, *tick, *in_s, *for_s).and_then(|steps| {
+                            match steps {
+                                (start, Some(end)) => {
+                                    live.voyage.timed_order(start, end, order.clone())
+                                }
+                                (start, None) => live.voyage.order(start, order.clone()),
+                            }
+                        })
                 {
                     warn!(target: "craft", "Ship order refused: {err}");
                 }
@@ -660,10 +728,12 @@ pub fn apply(
                 }
             }
             UiCommand::SetDisplay { option, on } => match option {
+                Display::Overlays => nav.overlays = *on,
                 Display::Orbits => nav.orbits = *on,
                 Display::Labels => nav.labels = *on,
                 Display::Markers => nav.markers = *on,
                 Display::VelocityMarker => nav.velocity_marker = *on,
+                Display::PredictedPaths => nav.predicted_paths = *on,
                 Display::Realistic => nav.realistic = *on,
                 Display::GalaxyGlow => nav.galaxy_glow = *on,
                 Display::Wireframe => nav.wireframe = *on,

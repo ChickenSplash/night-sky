@@ -13,7 +13,6 @@ breadcrumb inspects it without changing selection or moving the camera.
 | Orbit the camera target | Right mouse drag |
 | Roll | Q / E |
 | Move | W/A/S/D, R/F for up/down |
-| Move faster | Left Shift |
 | Zoom | Shift + mouse wheel |
 | Adjust movement speed | Mouse wheel or drag bottom-left set speed |
 | Adjust field of view | Debug console's `render` tab or Shift + left drag |
@@ -28,6 +27,33 @@ Exposure and compression apply immediately, with defaults of 0 stops and 50%.
 Compression balances individual bodies, not the galaxy. Neither is persisted.
 See [realistic rendering](rendering.md) for the physical model.
 
+Keys and mouse buttons are read as named actions through one binding table
+(`input.rs`), shared by the free camera and piloting, so a later controls menu
+can rebind both. The debug console's `controls` tab labels keys from it.
+
+## Piloting
+
+With a ship selected, Tab pilots it: the camera follows it by position and the
+keys fly the ship. Piloting holds the clock at 1×, and leaving keeps 1×.
+
+| Action | Control |
+| --- | --- |
+| Stop piloting | Tab or Esc; throttle, warp and spin carry on |
+| Fine thrusters (while held) | W/A/S/D, R/F for up/down |
+| Throttle lever up / down | Hold Shift / Ctrl; below zero is reverse |
+| Full / cut throttle | Z / X |
+| Pitch and yaw | Arrow keys |
+| Roll | Q / E |
+| Stop rotation | T |
+| Look round the ship | Left or right mouse drag |
+| Camera distance | Mouse wheel |
+
+Keys become ordinary ship orders only when they change, at the ship's next
+step, so piloting uses the same order path as the CLI. Turning is the raw
+`rotate` input: in sublight the spin keeps growing while held and persists when
+released; in warp it steers the bubble. Fine thrusters and the throttle do
+nothing in warp.
+
 ## Selection, inspection and travel
 
 | Action | Control |
@@ -35,6 +61,8 @@ See [realistic rendering](rendering.md) for the physical model.
 | Select a visible star | Click it |
 | Visit its system | Click the selected star again or press Enter |
 | Select a planet/task | Click its marker or the task index |
+| Select a star or pair of the loaded system | Click its marker (a pair's is a small cross) |
+| Reach a marker hidden by a crowd | Zoom in until it separates, or use the breadcrumb or search |
 | Follow a planet | Click the selected planet again or use `follow` |
 | Inspect without travel | Click an item in either breadcrumb trail |
 | Fly to/frame a system | Inspector's Fly to system / Frame system |
@@ -44,6 +72,7 @@ See [realistic rendering](rendering.md) for the physical model.
 | Browse list systems | Previous system / Next system or a System n line |
 | Visit a list | Click it in Tasks |
 | Stop following and reframe | Escape while tracking |
+| Look or move round a followed object | Mouse or WASD: it stops centring, but the camera keeps moving with it |
 | Clear selection | Escape when not tracking |
 | Move up physically | Escape with nothing selected |
 
@@ -64,6 +93,11 @@ Toggle the object browser with the 🔍 icon or Ctrl+K. Browser shortcuts can
 also be intercepted by the web browser; the icon is always available.
 There is no separate Settings window. Display options and realistic lighting
 live in `render`; shortcut help lives in `controls`.
+Scene overlays (`set_display overlays false`) hides everything drawn over the
+scene that is not in it: markers, rings, labels, the velocity marker, orbital
+and predicted craft paths, wireframes over lit bodies and constellation lines.
+Each of those keeps its own switch, nested beneath it. Clicks still select
+bodies while overlays are hidden.
 Click the left side of a checkbox row to toggle it. The square `+` / `-` button
 on the right expands or collapses its explanation without changing the switch.
 Only the console header (including its padding) moves the window, indicated by

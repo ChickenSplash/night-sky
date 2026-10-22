@@ -5,8 +5,11 @@ use crate::flight::{Flight, Pose};
 use bevy::{math::DVec3, prelude::*};
 use space_simulation::LY_METRES;
 
-/// Camera velocity in galactic axes, measured from displayed positions rather
-/// than the requested movement, so flights and turns are accounted for.
+/// Camera velocity in galactic axes. Free flight sums the controls' exact
+/// movement and the exact velocity of what carries the camera
+/// (`CameraPose::carried_velocity`): differencing positions would read the
+/// rounding of orbital positions and the simulation clock as speed. Flights
+/// and a followed craft are measured from displayed positions.
 #[derive(Resource, Default)]
 pub struct CameraVelocity {
     pub metres_per_second: DVec3,
@@ -34,6 +37,10 @@ pub struct CameraPose {
     /// Exact target-to-eye offset while following a craft, in galactic axes.
     /// Kept separate so adding it to a light-year-sized position cannot round it.
     pub followed: Option<FollowPose>,
+    /// Velocity of what carries the camera, a followed planet or its
+    /// anchor, in metres per simulated second and galactic axes. None
+    /// during flights.
+    pub carried_velocity: Option<DVec3>,
 }
 
 pub struct FollowPose {
@@ -75,6 +82,10 @@ pub struct CameraRig {
     pub(super) flight: Option<Flight>,
     pub(super) selected: Option<usize>,
     pub(super) warned_stall: bool,
+    /// Whether `frame_ly` was in galactic space (`Navigation::galactic_origin_ly`).
+    pub(super) galactic: bool,
+    /// The anchor's last position in the camera's frame, with that frame.
+    pub(super) carried: Option<(crate::Anchor, DVec3, DVec3)>,
 }
 
 impl CameraRig {
@@ -113,6 +124,7 @@ pub fn measure_velocity(
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
     motion: Res<CameraMotion>,
+    clock: Res<crate::Clock>,
     mut velocity: ResMut<CameraVelocity>,
     fleet: Option<Res<crate::craft::Fleet>>,
 ) {
@@ -149,32 +161,47 @@ pub fn measure_velocity(
         return;
     }
     velocity.previous_follow = None;
-    let previous = velocity.previous.replace(current);
-    if dt <= 0.0 {
-        velocity.metres_per_second = DVec3::ZERO;
-        velocity.marker_metres_per_second = DVec3::ZERO;
+    let rate = match (&clock.0, fleet.as_deref()) {
+        (clock, _) if clock.paused => 0.0,
+        (clock, Some(fleet)) => fleet.safe_rate(clock.rate),
+        (clock, None) => clock.rate,
+    };
+    let carried = pose.carried_velocity.unwrap_or(DVec3::ZERO) * rate;
+    // Orbiting by right-drag sweeps the eye round the target: the speed
+    // includes the sweep, measured below, but the marker does not.
+    if rig.flight.is_none() && !motion.orbiting && dt > 0.0 {
+        velocity.metres_per_second = motion.travel_metres / dt + carried;
+        velocity.marker_metres_per_second = velocity.metres_per_second;
+        velocity.previous = Some(current);
         return;
     }
-    let exact = motion.steered && !motion.orbiting && !rig.flying();
-    velocity.metres_per_second = match previous {
-        // Free flight knows its displacement exactly, whatever rounding the
-        // eye far from its origin or a re-anchoring frame switch adds.
-        _ if exact => motion.moved_metres / dt,
-        // Switching a star-relative frame subtracts interstellar-sized
-        // numbers. Do not interpret the rounding residual as motion.
-        Some((frame, _)) if frame != rig.frame_ly => {
-            velocity.marker_metres_per_second = DVec3::ZERO;
-            velocity.metres_per_second = DVec3::ZERO;
-            return;
+    velocity.metres_per_second = if let Some((frame, eye)) = velocity.previous {
+        if dt > 0.0 {
+            if frame != rig.frame_ly {
+                // Switching a star-relative frame subtracts interstellar-sized
+                // numbers. Do not interpret the rounding residual as motion.
+                velocity.previous = Some(current);
+                velocity.metres_per_second = DVec3::ZERO;
+                velocity.marker_metres_per_second = DVec3::ZERO;
+                return;
+            }
+            // Subtract local eyes first: adding the distant galactic origin to
+            // each position would lose metre-scale motion to f64 precision.
+            (pose.eye - eye) / dt
+        } else {
+            DVec3::ZERO
         }
-        // Subtract local eyes first: adding the distant galactic origin to
-        // each position would lose metre-scale motion to f64 precision.
-        Some((_, eye)) => (pose.eye - eye) / dt,
-        None => DVec3::ZERO,
+    } else {
+        DVec3::ZERO
     };
     velocity.marker_metres_per_second = if motion.orbiting {
-        motion.travel_metres / dt
+        if dt > 0.0 {
+            motion.travel_metres / dt + carried
+        } else {
+            DVec3::ZERO
+        }
     } else {
         velocity.metres_per_second
     };
+    velocity.previous = Some(current);
 }

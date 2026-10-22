@@ -136,6 +136,8 @@ fn cli_order_pipeline_points_burns_brakes_and_tracks_a_moving_body() {
         id: None,
         order,
         tick: None,
+        in_s: None,
+        for_s: None,
     };
     send(
         &mut app,
@@ -193,6 +195,8 @@ fn body_orders_validate_and_patch_inputs_without_cancelling_pointing() {
         id: None,
         order,
         tick: None,
+        in_s: None,
+        for_s: None,
     };
     send(
         &mut app,
@@ -291,6 +295,8 @@ fn manoeuvres_cap_the_clock_before_physics_and_preserve_pause_and_requested_rate
         &mut app,
         UiCommand::SteerCraft {
             tick: None,
+            in_s: None,
+            for_s: None,
             id: None,
             order: Order::Throttle { value: 0.5 },
         },
@@ -313,6 +319,12 @@ fn manoeuvres_cap_the_clock_before_physics_and_preserve_pause_and_requested_rate
     fleet.craft[0].craft.spin = [0.0, 0.1, 0.0];
     assert_eq!(fleet.safe_rate(86_400.0), 10.0);
     fleet.craft[0].craft.spin = [0.0; 3];
+    assert_eq!(fleet.safe_rate(86_400.0), 86_400.0);
+    // Steering the warp bubble is not a sublight manoeuvre.
+    let craft = &mut fleet.craft[0].craft;
+    craft.engage_warp().unwrap();
+    craft.input.controls.rotation = [0.0, 0.5, 0.0];
+    craft.spin = [0.0, 0.1, 0.0];
     assert_eq!(fleet.safe_rate(86_400.0), 86_400.0);
 }
 
@@ -347,6 +359,8 @@ fn warp_respects_pause_without_the_sublight_time_cap() {
         &mut app,
         UiCommand::SteerCraft {
             tick: None,
+            in_s: None,
+            for_s: None,
             id: None,
             order: Order::Warp {
                 command: WarpOrder::Engage,
@@ -378,7 +392,12 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
         .init_resource::<crate::scene::CameraPose>()
         .init_resource::<crate::scene::CameraRig>()
         .init_resource::<crate::stars::stream::StreamMetrics>()
-        .add_systems(Update, crate::scene::place_camera.after(step));
+        .add_systems(
+            Update,
+            (crate::scene::locate, crate::scene::place_camera)
+                .chain()
+                .after(step),
+        );
     let (_, _, planet) = planet_system();
     send(
         &mut app,
@@ -409,6 +428,8 @@ fn following_a_craft_survives_its_departure_into_galactic_space() {
     app.world_mut()
         .resource_mut::<Time>()
         .advance_by(std::time::Duration::from_secs(10));
+    app.update();
+    // The camera then finds itself far from the system and leaves it.
     app.update();
     let nav = app.world().resource::<Navigation>();
     assert!(nav.following);
@@ -453,7 +474,7 @@ fn manual_dropout_takes_effect_from_the_next_fixed_step() {
         live.craft.engage_warp().unwrap();
         live.craft.warp.actual_ms = speed;
         live.previous = live.craft.state();
-        live.voyage.advance();
+        live.voyage.advance(None);
         ordinary
     };
     let mid = epoch + STEP_SECONDS * 0.4;
@@ -466,6 +487,8 @@ fn manual_dropout_takes_effect_from_the_next_fixed_step() {
         &mut app,
         UiCommand::SteerCraft {
             tick: None,
+            in_s: None,
+            for_s: None,
             id: None,
             order: Order::Warp {
                 command: WarpOrder::Disengage,
@@ -525,6 +548,8 @@ fn matched_dropout_command_reaches_physics_and_ship_readout() {
             UiCommand::SteerCraft {
                 id: None,
                 tick: None,
+                in_s: None,
+                for_s: None,
                 order: Order::Warp {
                     command: WarpOrder::Engage,
                 },
@@ -560,6 +585,178 @@ fn matched_dropout_command_reaches_physics_and_ship_readout() {
             serde_json::json!(live.craft.state().velocity)
         );
     }
+}
+
+#[test]
+fn a_plotted_route_reaches_its_target_and_the_readout_shows_it() {
+    let mut app = app();
+    let (system, page, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let star = objects::star_id(&system, page);
+    let command: UiCommand = serde_json::from_value(serde_json::json!({
+        "type": "steer_craft", "order": {"action": "warp", "command": {
+            "command": "to", "target": star, "match": true, "time": 20.0,
+        }}
+    }))
+    .unwrap();
+    send(&mut app, command);
+    let readout = |app: &App| {
+        let fleet = app.world().resource::<Fleet>();
+        super::readout(fleet, fleet.craft[0].craft.seconds())["craft"][0]["route"].clone()
+    };
+    assert_eq!(readout(&app)["stage"], "align");
+    assert_eq!(readout(&app)["arrival"], "match");
+    for _ in 0..(25.0 / STEP_SECONDS) as usize {
+        app.world_mut().resource_mut::<Clock>().0.seconds += STEP_SECONDS;
+        app.update();
+    }
+    let route = readout(&app);
+    assert_eq!(route["stage"], "arrived", "{route}");
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert!(!live.craft.warp.engaged);
+    assert_eq!(live.craft.warp.last_match.as_ref().unwrap().body, star);
+}
+
+#[test]
+fn a_route_to_another_system_flies_through_the_command_path() {
+    use space_simulation::{craft::voyage, neighbourhood};
+    let mut app = app();
+    let (system, page, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    // A generated neighbour's planet, a light year or more away.
+    let mut sky = space_simulation::cells::Sky::default();
+    let origin = voyage::frame_origin_pc(&mut sky, &system, page);
+    let mut near = neighbourhood::stars_within(&mut sky, origin, 2.0, 1);
+    near.sort_by(|a, b| a.id.cmp(&b.id));
+    let target = near
+        .iter()
+        .filter(|star| {
+            let pc = (0..3)
+                .map(|i| (star.position_pc[i] - origin[i]).powi(2))
+                .sum::<f64>();
+            pc.sqrt() * space_simulation::galaxy::PC_METRES > space_simulation::LY_METRES
+        })
+        .find_map(|star| {
+            let candidate = neighbourhood::candidate(&mut sky, &star.id)?;
+            let generated = voyage::generated_arrival(&candidate);
+            let planet = generated.field.system().planets.first()?;
+            Some(planet.id.clone())
+        })
+        .expect("a neighbour with a planet");
+    let command: UiCommand = serde_json::from_value(serde_json::json!({
+        "type": "steer_craft", "order": {"action": "warp", "command": {
+            "command": "to", "target": target, "time": 20.0,
+        }}
+    }))
+    .unwrap();
+    send(&mut app, command);
+    let readout = |app: &App| {
+        let fleet = app.world().resource::<Fleet>();
+        super::readout(fleet, fleet.craft[0].craft.seconds())["craft"][0]["route"].clone()
+    };
+    assert_eq!(readout(&app)["stage"], "plotting");
+    for _ in 0..(25.0 / STEP_SECONDS) as usize {
+        app.world_mut().resource_mut::<Clock>().0.seconds += STEP_SECONDS;
+        app.update();
+    }
+    let route = readout(&app);
+    assert_eq!(route["stage"], "arrived", "{route}");
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert_eq!(
+        live.craft.frame.star(),
+        space_simulation::multiple::system_key(&target)
+    );
+}
+
+#[test]
+fn a_ship_flies_to_another_and_holds_formation_through_the_command_path() {
+    let mut app = app();
+    let (_, _, planet) = planet_system();
+    for altitude_km in [400.0, 200_000.0] {
+        send(
+            &mut app,
+            UiCommand::SpawnShip {
+                body: Some(planet.clone()),
+                altitude_km,
+                speed_kms: None,
+                velocity_kms: None,
+            },
+        );
+    }
+    let command: UiCommand = serde_json::from_value(serde_json::json!({
+        "type": "steer_craft", "id": "craft-2", "order": {"action": "warp", "command": {
+            "command": "to", "target": "craft-1", "match": true,
+        }}
+    }))
+    .unwrap();
+    send(&mut app, command);
+    let route = |app: &App| {
+        let fleet = app.world().resource::<Fleet>();
+        super::readout(fleet, fleet.craft[1].craft.seconds())["craft"][1]["route"].clone()
+    };
+    assert_eq!(route(&app)["stage"], "align", "{}", route(&app));
+    // Lowest the chaser goes, in the planet's radii.
+    let mut lowest = f64::INFINITY;
+    for _ in 0..(25.0 / STEP_SECONDS) as usize {
+        app.world_mut().resource_mut::<Clock>().0.seconds += STEP_SECONDS;
+        app.update();
+        let fleet = app.world().resource::<Fleet>();
+        let live = &fleet.craft[1];
+        let body = live
+            .field
+            .reference_by_id(&planet, live.craft.seconds())
+            .unwrap();
+        let at = live.craft.state().position;
+        let r = (0..3)
+            .map(|i| (at[i] - body.state.position[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        lowest = lowest.min(r / body.radius_m);
+    }
+    let fleet = app.world().resource::<Fleet>();
+    let live = &fleet.craft[0];
+    let body = live
+        .field
+        .reference_by_id(&planet, live.craft.seconds())
+        .unwrap();
+    let at = live.craft.state().position;
+    let r = (0..3)
+        .map(|i| (at[i] - body.state.position[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    // The target orbits inside the planet's keep-clear sphere: the route
+    // skims round at its height, never lower.
+    assert!(lowest > 0.999 * r / body.radius_m, "{lowest} radii");
+    let route = route(&app);
+    assert_eq!(route["stage"], "arrived", "{route}");
+    let fleet = app.world().resource::<Fleet>();
+    let (one, two) = (fleet.craft[0].craft.state(), fleet.craft[1].craft.state());
+    let gap = (0..3)
+        .map(|i| (one.position[i] - two.position[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!((900.0..1_100.0).contains(&gap), "{gap} m");
+    let drift = (0..3)
+        .map(|i| (one.velocity[i] - two.velocity[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(drift < 0.1, "{drift} m/s");
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -713,6 +910,78 @@ fn developer_orders_can_target_a_future_tick_without_acting_early() {
             .actual_ms
             > 0.0
     );
+}
+
+#[test]
+fn developer_orders_can_wait_and_last_for_seconds() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Clock>().0.seconds = 0.0;
+    let (_, _, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    let steer = |extra: serde_json::Value| {
+        let mut value = serde_json::json!({"type": "steer_craft",
+                                           "order": {"action": "throttle", "value": 0.5}});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value::<UiCommand>(value).unwrap()
+    };
+    let refused = |command: UiCommand| {
+        let world = app.world();
+        command
+            .check(
+                &world.resource::<crate::Universe>().0,
+                world.resource::<Navigation>(),
+                world.resource::<crate::stars::stream::Starfield>(),
+                world.resource::<Fleet>(),
+            )
+            .is_err()
+    };
+    assert!(refused(steer(serde_json::json!({"tick": 2, "in_s": 0.1}))));
+    assert!(refused(steer(serde_json::json!({"for_s": 0.01}))));
+    assert!(refused(steer(serde_json::json!({"in_s": -1.0}))));
+    let stop: UiCommand = serde_json::from_value(
+        serde_json::json!({"type": "steer_craft", "order": {"action": "stop"}, "for_s": 1}),
+    )
+    .unwrap();
+    assert!(refused(stop));
+    send(
+        &mut app,
+        steer(serde_json::json!({"in_s": 0.1, "for_s": 1})),
+    );
+    let pending =
+        readout(app.world().resource::<Fleet>(), 0.0)["craft"][0]["pending_orders"].clone();
+    assert_eq!(pending[0]["tick"], 2);
+    assert!((pending[0]["in_s"].as_f64().unwrap() - 0.1).abs() < 1e-9);
+    assert_eq!(
+        (&pending[1]["tick"], &pending[1]["ends_from"]),
+        (&22.into(), &2.into())
+    );
+    let throttle = |app: &App| {
+        app.world().resource::<Fleet>().craft[0]
+            .craft
+            .input
+            .controls
+            .throttle
+    };
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(2);
+    app.update();
+    assert_eq!(throttle(&app), 0.5);
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(21);
+    app.update();
+    assert_eq!(throttle(&app), 0.5);
+    app.world_mut().resource_mut::<Clock>().0.seconds = tick_seconds(22);
+    app.update();
+    assert_eq!(throttle(&app), 0.0);
 }
 
 #[test]
@@ -873,7 +1142,9 @@ fn orders_make_a_forecast_obsolete_and_burns_still_finish_theirs() {
     // The old one stays on show, marked as no longer current.
     assert!(live.forecast.updating() && !live.forecast.current(&live.craft));
     assert_eq!(live.forecast.shown.as_ref(), Some(&coasting));
-    // A burn keeps refreshing, yet every refresh finishes.
+    // A burn keeps refreshing, yet every refresh finishes, and the
+    // inspector says so steadily rather than as each one comes and goes.
+    let galaxy = space_simulation::demo_galaxy();
     let mut finished = 0;
     for _ in 0..60 {
         let live = &mut fleet.craft[0];
@@ -888,6 +1159,12 @@ fn orders_make_a_forecast_obsolete_and_burns_still_finish_theirs() {
             .as_ref()
             .map(|p| p.start_seconds);
         finished += usize::from(before != after);
+        let live = &fleet.craft[0];
+        if finished > 0 {
+            let (_, rows) = facts(live, &galaxy, live.craft.seconds());
+            let prediction = rows.iter().find(|(l, _)| l == "Prediction").unwrap();
+            assert!(prediction.1.ends_with(" · updating"), "{}", prediction.1);
+        }
     }
     assert!(finished >= 3, "{finished}");
     let live = &fleet.craft[0];

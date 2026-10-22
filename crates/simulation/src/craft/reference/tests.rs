@@ -238,7 +238,7 @@ fn refused_matched_exits_are_atomic_and_do_not_stop_warp() {
     assert!(craft.matched_dropout(Some(&field), "t#A/0", false).is_err());
     assert_eq!(craft, before);
     craft.frame = Frame::System { star: "t#A".into() };
-    craft.warp.stop("test");
+    craft.disengage_warp("test");
     let before = craft.clone();
     assert!(craft.matched_dropout(Some(&field), "t#A/0", false).is_err());
     assert_eq!(craft, before);
@@ -269,12 +269,12 @@ fn queued_matched_exit_resolves_at_execution_tick_and_replays() {
     let inputs: Vec<crate::craft::voyage::ScheduledOrder> =
         serde_json::from_str(&serde_json::to_string(&voyage.pending_orders()).unwrap()).unwrap();
     for input in inputs {
-        restored.order(input.tick, input.order).unwrap();
+        restored.schedule(input).unwrap();
     }
     while voyage.craft.tick < tick {
         assert!(voyage.craft.warp.engaged);
-        assert!(voyage.advance().is_empty());
-        assert!(restored.advance().is_empty());
+        assert!(voyage.advance(None).is_empty());
+        assert!(restored.advance(None).is_empty());
         assert_eq!(voyage.craft, restored.craft);
     }
     assert!(!voyage.craft.warp.engaged);

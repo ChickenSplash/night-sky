@@ -15,7 +15,8 @@ pub enum Visit {
 }
 
 /// The one clicked object. A second click activates it: a star is visited, a
-/// planet followed.
+/// planet followed. A loaded system's star or barycentre marker selects
+/// without a second action.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Selection {
     /// Any star in the galaxy, by stable ID.
@@ -24,6 +25,8 @@ pub enum Selection {
     Planet(String),
     /// A live craft, by its own ID (`craft::Fleet`).
     Craft(String),
+    /// A pair of a multiple system, by member ID, such as `…#AB`.
+    Barycentre(String),
 }
 
 impl Selection {
@@ -38,8 +41,18 @@ impl Selection {
             },
             Self::Planet(id) => objects::ObjectRef::Planet { id: id.clone() },
             Self::Craft(id) => objects::ObjectRef::Craft { id: id.clone() },
+            Self::Barycentre(id) => objects::ObjectRef::Barycentre { id: id.clone() },
         }
     }
+}
+
+/// What the camera moves with: the innermost neighbourhood it is in, set
+/// each frame by `scene::locate_anchor`. Free movement is relative to it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    /// The `location_body`: a planet, or a star or pair of a multiple system.
+    Body(String),
+    Craft(String),
 }
 
 #[derive(Resource)]
@@ -49,13 +62,8 @@ pub struct Navigation {
     pub viewport: Option<bevy::camera::Viewport>,
     /// The system the camera is anchored to: the one it is at, is flying to,
     /// or whose list is shown as a constellation. `None` in open space, where
-    /// the camera is relative to `open_origin_ly`. See `location` for where
-    /// it actually is.
+    /// the camera is relative to home. See `location` for where it actually is.
     pub visit: Option<Visit>,
-    /// Open space's floating origin, in light years from home. Free flight
-    /// re-anchors it near the camera (`scene::locate`), so the eye stays small
-    /// enough for metre-scale steps far from home.
-    pub open_origin_ly: DVec3,
     /// Whether the camera is at the visited star, by physical distance. Set
     /// each frame by `scene::locate`.
     pub arrived: bool,
@@ -64,13 +72,25 @@ pub struct Navigation {
     pub selection: Option<Selection>,
     /// Which trail and object currently drive the floating inspector.
     pub inspection: Option<ui::breadcrumb::Inspection>,
-    /// Physical planet neighbourhood, unrelated to selection or following.
-    pub location_planet: Option<String>,
+    /// The body the camera is physically at, unrelated to selection or
+    /// following: a planet, or a star or inner pair of a multiple system,
+    /// by the rule that picks a craft's orbit reference. Never the whole
+    /// system, which `arrived` already covers.
+    pub location_body: Option<String>,
+    /// What the camera moves with, by its own position alone.
+    pub anchor: Option<Anchor>,
+    /// Whether the camera keeps the selected object centred. Moving or
+    /// looking ends it, not the camera's motion with its `anchor`.
     pub following: bool,
     pub target: DVec3,
     /// Authoritative free-flight eye in the current page's local frame.
     /// Avoids cancelling a distant target against the camera range.
     pub eye: Option<DVec3>,
+    /// In open space, what `target` and `eye` are relative to, in light
+    /// years from home: a followed or nearby craft's anchor, else one that
+    /// moves with the camera (`scene::place_camera`), so they stay precise
+    /// anywhere in the galaxy.
+    pub galactic_origin_ly: DVec3,
     pub distance: f64,
     /// Selected free-flight speed in metres per real second, independent of zoom.
     pub move_speed: f64,
@@ -82,11 +102,16 @@ pub struct Navigation {
     /// Faintest apparent magnitude drawn as a star point, within
     /// `MAGNITUDE`. Fainter stars are part of the galaxy glow.
     pub magnitude: f64,
+    /// Everything drawn over the scene that is not in it: markers, labels,
+    /// paths and wireframes. Each of those has its own switch beneath this.
+    pub overlays: bool,
     pub labels: bool,
     pub orbits: bool,
     /// Rings marking bodies too small to see. Hover and selection rings stay.
     pub markers: bool,
     pub velocity_marker: bool,
+    /// The selected craft's predicted coast path.
+    pub predicted_paths: bool,
     /// Lit and glowing bodies in HDR under the wireframes.
     pub realistic: bool,
     pub galaxy_glow: bool,
@@ -113,11 +138,12 @@ impl Default for Navigation {
             presentation_mode: presentation::PresentationMode::Simulation,
             viewport: None,
             visit: None,
-            open_origin_ly: DVec3::ZERO,
             arrived: false,
             selection: None,
             inspection: None,
-            location_planet: None,
+            location_body: None,
+            anchor: None,
+            galactic_origin_ly: DVec3::ZERO,
             following: false,
             target: DVec3::ZERO,
             eye: None,
@@ -126,10 +152,12 @@ impl Default for Navigation {
             rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
             fov_deg: 50.0,
             magnitude: space_simulation::population::VISIBLE_MAGNITUDE,
+            overlays: true,
             labels: true,
             orbits: true,
             markers: true,
             velocity_marker: true,
+            predicted_paths: true,
             realistic: true,
             galaxy_glow: true,
             exposure: 0.0,
@@ -142,6 +170,13 @@ impl Default for Navigation {
     }
 }
 
+impl Navigation {
+    /// Whether an overlay is drawn: its own switch, and scene overlays on.
+    pub fn overlay(&self, on: bool) -> bool {
+        self.overlays && on
+    }
+}
+
 /// Selectable vertical field of view, in degrees.
 pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
 
@@ -150,6 +185,13 @@ pub const FOV_DEG: std::ops::RangeInclusive<f32> = 30.0..=130.0;
 pub const MAGNITUDE: std::ops::RangeInclusive<f64> = 3.0..=10.5;
 
 impl Navigation {
+    /// Leave any system for open space, with `target` and `eye` then given
+    /// relative to home.
+    pub fn leave_for_home_frame(&mut self) {
+        self.visit = None;
+        self.galactic_origin_ly = DVec3::ZERO;
+    }
+
     pub fn set_exposure(&mut self, stops: f64) {
         if stops.is_finite() {
             self.exposure = stops.clamp(
@@ -205,6 +247,13 @@ impl Navigation {
                 .planets
                 .iter()
                 .position(|planet| planet.id == *id),
+            _ => None,
+        }
+    }
+
+    pub fn selected_barycentre(&self) -> Option<&str> {
+        match &self.selection {
+            Some(Selection::Barycentre(id)) => Some(id),
             _ => None,
         }
     }

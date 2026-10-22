@@ -4,26 +4,27 @@ use crate::format::speed_label;
 use crate::presentation::PresentationMode;
 use crate::{Clock, Navigation, Universe};
 use bevy::math::{DQuat, DVec3};
-use space_shared::{Orbit, Spin};
+use space_shared::{Orbit, Spin, StarSystem};
 use space_simulation::AU_METRES;
+use space_simulation::craft::Field;
 use space_simulation::{
     LY_METRES, SUN_RADIUS_METRES,
     galaxy::{GalaxyModel, PC_METRES},
     position,
 };
 
-#[test]
-fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
+/// A star near home streamed into the field, with its ID and its position
+/// in parsecs from the galactic centre.
+fn streamed_star() -> (crate::stars::stream::Starfield, String, [f64; 3]) {
     use space_simulation::{
         cells::{Cell, Sky, parse_cell_star},
         stream::{StarCell, StarPoint},
     };
-    let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
-    let cell = Cell::containing(10, home.to_array()).unwrap();
+    let home = GalaxyModel::milky_way().home_pc;
+    let cell = Cell::containing(10, home).unwrap();
     let mut sky = Sky::default();
     let id = sky.cell_star_at(cell, 0).unwrap().id;
     let star = sky.star(&id).unwrap();
-    let position_ly = (DVec3::from_array(star.position_pc) - home) * (PC_METRES / LY_METRES);
     let mut field = crate::stars::stream::Starfield::default();
     field.cells.insert(
         cell,
@@ -40,6 +41,14 @@ fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
             }],
         ),
     );
+    (field, id, star.position_pc)
+}
+
+#[test]
+fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
+    let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
+    let (field, id, position_pc) = streamed_star();
+    let position_ly = (DVec3::from_array(position_pc) - home) * (PC_METRES / LY_METRES);
     let mut nav = Navigation {
         rotation: Quat::IDENTITY,
         distance: 40_000.0 * LY_METRES,
@@ -69,7 +78,8 @@ fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
         .insert_resource(pose)
         .insert_resource(nav)
         .init_resource::<crate::stars::stream::StreamMetrics>()
-        .add_systems(Update, (locate, locate_planet).chain());
+        .init_resource::<crate::craft::Fleet>()
+        .add_systems(Update, (locate, locate_body).chain());
     app.update();
     let nav = app.world().resource::<Navigation>();
     assert!(nav.arrived);
@@ -110,117 +120,21 @@ fn drifting_into_a_streamed_star_preserves_the_eye_and_does_not_fly() {
     app.update();
     let nav = app.world().resource::<Navigation>();
     assert!(nav.visit.is_none() && !nav.arrived);
-    // Open space stays anchored at the star, so the eye keeps its precision.
-    assert_eq!(nav.open_origin_ly, frame);
-    assert!((nav.eye.unwrap() - departing_eye).length() < 1.0);
-}
-
-/// Open space with the eye `eye` metres from an origin at home.
-fn open_space(eye: DVec3) -> App {
-    let nav = Navigation {
-        eye: Some(eye),
-        ..default()
-    };
-    let rig = CameraRig {
-        shown: Some(Pose {
-            target: nav.target,
-            distance: nav.distance,
-            rotation: nav.rotation,
-            layout: 0.0,
-        }),
-        ..default()
-    };
-    let mut app = App::new();
-    app.insert_resource(crate::stars::stream::Starfield::default())
-        .init_resource::<Clock>()
-        .insert_resource(Universe(space_simulation::demo_galaxy()))
-        .insert_resource(rig)
-        .insert_resource(CameraPose {
-            eye,
-            distance: nav.distance,
-            ..default()
-        })
-        .insert_resource(nav)
-        .init_resource::<crate::stars::stream::StreamMetrics>()
-        .add_systems(Update, locate);
-    app
-}
-
-#[test]
-fn open_space_free_flight_reanchors_its_origin_near_the_camera() {
-    // About 5,000 pc from home, where the eye alone resolves only ~30 km.
-    let far = DVec3::new(1.6e20, -2.0e18, 3.0e17);
-    let mut app = open_space(far);
-    app.update();
-    let nav = app.world().resource::<Navigation>();
-    assert!(nav.visit.is_none() && !nav.arrived);
-    let eye = nav.eye.unwrap();
-    assert!(eye.length() < REANCHOR_METRES);
-    // The camera has not moved, to the precision of the old far eye.
-    assert!((nav.open_origin_ly * LY_METRES + eye - far).length() < 100_000.0);
-    // A 30 m/s keyboard step now survives intact.
-    let step = DVec3::new(0.3, -0.2, 0.4);
-    assert!(((eye + step) - eye - step).length() < 1e-6);
-    let target = nav.target;
-    assert!((target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance - eye).length() < 1.0);
-
-    // Within reach of the origin it stays put.
-    let near = DVec3::X * (REANCHOR_METRES * 0.5);
-    let mut app = open_space(near);
-    app.update();
-    let nav = app.world().resource::<Navigation>();
-    assert_eq!((nav.open_origin_ly, nav.eye), (DVec3::ZERO, Some(near)));
-}
-
-#[test]
-fn slow_free_flight_far_from_the_star_keeps_an_exact_travel_marker() {
-    let mut app = App::new();
-    app.insert_resource(Time::<()>::default())
-        .insert_resource(CameraRig::default())
-        .insert_resource(CameraPose {
-            // About 900 AU out, where a stored eye resolves ~3 cm.
-            eye: DVec3::new(1.1e14, -6.3e13, 4.7e13),
-            ..default()
-        })
-        .init_resource::<CameraMotion>()
-        .init_resource::<CameraVelocity>()
-        .add_systems(Update, measure_velocity);
-    let frame = std::time::Duration::from_micros(16_667);
-    app.world_mut().resource_mut::<Time>().advance_by(frame);
-    app.update();
-    let ahead = DVec3::new(0.48, 0.6, -0.64);
-    let step = ahead * (30.0 * frame.as_secs_f64());
-    for i in 0..120 {
-        *app.world_mut().resource_mut::<CameraMotion>() = CameraMotion {
-            steered: true,
-            travel_metres: step,
-            moved_metres: step,
-            ..default()
-        };
-        app.world_mut().resource_mut::<CameraPose>().eye += step;
-        // A re-anchoring frame switch must not interrupt the readout.
-        if i == 60 {
-            app.world_mut().resource_mut::<CameraRig>().frame_ly = DVec3::X * 1e-3;
-            app.world_mut().resource_mut::<CameraPose>().eye -= DVec3::X * 1e-3 * LY_METRES;
-        }
-        app.world_mut().resource_mut::<Time>().advance_by(frame);
-        app.update();
-        let velocity = app.world().resource::<CameraVelocity>();
-        assert!((velocity.metres_per_second.length() - 30.0).abs() < 1e-6);
-        assert!(
-            velocity
-                .marker_metres_per_second
-                .normalize()
-                .angle_between(ahead)
-                < 1e-9
-        );
-    }
+    // Open space keeps the system's frame, where the eye is still precise.
+    assert_eq!(nav.galactic_origin_ly, frame);
+    let restored_eye = nav.eye.unwrap();
+    assert!((restored_eye - departing_eye).length() < 100_000.0);
 }
 
 /// A visited list's star, with the camera placed `eye` from it in `presentation_mode`.
 fn visited_list(eye: DVec3, presentation_mode: PresentationMode) -> App {
+    let page = space_simulation::demo_galaxy().systems[0].first_page();
+    visited_page(page, eye, presentation_mode)
+}
+
+/// `visited_list` at one of its pages.
+fn visited_page(page: u32, eye: DVec3, presentation_mode: PresentationMode) -> App {
     let galaxy = space_simulation::demo_galaxy();
-    let page = galaxy.systems[0].first_page();
     let frame_ly = page_origin_ly(&galaxy.systems[0], page);
     let nav = Navigation {
         visit: Some(crate::Visit::List(0)),
@@ -252,48 +166,112 @@ fn visited_list(eye: DVec3, presentation_mode: PresentationMode) -> App {
         })
         .insert_resource(nav)
         .init_resource::<crate::stars::stream::StreamMetrics>()
-        .add_systems(Update, (locate, locate_planet).chain());
+        .init_resource::<crate::craft::Fleet>()
+        .add_systems(Update, (locate, locate_body).chain());
     app
 }
 
+/// How near the camera must be to be at a planet: its Hill sphere, never
+/// under `PLANET_MIN_RADII`.
+fn camera_reach(system: &StarSystem, planet: &space_shared::Planet) -> f64 {
+    space_simulation::craft::planet_reach_m(system, planet)
+        .max(planet.radius_km * 1000.0 * PLANET_MIN_RADII)
+}
+
 #[test]
-fn planet_neighbourhood_has_hysteresis_and_uses_physical_orbits() {
+fn a_planets_location_has_hysteresis_and_uses_physical_orbits() {
     let galaxy = space_simulation::demo_galaxy();
     let system = &galaxy.systems[0];
-    let planet = system.on_page(system.first_page()).next().unwrap();
-    let page = planet.page();
+    let page = system.first_page();
+    let planet = system.on_page(page).next().unwrap();
+    let field = Field::new(system.clone(), page);
+    let id = Some(planet.id.clone());
     for seconds in [0.0, 1e7] {
         let centre = DVec3::from_array(space_simulation::planet_position(system, planet, seconds));
-        let radius = planet.radius_km * 1000.0;
-        let check = |radii, previous| {
-            nearby_planet(
-                system,
-                page,
-                centre + DVec3::Y * (radius * radii),
+        let reach = camera_reach(system, planet);
+        let check = |share, previous, mode| {
+            nearby_body(
+                &field,
+                centre + DVec3::Y * (reach * share),
                 seconds,
                 previous,
-                PresentationMode::Simulation,
+                mode,
             )
         };
-        assert_eq!(check(19.0, None), Some(planet.id.clone()));
-        assert_eq!(check(25.0, None), None);
-        assert_eq!(check(25.0, Some(&planet.id)), Some(planet.id.clone()));
-        assert_eq!(check(31.0, Some(&planet.id)), None);
-        assert_eq!(
-            nearby_planet(system, page, centre, seconds, None, PresentationMode::Table),
-            None
-        );
-        assert_eq!(
-            nearby_planet(
-                system,
-                page,
-                centre,
-                seconds,
-                None,
-                PresentationMode::Constellation
-            ),
-            None
-        );
+        let simulation = PresentationMode::Simulation;
+        assert_eq!(check(0.95, None, simulation), id);
+        assert_ne!(check(1.05, None, simulation), id);
+        assert_eq!(check(1.05, id.as_deref(), simulation), id);
+        assert_ne!(check(1.15, id.as_deref(), simulation), id);
+        assert_eq!(check(0.0, None, PresentationMode::Table), None);
+        assert_eq!(check(0.0, None, PresentationMode::Constellation), None);
+    }
+}
+
+#[test]
+fn the_camera_is_at_a_close_in_planet_within_its_minimum_but_a_ship_is_not() {
+    let mut system = space_simulation::demo_galaxy().systems[0].clone();
+    let page = system.first_page();
+    // A hot Jupiter, whose Hill sphere is smaller than the following distance.
+    let planet = system
+        .planets
+        .iter_mut()
+        .find(|p| p.page() == page)
+        .unwrap();
+    planet.mass_earth = 318.0;
+    planet.radius_km = 71_492.0;
+    planet.orbit.semi_major_au = 0.02;
+    planet.orbit.eccentricity = 0.0;
+    let planet = planet.clone();
+    let radius = planet.radius_km * 1000.0;
+    assert!(space_simulation::craft::planet_reach_m(&system, &planet) < 12.0 * radius);
+    let field = Field::new(system.clone(), page);
+    let centre = DVec3::from_array(space_simulation::planet_position(&system, &planet, 0.0));
+    let at = |radii: f64| centre + DVec3::Z * (radius * radii);
+    let camera = |eye: DVec3| nearby_body(&field, eye, 0.0, None, PresentationMode::Simulation);
+    let id = Some(planet.id.clone());
+    assert_eq!(camera(at(20.0)), id);
+    assert_ne!(camera(at(31.0)), id);
+    let ship = field.select_reference(None, at(20.0).to_array(), 0.0);
+    assert_ne!(ship.map(|r| r.id), id);
+}
+
+/// The demo's multiple system: its page, and a star of an inner pair with
+/// its stable zone in metres.
+fn binary_star() -> (StarSystem, u32, String, f64) {
+    let system = space_simulation::demo_galaxy().systems[0].clone();
+    let page = system.pages()[1];
+    let root = system.root(page).unwrap().to_owned();
+    let star = system
+        .stars_on(page)
+        .find(|star| star.id != root && system.pair_of(page, &star.id).is_some())
+        .expect("the demo's second system is multiple")
+        .id
+        .clone();
+    let zone = Field::new(system.clone(), page)
+        .reference_by_id(&star, 0.0)
+        .unwrap()
+        .reach_m;
+    assert!(zone.is_finite());
+    (system, page, star, zone)
+}
+
+#[test]
+fn a_star_of_a_multiple_system_is_a_location_within_its_stable_zone() {
+    let (system, page, star, zone) = binary_star();
+    let field = Field::new(system.clone(), page);
+    let id = Some(star.clone());
+    for seconds in [0.0, 1e7] {
+        let centre = space_simulation::member_state(&system, page, &star, seconds).position;
+        let check = |share, previous| {
+            let eye = DVec3::from_array(centre) + DVec3::Z * (zone * share);
+            nearby_body(&field, eye, seconds, previous, PresentationMode::Simulation)
+        };
+        assert_eq!(check(0.5, None), id);
+        assert_eq!(check(0.95, None), id);
+        assert_ne!(check(1.05, None), id);
+        assert_eq!(check(1.05, id.as_deref()), id);
+        assert_ne!(check(1.15, id.as_deref()), id);
     }
 }
 
@@ -312,7 +290,7 @@ fn drifting_near_a_planet_sets_location_without_selection_or_following() {
     );
     app.update();
     let nav = app.world().resource::<Navigation>();
-    assert_eq!(nav.location_planet, Some(id));
+    assert_eq!(nav.location_body, Some(id));
     assert!(nav.selection.is_none() && !nav.following && !nav.fly);
 }
 
@@ -539,6 +517,7 @@ fn turning_in_place_has_no_measured_velocity() {
             ..default()
         })
         .init_resource::<CameraMotion>()
+        .init_resource::<Clock>()
         .init_resource::<CameraVelocity>()
         .add_systems(Update, measure_velocity);
     app.world_mut()
@@ -604,6 +583,7 @@ fn followed_velocity_and_marker_survive_every_frame_reanchoring() {
             ..default()
         })
         .init_resource::<CameraMotion>()
+        .init_resource::<Clock>()
         .init_resource::<CameraVelocity>()
         .add_systems(Update, measure_velocity);
     let dt = 0.006;
@@ -646,6 +626,7 @@ fn orbit_motion_does_not_steer_travel_marker() {
         .insert_resource(CameraRig::default())
         .insert_resource(CameraPose::default())
         .init_resource::<CameraMotion>()
+        .init_resource::<Clock>()
         .init_resource::<CameraVelocity>()
         .add_systems(Update, measure_velocity);
     let frame = std::time::Duration::from_millis(16);
@@ -900,4 +881,455 @@ fn lines_are_cut_in_front_of_the_camera_in_f64() {
     assert_eq!(clip_strip(ahead.clone(), DVec3::ZERO, forward), vec![ahead]);
     let behind = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(1.0, 2.0, 7.0)];
     assert!(clip_strip(behind, DVec3::ZERO, forward).is_empty());
+}
+
+#[test]
+fn following_a_ship_in_galactic_space_arrives_as_the_camera_nears_a_star() {
+    use space_simulation::{State, craft::Frame};
+    let (field, id, star_pc) = streamed_star();
+    let galaxy = space_simulation::demo_galaxy();
+    let system = galaxy.systems[0].clone();
+    let page = system.first_page();
+    let body = system.on_page(page).next().unwrap().id.clone();
+    let mut fleet = crate::craft::Fleet::default();
+    let craft = fleet
+        .spawn(
+            system,
+            page,
+            &body,
+            400_000.0,
+            crate::craft::Launch::Circular,
+            0.0,
+        )
+        .unwrap();
+    // Too fast to enter the star's system, but within the camera's reach of it.
+    let fly_by = |fleet: &mut crate::craft::Fleet, from_star_m: f64| {
+        let live = fleet.get_mut(&craft).unwrap();
+        let tick = live.craft.tick;
+        live.voyage.origin_pc = star_pc;
+        live.voyage.craft.frame = Frame::Galaxy { origin_pc: star_pc };
+        live.voyage.craft.place(
+            State {
+                position: [from_star_m, 0.0, 0.0],
+                velocity: [0.0; 3],
+            },
+            tick,
+        );
+    };
+    fly_by(&mut fleet, APPROACH_METRES * 0.5);
+    let seconds = fleet.get(&craft).unwrap().craft.seconds();
+    let frame_ly = fleet.get(&craft).unwrap().origin_ly();
+    let mut nav = Navigation {
+        selection: Some(crate::Selection::Craft(craft.clone())),
+        following: true,
+        distance: crate::craft::FOLLOW_M,
+        ..default()
+    };
+    nav.target = DVec3::X * (APPROACH_METRES * 0.5);
+    let mut app = App::new();
+    app.insert_resource(field)
+        .insert_resource(Time::<()>::default())
+        .insert_resource(Clock(space_simulation::SimulationClock {
+            seconds,
+            ..default()
+        }))
+        .insert_resource(Universe(galaxy))
+        .insert_resource(CameraRig {
+            frame_ly,
+            ..default()
+        })
+        .init_resource::<CameraPose>()
+        .insert_resource(nav)
+        .insert_resource(fleet)
+        .init_resource::<crate::stars::stream::StreamMetrics>()
+        .add_systems(Update, (locate, place_camera).chain());
+    for _ in 0..3 {
+        app.update();
+    }
+    let world = app.world();
+    let nav = world.resource::<Navigation>();
+    let system = nav.system(&world.resource::<Universe>().0).unwrap();
+    assert!(nav.arrived && nav.following);
+    assert_eq!(system.page_star(0).unwrap().id, id);
+    let live = world.resource::<crate::craft::Fleet>().get(&craft).unwrap();
+    assert!(
+        live.star().is_empty(),
+        "the ship itself stays in galactic space"
+    );
+    // The camera, in the system's frame, still centres on the ship.
+    let rig = world.resource::<CameraRig>();
+    assert_eq!(rig.frame_ly, page_origin_ly(system, 0));
+    let ship = (live.origin_ly() - rig.frame_ly) * LY_METRES
+        + DVec3::from_array(live.craft.state().position);
+    let target = page_frame(system, 0) * nav.target;
+    assert!(
+        (target - ship).length() < 1.0,
+        "{} m",
+        (target - ship).length()
+    );
+
+    // Far beyond the system, the camera leaves it and keeps following.
+    let range = system_range(system, 0);
+    fly_by(
+        &mut app.world_mut().resource_mut::<crate::craft::Fleet>(),
+        3.0 * LEAVE_FACTOR * range,
+    );
+    for _ in 0..3 {
+        app.update();
+    }
+    let world = app.world();
+    let nav = world.resource::<Navigation>();
+    assert!(nav.visit.is_none() && !nav.arrived && nav.following);
+    let live = world.resource::<crate::craft::Fleet>().get(&craft).unwrap();
+    assert_eq!(world.resource::<CameraRig>().frame_ly, live.origin_ly());
+    assert_eq!(nav.target, DVec3::from_array(live.craft.state().position));
+}
+
+/// A visited list with the camera free at `local` in its first page's frame,
+/// placed and anchored every update.
+fn anchored_app(local: DVec3, fleet: crate::craft::Fleet) -> App {
+    let page = space_simulation::demo_galaxy().systems[0].first_page();
+    anchored_page(page, local, fleet)
+}
+
+/// `anchored_app` at one of the list's pages.
+fn anchored_page(page: u32, local: DVec3, fleet: crate::craft::Fleet) -> App {
+    let galaxy = space_simulation::demo_galaxy();
+    let mut app = visited_page(
+        page,
+        page_frame(&galaxy.systems[0], page) * local,
+        PresentationMode::Simulation,
+    );
+    app.world_mut().resource_mut::<Navigation>().eye = Some(local);
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(fleet)
+        // In the app's order: placed after `locate`, measured after placing.
+        .add_systems(
+            Update,
+            (
+                place_camera.after(locate).before(locate_body),
+                locate_anchor.after(locate_body),
+            ),
+        );
+    app
+}
+
+#[test]
+fn free_movement_in_a_planets_neighbourhood_moves_with_it() {
+    let galaxy = space_simulation::demo_galaxy();
+    let system = &galaxy.systems[0];
+    let page = system.first_page();
+    let planet = system.on_page(page).next().unwrap();
+    let at =
+        |seconds| DVec3::from_array(space_simulation::planet_position(system, planet, seconds));
+    let offset = DVec3::Y * (planet.radius_km * 1000.0 * 12.0);
+    let mut app = anchored_app(at(0.0) + offset, default());
+    app.update();
+    app.update();
+    let anchor = Some(crate::Anchor::Body(planet.id.clone()));
+    let nav = app.world().resource::<Navigation>();
+    assert_eq!(nav.anchor, anchor);
+    assert_eq!(nav.location_body.as_ref(), Some(&planet.id));
+    for seconds in [600.0, 86_400.0] {
+        app.world_mut().resource_mut::<Clock>().0.seconds = seconds;
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert!(!nav.following && nav.anchor == anchor);
+        let eye = nav.eye.unwrap();
+        assert!((eye - (at(seconds) + offset)).length() < 1.0, "{seconds} s");
+        let pose = app.world().resource::<CameraPose>();
+        assert!((pose.eye - page_frame(system, page) * eye).length() < 1.0);
+    }
+
+    // Beyond its neighbourhood the camera is no longer at the planet, and
+    // stays with the system.
+    let far = at(86_400.0) + DVec3::Y * (camera_reach(system, planet) * 1.5);
+    app.world_mut().resource_mut::<Navigation>().eye = Some(far);
+    app.update();
+    let nav = app.world().resource::<Navigation>();
+    assert!(nav.anchor.is_none() && nav.location_body.is_none());
+    app.world_mut().resource_mut::<Clock>().0.seconds = 90_000.0;
+    app.update();
+    assert_eq!(app.world().resource::<Navigation>().eye, Some(far));
+}
+
+#[test]
+fn free_movement_near_a_star_of_a_binary_moves_with_it() {
+    let (system, page, star, zone) = binary_star();
+    let at = |seconds| {
+        DVec3::from_array(space_simulation::member_state(&system, page, &star, seconds).position)
+    };
+    let offset = DVec3::Z * (zone * 0.5);
+    let mut app = anchored_page(page, at(0.0) + offset, default());
+    app.update();
+    app.update();
+    let anchor = Some(crate::Anchor::Body(star.clone()));
+    assert_eq!(app.world().resource::<Navigation>().anchor, anchor);
+    let day = 86_400.0;
+    // The star moves on its orbit round the pair, and the camera with it.
+    assert!((at(30.0 * day) - at(0.0)).length() > 1_000.0);
+    for seconds in [day, 30.0 * day] {
+        app.world_mut().resource_mut::<Clock>().0.seconds = seconds;
+        app.update();
+        let nav = app.world().resource::<Navigation>();
+        assert_eq!(nav.anchor, anchor);
+        assert!(
+            (nav.eye.unwrap() - (at(seconds) + offset)).length() < 1.0,
+            "{seconds} s"
+        );
+        // Its exact velocity is read out, not the rounding of its position.
+        let star_velocity = space_simulation::member_state(&system, page, &star, seconds).velocity;
+        assert_eq!(
+            app.world().resource::<CameraPose>().carried_velocity,
+            Some(page_frame(&system, page) * DVec3::from_array(star_velocity))
+        );
+    }
+}
+
+#[test]
+fn a_ship_close_by_is_the_innermost_neighbourhood() {
+    let galaxy = space_simulation::demo_galaxy();
+    let system = galaxy.systems[0].clone();
+    let page = system.first_page();
+    let planet = system.on_page(page).next().unwrap().id.clone();
+    let mut fleet = crate::craft::Fleet::default();
+    let id = fleet
+        .spawn(
+            system.clone(),
+            page,
+            &planet,
+            400_000.0,
+            crate::craft::Launch::Circular,
+            0.0,
+        )
+        .unwrap();
+    let live = fleet.get(&id).unwrap();
+    let ship = super::placement::in_camera_frame(
+        live,
+        live.state_at(0.0),
+        page_origin_ly(&system, page),
+        page_frame(&system, page),
+    );
+    let mut app = anchored_app(ship + DVec3::X * 500_000.0, fleet);
+    app.update();
+    app.update();
+    let anchor = |app: &App| app.world().resource::<Navigation>().anchor.clone();
+    assert_eq!(anchor(&app), Some(crate::Anchor::Craft(id)));
+    // Backing off hands the camera up to the planet the ship orbits.
+    app.world_mut().resource_mut::<Navigation>().eye = Some(ship + DVec3::X * 2_000_000.0);
+    app.update();
+    assert_eq!(anchor(&app), Some(crate::Anchor::Body(planet)));
+}
+
+#[test]
+fn a_ship_in_galactic_space_carries_the_camera_through_its_re_anchoring() {
+    use space_simulation::{State, craft::Frame};
+    let (_, _, star_pc) = streamed_star();
+    let galaxy = space_simulation::demo_galaxy();
+    let system = galaxy.systems[0].clone();
+    let page = system.first_page();
+    let body = system.on_page(page).next().unwrap().id.clone();
+    let mut fleet = crate::craft::Fleet::default();
+    let craft = fleet
+        .spawn(
+            system,
+            page,
+            &body,
+            400_000.0,
+            crate::craft::Launch::Circular,
+            0.0,
+        )
+        .unwrap();
+    // Hold the ship at `position` metres from a galactic anchor at `origin_pc`.
+    let hold = |app: &mut App, origin_pc: [f64; 3], position: [f64; 3]| {
+        let mut fleet = app.world_mut().resource_mut::<crate::craft::Fleet>();
+        let live = fleet.get_mut(&craft).unwrap();
+        let tick = live.craft.tick;
+        live.voyage.origin_pc = origin_pc;
+        live.voyage.craft.frame = Frame::Galaxy { origin_pc };
+        live.voyage.craft.place(
+            State {
+                position,
+                velocity: [0.0; 3],
+            },
+            tick,
+        );
+    };
+    let seconds = fleet.get(&craft).unwrap().craft.seconds();
+    let nav = Navigation {
+        eye: Some(DVec3::X * 500_000.0),
+        distance: 1_000.0,
+        ..default()
+    };
+    let mut app = App::new();
+    app.insert_resource(crate::stars::stream::Starfield::default())
+        .insert_resource(Time::<()>::default())
+        .insert_resource(Clock(space_simulation::SimulationClock {
+            seconds,
+            ..default()
+        }))
+        .insert_resource(Universe(galaxy))
+        .init_resource::<CameraRig>()
+        .init_resource::<CameraPose>()
+        .insert_resource(nav)
+        .insert_resource(fleet)
+        .init_resource::<crate::stars::stream::StreamMetrics>()
+        .add_systems(Update, (locate, place_camera, locate_anchor).chain());
+    hold(&mut app, star_pc, [0.0; 3]);
+    // Placed at home first, then the ship's frame once it anchors the camera.
+    app.world_mut().resource_mut::<Navigation>().eye = None;
+    let home_ly = app
+        .world()
+        .resource::<crate::craft::Fleet>()
+        .get(&craft)
+        .unwrap()
+        .origin_ly();
+    app.world_mut().resource_mut::<Navigation>().eye =
+        Some(home_ly * LY_METRES + DVec3::X * 500_000.0);
+    for _ in 0..3 {
+        app.update();
+    }
+    let relative = |app: &App| {
+        let live = app
+            .world()
+            .resource::<crate::craft::Fleet>()
+            .get(&craft)
+            .unwrap();
+        let rig = app.world().resource::<CameraRig>();
+        assert_eq!(rig.frame_ly, live.origin_ly());
+        app.world().resource::<Navigation>().eye.unwrap()
+            - DVec3::from_array(live.craft.state().position)
+    };
+    assert_eq!(
+        app.world().resource::<Navigation>().anchor,
+        Some(crate::Anchor::Craft(craft.clone()))
+    );
+    // Placed from home, hundreds of light years away, so only to about a km.
+    let start = relative(&app);
+    assert!((start - DVec3::X * 500_000.0).length() < 1_000.0);
+
+    // The ship moves, then re-anchors its frame 0.1 pc on: the camera keeps up.
+    hold(&mut app, star_pc, [1e11, 0.0, 0.0]);
+    app.update();
+    assert!((relative(&app) - start).length() < 1.0);
+    let moved_pc = [star_pc[0] + 0.1, star_pc[1], star_pc[2]];
+    hold(
+        &mut app,
+        moved_pc,
+        [1e11 - (moved_pc[0] - star_pc[0]) * PC_METRES, 0.0, 0.0],
+    );
+    app.update();
+    assert!((relative(&app) - start).length() < 1.0);
+}
+
+#[test]
+fn moving_with_a_body_reads_its_exact_velocity_every_frame() {
+    let carried = DVec3::new(1_412.8, -37.5, 6.25);
+    let mut app = App::new();
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(CameraRig::default())
+        .insert_resource(CameraPose {
+            carried_velocity: Some(carried),
+            ..default()
+        })
+        .init_resource::<CameraMotion>()
+        .init_resource::<Clock>()
+        .init_resource::<CameraVelocity>()
+        .add_systems(Update, measure_velocity);
+    let velocity = |app: &App| app.world().resource::<CameraVelocity>().metres_per_second;
+    app.world_mut().resource_mut::<Clock>().0.rate = 1.0;
+    // Uneven frames change nothing.
+    for millis in [16, 7, 9, 33] {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(millis));
+        app.update();
+        assert_eq!(velocity(&app), carried);
+    }
+    // Faster time carries the camera faster.
+    app.world_mut().resource_mut::<Clock>().0.rate = 10.0;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(16));
+    app.update();
+    assert_eq!(velocity(&app), carried * 10.0);
+    // The controls' travel adds to it; pausing stops only the carrying.
+    app.world_mut().resource_mut::<CameraMotion>().travel_metres = DVec3::X * 0.48;
+    app.world_mut().resource_mut::<Clock>().0.paused = true;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(16));
+    app.update();
+    assert!((velocity(&app) - DVec3::X * 30.0).length() < 1e-9);
+}
+
+#[test]
+fn free_flight_far_from_home_moves_its_frame_and_keeps_every_centimetre() {
+    // About 26,000 ly out, where light years from home step by tens of km.
+    let far = DVec3::new(2.0e20, -0.5e20, 1.3e20);
+    let mut nav = Navigation {
+        eye: Some(far),
+        distance: 1_000.0,
+        ..default()
+    };
+    nav.target = far - (nav.rotation * Vec3::Z).as_dvec3() * nav.distance;
+    let mut app = App::new();
+    app.insert_resource(crate::stars::stream::Starfield::default())
+        .insert_resource(Time::<()>::default())
+        .init_resource::<Clock>()
+        .insert_resource(Universe(space_simulation::demo_galaxy()))
+        .init_resource::<CameraRig>()
+        .init_resource::<CameraPose>()
+        .insert_resource(nav)
+        .init_resource::<crate::craft::Fleet>()
+        .init_resource::<crate::stars::stream::StreamMetrics>()
+        .add_systems(Update, place_camera);
+    app.update();
+    app.update();
+    let nav = app.world().resource::<Navigation>();
+    let eye = nav.eye.unwrap();
+    assert!(eye.length() < REANCHOR_METRES);
+    assert_eq!(
+        app.world().resource::<CameraRig>().frame_ly,
+        nav.galactic_origin_ly
+    );
+    // The same place, to the precision light years from home allow.
+    assert!((nav.galactic_origin_ly * LY_METRES - far + eye).length() < 100_000.0);
+    for _ in 0..5 {
+        let before = app.world().resource::<CameraPose>().eye;
+        let mut nav = app.world_mut().resource_mut::<Navigation>();
+        *nav.eye.as_mut().unwrap() += DVec3::X * 0.01;
+        nav.target += DVec3::X * 0.01;
+        app.update();
+        let moved = app.world().resource::<CameraPose>().eye - before;
+        assert!((moved - DVec3::X * 0.01).length() < 1e-6, "{moved}");
+    }
+}
+
+#[test]
+fn a_loaded_page_marks_each_star_and_pair_and_the_table_only_its_primary() {
+    use super::draw::member_markers;
+    let galaxy = space_simulation::demo_galaxy();
+    let system = &galaxy.systems[0];
+    let [single, multiple] = [0, 1].map(|index| system.pages()[index]);
+    assert_eq!(
+        member_markers(system, single, false),
+        [Marked::Star(system.star(single).unwrap().id.clone())]
+    );
+    let marked = member_markers(system, multiple, false);
+    let stars: Vec<_> = system.stars_on(multiple).collect();
+    let pairs: Vec<_> = system.barycentres_on(multiple).collect();
+    assert!(stars.len() >= 2 && pairs.len() == stars.len() - 1);
+    assert_eq!(marked.len(), stars.len() + pairs.len());
+    for star in &stars {
+        assert!(marked.contains(&Marked::Star(star.id.clone())));
+    }
+    // The whole system's pair included.
+    for pair in &pairs {
+        assert!(marked.contains(&Marked::Barycentre(pair.id.clone())));
+    }
+    assert_eq!(
+        member_markers(system, multiple, true),
+        [Marked::Star(stars[0].id.clone())]
+    );
 }

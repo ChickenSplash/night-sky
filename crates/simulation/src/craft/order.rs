@@ -1,8 +1,12 @@
 //! Orders a pilot, autopilot or remote player gives a craft. Each patches only
 //! the input it names, leaving other drives alone. Checks and application
 //! share this one path, so any client or server refuses the same orders.
-use super::warp::{GravityPolicy, MAX_SPEED, MIN_SPEED, SPEED_FACTOR};
+use super::route::{ArrivalMode, MAX_TRIP_S, MIN_TRIP_S, TAKEOVER, Target};
+use super::warp::{
+    GravityPolicy, MAX_SPEED, MAX_TURN_RATE_DPS, MIN_SPEED, MIN_TURN_RATE_DPS, SPEED_FACTOR,
+};
 use super::{Craft, Field, PointTarget, Thrusters};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Most legacy frame-axis thrust an order may hold, in m/s².
@@ -17,67 +21,211 @@ fn body_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Doc comments here are the CLI and TUI help: the first paragraph is the
+/// short help, the rest its description. `x-group` sorts orders for display.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Order {
+    /// Main drive fraction [-1, 1]; negative uses reverse, 0 cuts main only.
+    #[schemars(extend("x-group" = "sublight"))]
     Throttle {
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         value: f64,
     },
+    /// Fine translation fractions [-1, 1]; omitted axes reset to zero.
+    #[schemars(extend("x-group" = "sublight"))]
     Translate {
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         right: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         up: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         forward: f64,
     },
+    /// Manual turning fractions [-1, 1] (in warp, bubble steering); releases
+    /// pointing, omitted axes reset to zero.
+    #[schemars(extend("x-group" = "turning"))]
     Rotate {
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         pitch: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         yaw: f64,
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
         roll: f64,
     },
+    /// Turn to and track an orbital direction, body or fixed system vector.
+    #[schemars(extend("x-group" = "turning"))]
     Point {
         target: PointTarget,
+        /// System up direction to align roll; otherwise roll is preserved.
         #[serde(default)]
+        #[schemars(extend("x-unit" = ""))]
         up: Option<[f64; 3]>,
     },
+    /// Brake rotation only, leaving translation and throttle unchanged.
+    #[schemars(extend("x-group" = "turning"))]
     Stop,
+    /// Disable the attitude pilot without braking or changing drives.
+    #[schemars(extend("x-group" = "turning"))]
     Release,
+    /// Cut all drives and engage spin braking; does not stop linear motion.
+    #[schemars(extend("x-group" = "turning"))]
     Cut,
-    /// Change the craft's own thruster limits. A server should accept this
-    /// only from an administrator, never from a player.
-    Configure {
-        thrusters: Thrusters,
-    },
-    /// Legacy debug acceleration in m/s², in the frame's axes.
+    /// Replace thruster limits; reverse 0 disables the reverse drive.
+    ///
+    /// A server should accept this only from an administrator, never from a
+    /// player.
+    #[schemars(extend("x-group" = "sublight"))]
+    Configure { thrusters: Thrusters },
+    /// Legacy debug acceleration, in the frame's axes.
+    #[schemars(extend("x-group" = "sublight"))]
     Thrust {
+        #[schemars(extend("x-unit" = "m/s²"))]
         thrust: [f64; 3],
     },
-    Warp {
-        command: WarpOrder,
-    },
+    /// Bubble transport along the nose, separate from sublight thrust.
+    ///
+    /// While engaged, rotate, point, stop and cut steer the bubble instead of
+    /// the turning thrusters: pitch and yaw bend the path, roll turns the ship
+    /// about it. Steering sets a turn rate (fraction × turn rate) that eases
+    /// in and out over about 0.3 s; dropout leaves no spin.
+    #[schemars(extend("x-group" = "warp"))]
+    Warp { command: WarpOrder },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WarpOrder {
+    /// Start bubble travel along the nose; needs no thrust, takes over any spin.
     Engage,
+    /// Drop out keeping ordinary velocity.
     Disengage,
-    /// Explicit matched dropout, resolved in the craft's current system at
-    /// the application tick. This never changes heading or position.
+    /// Drop out matching a body in the ship's current system, or another
+    /// ship anywhere.
+    ///
+    /// Resolved in the craft's current system at the application tick, or
+    /// as the other ship was at the start of the step. This never changes
+    /// heading or position.
     Match {
+        /// Existing planet, star or barycentre ID, or another craft's ID.
         body: String,
+        /// Add tangential speed for a rough orbit.
         #[serde(default)]
         orbit: bool,
     },
+    /// Requested speed, from 1 m/s to 10,000 ly/s; does not engage.
     Set {
+        #[schemars(range(min = MIN_SPEED, max = MAX_SPEED), extend("x-unit" = "m/s"))]
         speed_ms: f64,
     },
-    Up,
-    Down,
-    Gravity {
-        policy: GravityPolicy,
+    /// Bubble turn rate at full steering (default 30 °/s).
+    TurnRate {
+        #[schemars(
+            range(min = MIN_TURN_RATE_DPS, max = MAX_TURN_RATE_DPS),
+            extend("x-unit" = "°/s")
+        )]
+        degrees_per_second: f64,
     },
+    /// Multiply the requested speed by √10.
+    Up,
+    /// Divide the requested speed by √10.
+    Down,
+    /// Developer gravity policy; change only while disengaged.
+    Gravity { policy: GravityPolicy },
+    /// Fly to a body, here or in another system, or to another ship, and
+    /// drop out near it.
+    ///
+    /// Engages warp, turns to the target, curves round bodies in the way,
+    /// then slows all the way in, dropping out at a standoff of a few times
+    /// the target's size. Another system is loaded first and entered on the
+    /// slowdown. Moving targets are tracked every step. Turning, warp speed,
+    /// disengage and match orders take over; warp is left as it was.
+    To {
+        /// Planet, star or barycentre ID, a system's key, or another
+        /// craft's ID.
+        target: String,
+        /// Drop out at the target's velocity.
+        #[serde(default, rename = "match")]
+        matched: bool,
+        /// Drop out into a rough orbit around the target; matches too.
+        #[serde(default)]
+        orbit: bool,
+        /// Trip time, including the first turn (default 20 to 60 s by
+        /// distance).
+        #[serde(default)]
+        #[schemars(range(min = MIN_TRIP_S, max = MAX_TRIP_S), extend("x-unit" = "s"))]
+        time: Option<f64>,
+    },
+    /// End the route, leaving warp engaged at its current speed.
+    Cancel,
 }
 
+/// Controls an order sets, as bits of `Order::controls`.
+const THROTTLE: u8 = 1;
+const TRANSLATION: u8 = 2;
+const TURNING: u8 = 4;
+const THRUST: u8 = 8;
+const WARP: u8 = 16;
+
 impl Order {
+    /// The order that ends this one when it is given for a time: its axes
+    /// back to zero, or out of warp. Motion and spin are kept, as when the
+    /// controls are let go. Orders with no such rest state, like `stop` or
+    /// `warp set`, cannot be timed.
+    pub fn off(&self) -> Option<Order> {
+        Some(match self {
+            Self::Throttle { .. } => Self::Throttle { value: 0.0 },
+            Self::Translate { .. } => Self::Translate {
+                right: 0.0,
+                up: 0.0,
+                forward: 0.0,
+            },
+            Self::Rotate { .. } | Self::Point { .. } => Self::Rotate {
+                pitch: 0.0,
+                yaw: 0.0,
+                roll: 0.0,
+            },
+            Self::Thrust { .. } => Self::Thrust { thrust: [0.0; 3] },
+            Self::Warp {
+                command: WarpOrder::Engage,
+            } => Self::Warp {
+                command: WarpOrder::Disengage,
+            },
+            _ => return None,
+        })
+    }
+
+    /// Whether this order sets any control `other` does, so applying it
+    /// replaces `other`'s effect.
+    pub fn overlaps(&self, other: &Order) -> bool {
+        self.controls() & other.controls() != 0
+    }
+
+    fn controls(&self) -> u8 {
+        match self {
+            Self::Throttle { .. } => THROTTLE,
+            Self::Translate { .. } => TRANSLATION,
+            Self::Rotate { .. } | Self::Point { .. } | Self::Stop | Self::Release => TURNING,
+            Self::Cut => THROTTLE | TRANSLATION | TURNING | THRUST,
+            Self::Thrust { .. } => THRUST,
+            Self::Warp {
+                command:
+                    WarpOrder::Engage
+                    | WarpOrder::Disengage
+                    | WarpOrder::Match { .. }
+                    | WarpOrder::To { .. }
+                    | WarpOrder::Cancel,
+            } => WARP,
+            Self::Configure { .. } | Self::Warp { .. } => 0,
+        }
+    }
+
     /// State-independent validation, also run when future inputs are submitted.
     /// Drive interlocks and body/frame checks remain application-time rules.
     pub fn validate(&self) -> Result<(), String> {
@@ -131,8 +279,23 @@ impl Order {
                 super::warp::Warp::validate_speed(*speed_ms)?;
             }
             Self::Warp {
+                command: WarpOrder::TurnRate { degrees_per_second },
+            } => {
+                super::warp::Warp::validate_turn_rate(*degrees_per_second)?;
+            }
+            Self::Warp {
                 command: WarpOrder::Match { body, .. },
             } => body_id(body)?,
+            Self::Warp {
+                command: WarpOrder::To { target, time, .. },
+            } => {
+                body_id(target)?;
+                if time.is_some_and(|t| !(MIN_TRIP_S..=MAX_TRIP_S).contains(&t)) {
+                    return Err(format!(
+                        "Trip time must be {MIN_TRIP_S} to {MAX_TRIP_S} seconds"
+                    ));
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -142,26 +305,67 @@ impl Order {
     /// step (`Craft::tick`), so a server can key orders by step number.
     /// `field` is the craft's system, when it is in one, to check bodies.
     pub fn apply(&self, craft: &mut Craft, field: Option<&Field>) -> Result<(), String> {
+        self.apply_among(craft, field, &[])
+    }
+
+    /// As `apply`, with the other craft as targets, in the craft's frame.
+    pub fn apply_among(
+        &self,
+        craft: &mut Craft,
+        field: Option<&Field>,
+        ships: &[Target],
+    ) -> Result<(), String> {
         self.validate()?;
-        if craft.warp.engaged && matches!(self, Self::Point { .. } | Self::Stop | Self::Cut) {
-            return Err("Disengage warp before engaging turning thrusters or pointing".into());
-        }
         let mut controls = craft.input.controls;
         match self {
             Self::Warp { command } => {
                 match command {
                     WarpOrder::Engage => craft.engage_warp()?,
-                    WarpOrder::Disengage => craft.warp.stop("Manual disengagement"),
-                    WarpOrder::Match { body, orbit } => {
-                        craft.matched_dropout(field, body, *orbit)?;
+                    WarpOrder::Disengage => {
+                        craft.end_route(TAKEOVER);
+                        craft.disengage_warp("Manual disengagement");
                     }
-                    WarpOrder::Set { speed_ms } => craft.warp.set_speed(*speed_ms)?,
-                    WarpOrder::Up => craft
-                        .warp
-                        .set_speed((craft.warp.requested_ms * SPEED_FACTOR).min(MAX_SPEED))?,
-                    WarpOrder::Down => craft
-                        .warp
-                        .set_speed((craft.warp.requested_ms / SPEED_FACTOR).max(MIN_SPEED))?,
+                    WarpOrder::Match { body, orbit } => {
+                        craft.matched_dropout_among(field, ships, body, *orbit)?;
+                        craft.end_route(TAKEOVER);
+                    }
+                    WarpOrder::Set { speed_ms } => {
+                        craft.warp.set_speed(*speed_ms)?;
+                        craft.end_route(TAKEOVER);
+                    }
+                    WarpOrder::TurnRate { degrees_per_second } => {
+                        craft.warp.set_turn_rate(*degrees_per_second)?
+                    }
+                    WarpOrder::Up => {
+                        craft
+                            .warp
+                            .set_speed((craft.warp.requested_ms * SPEED_FACTOR).min(MAX_SPEED))?;
+                        craft.end_route(TAKEOVER);
+                    }
+                    WarpOrder::Down => {
+                        craft
+                            .warp
+                            .set_speed((craft.warp.requested_ms / SPEED_FACTOR).max(MIN_SPEED))?;
+                        craft.end_route(TAKEOVER);
+                    }
+                    WarpOrder::To {
+                        target,
+                        matched,
+                        orbit,
+                        time,
+                    } => {
+                        let arrival = match (*matched, *orbit) {
+                            (_, true) => ArrivalMode::Orbit,
+                            (true, false) => ArrivalMode::Match,
+                            (false, false) => ArrivalMode::Keep,
+                        };
+                        craft.fly_to(field, ships, target, arrival, *time)?;
+                    }
+                    WarpOrder::Cancel => {
+                        if !craft.end_route("Cancelled") {
+                            return Err("No route is being flown".into());
+                        }
+                    }
                     WarpOrder::Gravity { policy } => {
                         if craft.warp.engaged {
                             return Err("Disengage warp before changing its gravity policy".into());

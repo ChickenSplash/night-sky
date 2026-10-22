@@ -127,12 +127,21 @@ curl -H 'X-Night-Sky-Client: cli' --data 'set_debug split_multiples false' http:
 ## Terminal control panel
 
 `./scripts/ns-tui` is a Textual app over the same API, for trying commands
-before they have in-app UI. It builds its command list and forms from
+before they have in-app UI. It opens on a **Ship** tab built from the
+[ship schema](#ship-schema): a ship picker, order buttons grouped as sublight,
+turning and warp (orders without settings run when pressed, others open a
+typed form with ranges and units, plus `in` and, on orders that can be
+timed, `for` in seconds), and the picked ship's live state, grouped with
+readable units and refreshed twice a second. Pending orders show as
+"in 0.95 s: throttle value=0 (timed end)". It reads the live schema,
+or the committed copy when the app is older or offline.
+
+The **Commands** tab builds its command list and forms from
 `GET /commands`, so a new `USAGE` entry appears with no TUI change. Forms send
 `name field=value` text (blank fields are left out) through `POST /command`
 and log the reply or refusal. A free-text line takes any command, a side panel
 polls chosen `/state` paths every second, and Ctrl+S captures a screenshot.
-Fields are untyped text, as `USAGE` names fields but not their types.
+Its fields are untyped text, as `USAGE` names fields but not their types.
 
 Textual is the one dependency outside the standard library. The first run makes
 a virtual environment in `tools/tui/` and installs it there; delete that
@@ -154,6 +163,41 @@ arrays of UiCommand JSON accepted by `ns cmd` or `POST /command`. List-system
 buttons also export follow-up `InspectObject` to preserve the list tab. Task
 links export a URL and no app commands; CLI reads never open them. These reads
 do not select or move the camera and use the normal snapshot refresh rate.
+
+## Ship schema
+
+Ship orders and the ship state readout are described by the Rust types
+themselves. `schemars` derives JSON Schema from `Order`, the readout structs
+and the simulation types inside them; doc comments become help text, range
+attributes use the constants validation uses, and `x-group`/`x-unit`
+extensions add display groups and units. `craft/schema.rs` flattens that into
+a catalogue that clients read without knowing JSON Schema:
+
+- `orders`: each order's words (`warp set`), group, help, JSON skeleton, the
+  path its fields go under, and its fields: key path, kind (number, integer,
+  boolean, text, choice, vector, variant), range, unit, default, and whether
+  the CLI takes it as a positional argument or a flag; and `off`, the order
+  that ends it when timed (`Order::off`), or null when it cannot be timed;
+- `common`: `id`, `tick`, `in` and `for`, which orders take from
+  `steer_craft` (key `in_s` and `for_s`); `for`, marked `timed`, applies only
+  to orders with an `off`;
+- `state`: display groups and every readout field with its group, label and
+  unit, so new state fields appear in the TUI's state panel.
+
+`GET /craft/schema` serves it, and a client test keeps a copy in
+`scripts/craft-schema.json`, rewriting it and failing while it is stale:
+commit the rewritten file. `ns ship` builds its order subcommands from that
+copy, so it needs no app for `--help` or `ns ship tree`. Tests require every
+order to have help and a group, every catalogue order to build an order the
+simulation accepts, and every number to declare a unit (`""` for none,
+`fraction` for [-1, 1] inputs).
+
+Adding an order or a state field therefore needs only the Rust change, its
+doc comment and attributes, and the rewritten copy. Generation rules:
+required fields are positional in declaration order; defaulted fields are
+flags; a nested struct becomes flags; an order holding only a tagged enum,
+like `warp`, becomes a menu of subcommands. Spawning, listing, state, follow
+and despawn are hand-written in `ns`.
 
 ## Craft
 
@@ -222,10 +266,24 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   limited to 300 simulated seconds ahead and 1,024 pending orders per craft.
   Queue acceptance is not execution acceptance:
   drive/frame interlocks are checked at that future boundary and refusals
-  are logged. `ship state` exposes `pending_orders` as tick/order pairs.
-  See [step-keyed orders](../simulation/craft.md#body-axis-control-simulation)
-  for queue limits and replay semantics. Use the generic JSON command API
-  for explicit ticks; the `ns ship` convenience commands still mean now.
+  are logged. `ship state` exposes `pending_orders`, each with its `tick`,
+  `order`, `in_s` (seconds until it applies) and, for a timed order's end,
+  `ends_from`. See [step-keyed orders](../simulation/craft.md#body-axis-control-simulation)
+  for queue limits and replay semantics.
+- People and agents should give times in seconds rather than steps:
+  `in_s` delays an order from the ship's next step (instead of `tick`), and
+  `for_s` ends it with its off order after that long, both rounded to whole
+  0.05 s steps. Throttle, translate, rotate, point, thrust and warp engage
+  can be timed; their off order is zero on the order's axes (a zero `rotate`
+  for point, which keeps any spin) or disengage. The app queues both halves
+  at once, so a client closing mid-burn changes nothing, and a later order
+  on the same controls cancels a pending end. In `ns` these are `--in` and
+  `--for` on every order that takes them, and `--tick` remains for exact
+  steps:
+  `ns ship throttle 0.5 --for 1` is a one-second burn,
+  `ns ship warp engage --in 5 --for 30` a delayed 30-second warp hop, and
+  `{"type":"steer_craft","in_s":2,"for_s":1,"order":{"action":"throttle","value":0.5}}`
+  the same through the API.
 - Legacy `ns ship thrust x,y,z` / `set_thrust [x,y,z]` remains a system-axis
   debug acceleration, at most 100 m/s². It is the `thrust` order underneath
   (`{"action":"thrust","thrust":[x,y,z]}`), validated like the others. A
@@ -233,6 +291,7 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
   the body-axis commands for flying.
 - Manoeuvres (drive inputs, spin, or an engaged attitude pilot) cap clock
   advancement at 10× without changing the requested rate or pause setting.
+  Steering the warp bubble is not a manoeuvre and does not cap it.
   `/state/clock/effective_rate` reports that ceiling (zero while paused),
   before any further physics catch-up hold. Quiet manual coasting restores
   the requested rate; release the attitude pilot to allow that restoration.
@@ -240,34 +299,58 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 ### Warp commands
 
 ```sh
-./scripts/ns ship cut              # cut thrust and brake spin
-# Wait until spin_rads is near zero, then release the braking controller.
-./scripts/ns ship release
+./scripts/ns ship throttle 0       # warp needs every sublight thrust input at zero
 ./scripts/ns ship state            # inspect spin, inputs and warp state
 ./scripts/ns ship warp set 1000000  # requested m/s; does not engage
 ./scripts/ns ship warp engage
 ./scripts/ns ship warp up          # multiply requested speed by √10
 ./scripts/ns ship warp down
+# Steering while engaged: the same turning commands steer the bubble.
+./scripts/ns ship rotate --yaw 0.5        # turn at half the turn rate, until changed
+./scripts/ns ship rotate                  # stop turning (eases out over ~0.3 s)
+./scripts/ns ship point body 'body-id'    # turn towards a body and track it
+./scripts/ns ship stop                    # stop turning, ending pointing
+./scripts/ns ship warp turn-rate 90       # turn rate at full steering, 1 to 360 °/s
 ./scripts/ns ship warp disengage
 # Alternative exits while engaged, using a body in the ship's current system:
 ./scripts/ns ship warp match 'body-id'          # match only the body's velocity
 ./scripts/ns ship warp match 'body-id' --orbit  # add speed for a rough orbit
+./scripts/ns ship warp match craft-1 --id craft-2  # formation: craft-1's velocity, from anywhere
 ./scripts/ns ship warp gravity suspended  # developer policy, only while off
 ./scripts/ns ship warp gravity active     # default
+# Plotted routes, to a body in the ship's current system:
+./scripts/ns ship warp to 'body-id'                  # fly there, keep velocity on arrival
+./scripts/ns ship warp to 'body-id' --orbit          # drop into a rough orbit
+./scripts/ns ship warp to 'other-system-body-id'     # loads that system first, then flies there
+./scripts/ns ship warp to craft-1 --match --id craft-2  # fly to another ship, hold formation 1 km off
+./scripts/ns ship warp to 'body-id' --match --time 120  # match it, in two minutes; replies with the plotted route
+./scripts/ns ship state              # its route: stage, distance, ETA, lateness
+./scripts/ns ship warp cancel        # end the route; warp stays engaged
 ```
 
-All warp commands accept `--id`. Point the ship before engagement; phase 4 has
-no warp steering or automatic arrival. Thrust and turning are interlocked with
-warp. Manual warp is unsafe: no collision checks, proximity slowdown, automatic
-arrival stop or missing-data stop. It can pass through stars and planets without
+All warp commands accept `--id`. Sublight thrust is interlocked with warp;
+turning is not. While engaged, `rotate`, `point`, `stop` and `cut` steer the
+bubble rather than the turning thrusters, at up to the turn rate (default
+30 °/s), and engagement takes over any existing spin and eases it out. On
+disengagement the ship keeps no spin, and a held rotation input or pointing
+pilot passes back to the turning thrusters. `warp to` engages warp, turns,
+curves round bodies in the way, slows all the way in and drops out at a
+standoff, in this system or another (loaded first, clock held), or 1 km
+from another ship; turning, warp speed,
+`disengage` and `match` orders take over from it (see
+[plotted routes](../simulation/craft.md#plotted-routes)). Manual warp is
+unsafe: no collision checks, proximity slowdown, automatic arrival stop or
+missing-data stop. It can pass through stars and planets without
 a crash response. Ordinary motion continues. See the
 [warp model](../simulation/craft.md#warp-core) for the precise rules and limits.
 
 The API uses `steer_craft`, for example
 `{"type":"steer_craft","order":{"action":"warp","command":{"command":"engage"}}}`
 or `{"type":"steer_craft","order":{"action":"warp","command":{"command":"set","speed_ms":1000000}}}`.
+The turn rate order is `{"action":"warp","command":{"command":"turn_rate","degrees_per_second":90}}`.
 `/state/craft/craft/<index>/warp` contains `engaged`, `requested_ms`, `actual_ms`,
-`gravity`, `stop_reason` and the last step's `bubble_delta_m` in frame axes.
+`gravity`, `stop_reason`, `turn_rate_dps` and the last step's `bubble_delta_m`
+in frame axes. The bubble's current turn rate is `spin_rads`, body axes.
 `last_match` is null or the last successful matched exit's `body`, `orbit`,
 `tick` and `velocity_ms` (system-frame velocity at exit, not current velocity).
 It clears on the next engagement. Matching uses existing planet, star and

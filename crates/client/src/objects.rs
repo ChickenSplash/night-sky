@@ -54,6 +54,27 @@ pub fn member_label(name: &str, letters: &str) -> String {
     }
 }
 
+/// A page's system as the breadcrumb names it: "System 2" on a list, as the
+/// page controls number them, else the star's own name.
+pub fn system_name(galaxy: &Galaxy, system: &StarSystem, page: u32) -> String {
+    if galaxy.systems.iter().any(|list| list.id == system.id) {
+        let number = system.pages().iter().position(|p| *p == page).unwrap_or(0) + 1;
+        format!("System {number}")
+    } else {
+        system.name.clone()
+    }
+}
+
+/// A star's or pair's label, such as "System 2 B": its system's name and
+/// its letters within it.
+pub fn page_member_label(galaxy: &Galaxy, system: &StarSystem, page: u32, id: &str) -> String {
+    let letters = match system.barycentre(id) {
+        Some(pair) => pair.component.as_str(),
+        None => space_simulation::multiple::member_letters(id),
+    };
+    member_label(&system_name(galaxy, system, page), letters)
+}
+
 pub fn star_id(system: &StarSystem, page: u32) -> String {
     space_simulation::craft::voyage::page_star_id(system, page)
 }

@@ -11,7 +11,7 @@ use space_simulation::{
         Craft, CraftKind, Field, Frame, Reference, STEP_SECONDS, circular_speed, distance,
         predict::Prediction,
         tick_at, tick_seconds,
-        voyage::{Voyage, Wait},
+        voyage::{Sighting, Voyage, Wait},
     },
 };
 
@@ -21,6 +21,9 @@ pub use forecast::{Forecast, forecast};
 mod loading;
 mod readout;
 pub use readout::{facts, readout};
+// Served only by the native developer API.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod schema;
 mod shape;
 mod travel;
 pub use shape::{HULL_EDGES, HULL_VERTICES};
@@ -35,7 +38,7 @@ pub const MANOEUVRE_RATE: f64 = 10.0;
 pub const MAX_STEPS_PER_FRAME: usize = 1_000;
 
 /// Nose-to-tail length of the test hull, in metres.
-pub const SHIP_SIZE_M: f64 = 30.0;
+pub const SHIP_SIZE_M: f64 = space_simulation::craft::SHIP_LENGTH_M;
 /// Conservative sphere around the test hull, for projection and picking.
 pub const SHIP_RADIUS_M: f64 = 18.0;
 
@@ -91,6 +94,8 @@ pub struct Live {
     pub forecast: Forecast,
     /// What its next step waits for: the clock is held until it is known.
     pub waiting: Option<Wait>,
+    /// How others saw it as its last step began, for craft a step behind.
+    before: Option<Sighting>,
 }
 
 impl std::ops::Deref for Live {
@@ -134,6 +139,14 @@ impl Live {
         }
     }
 
+    /// How fast `state_at` moves the craft, warp included: its last step's
+    /// motion, in metres per simulated second and its frame's axes.
+    pub fn display_velocity(&self) -> bevy::math::DVec3 {
+        let (from, to) = (self.previous.position, self.craft.state().position);
+        bevy::math::DVec3::from_array(std::array::from_fn(|i| to[i] - from[i]))
+            / space_simulation::craft::STEP_SECONDS
+    }
+
     /// The craft at `seconds`, and the reference its orbit is described
     /// around, kept from its last step within the switching margin.
     pub fn surroundings(&self, seconds: f64) -> (State, Option<Reference>) {
@@ -171,15 +184,18 @@ impl Fleet {
         let active = self.craft.iter().any(|live| {
             let craft = &live.craft;
             let input = craft.input;
+            // In warp, turning steers the bubble rather than the thrusters.
+            let turning = !craft.warp.engaged
+                && (input.controls.rotation != [0.0; 3]
+                    || craft
+                        .spin
+                        .iter()
+                        .any(|v| v.abs() > space_simulation::craft::warp::SPIN_TOLERANCE)
+                    || !matches!(craft.autopilot, AttitudePilot::Manual));
             input.thrust != [0.0; 3]
                 || input.controls.throttle != 0.0
                 || input.controls.translation != [0.0; 3]
-                || input.controls.rotation != [0.0; 3]
-                || craft
-                    .spin
-                    .iter()
-                    .any(|v| v.abs() > space_simulation::craft::warp::SPIN_TOLERANCE)
-                || !matches!(craft.autopilot, AttitudePilot::Manual)
+                || turning
                 || live.scheduled().any(|(_, order)| match order {
                     Order::Throttle { value } => *value != 0.0,
                     Order::Translate { right, up, forward } => [*right, *up, *forward] != [0.0; 3],
@@ -274,7 +290,7 @@ impl Fleet {
             velocity: std::array::from_fn(|i| here.velocity[i] + velocity[i]),
         };
         self.numbered += 1;
-        let id = format!("craft-{}", self.numbered);
+        let id = space_simulation::craft::craft_id(self.numbered);
         let name = format!("Ship {}", self.numbered);
         let mut craft = Craft::new(
             id.clone(),
@@ -296,7 +312,9 @@ impl Fleet {
             display_delta_m: bevy::math::DVec3::ZERO,
             forecast: Forecast::default(),
             waiting: None,
+            before: None,
         });
+        self.sight();
         Ok(id)
     }
 
@@ -305,7 +323,30 @@ impl Fleet {
         let before = self.craft.len();
         self.craft
             .retain(|live| id.is_some_and(|id| live.craft.id != id));
+        self.sight();
         before - self.craft.len()
+    }
+
+    /// Every craft as it was at the start of step `tick`: those a step ahead
+    /// give how they were as it began.
+    fn sightings(&self, tick: i64) -> Vec<Sighting> {
+        self.craft
+            .iter()
+            .map(|live| {
+                live.before
+                    .clone()
+                    .filter(|seen| live.craft.tick != tick && seen.tick == tick)
+                    .unwrap_or_else(|| live.sighting())
+            })
+            .collect()
+    }
+
+    /// Show every craft the others as they are now, for orders.
+    fn sight(&mut self) {
+        let sightings: Vec<Sighting> = self.craft.iter().map(|live| live.sighting()).collect();
+        for live in &mut self.craft {
+            live.traffic.clone_from(&sightings);
+        }
     }
 }
 
@@ -393,17 +434,16 @@ pub fn step(
     let start = Instant::now();
     let mut timing = crate::stars::stream::CraftFrame::default();
     let until = clock.0.seconds;
-    let mut reached = f64::INFINITY;
-    let Fleet { craft, charts, .. } = &mut *fleet;
     let discovery_start = Instant::now();
-    charts.poll(&galaxy.0);
+    fleet.charts.poll(&galaxy.0);
     timing.discovery_ms += discovery_start.elapsed().as_secs_f64() * 1000.0;
-    for live in craft.iter_mut() {
-        let stepping_start = Instant::now();
-        let steps = live.catch_up(charts, &galaxy.0, until, &mut timing.discovery_ms);
+    let stepping_start = Instant::now();
+    timing.steps = fleet.catch_up(&galaxy.0, until, &mut timing.discovery_ms);
+    timing.stepping_ms += stepping_start.elapsed().as_secs_f64() * 1000.0;
+    let Fleet { craft, charts, .. } = &mut *fleet;
+    let mut reached = f64::INFINITY;
+    for live in craft.iter() {
         reached = reached.min(live.craft.seconds());
-        timing.stepping_ms += stepping_start.elapsed().as_secs_f64() * 1000.0;
-        timing.steps += steps;
         charts.prefetch(&live.voyage, &galaxy.0);
     }
     charts.dispatch();
@@ -427,10 +467,48 @@ pub fn step(
     }
 }
 
+impl Fleet {
+    /// Step every craft towards `until` in lockstep, at most
+    /// `MAX_STEPS_PER_FRAME` steps each: each round steps the craft furthest
+    /// behind, every one seeing the others as they were as its step began.
+    /// A craft waiting for system data stops them all, so no craft reads
+    /// another that loading has left behind. Returns the steps taken;
+    /// `discovery_ms` gains the time spent asking for data.
+    pub fn catch_up(&mut self, galaxy: &Galaxy, until: f64, discovery_ms: &mut f64) -> usize {
+        let mut steps = 0;
+        let mut rounds = 0;
+        for live in &mut self.craft {
+            live.waiting = None;
+        }
+        'rounds: while rounds < MAX_STEPS_PER_FRAME {
+            let Some(tick) = self
+                .craft
+                .iter()
+                .filter(|live| live.craft.seconds() < until)
+                .map(|live| live.craft.tick)
+                .min()
+            else {
+                break;
+            };
+            let sightings = self.sightings(tick);
+            let Fleet { craft, charts, .. } = self;
+            for live in craft.iter_mut().filter(|live| live.craft.tick == tick) {
+                live.traffic.clone_from(&sightings);
+                if !live.step_once(charts, galaxy, discovery_ms) {
+                    break 'rounds;
+                }
+                steps += 1;
+            }
+            rounds += 1;
+        }
+        self.sight();
+        steps
+    }
+}
+
 impl Live {
-    /// Step towards `until`, at most `MAX_STEPS_PER_FRAME` steps, stopping
-    /// early while system data the next step needs is worked out. Returns
-    /// the steps taken; `discovery_ms` gains the time spent asking for data.
+    /// Step this craft alone towards `until`, as a fleet of one steps.
+    #[cfg(test)]
     pub fn catch_up(
         &mut self,
         charts: &mut travel::Charts,
@@ -438,10 +516,28 @@ impl Live {
         until: f64,
         discovery_ms: &mut f64,
     ) -> usize {
-        use bevy::platform::time::Instant;
         let mut steps = 0;
         self.waiting = None;
-        while self.craft.seconds() < until && steps < MAX_STEPS_PER_FRAME {
+        while self.craft.seconds() < until
+            && steps < MAX_STEPS_PER_FRAME
+            && self.step_once(charts, galaxy, discovery_ms)
+        {
+            steps += 1;
+        }
+        steps
+    }
+
+    /// One step, asking for any system data it needs. Returns false, with
+    /// `waiting` set, when the data is still being worked out.
+    fn step_once(
+        &mut self,
+        charts: &mut travel::Charts,
+        galaxy: &Galaxy,
+        discovery_ms: &mut f64,
+    ) -> bool {
+        use bevy::platform::time::Instant;
+        let before = self.sighting();
+        loop {
             match self.voyage.step(&*charts) {
                 Ok(step) => {
                     if let Some(rebase) = &step.rebase {
@@ -452,24 +548,24 @@ impl Live {
                     for refused in step.refused {
                         warn!(target: "craft", "Ship order for step {} refused: {}", refused.tick, refused.reason);
                     }
+                    break;
                 }
                 Err(wait) => {
                     let start = Instant::now();
                     let known = charts.offer(&wait, galaxy);
                     *discovery_ms += start.elapsed().as_secs_f64() * 1000.0;
-                    if known {
-                        continue;
+                    if !known {
+                        self.waiting = Some(wait);
+                        return false;
                     }
-                    self.waiting = Some(wait);
-                    break;
                 }
             }
-            if self.craft.warp.engaged {
-                self.forecast = Forecast::default();
-            }
-            steps += 1;
         }
-        steps
+        self.before = Some(before);
+        if self.craft.warp.engaged {
+            self.forecast = Forecast::default();
+        }
+        true
     }
 }
 

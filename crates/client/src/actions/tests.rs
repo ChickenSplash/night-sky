@@ -882,3 +882,52 @@ fn up_from_a_selected_but_untracked_planet_only_deselects() {
     assert_eq!(nav(&app).distance, distance);
     assert_eq!(nav(&app).list(), Some(0));
 }
+
+#[test]
+fn a_loaded_systems_barycentre_can_be_selected_by_id_only_there() {
+    let galaxy = space_simulation::demo_galaxy();
+    let page = galaxy.systems[0].pages()[1];
+    let root = galaxy.systems[0]
+        .barycentres_on(page)
+        .last()
+        .unwrap()
+        .id
+        .clone();
+    let mut app = run(galaxy, vec![]);
+    let select = UiCommand::SelectBarycentre { id: root.clone() };
+    let check = |app: &App, command: &UiCommand| {
+        command.check(
+            &app.world().resource::<Universe>().0,
+            nav(app),
+            app.world().resource::<crate::stars::stream::Starfield>(),
+            app.world().resource::<crate::craft::Fleet>(),
+        )
+    };
+    // Not loaded: nothing to select.
+    assert!(check(&app, &select).is_err());
+    send(&mut app, vec![select.clone()]);
+    assert_eq!(nav(&app).selection, None);
+
+    {
+        let mut nav = app.world_mut().resource_mut::<Navigation>();
+        nav.visit = Some(crate::Visit::List(0));
+        nav.page = page;
+    }
+    let missing = UiCommand::SelectBarycentre {
+        id: format!("{root}X"),
+    };
+    assert!(check(&app, &missing).is_err());
+    assert_eq!(check(&app, &select), Ok(()));
+    send(&mut app, vec![select]);
+    assert_eq!(
+        nav(&app).selection,
+        Some(Selection::Barycentre(root.clone()))
+    );
+    assert_eq!(
+        nav(&app).selection.as_ref().map(Selection::object),
+        Some(crate::objects::ObjectRef::Barycentre { id: root })
+    );
+    // A second command does not follow it.
+    send(&mut app, vec![UiCommand::Follow]);
+    assert!(!nav(&app).following);
+}

@@ -146,11 +146,11 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 31] = [
+pub const USAGE: [Usage; 32] = [
     Usage {
         name: "steer_craft",
-        fields: &["order", "id", "tick"],
-        about: "Ship order JSON: throttle, translate, rotate, point, stop (spin), release, cut (sublight drives and brake spin), configure, warp; use ns ship --help",
+        fields: &["order", "id", "tick", "in_s", "for_s"],
+        about: "Ship order JSON: throttle, translate, rotate, point, stop (spin), release, cut (sublight drives and brake spin), configure, warp (turning steers the bubble while engaged); use ns ship --help",
     },
     Usage {
         name: "pick_star",
@@ -161,6 +161,11 @@ pub const USAGE: [Usage; 31] = [
         name: "select_star",
         fields: &["id"],
         about: "Select a known star by ID without travelling",
+    },
+    Usage {
+        name: "select_barycentre",
+        fields: &["id"],
+        about: "Select a pair of the visited system by ID, such as <star>#AB",
     },
     Usage {
         name: "jump",
@@ -255,7 +260,7 @@ pub const USAGE: [Usage; 31] = [
     Usage {
         name: "set_display",
         fields: &["option", "on"],
-        about: "orbits, labels, markers, velocity_marker, realistic, galaxy_glow or wireframe; true or false",
+        about: "overlays, orbits, labels, markers, velocity_marker, predicted_paths, wireframe, realistic or galaxy_glow; true or false",
     },
     Usage {
         name: "set_fov",

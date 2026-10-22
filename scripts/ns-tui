@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Terminal control panel for the Night Sky developer API.
 
-Forms come from the app's live command catalogue (GET /commands), so a new
-USAGE entry appears here with no change to this file. Textual lives in a
-project-local virtual environment, made on first run in tools/tui/.
+The Commands tab's forms come from the app's live command catalogue
+(GET /commands), and the Ship tab's controls and state panel from the ship
+schema (GET /craft/schema), so new commands, orders and state fields appear
+here with no change to this file. Textual lives in a project-local virtual
+environment, made on first run in tools/tui/.
 """
 import json
+import math
 import os
+import runpy
 import subprocess
 import sys
+import types
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,12 +23,15 @@ VENV = os.path.join(ROOT, "tools", "tui")
 VENV_PYTHON = os.path.join(VENV, "bin", "python")
 
 try:
+    from rich.console import Group
     from rich.json import JSON
+    from rich.table import Table
     from rich.text import Text
     from textual import on, work
     from textual.app import App, ComposeResult
-    from textual.containers import Horizontal, Vertical, VerticalScroll
-    from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RichLog, Static
+    from textual.containers import Horizontal, ItemGrid, Vertical, VerticalScroll
+    from textual.widgets import (Button, Checkbox, Footer, Header, Input, Label, OptionList, RichLog,
+                                 Select, Static, TabbedContent, TabPane)
     from textual.widgets.option_list import Option
 except ImportError:
     if sys.executable == VENV_PYTHON:
@@ -36,6 +44,11 @@ except ImportError:
 
 PORT = int(os.environ.get("NIGHT_SKY_API_PORT", "4322"))
 WATCH = "clock, camera/flying, presentation_mode"
+# The CLI's own order building, so both clients read the schema the same way.
+NS = runpy.run_path(os.path.join(ROOT, "scripts", "ns"))
+LIGHT_SPEED = 299_792_458.0
+LIGHT_YEAR = 9.460_730_472_580_8e15
+AU = 1.495_978_707e11
 
 
 class ApiError(Exception):
@@ -74,6 +87,344 @@ def command_line(entry, values):
     return " ".join([entry["name"]] + [f"{f}={quote(v)}" for f, v in values.items() if v])
 
 
+# Values with units, for the ship state panel
+
+def number(value):
+    if value == 0:
+        return "0"
+    if 1e-3 <= abs(value) < 1e6:
+        digits = max(0, 3 - int(math.floor(math.log10(abs(value)))))
+        return f"{value:,.{digits}f}"
+    return f"{value:.3e}"
+
+
+def scaled(values, unit):
+    """Numbers in a readable unit for their size: one value or a vector."""
+    biggest = max((abs(v) for v in values if v is not None), default=0.0)
+    scale, shown = 1.0, unit
+    if unit in ("km", "km/s"):
+        values, unit = [v * 1000 if v is not None else None for v in values], {"km": "m", "km/s": "m/s"}[unit]
+        biggest *= 1000
+        shown = unit
+    if unit == "m":
+        for size, name in ((LIGHT_YEAR * 0.1, "ly"), (AU * 0.01, "AU"), (1e4, "km")):
+            if biggest >= size:
+                scale, shown = {"ly": LIGHT_YEAR, "AU": AU, "km": 1000.0}[name], name
+                break
+    elif unit == "m/s":
+        for size, name, factor in ((LIGHT_YEAR * 0.1, "ly/s", LIGHT_YEAR), (LIGHT_SPEED * 0.01, "c", LIGHT_SPEED),
+                                   (1e4, "km/s", 1000.0)):
+            if biggest >= size:
+                scale, shown = factor, name
+                break
+    elif unit == "rad/s":
+        scale, shown = math.pi / 180, "°/s"
+    elif unit == "s" and len(values) == 1 and values[0] is not None:
+        return duration(values[0])
+    elif unit == "fraction":
+        return " ".join("–" if v is None else f"{v * 100:+.0f}%" for v in values)
+    text = ", ".join("–" if v is None else number(v / scale) for v in values)
+    if len(values) > 1:
+        text = f"({text})"
+    return f"{text} {shown}".rstrip()
+
+
+def duration(seconds):
+    for size, name in ((86400 * 365.25, "yr"), (86400, "d"), (3600, "h"), (60, "min")):
+        if abs(seconds) >= 2 * size:
+            return f"{number(seconds / size)} {name}"
+    return f"{number(seconds)} s"
+
+
+def compact(value):
+    """A short line for a nested value: a tagged enum, list or object."""
+    if value is None:
+        return "–"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return number(value)
+    if isinstance(value, list):
+        if value and all(isinstance(v, (int, float)) for v in value):
+            return "(" + ", ".join(number(v) for v in value) + ")"
+        shown = [compact(v) for v in value[:3]]
+        return f"{len(value)}: " + "; ".join(shown) + (" …" if len(value) > 3 else "") if value else "none"
+    if isinstance(value, dict):
+        parts = [str(v) for k, v in value.items() if isinstance(v, str) and k in ("frame", "mode", "target", "action",
+                                                                                   "command", "event")]
+        parts += [f"{k} {compact(v)}" for k, v in value.items()
+                  if not (isinstance(v, str) and k in ("frame", "mode", "target", "action", "command", "event"))]
+        return " · ".join(parts)
+    return str(value)
+
+
+def pending(orders):
+    """Pending orders, soonest first, one a line: when, and what."""
+    lines = [f"in {duration(p['in_s'])}: {NS['order_text'](p['order'])}"
+             + (" (timed end)" if p.get("ends_from") is not None else "") for p in orders[:6]]
+    return "\n".join(lines + ([f"… {len(orders) - 6} more"] if len(orders) > 6 else [])) or "none"
+
+
+def shown(field, value):
+    if field["key"] == ["pending_orders"] and isinstance(value, list):
+        return Text(pending(value))
+    if value is None:
+        return Text("–", style="dim")
+    if isinstance(value, bool):
+        return Text("yes" if value else "no", style="green" if value else "dim")
+    unit = field.get("unit")
+    if unit is not None and isinstance(value, (int, float)):
+        return Text(scaled([value], unit))
+    if unit is not None and isinstance(value, list) and all(isinstance(v, (int, float)) or v is None for v in value):
+        return Text(scaled(value, unit))
+    return Text(compact(value))
+
+
+def lookup(state, key):
+    """The value at a key path, or KeyError when a parent is missing or null."""
+    for part in key:
+        if not isinstance(state, dict) or part not in state:
+            raise KeyError(part)
+        state = state[part]
+    return state
+
+
+class ShipPanel(Horizontal):
+    """Grouped order buttons and forms, and the selected ship's live state,
+    all built from the ship schema."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.schema = None
+        self.order = None
+        self.inputs = {}
+        self.ships = []
+        self.craft = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="ship-controls"):
+            yield Select([], prompt="no ships", id="ship-pick", allow_blank=True)
+            yield VerticalScroll(id="ship-orders")
+        with Vertical(id="ship-middle"):
+            with VerticalScroll(id="ship-form"):
+                yield Static("Pick an order. Orders without settings run when pressed.", classes="about")
+            yield RichLog(id="ship-log", markup=False, wrap=True)
+        with VerticalScroll(id="ship-state-box"):
+            yield Static("Waiting for the app…", id="ship-state")
+
+    def on_mount(self):
+        self.query_one("#ship-controls").border_title = "orders"
+        self.query_one("#ship-form").border_title = "order"
+        self.query_one("#ship-log").border_title = "history"
+        self.query_one("#ship-state-box").border_title = "ship state"
+        self.load_schema()
+        self.set_interval(0.5, self.refresh_state)
+
+    @work(thread=True, exclusive=True, group="ship-schema")
+    def load_schema(self):
+        source = "live"
+        try:
+            status, schema = request("/craft/schema")
+            if status != 200:
+                raise ApiError(f"HTTP {status}")
+        except ApiError:
+            schema, source = NS["craft_schema"](), "scripts/craft-schema.json"
+        self.app.call_from_thread(self.set_schema, schema, source)
+
+    async def set_schema(self, schema, source):
+        self.schema = schema
+        self.query_one("#ship-controls").border_subtitle = source
+        box = self.query_one("#ship-orders")
+        await box.remove_children()
+        widgets = []
+        for group in schema["groups"]:
+            orders = [(i, o) for i, o in enumerate(schema["orders"]) if o["group"] == group["id"]]
+            if not orders:
+                continue
+            widgets.append(Label(Text(group["label"], style="bold"), classes="group"))
+            if group["note"]:
+                widgets.append(Static(group["note"], classes="note"))
+            widgets.append(ItemGrid(*(Button(o["words"][-1], id=f"order-{i}", classes="order", compact=True,
+                                             tooltip=o.get("help"),
+                                             variant="primary" if o["fields"] or o.get("off") else "default")
+                                      for i, o in orders), min_column_width=12))
+        await box.mount_all(widgets)
+
+    # Orders
+
+    @on(Button.Pressed, ".order")
+    async def order_pressed(self, event):
+        order = self.schema["orders"][int(event.button.id.removeprefix("order-"))]
+        if not order["fields"] and not order.get("off"):
+            self.send(order, {})
+        else:
+            await self.show_form(order)
+
+    async def show_form(self, order):
+        self.order = order
+        form = self.query_one("#ship-form")
+        form.border_title = " ".join(order["words"])
+        await form.remove_children()
+        self.inputs = {}
+        about = " ".join(filter(None, (order.get("help"), order.get("about"))))
+        widgets = [Static(about, classes="about")]
+        # Delays and durations in seconds stand in for the absolute tick here.
+        timing = [f for f in NS["common_fields"](order, self.schema) if f["name"] in ("in", "for")]
+        for field in order["fields"] + timing:
+            widgets.append(self.field_row(field))
+        widgets.append(Button(f"Run {' '.join(order['words'])}  (ctrl+r)", classes="ship-run", variant="primary"))
+        await form.mount_all(widgets)
+
+    def field_row(self, field):
+        dest = ".".join(field["key"])
+        hint = NS["field_hint"](field) or ""
+        kind = field["kind"]
+        if kind == "boolean":
+            box = Checkbox(field["name"], value=bool(field.get("default")))
+        elif kind == "choice":
+            box = Select([(o["name"], o["name"]) for o in field["options"]], allow_blank=False)
+        elif kind == "variant":
+            box = Select([(o["name"].replace("_", "-"), o["name"]) for o in field["options"]], allow_blank=False)
+            value = Input(placeholder="value (body ID or x,y,z)", classes="variant-value")
+            self.inputs[dest] = (field, box, value)
+            return Horizontal(Label(field["name"]), box, value, classes="field")
+        else:
+            default = field.get("default")
+            placeholder = ",".join("xyzw"[:field["length"]]) if kind == "vector" else ""
+            placeholder = " ".join(filter(None, (placeholder, hint, "" if field["required"] else "optional")))
+            box = Input(value=None if default is None else f"{default:g}" if isinstance(default, float) else
+                        str(default), placeholder=placeholder,
+                        type={"number": "number", "integer": "integer"}.get(kind, "text"))
+        box.tooltip = field.get("help")
+        self.inputs[dest] = (field, box, None)
+        unit = field.get("unit") if field.get("unit") not in (None, "", "fraction") else ""
+        return Horizontal(Label(f"{field['name']} {unit}".rstrip()), box, classes="field")
+
+    @on(Button.Pressed, ".ship-run")
+    def run_pressed(self):
+        self.run_form()
+
+    @on(Input.Submitted)
+    def field_submitted(self, event):
+        if any(event.input in entry for entry in self.inputs.values()):
+            self.run_form()
+
+    def run_form(self):
+        if not self.order:
+            return
+        values = {}
+        for dest, (field, box, extra) in self.inputs.items():
+            if field["kind"] == "variant":
+                values[dest] = box.value
+                values[dest + ".value"] = extra.value.strip() or None
+            elif field["kind"] in ("boolean", "choice"):
+                values[dest] = box.value
+            else:
+                text = box.value.strip()
+                if not text:
+                    values[dest] = None
+                elif field["kind"] == "number":
+                    values[dest] = float(text)
+                elif field["kind"] == "integer":
+                    values[dest] = int(text)
+                else:
+                    values[dest] = text
+        missing = [f["name"] for f, box, _ in self.inputs.values()
+                   if f["required"] and values.get(".".join(f["key"])) is None]
+        if missing:
+            self.log_reply(" ".join(self.order["words"]), 0, {"error": f"needs {', '.join(missing)}"})
+            return
+        self.send(self.order, values)
+
+    def send(self, order, values):
+        """Builds the order as `ns` does, then sends it to the picked ship."""
+        args = types.SimpleNamespace(**{"field." + k: v for k, v in values.items()})
+        line = " ".join(order["words"] + [f"{k.split('.')[-1].removesuffix('_s')}={v}" for k, v in values.items()
+                                          if v not in (None, False) and not k.endswith(".value")])
+        try:
+            command = NS["steer_command"](order, args, self.craft, NS["common_fields"](order, self.schema))
+        except RuntimeError as error:
+            self.log_reply(line, 0, {"error": str(error)})
+            return
+        self.post(line, command)
+
+    @work(thread=True, group="ship-command")
+    def post(self, line, command):
+        try:
+            status, reply = request("/command", json.dumps(command).encode("utf-8"))
+        except ApiError as error:
+            status, reply = 0, {"error": str(error)}
+        self.app.call_from_thread(self.log_reply, line, status, reply)
+
+    def log_reply(self, line, status, reply):
+        ok = 200 <= status < 300
+        text = Text("✓ " if ok else "✗ ", style="green" if ok else "red")
+        text.append(line, style="bold")
+        detail = reply.get("status") if ok and isinstance(reply, dict) else reply.get("error", reply)
+        text.append(f"  {detail}", style="dim" if ok else "red")
+        self.query_one("#ship-log", RichLog).write(text)
+
+    # Ships and state
+
+    @on(Select.Changed, "#ship-pick")
+    def ship_picked(self, event):
+        self.craft = None if event.value is Select.NULL else event.value
+
+    @work(thread=True, exclusive=True, group="ship-state")
+    def refresh_state(self):
+        try:
+            status, fleet = request("/state/craft")
+        except ApiError:
+            self.app.call_from_thread(self.query_one("#ship-state", Static).update, "app not reachable")
+            return
+        if status == 200:
+            self.app.call_from_thread(self.show_state, fleet)
+
+    def show_state(self, fleet):
+        ships = [(f"{c['name']} · {c['id']}", c["id"]) for c in fleet.get("craft", [])]
+        pick = self.query_one("#ship-pick", Select)
+        if ships != self.ships:
+            self.ships = ships
+            keep = self.craft if any(i == self.craft for _, i in ships) else (ships[0][1] if ships else None)
+            pick.set_options(ships)
+            pick.prompt = "pick a ship" if ships else "no ships"
+            if keep is not None:
+                pick.value = keep
+            self.craft = keep
+        craft = next((c for c in fleet.get("craft", []) if c["id"] == self.craft), None)
+        if self.schema is None:
+            return
+        sections = []
+        state = self.schema["state"]
+        if craft is not None:
+            for group in state["groups"]:
+                table = Table.grid(padding=(0, 1))
+                table.add_column(style="dim", no_wrap=True)
+                table.add_column()
+                for field in state["craft"]:
+                    if field["group"] != group["id"]:
+                        continue
+                    try:
+                        value = lookup(craft, field["key"])
+                    except KeyError:
+                        continue
+                    table.add_row(field["label"], shown(field, value))
+                if table.row_count:
+                    sections += [Text(group["label"], style="bold"), table, Text("")]
+        else:
+            sections.append(Text("No ship. Spawn one: ns ship spawn --altitude 400", style="dim"))
+        fleet_table = Table.grid(padding=(0, 1))
+        fleet_table.add_column(style="dim", no_wrap=True)
+        fleet_table.add_column()
+        for field in state["fleet"]:
+            try:
+                fleet_table.add_row(field["label"], shown(field, lookup(fleet, field["key"])))
+            except KeyError:
+                continue
+        sections += [Text("Fleet", style="bold"), fleet_table]
+        self.query_one("#ship-state", Static).update(Group(*sections))
+
+
 class NsTui(App):
     TITLE = "Night Sky · ns-tui"
     CSS = """
@@ -90,6 +441,18 @@ class NsTui(App):
     #line { dock: bottom; }
     #watch { width: 46; border: round $success; }
     #state { height: 1fr; }
+    #ship-controls { width: 40; border: round $primary; }
+    #ship-pick { margin-bottom: 1; }
+    #ship-orders .group { margin-top: 1; }
+    #ship-orders .note { color: $text-muted; }
+    #ship-orders ItemGrid { height: auto; grid-gutter: 0 1; }
+    #ship-middle { width: 1fr; }
+    #ship-form { height: auto; max-height: 60%; border: round $accent; padding: 0 1; }
+    #ship-form .field Label { width: 24; }
+    #ship-form .field Select { width: 1fr; }
+    #ship-form .field Checkbox { width: 1fr; }
+    #ship-log { border: round $secondary; height: 1fr; }
+    #ship-state-box { width: 58; border: round $success; padding: 0 1; }
     """
     BINDINGS = [
         ("ctrl+r", "run", "Run form"),
@@ -107,6 +470,14 @@ class NsTui(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        with TabbedContent(initial="ship-tab"):
+            with TabPane("Ship", id="ship-tab"):
+                yield ShipPanel()
+            with TabPane("Commands", id="commands-tab"):
+                yield from self.compose_commands()
+        yield Footer()
+
+    def compose_commands(self) -> ComposeResult:
         with Horizontal():
             with Vertical(id="commands"):
                 yield Input(placeholder="filter commands", id="filter")
@@ -119,7 +490,6 @@ class NsTui(App):
             with Vertical(id="watch"):
                 yield Input(value=WATCH, placeholder="state paths, comma separated", id="paths")
                 yield Static(id="state")
-        yield Footer()
 
     def on_mount(self):
         # Terminal colours throughout: no background of its own.
@@ -208,7 +578,9 @@ class NsTui(App):
         self.action_run()
 
     def action_run(self):
-        if self.entry:
+        if self.query_one(TabbedContent).active == "ship-tab":
+            self.query_one(ShipPanel).run_form()
+        elif self.entry:
             values = {field: box.value.strip() for field, box in self.inputs.items()}
             self.send(command_line(self.entry, values))
 

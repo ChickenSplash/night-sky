@@ -154,6 +154,27 @@ pub(super) fn time_controls(
         });
 }
 
+/// The piloted ship's lines, centred above the time controls' two lines.
+pub(super) fn pilot_readout(ctx: &egui::Context, rect: egui::Rect, lines: &[String]) {
+    let height = ctx.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(SIZE)));
+    let above = HUD_PADDING + 2.0 * (height + HUD_LINE_GAP) + 2.0 * HUD_LINE_GAP;
+    egui::Area::new(egui::Id::new("pilot-readout"))
+        .order(egui::Order::Background)
+        .movable(false)
+        .interactable(false)
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(rect.center_bottom() - egui::vec2(0.0, above))
+        .show(ctx, |ui| {
+            ui.set_width(420.0);
+            ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
+            ui.vertical_centered(|ui| {
+                for line in lines {
+                    halo_text(ui, line, egui::Sense::hover(), |_| CURRENT);
+                }
+            });
+        });
+}
+
 fn elapsed_text(days: f64) -> String {
     if days >= 365.25 {
         format!("T + {:.2} yr", days / 365.25)
@@ -162,10 +183,13 @@ fn elapsed_text(days: f64) -> String {
     }
 }
 
-/// Measured velocity above a draggable set speed, like the time controls.
+/// What the camera moves with, then measured velocity above a draggable set
+/// speed, like the time controls.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn speed_readout(
     ctx: &egui::Context,
     rect: egui::Rect,
+    moving_with: Option<&str>,
     set_speed: f64,
     velocity: f64,
     drag_start: &mut Option<f64>,
@@ -178,6 +202,14 @@ pub(super) fn speed_readout(
         .fixed_pos(rect.left_bottom() + egui::vec2(HUD_PADDING, -HUD_PADDING))
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
+            if let Some(anchor) = moving_with {
+                halo_text(
+                    ui,
+                    &format!("Moving with {anchor}"),
+                    egui::Sense::hover(),
+                    |_| CURRENT,
+                );
+            }
             halo_text(
                 ui,
                 &format!("Velocity {}", speed_label(velocity)),

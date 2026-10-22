@@ -67,10 +67,23 @@ seconds ahead of its current tick. Value checks (finite numbers, ranges and
 nonzero directions) run at submission; drive interlocks and body checks run
 at application. Long replay logs must be fed incrementally as ticks advance.
 
-`ScheduledOrder` is a serializable tick/order pair for replay;
-`pending_orders()` supplies the remaining queue to save alongside a craft
-snapshot. Reconstruct its field
-and frame origin, then resubmit those pairs to restore it. JSON parsing uses
+`Voyage::timed_order(tick, end, order)` gives an order for a time: the order
+at `tick` and its `Order::off` at `end`, queued together or refused together.
+The off order puts the order's controls at rest and keeps motion and spin:
+zero throttle, translation, rotation or legacy thrust (`point` ends as a zero
+`rotate`), and disengage for warp engage. Other orders have no rest state and
+cannot be timed. The pending end is tagged with its start step and dropped if
+its start is refused, or once a later order on the same controls (throttle,
+translation, turning, thrust or warp engagement; `cut` covers all but warp)
+applies after that start, so an earlier burn's end never cuts a newer one.
+An end due at the same step as another order applies first, so the other
+order wins. A timed order uses two of the 1,024 pending slots.
+
+`ScheduledOrder` is a serializable tick/order record for replay, with
+`ends_from` set on timed orders' ends; `pending_orders()` supplies the
+remaining queue to save alongside a craft snapshot. Reconstruct its field
+and frame origin, then resubmit the records through `Voyage::schedule` to
+restore it. JSON parsing uses
 round-trip f64 precision so a snapshot does not lose physics bits. This is
 replay infrastructure, not a multiplayer protocol: ownership, administrator
 permissions, player rate limits, acknowledgements and rollback/correction
@@ -236,6 +249,12 @@ in memory only: nothing is saved or shared yet.
 - **Stepping:** `craft::step` runs after the clock advances each frame and
   steps every craft until it reaches the clock, at most
   `MAX_STEPS_PER_FRAME` (1,000, about 50 s of simulation time) per frame.
+  Craft step in lockstep (`Fleet::catch_up`): each round steps those
+  furthest behind, every one given the others as they were as its step
+  began (`Voyage::traffic`, a `Sighting` per craft), so craft that target
+  each other fly the same paths whatever order they are stepped in. A craft
+  waiting for system data stops the whole fleet for the frame, so none
+  reads another that loading has left behind.
   A craft that cannot keep up **holds the clock** back to its own time, so
   bodies and craft never disagree; the time HUD then reads `· held by craft`.
   At the default 1 day/s, time runs at roughly 3,000 times real time with a
@@ -248,7 +267,8 @@ in memory only: nothing is saved or shared yet.
   the manoeuvre cap and either hold.
   Pending sublight or pointing orders also conservatively apply the manoeuvre
   cap, so a catch-up frame cannot run a newly scheduled burn at the high
-  coasting rate. Pending warp-only orders do not apply that cap.
+  coasting rate. Pending warp-only orders do not apply that cap, and neither
+  does steering the bubble of an engaged warp.
 - **Forecasts:** each craft keeps its last finished
   [coast prediction](#coast-prediction) (`craft::Forecast`) on show while a
   newer one is worked on. `craft::forecast` runs after stepping and shares
@@ -327,18 +347,17 @@ or on streamed stars.
 
 ## Warp core
 
-Warp is straight-line bubble transport along the ship's nose, commanded through
-the CLI/API. It is not a destination autopilot. There is no steering,
-approach assist, fuel or energy budget yet. Explicit matched dropout is described
+Warp is bubble transport along the ship's nose, commanded through the CLI/API,
+and steered by turning the nose (see [warp steering](#warp-steering)), by
+hand or by the [route pilot](#plotted-routes). There is no turn-limit,
+collision or approach assist, fuel or energy budget yet. Explicit matched dropout is described
 below. Manual warp is deliberately unsafe:
 there are no body collision checks, atmosphere exclusions or missing-data stops.
 It can engage inside a body and pass through stars and planets, with no crash
 or damage response. Arrival detection is separate and does not stop the drive.
 
 - **Two motions:** each 0.05 s step adds ordinary drift and bubble displacement.
-  Bubble motion never becomes ordinary velocity on dropout. Attitude is held
-  during phase 4 travel. Existing appreciable spin, turning inputs or an engaged
-  attitude controller prevent engagement; stop rotation, then release the pilot.
+  Bubble motion never becomes ordinary velocity on dropout.
 - **Orders take effect from the next step:** every order, warp included, changes
   the craft's input or drive state and acts from its next fixed step (its
   `tick`), so a server can key inputs by step number. Physics brackets the clock with a step that may
@@ -347,8 +366,9 @@ or damage response. Arrival detection is separate and does not stop the drive.
   more step (up to 0.5 ly at 10,000 ly/s). Ordered while paused, that last step
   is seen once time resumes.
 - **Drive interlock:** all sublight thrust must be zero before engaging warp.
-  Nonzero throttle, fine/legacy translation, turning and pointing orders are
-  refused during warp, not silently cleared. Disengage before using them.
+  Nonzero throttle and fine/legacy translation orders are refused during warp,
+  not silently cleared. Disengage before using them. Turning is not
+  interlocked: during warp it steers the bubble.
 - **Gravity policy:** `active` by default, evaluated at the current travelled
   positions and integrated into ordinary velocity. The developer alternative
   `suspended` retains ordinary velocity but not position. At and above light
@@ -374,6 +394,152 @@ or damage response. Arrival detection is separate and does not stop the drive.
 - **One step for both drives:** `Craft::step` integrates ordinary flight or,
   while warp is engaged, bubble transport, so anything stepping a craft
   (client, tests, a future server) moves it the same way.
+
+### Warp steering
+
+The drive turns the bubble and the ship inside it together, without the
+turning thrusters. This is a game rule, in keeping with steering above light
+speed (see the [plan](../plans/flight-sim.md#warp-drive-rules)): in the
+Alcubierre picture the ship floats freely in flat space inside the bubble, so
+rotating it with the bubble resembles frame dragging, not anything the metric
+predicts. The crew would feel no turning force.
+
+- **Rate, not acceleration:** the same rotation fractions and attitude pilot
+  as ordinary flight set a target turn rate in body axes. Manual input is the
+  fraction times `turn_rate_dps`, a per-ship setting from 1 to 360 °/s
+  (default 30) that can change engaged or not. Several axes share it: the
+  total rate never exceeds it.
+- **Ramp:** the bubble's rate (`spin`) approaches the target with the same
+  0.3 s exponential response as speed, integrated exactly over each step.
+  Releasing steering ends the turn with no residual spin.
+- **The path bends with the nose:** each step's bubble displacement runs along
+  the step's midpoint attitude, so a steady turn traces a circle of radius
+  speed over turn rate. Roll turns the ship about its direction of travel
+  without changing the path. Ordinary velocity is never rotated.
+- **Pointing:** `point` drives the bubble's rate in proportion to the
+  attitude error, at a gain that critically damps the rate ramp with an
+  allowance for each step's held target. Turns from rest settle without
+  overshoot in the regression tests, never above the turn rate. `stop` and
+  `cut` target zero rate.
+- **Engaging and dropout:** engagement takes over any spin and eases it to
+  the steering target. Disengaging or a matched dropout leaves the ship with
+  no spin; a held rotation input or pointing pilot then passes back to the
+  turning thrusters, unchanged.
+
+### Plotted routes
+
+`ns ship warp to <id> [--match | --orbit] [--time <s>]` plots a trip to a
+planet, star, barycentre or system key (its star or outermost barycentre),
+in the ship's current system or another, engages warp and flies it
+(`craft::route`). The
+route pilot is ship state beside the attitude pilot. Each step, before the
+ship moves, it gives the orders a player would: pointing at a direction,
+the requested speed and, at the standoff, dropout. It never moves the ship
+itself, so replays and servers run it from the same inputs.
+
+- **Target facts:** each step the pilot asks the field for the target's
+  state, size, keep-clear distance, orbit reach, GM and system (`Target`),
+  and never checks what kind of object it is. A body's size is its radius;
+  a barycentre's is its pair's separation, and it keeps clear of its stars.
+- **Standoff:** four sizes from the centre, at least the keep-clear distance
+  (1.5 radii, or a barycentre's farthest star plus 1.5 of its radii) and at
+  most 90% of the orbit reach, so `--orbit` works on arrival. A star of a
+  tight pair whose stable zone barely clears its surface has none, and the
+  order is refused.
+- **Speed profile:** requested speed is the distance to the target's centre
+  over a time constant τ, so every second covers the same share of what is
+  left, reaching the standoff after τ × ln(distance ÷ standoff). The request
+  is lowered by (1 − 0.3 s ÷ τ) so the lagging speed ramp still flies the
+  profile; τ is at least 0.6 s. Speed is 1 m/s while the nose is more than
+  10° off, ramping up to full by 2°.
+- **Trip time:** 10 to 3,600 s, or by default 20 s plus 10 s for each tenfold
+  distance beyond 1 AU, up to 60 s. It includes the first turn, estimated
+  from the turn rate and pointing's easing. τ is fitted to it at plotting,
+  again once lined up, and once a second until the approach (the last ten
+  standoffs), so a trip whose turn ran long catches up. A time that cannot
+  be met (a 10 s trip facing away, or a tight detour) is accepted and shows
+  as `late_s`, with its cause in `slowed_by`: the first turn, the costliest
+  bend, or the top warp speed.
+- **Bodies in the way:** every star and planet but the target has a
+  keep-clear sphere of 1.5 radii. Each step the pilot checks the line to
+  the standoff against them; when one is in the way it aims along the
+  tangent to the nearest such sphere, on the side the target lies, and
+  checks that tangent against the others in turn. Worked out afresh every
+  step, it curves the ship round like a string pulled tight, so moving
+  bodies and several in a row need nothing more. A ship starting inside a
+  sphere, such as low over a planet, aims along its horizon and climbs out.
+  - **Bend speed:** rounding a body, speed is capped so the aim turns at no
+    more than half the turn rate, leaving the rest for pointing to follow.
+    The lead then uses the tangent's own turn rate, not the line of sight's.
+  - **Impact slowdown:** heading into a sphere it is outside of, speed is
+    capped to the gap over 1.7 s (pointing's response plus the speed ramp),
+    so a late turn never cuts into it.
+  - **Timing:** at plotting and once a second, the trip is measured along
+    the wrapped path (tangents and arcs round spheres frozen where they are
+    now), and τ is fitted to the time left after the bends. A bend of turn θ
+    allows (1 − cos θ) over half the turn rate up to a quarter turn, the
+    rest at that rate, plus pointing's 1.4 s settling scaled by θ up to a
+    quarter turn: a barely hidden target costs almost nothing.
+  - **Cost:** one line-to-sphere test per body per step, over the bodies
+    gravity already sums; the path is measured only once a second.
+- **Aim:** the bubble's wanted velocity closes along the line of sight and
+  cancels the drift between the ship's ordinary velocity and the target's,
+  so moving targets are met. Flying off the line turns the line of sight
+  faster than pointing (a 1.4 s response) can follow once τ is short, which
+  would diverge; the pilot aims ahead by the line of sight's turn over that
+  response (at most 45°), which keeps the nose on it.
+- **Arrival:** at the standoff, `keep` disengages with ordinary velocity,
+  `match` takes the target's velocity and `orbit` adds rough-orbit speed, as
+  [matched dropout](#matched-dropout) does. The attitude pilot returns to
+  manual, with no spin. The ship also drops out when the coming step's
+  travel (the speed ramp's integral plus drift) would reach the standoff,
+  so it stops at most one step early and can never pass through. That
+  matters when τ is pinned at its minimum by too short a time: the ramp
+  then cannot slow the ship as fast as the profile asks, and a 2 ly trip
+  asked to take 10 s drops out at about 1.8 standoffs, still faster than
+  light and so in galactic space, entering the system the next step.
+- **Takeover:** `warp cancel`, any turning order (`rotate`, `point`, `stop`,
+  `release`, `cut`), a warp speed order, `disengage` or `match` ends the
+  route. Warp is left as it was, so nothing jumps; turning returns to manual.
+- **Another system:** a target whose system key is not the ship's own
+  system, or any target from galactic space, is accepted in the `plotting`
+  stage without engaging warp. Each step, `Voyage` first needs that
+  system's location (`Wait::Star`, from seeds, or from the lists for a
+  legacy page) and then its bodies (`Wait::System`), waiting like any other
+  data, so the client holds the clock while they load and a slow machine
+  flies the same path. The first step that has them plots the route as an
+  in-system order would be, from the same step; a refusal then ends it in
+  `released` with the reason, warp still off. While the ship is outside
+  the destination, the pilot sees its target and bodies converted into the
+  ship's frame (`Rebase` from the destination's frame, system velocities
+  included), for aiming and wrapping alike; gravity stays the local
+  system's. Leaving, re-anchoring and entering are the usual frame rules:
+  the profile only drops below light speed about c × τ from the target, so
+  the ship crosses most of the destination's range in galactic space and
+  enters on the slowdown, typically a few hundred thousand kilometres out.
+  A 2 ly trip in 40 s peaks near 0.6 ly/s.
+- **Other craft:** a craft ID targets that craft, in any frame. The pilot
+  sees it as it was at the start of the step, converted into the ship's
+  frame, and aims along its whole motion, warp bubble included, correcting
+  every step; a target pulling away shows a growing ETA. The standoff is
+  1 km (`CRAFT_STANDOFF_M`), `--match` gives formation flying beside it,
+  matching its ordinary velocity only, never its bubble, and `--orbit` is
+  refused. A target that despawns releases the route as cancelling does,
+  with "`craft-2` is gone", warp left engaged.
+- **Targets in low orbit:** a body whose keep-clear sphere holds the target,
+  as a planet's does a ship 400 km up, shrinks to pass through it, so the
+  route skims round at the target's height and never lower.
+- **Refused when given, leaving the ship unchanged:** an unknown ID in the
+  ship's own system, a craft ID with no craft, the ship itself, `--orbit` on
+  a craft, no safe standoff, already within the standoff, sublight thrust
+  still on, or a trip time out of range.
+- **Readout:** `route` in the ship state holds the target and its system
+  (empty for a craft),
+  arrival mode, stage (`plotting`, `align`, `cruise`, `approach`, `arrived`,
+  `released`), trip time, τ,
+  standoff, distance, ETA, lateness and its cause, the detour beyond the
+  straight line, the body being steered round, whether the top speed
+  stretches it and how it ended. It is kept after the route ends.
 
 Below the gravity cutoff, active warp retains its final gravity sample for
 the next step, including ordinary flight after dropout. Samples use the
@@ -405,8 +571,9 @@ inputs give the same path on any machine, wherever the camera is.
   reach then needs its bodies for its exact range and gravity. Charted list
   pages take the place of the generated systems they are assigned to; legacy
   pages with no cell star are added as candidates of their own.
-- **Waiting, not guessing:** when a step needs a region or a system's bodies
-  that its `Atlas` does not have yet, it returns `Wait` and changes nothing.
+- **Waiting, not guessing:** when a step needs a region, a system's bodies or
+  a route destination's location that its `Atlas` does not have yet, it
+  returns `Wait` and changes nothing.
   `Library` answers synchronously for tests and offline replay. The client asks its
   background worker and holds the clock until the answer arrives, so a slow
   machine arrives at the same step, only later in real time.
@@ -468,9 +635,16 @@ inputs give the same path on any machine, wherever the camera is.
 `ns ship warp match <body-id> [--orbit]`, ends warp and replaces ordinary velocity
 at the command's application tick. It resolves the same stable planet, star or
 barycentre IDs used by inspection, selection and orbit references, against the
-craft's current system. Galactic-space and remote matching are refused. There
-is no separate target picker, persistent matching setting or automatic arrival;
-in-app selection-to-flight actions remain later work.
+craft's current system, or a system key as its star or outermost barycentre.
+Galactic-space and remote matching are refused, except of another craft:
+`warp match <craft-id>` takes its ordinary velocity as it was at the start of
+the step, from any frame, for formation flying (`--orbit` refused). A
+plotted route's `--match`
+and `--orbit` arrivals use the same rules, except that a route to another
+system sees its target converted into the ship's frame, so it can match on
+arrival before the ship has entered the system. There is no separate target picker
+or persistent matching setting; in-app selection-to-flight actions remain
+later work.
 
 Without `--orbit`, the result is the body's analytic velocity at that tick.
 This alone does not support the ship against gravity. With `--orbit`, the drive

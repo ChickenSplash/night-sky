@@ -33,7 +33,8 @@ to `crates/client/src/`.
   on dark space. Reuse `kit::halo::halo_text`/`halo_wrapped_text` for scene
   text, or `halo_galley` for manually placed text such as canvas planet labels.
 - `breadcrumb::trail` is physical location: `Milky Way`, the current star's
-  list if any, the star, then `Navigation::location_planet`. An open list or
+  list if any, the star, then `Navigation::location_body` with the stars and
+  pairs above it (such as `System 2 AB › System 2 B › b`). An open list or
   destination is not a location until arrival. `selection_trail` independently
   shows the selected object's hierarchy, including remote planets. List stars
   are `System n`; other stars use catalogue names.
@@ -83,6 +84,14 @@ Stars are reachable by ID if mapped, visited, charted by the shown search, or
 streamed. Unreachable actions are hidden, not disabled. The read-only
 [developer inspector](../developer-api.md#inspector-readout) exports these
 same facts/actions without selecting or travelling.
+
+## Scene canvas
+
+`ui/canvas.rs` draws marker rings, labels, the selected star's ring and the
+velocity marker over the 3D view, and turns clicks on it into selections.
+Which crowded markers it hides and which one a click reaches are described in
+[navigation](../navigation.md#selection-and-picking). With Scene overlays
+off it draws nothing, but clicks still select (see [controls](../controls.md#debug-tools)).
 
 ## Text HUDs
 

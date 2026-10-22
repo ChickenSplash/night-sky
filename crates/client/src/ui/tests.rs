@@ -223,7 +223,7 @@ fn set_speed_drag_is_continuous_and_captures_input_without_click_actions() {
                 events,
                 ..Default::default()
             },
-            |ctx| speed_readout(ctx, rect, speed, 0.0, &mut drag, &mut commands),
+            |ctx| speed_readout(ctx, rect, None, speed, 0.0, &mut drag, &mut commands),
         );
         for command in &commands {
             let UiCommand::SetMoveSpeed { speed: value } = command else {
@@ -468,7 +468,7 @@ fn text_huds_share_edge_padding_and_bottom_baseline() {
                         &mut commands,
                     );
                     time_controls(ctx, rect, &clock, false, &mut drag, &mut commands);
-                    speed_readout(ctx, rect, 1000.0, 0.0, &mut speed_drag, &mut commands);
+                    speed_readout(ctx, rect, None, 1000.0, 0.0, &mut speed_drag, &mut commands);
                     magnitude_control(ctx, rect, 6.5, &mut magnitude_drag, &mut commands);
                 },
             );
@@ -682,4 +682,155 @@ fn camera_drag_crossing_time_text_stays_with_the_scene() {
             modifiers: egui::Modifiers::NONE,
         },
     ]));
+}
+
+#[test]
+fn star_and_barycentre_markers_show_the_selection() {
+    use crate::{Selection, Visit, scene::Marked};
+    let galaxy = space_simulation::demo_galaxy();
+    let system = &galaxy.systems[0];
+    let page = system.pages()[1];
+    let mut nav = Navigation {
+        visit: Some(Visit::List(0)),
+        page,
+        arrived: true,
+        ..Navigation::default()
+    };
+    let root = system.barycentres_on(page).last().unwrap().id.clone();
+    let star = system.stars_on(page).last().unwrap().id.clone();
+    let pick = |id: String| crate::galaxy_nav::PickedStar {
+        id,
+        position_ly: bevy::math::DVec3::ZERO,
+    };
+    let selected = |nav: &Navigation, object: Marked| {
+        super::canvas::selected(nav, &galaxy, nav.system(&galaxy), &object)
+    };
+
+    nav.select(Some(Selection::Star(pick(star.clone()))));
+    assert!(selected(&nav, Marked::Star(star.clone())));
+    assert!(!selected(&nav, Marked::Barycentre(root.clone())));
+
+    nav.select(Some(Selection::Barycentre(root.clone())));
+    assert!(selected(&nav, Marked::Barycentre(root.clone())));
+    assert!(!selected(&nav, Marked::Star(star.clone())));
+
+    // Selecting the system as a whole is selecting its outermost pair.
+    let whole = crate::objects::star_id(system, page);
+    nav.select(Some(Selection::Star(pick(whole))));
+    assert!(selected(&nav, Marked::Barycentre(root)));
+    assert!(!selected(&nav, Marked::Star(star)));
+}
+
+fn marker(object: crate::scene::Marked, x: f32, depth: f32) -> crate::scene::Marker {
+    crate::scene::Marker {
+        point: Vec2::new(x, 100.0),
+        depth,
+        radius: 5.0,
+        label: String::new(),
+        colour: [255; 3],
+        object,
+    }
+}
+
+fn shown(markers: &[crate::scene::Marker], selected: &[bool]) -> Vec<bool> {
+    use crate::presentation::PresentationMode;
+    super::canvas::shown(markers, selected, PresentationMode::Simulation, 1.0)
+}
+
+#[test]
+fn crowded_markers_give_way_by_rank() {
+    use crate::scene::Marked;
+    let near = super::canvas::MARKER_SPACING - 1.0;
+    let far = super::canvas::MARKER_SPACING + 1.0;
+    let ranks = [
+        Marked::Barycentre("s#AB".into()),
+        Marked::Star("s#A".into()),
+        Marked::Planet(0),
+        Marked::Craft("c".into()),
+    ];
+    for pair in ranks.windows(2) {
+        let close = [
+            marker(pair[1].clone(), 100.0 + near, 1.0),
+            marker(pair[0].clone(), 100.0, 1.0),
+        ];
+        assert_eq!(shown(&close, &[false; 2]), [false, true], "{pair:?}");
+        let apart = [
+            marker(pair[1].clone(), 100.0 + far, 1.0),
+            marker(pair[0].clone(), 100.0, 1.0),
+        ];
+        assert_eq!(shown(&apart, &[false; 2]), [true, true], "{pair:?}");
+    }
+
+    // Only a shown marker hides: a craft by a hidden planet stays.
+    let chain = [
+        marker(Marked::Star("s".into()), 100.0, 1.0),
+        marker(Marked::Planet(0), 100.0 + near, 1.0),
+        marker(Marked::Craft("c".into()), 100.0 + 2.0 * near, 1.0),
+    ];
+    assert_eq!(shown(&chain, &[false; 3]), [true, false, true]);
+
+    // Planets side by side both stay, as do stars.
+    let planets = [
+        marker(Marked::Planet(0), 100.0, 1.0),
+        marker(Marked::Planet(1), 101.0, 1.0),
+    ];
+    assert_eq!(shown(&planets, &[false; 2]), [true, true]);
+    let stars = [
+        marker(Marked::Star("s#A".into()), 100.0, 1.0),
+        marker(Marked::Star("s#B".into()), 101.0, 1.0),
+    ];
+    assert_eq!(shown(&stars, &[false; 2]), [true, true]);
+
+    // Of two pairs' crosses, the outer pair's, listed last, stays.
+    let pairs = [
+        marker(Marked::Barycentre("s#AB".into()), 101.0, 1.0),
+        marker(Marked::Barycentre("s#ABC".into()), 100.0, 1.0),
+    ];
+    assert_eq!(shown(&pairs, &[false; 2]), [false, true]);
+}
+
+#[test]
+fn the_selection_is_never_hidden_and_tables_hide_nothing() {
+    use crate::{presentation::PresentationMode, scene::Marked};
+    let markers = [
+        marker(Marked::Star("s".into()), 100.0, 1.0),
+        marker(Marked::Planet(0), 105.0, 1.0),
+        marker(Marked::Craft("c".into()), 110.0, 1.0),
+    ];
+    // A selected (or followed) planet stays, and still hides the craft.
+    assert_eq!(shown(&markers, &[false, true, false]), [true, true, false]);
+    assert_eq!(shown(&markers, &[false, false, true]), [true, false, true]);
+    for mode in [PresentationMode::Table, PresentationMode::Constellation] {
+        assert_eq!(
+            super::canvas::shown(&markers, &[false; 3], mode, 1.0),
+            [true; 3]
+        );
+    }
+}
+
+#[test]
+fn a_click_goes_to_the_nearest_shown_marker() {
+    use crate::scene::Marked;
+    let under = |markers: &[crate::scene::Marker], shown: &[bool], x: f32| {
+        super::canvas::under_pointer(markers, shown, egui::pos2(x, 100.0), 1.0)
+    };
+    // Overlapping planet and star: the centre nearer the pointer wins,
+    // whatever its rank or drawing order.
+    let markers = [
+        marker(Marked::Planet(0), 100.0, 1.0),
+        marker(Marked::Star("s".into()), 110.0, 1.0),
+    ];
+    assert_eq!(under(&markers, &[true; 2], 103.0), Some(0));
+    assert_eq!(under(&markers, &[true; 2], 108.0), Some(1));
+    // Centres together: the one nearer the camera.
+    let stacked = [
+        marker(Marked::Planet(0), 100.0, 5.0),
+        marker(Marked::Planet(1), 100.0, 2.0),
+    ];
+    assert_eq!(under(&stacked, &[true; 2], 104.0), Some(1));
+    // A hidden marker is never clicked, even under the pointer.
+    assert_eq!(under(&markers, &[true, false], 108.0), Some(0));
+    assert_eq!(under(&markers, &[false, false], 108.0), None);
+    // Out of reach, the click falls through to the star points behind.
+    assert_eq!(under(&markers, &[true; 2], 150.0), None);
 }

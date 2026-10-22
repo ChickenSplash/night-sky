@@ -1,5 +1,5 @@
 //! Where the camera physically is: arriving at and leaving systems, and
-//! the nearby planet.
+//! the nearby body.
 use super::{
     camera::{CameraPose, CameraRig},
     frames::{page_frame, page_origin_ly},
@@ -14,7 +14,6 @@ use space_shared::StarSystem;
 use space_simulation::{
     LY_METRES,
     galaxy::{GalaxyModel, PC_METRES},
-    planet_position,
 };
 
 /// Beyond this camera range stars draw at their true separation. Planet
@@ -25,9 +24,12 @@ pub(super) const APPROACH_METRES: f64 = 0.02 * LY_METRES;
 /// The camera leaves a system beyond this multiple of its `system_range`, so
 /// the boundary cannot flicker.
 pub(super) const LEAVE_FACTOR: f64 = 2.0;
-/// Open-space free flight moves its origin to the camera beyond this eye
-/// distance, where an f64 position still resolves about 0.1 mm.
-pub(super) const REANCHOR_METRES: f64 = 1e12;
+/// A craft's neighbourhood: the camera moves with it within this range,
+/// kept until `SWITCH_MARGIN` past it, as bodies are.
+pub const CRAFT_NEIGHBOURHOOD_M: f64 = 1_000_000.0;
+/// The camera is at a planet within at least this many of its radii, even
+/// where its Hill sphere is smaller, so following (12 radii) is always inside.
+pub(super) const PLANET_MIN_RADII: f64 = 30.0;
 
 /// Within this range of its star the camera arrives at a system. Even unusually
 /// wide systems include their initial fitted range and an outer planet being
@@ -53,6 +55,7 @@ fn rebase(
     lists: &space_shared::Galaxy,
     next: Option<crate::Visit>,
     page: u32,
+    galactic_ly: DVec3,
 ) {
     let old_tilt = nav
         .system(lists)
@@ -64,7 +67,10 @@ fn rebase(
         None => None,
     };
     let new_tilt = new_system.map_or(DQuat::IDENTITY, |s| page_frame(s, page));
-    let new_frame = new_system.map_or(nav.open_origin_ly, |s| page_origin_ly(s, page));
+    let new_frame = new_system.map_or(galactic_ly, |s| page_origin_ly(s, page));
+    if new_system.is_none() {
+        nav.galactic_origin_ly = galactic_ly;
+    }
     let old_eye = nav
         .eye
         .unwrap_or_else(|| old_tilt.inverse() * displayed_eye);
@@ -76,7 +82,7 @@ fn rebase(
     nav.eye = Some(new_eye);
     nav.visit = next;
     nav.page = page;
-    nav.location_planet = None;
+    nav.location_body = None;
     nav.following = false;
 }
 
@@ -90,7 +96,11 @@ pub(super) fn within(arrived: bool, distance: f64, range: f64) -> bool {
 /// free flight uses the same star body and planetary system as clicking Visit;
 /// only cells already streamed in are eligible, and it never starts a flight or
 /// re-frames the camera. Leaving a system in simulation mode, however it was
-/// reached, returns to open space without moving the eye.
+/// reached, returns to open space without moving the eye. Following a craft in
+/// galactic space arrives and leaves the same way, so a system comes into view
+/// as the camera nears it, not when the craft slows enough to enter it; a
+/// craft in a system brings the camera there itself (`place_camera`).
+#[allow(clippy::too_many_arguments)]
 pub fn locate(
     #[cfg(target_arch = "wasm32")] benchmark: Option<
         Res<crate::devtools::benchmark::BenchmarkFlight>,
@@ -100,6 +110,7 @@ pub fn locate(
     lists: Res<Universe>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
+    fleet: Res<crate::craft::Fleet>,
     mut nav: ResMut<Navigation>,
 ) {
     let eye_ly = rig.galactic_ly(&pose);
@@ -115,9 +126,13 @@ pub fn locate(
     if benchmark.is_some() {
         return;
     }
+    let craft = nav
+        .following
+        .then(|| nav.selected_craft().and_then(|id| fleet.get(id)))
+        .flatten();
     // Flights and presets are deliberate: wait until they land.
     if nav.presentation_mode != PresentationMode::Simulation
-        || (nav.following && nav.selected_craft().is_some())
+        || craft.is_some_and(|live| !live.star().is_empty())
         || rig.flying()
         || nav.fly
         || !rig.placed()
@@ -125,78 +140,180 @@ pub fn locate(
     {
         return;
     }
+    let following = craft.is_some();
     if nav.system(&lists.0).is_some() {
-        // Open space stays anchored at the star just left.
-        nav.open_origin_ly = rig.frame_ly;
-        rebase(&mut nav, &rig, pose.eye, &lists.0, None, 0);
+        // Stay in the system's frame for now: the eye is near it.
+        let galactic_ly = galactic_frame_ly(&nav, &fleet).unwrap_or(rig.frame_ly);
+        rebase(&mut nav, &rig, pose.eye, &lists.0, None, 0, galactic_ly);
+        nav.following = following;
         // Let place_camera switch the displayed frame before another handoff.
         return;
     }
     let eye_pc =
         DVec3::from_array(GalaxyModel::milky_way().home_pc) + eye_ly * (LY_METRES / PC_METRES);
-    if let Some((visit, page)) = approached(&field, &mut metrics, &lists.0, eye_pc) {
-        rebase(&mut nav, &rig, pose.eye, &lists.0, Some(visit), page);
-        nav.arrived = true;
-    } else if nav.open_origin_ly == rig.frame_ly
-        && let Some(eye) = nav.eye.filter(|eye| eye.length() > REANCHOR_METRES)
-    {
-        nav.open_origin_ly = rig.frame_ly + eye / LY_METRES;
-        rebase(&mut nav, &rig, pose.eye, &lists.0, None, 0);
-    }
-}
-
-/// The streamed system free flight at `eye_pc` has come close enough to enter.
-fn approached(
-    field: &crate::stars::stream::Starfield,
-    metrics: &mut crate::stars::stream::StreamMetrics,
-    lists: &space_shared::Galaxy,
-    eye_pc: DVec3,
-) -> Option<(crate::Visit, u32)> {
     let reach_pc = APPROACH_METRES / PC_METRES;
-    let (_, cell, star) = field.nearest(eye_pc, reach_pc, metrics)?;
+    let Some((_, cell, star)) = field.nearest(eye_pc, reach_pc, &mut metrics) else {
+        return;
+    };
     let (id, position_pc) = (star.id(cell), star.position_pc);
     let position_ly = (DVec3::from_array(position_pc)
         - DVec3::from_array(GalaxyModel::milky_way().home_pc))
         * (PC_METRES / LY_METRES);
-    if let Some((list, page)) = crate::galaxy_nav::mapped(lists, &id) {
-        Some((crate::Visit::List(list), page))
+    let (visit, page) = if let Some((list, page)) = crate::galaxy_nav::mapped(&lists.0, &id) {
+        (crate::Visit::List(list), page)
+    } else if let Some(system) = crate::galaxy_nav::generated(&id, position_ly) {
+        (crate::Visit::Generated(Box::new(system)), 0)
     } else {
-        crate::galaxy_nav::generated(&id, position_ly)
-            .map(|system| (crate::Visit::Generated(Box::new(system)), 0))
-    }
+        return;
+    };
+    rebase(
+        &mut nav,
+        &rig,
+        pose.eye,
+        &lists.0,
+        Some(visit),
+        page,
+        DVec3::ZERO,
+    );
+    nav.following = following;
+    nav.arrived = true;
 }
 
-/// Measure planets after camera placement, so a followed planet and the eye
+/// Measure bodies after camera placement, so a followed planet and the eye
 /// use the same simulation instant even at very high time rates.
-pub fn locate_planet(
+pub fn locate_body(
     lists: Res<Universe>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
     clock: Res<Clock>,
+    mut field: Local<Option<space_simulation::craft::Field>>,
     mut nav: ResMut<Navigation>,
 ) {
-    nav.location_planet = nav.location(&lists.0).and_then(|system| {
+    let body = nav.location(&lists.0).and_then(|system| {
         // Never cancel huge galactic coordinates for metre-scale measurements.
         if rig.frame_ly != page_origin_ly(system, nav.page) {
             return None;
         }
+        let stale = field
+            .as_ref()
+            .is_none_or(|f| f.system().id != system.id || f.page() != nav.page);
+        if stale || lists.is_changed() {
+            *field = Some(space_simulation::craft::Field::new(
+                system.clone(),
+                nav.page,
+            ));
+        }
         let eye = page_frame(system, nav.page).inverse() * pose.eye;
-        nearby_planet(
-            system,
-            nav.page,
+        nearby_body(
+            field.as_ref()?,
             eye,
             clock.0.seconds,
-            nav.location_planet.as_deref(),
+            nav.location_body.as_deref(),
             nav.presentation_mode,
         )
     });
+    nav.location_body = body;
 }
 
-/// Enter within 20 physical radii; remain until 30. No visual exaggeration,
-/// selection or following is involved. Table/constellation are not physical.
-pub(super) fn nearby_planet(
-    system: &space_shared::StarSystem,
-    page: u32,
+/// Open space re-anchors the camera's frame on the eye beyond this, so
+/// positions in it stay precise to well under a millimetre.
+pub(super) const REANCHOR_METRES: f64 = 1e9;
+
+/// A craft's frame for the camera in galactic space, in light years from
+/// home: the followed craft's, else the anchoring craft's, for close-up
+/// precision.
+pub(super) fn galactic_frame_ly(nav: &Navigation, fleet: &crate::craft::Fleet) -> Option<DVec3> {
+    let id = if nav.following {
+        nav.selected_craft()
+    } else {
+        match &nav.anchor {
+            Some(crate::Anchor::Craft(id)) => Some(id.as_str()),
+            _ => None,
+        }
+    };
+    id.and_then(|id| fleet.get(id)).map(|live| live.origin_ly())
+}
+
+/// The camera's own frame in open space: `Navigation::galactic_origin_ly`,
+/// moved onto the eye once it is `REANCHOR_METRES` away. Light-year
+/// coordinates from home are only precise to tens of kilometres out here.
+pub(super) fn open_space_frame_ly(nav: &Navigation, rig: &CameraRig) -> DVec3 {
+    let origin = nav.galactic_origin_ly;
+    if !(rig.galactic && rig.placed()) || rig.flying() || nav.fly || nav.following {
+        return origin;
+    }
+    let eye = nav
+        .eye
+        .unwrap_or_else(|| nav.target + (nav.rotation * Vec3::Z).as_dvec3() * nav.distance);
+    if eye.length() > REANCHOR_METRES {
+        origin + eye / LY_METRES
+    } else {
+        origin
+    }
+}
+
+/// What the camera moves with (`Navigation::anchor`): a craft within
+/// `CRAFT_NEIGHBOURHOOD_M`, else the body it is at (`location_body`),
+/// else nothing, staying in its system's or galactic frame. Only the
+/// camera's position decides, not selection.
+pub fn locate_anchor(
+    lists: Res<Universe>,
+    rig: Res<CameraRig>,
+    pose: Res<CameraPose>,
+    clock: Res<Clock>,
+    fleet: Res<crate::craft::Fleet>,
+    mut nav: ResMut<Navigation>,
+) {
+    let anchor = if nav.presentation_mode == PresentationMode::Simulation && rig.placed() {
+        nearest_anchor(&nav, &lists.0, &rig, &pose, &fleet, clock.0.seconds)
+    } else {
+        None
+    };
+    nav.anchor = anchor;
+}
+
+fn nearest_anchor(
+    nav: &Navigation,
+    lists: &space_shared::Galaxy,
+    rig: &CameraRig,
+    pose: &CameraPose,
+    fleet: &crate::craft::Fleet,
+    seconds: f64,
+) -> Option<crate::Anchor> {
+    let system = nav.system(lists);
+    let tilt = system.map_or(DQuat::IDENTITY, |s| page_frame(s, pose.page));
+    let eye = tilt.inverse() * pose.eye;
+    let range = |anchor: crate::Anchor, neighbourhood: f64| {
+        if nav.anchor.as_ref() == Some(&anchor) {
+            neighbourhood * (1.0 + space_simulation::craft::SWITCH_MARGIN)
+        } else {
+            neighbourhood
+        }
+    };
+    let craft = fleet
+        .craft
+        .iter()
+        .filter_map(|live| {
+            let at =
+                super::placement::in_camera_frame(live, live.state_at(seconds), rig.frame_ly, tilt);
+            let distance = (at - eye).length();
+            let anchor = crate::Anchor::Craft(live.craft.id.clone());
+            (distance < range(anchor.clone(), CRAFT_NEIGHBOURHOOD_M)).then_some((distance, anchor))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    craft
+        .map(|(_, anchor)| anchor)
+        .or_else(|| nav.location_body.clone().map(crate::Anchor::Body))
+}
+
+/// The body the camera at `eye` is at, exactly as a craft there would pick
+/// its orbit reference (`Field::select_reference`): a planet within its
+/// Hill sphere, or `PLANET_MIN_RADII` if larger, else the innermost star or
+/// pair whose stable zone holds it, each kept until `SWITCH_MARGIN` past it.
+/// The whole system is `None`. No visual exaggeration, selection or
+/// following is involved. Table/constellation are not physical.
+pub(super) fn nearby_body(
+    field: &space_simulation::craft::Field,
     eye: DVec3,
     seconds: f64,
     previous: Option<&str>,
@@ -205,22 +322,7 @@ pub(super) fn nearby_planet(
     if mode != PresentationMode::Simulation {
         return None;
     }
-    let distance = |planet: &space_shared::Planet| {
-        (eye - DVec3::from_array(planet_position(system, planet, seconds))).length()
-    };
-    if let Some(planet) = system
-        .on_page(page)
-        .find(|planet| Some(planet.id.as_str()) == previous)
-        && distance(planet) < planet.radius_km * 1000.0 * 30.0
-    {
-        return Some(planet.id.clone());
-    }
-    system
-        .on_page(page)
-        .filter_map(|planet| {
-            let d = distance(planet);
-            (d < planet.radius_km * 1000.0 * 20.0).then_some((d, &planet.id))
-        })
-        .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(b.1)))
-        .map(|(_, id)| id.clone())
+    let body =
+        field.select_reference_floored(previous, eye.to_array(), seconds, PLANET_MIN_RADII)?;
+    (field.system().root(field.page()) != Some(body.id.as_str())).then_some(body.id)
 }

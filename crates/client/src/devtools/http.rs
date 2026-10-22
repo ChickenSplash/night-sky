@@ -228,6 +228,7 @@ fn handle(
             200,
             json!({"status": "ok", "process_id": std::process::id(), "schema_version": 1}),
         ),
+        (&Method::Get, "/craft/schema") => respond(request, 200, crate::craft::schema::catalogue()),
         (&Method::Get, _) if commands_route(&url) => match command_catalogue(&url) {
             Ok(body) => respond(request, 200, body),
             Err((status, error)) => respond(request, status, json!({"error": error})),
@@ -413,9 +414,10 @@ fn handle(
         _ if snapshot_route(&url) || commands_route(&url) || url.starts_with("/search/") => {
             respond(request, 405, json!({"error": "Method not allowed"}))
         }
-        (_, "/health" | "/command" | "/screenshot" | "/catalogue" | "/search") => {
-            respond(request, 405, json!({"error": "Method not allowed"}))
-        }
+        (
+            _,
+            "/health" | "/command" | "/screenshot" | "/catalogue" | "/search" | "/craft/schema",
+        ) => respond(request, 405, json!({"error": "Method not allowed"})),
         _ => respond(request, 404, json!({"error": "Unknown endpoint"})),
     }
 }
@@ -1094,6 +1096,10 @@ mod tests {
             "set_debug"
         );
         assert!(get("/commands").json::<Value>().unwrap().is_array());
+        assert_eq!(
+            get("/craft/schema").json::<Value>().unwrap()["command"],
+            "steer_craft"
+        );
         assert_eq!(
             get("/perf/latest?keys=1").json::<Value>().unwrap(),
             json!(["sequence"])
