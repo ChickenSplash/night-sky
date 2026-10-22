@@ -91,8 +91,9 @@ The rules:
   restoring its pre-engagement velocity. Matched, it takes a chosen body's
   velocity, optionally plus the sideways speed for a rough orbit. A realistic 1 g drive would otherwise
   need 30 to 60 minutes to match a planet's 10 to 50 km/s.
-- **Plotted trip time.** About 20 to 60 seconds at 1× simulation time, using a
-  distance-scaled cruise and slower approach. Pause stops travel. Manual trips
+- **Plotted trip time.** About 20 to 60 seconds at 1× simulation time by
+  default, using a distance-scaled cruise and slower approach; a chosen time
+  from 10 seconds to an hour can replace it. Pause stops travel. Manual trips
   have no fixed duration.
 
 ### Optional warp assists
@@ -659,6 +660,158 @@ Deferred with phase 6's turn limit and phase 7, to be decided after phase 11.
   to another planet or system, drop into a rough orbit, then take over or
   cancel without discontinuities.
 
+Decisions agreed with the user on 2026-10-22:
+
+- **A route pilot in the simulation, not a CLI script.** One step at
+  interstellar speed covers about half a light year, and destinations move,
+  so the aim, speed and dropout must be worked out every fixed step. A route
+  pilot is ship state beside the attitude pilot, in `crates/simulation`, and
+  each step gives the same orders a player would: pointing during warp
+  (phase 6), requested speed (phase 4) and, at the standoff, matched dropout
+  (phase 5). A server can run it from the same inputs.
+- **The command:**
+
+  ```
+  ns ship warp to <id> [--match | --orbit] [--time <seconds>]
+  ns ship warp cancel
+  ```
+
+  - One `WarpOrder` each, so `ns` and the TUI get them from the schema, and
+    `--in` and `--tick` work as on every order.
+  - `--match` drops out at the target's velocity, `--orbit` into a rough
+    orbit around it (a match included). With neither, dropout keeps the
+    ship's velocity.
+  - `--time` sets the trip time, from 10 to 3,600 s. The minimum leaves room
+    for turning round first (up to about 6 s at the default turn rate).
+    Without it, the time scales with distance: about 20 s for a short
+    in-system hop, up to 60 s between systems. The time includes the
+    initial turn; a trip that runs late shows the delay in its progress.
+- **The speed profile: always slowing.** Requested speed is the remaining
+  distance divided by a time constant τ, so every second covers the same
+  fraction of what is left: the destination looks twice as large every so
+  often, a steady zoom like the camera's logarithmic flights. A trip takes
+  about τ × ln(start distance ÷ standoff), so τ is chosen when the route is
+  plotted to fit the trip time. Speed is held low until the nose is lined
+  up, and the profile allows for the 0.3 s speed ramp so the ship does not
+  overshoot. When the 10,000 ly/s cap stretches a trip, its progress says so.
+  The profile is a standalone function for phase 8 to reuse.
+- **Moving targets:** the pilot aims at where the target will be, worked out
+  again every step.
+- **Cancelling and taking over:** `warp cancel`, or any manual turning or
+  warp speed order, releases the pilot, as turning orders release the
+  attitude pilot. Warp stays as it was, so nothing jumps.
+- **Progress** in `ns ship state` and the inspector: target, stage (align,
+  cruise, approach, arrived), distance, ETA, trip time and arrival mode.
+- **Bodies in the way: wrap round them,** like a string pulled tight from the
+  ship to the target.
+  - Every step the pilot checks the straight line to the target against a
+    keep-clear sphere round each body, a margin larger than its surface. If
+    the line is clear it aims at the target. If not, it aims at the edge of
+    the first sphere in the way, on the shorter side, so the ship curves
+    round the body and turns back to the target once it is in view.
+  - Steering needs only that next edge. Because it is worked out again every
+    step, moving bodies, moving targets and several bodies in the way need
+    no special handling, and no waypoint goes stale.
+  - The bubble's turn rate limits how tight a bend can be, so near a body
+    being skirted, speed is capped for the bend to fit, then recovers. A
+    target barely hidden needs little slowing.
+  - Bodies in the ship's current system are checked on the way out, and the
+    destination system's on the way in. Stars between systems are ignored.
+  - Cost: one line-to-sphere test per body, a few multiplications, over the
+    same bodies and positions gravity already sums each step. Galactic space
+    has none to check until the destination system is near. The whole
+    wrapped path is measured only for timing.
+- **Fitting the trip time round a detour.** At plotting, the pilot measures
+  the wrapped path, not the straight line, and allows for the initial turn
+  and the slowdown at each bend when choosing τ. It re-measures about once a
+  second for the ETA. A time that cannot be met, such as a tight detour at a
+  low turn rate, is still accepted: the reply gives the best achievable time
+  and its cause (such as "about 34 s, detour round planet b"), and progress
+  shows the delay.
+- **Interstellar, with no new frame rule.** Speed drops below light speed only
+  when the remaining distance is about light speed × τ, well inside the
+  destination's entry range, so the existing entry rule enters the system
+  on the way in. The destination's data is requested when the route is
+  plotted; until it arrives the pilot aims at the system's star, then at
+  the body. Phase 5's current-system-only matching still holds, because the
+  ship is in the destination system by the standoff.
+
+#### Targets
+
+One command for every target, and the pilot never checks what kind of object
+it is flying to. Each kind supplies the same facts, every step:
+
+- position and velocity now;
+- **size**, which sets the standoff;
+- **keep-clear distance**: its surface, or its companion stars;
+- **orbit reach**, or none when it cannot be orbited;
+- which system it is in, or galactic space.
+
+Moons and asteroids later add a source of these facts and change nothing in
+the pilot, profile, standoff rule or readout.
+
+**Standoff rule:** a comfortable multiple of the target's size, never closer
+than its keep-clear distance and never further than its orbit reach, so
+`--orbit` always works on arrival. When no such distance exists (a star in a
+tight binary, whose reach is barely beyond its surface), the order is refused
+when given, with the reason, not on arrival.
+
+| Target | Size | Orbit reach | Standoff |
+| --- | --- | --- | --- |
+| Planet | radius | sphere of influence | a few planet widths |
+| Single star | radius | stable zone | clear of the surface, inside its planets |
+| One star of a multiple | radius | its own stable zone | close to that star |
+| Barycentre | pair separation | the pair's stable zone | outside both stars, for a circumbinary orbit |
+| System, by its key | its star or outermost barycentre | as that object | as that object |
+| Ship | hull length | none: `--orbit` refused | about 1 km |
+| Moon (later) | radius | sphere of influence inside its planet's | as a planet |
+| Asteroid (later) | radius | tiny | a minimum floor, so it does not stop metres off a rock |
+
+- **A barycentre has no surface:** its stars are what the ship keeps clear of,
+  and what the route steers round.
+- **A system is fixed,** as everywhere else under the static-star
+  approximation. Planets, stars in multiple systems and inner barycentres
+  move.
+- **Ships:**
+  - They thrust and warp at will, so the pilot aims along the target's
+    current velocity and corrects every step. A target pulling away shows a
+    growing ETA.
+  - `--match` gives formation flying alongside it. `warp match <ship-id>`
+    gains the same, for manual flight.
+  - A target that despawns releases the pilot as cancelling does, with the
+    reason in the readout. Targeting the ship itself is refused.
+  - Each ship reads other craft as they were at the start of the step, so
+    ships chasing each other give the same paths whatever the update order.
+- **Refused when given, leaving the ship unchanged:** an unknown ID, the ship
+  itself, `--orbit` on a ship, or no valid standoff.
+
+Checkpoints:
+
+1. **In-system pilot:** the target facts with natural bodies as the first
+   source, the speed profile and trip time, aiming at moving targets, the
+   standoff rule, the three arrival modes, `warp to` and `warp cancel`,
+   takeover, progress readouts and refusals. Tests for each target kind,
+   both gravity policies, trip times from 10 to 3,600 s and replay from
+   a snapshot.
+2. **Bodies in the way:** the per-step clearance check, aiming at the edge,
+   the bend speed cap, and the wrapped path in the trip time, best
+   achievable time and ETA. Tests with a target directly and barely behind
+   a planet, a binary companion on the line, two bodies in the way, a moving
+   blocker, bodies well off the line, an interstellar departure from behind
+   a planet, and a trip time too short for its detour.
+3. **Interstellar routes:** requesting the destination's data at plotting,
+   aiming at its star then its body, and entry on the slowdown. Tests with a
+   seeded system and a list system, through the background loader.
+4. **Ships as targets:** the craft source, start-of-step reads, formation
+   matching, `warp match <ship-id>` and a despawned target. Tests with a
+   coasting, a thrusting and a warping target, and two ships chasing each
+   other.
+5. **Live CLI core loop:** leave orbit, fly to another system, drop into a
+   rough orbit, fly to a second ship and match it, wrap round a planet in
+   the way, then cancel and take over mid-route without discontinuities.
+   Craft update timings in the performance console confirm the per-step
+   checks stay cheap. Then the docs and the phase marked done.
+
 ### 10 · Orbit autopilot
 
 - After drop-out, a short sublight burn (seconds to a minute) circularises the orbit.
@@ -699,6 +852,8 @@ Deferred with phase 6's turn limit and phase 7, to be decided after phase 11.
   (spheres of influence), a deliberate simplification of the summed gravity.
 - More craft: stations on rails, rovers on planet surfaces, probes. The craft
   model and browser integration already cover them.
+- Moons and asteroids as autopilot targets, each a new source of the
+  phase 9 target facts.
 - Craft saved on the backend, then rudimentary multiplayer: other players'
   ships shown live through a WebSocket channel.
 - Then server-authoritative multiplayer: the server runs all craft from
