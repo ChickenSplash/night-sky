@@ -9,7 +9,8 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 ## Visits and presentation
 
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
-  drawn and picked like any other, with no markers of their own.
+  drawn and picked like any other, with no markers of their own until their
+  system is loaded (see Selection and picking).
 - `Navigation::visit` (`navigation.rs`) is the system the camera is anchored to
   (at, flying to, or showing as a constellation): `Visit::List` (a list index,
   at `Navigation::page`) or `Visit::Generated` (task-free planets built from
@@ -121,11 +122,20 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 ## Selection and picking
 
 - `Navigation::selection` is the one clicked object: `Selection::Star` (stable
-  star ID), `Selection::Planet` (stable planet ID, including remote systems)
-  or `Selection::Craft` (a live craft's ID, see [craft](../simulation/craft.md#in-the-client)).
+  star ID), `Selection::Planet` (stable planet ID, including remote systems),
+  `Selection::Craft` (a live craft's ID, see [craft](../simulation/craft.md#in-the-client))
+  or `Selection::Barycentre` (a pair of the loaded system, by member ID).
   Selecting one replaces the other; `Navigation::select` keeps following only
   from planet to planet. A second click activates it: a star is visited, a
-  planet or craft followed. Following a craft targets its blended position
+  planet or craft followed.
+- While a system is loaded (as for planet markers), each star of the page has
+  a marker, single stars included, and each pair a small-cross marker at its
+  moving centre of mass, the whole system's included
+  (`scene::draw::member_markers`). Their labels are the breadcrumb's
+  ("System 2 B", "System 2 AB"). Clicking one selects it (`SelectStar` with
+  the member ID, or `SelectBarycentre`); a second click does nothing yet, as
+  stars and pairs are not followed. Selecting the whole system rings its
+  outermost pair's marker. The table shows only the primary's marker. Following a craft targets its blended position
   each frame (`craft::followed`), from 200 m. It uses the craft's retained body
   data, not visible-star reachability, and tracks system/galactic handoffs
   without starting another camera flight. Open-space following uses the craft's

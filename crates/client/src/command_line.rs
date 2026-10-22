@@ -146,7 +146,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 31] = [
+pub const USAGE: [Usage; 32] = [
     Usage {
         name: "steer_craft",
         fields: &["order", "id", "tick", "in_s", "for_s"],
@@ -161,6 +161,11 @@ pub const USAGE: [Usage; 31] = [
         name: "select_star",
         fields: &["id"],
         about: "Select a known star by ID without travelling",
+    },
+    Usage {
+        name: "select_barycentre",
+        fields: &["id"],
+        about: "Select a pair of the visited system by ID, such as <star>#AB",
     },
     Usage {
         name: "jump",

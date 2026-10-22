@@ -18,7 +18,11 @@ what it orbits.
   location rule (`location_body`, `Field::select_reference_floored`) and a
   steady velocity readout: open space re-anchors on the eye, and free flight
   reads exact velocities instead of differencing positions.
-- **Markers (checkpoint 2):** in progress.
+- **Markers (checkpoint 2):** built, tested and documented: star and
+  small-cross barycentre markers, `Selection::Barycentre`, the CLI's
+  `select_barycentre`, and member stars and pairs in the Selected trail;
+  awaiting the user's live check. Until checkpoint 3 they are hit-tested
+  after planets and craft, so those still win where markers overlap.
 - **Click priority (checkpoint 3):** not started.
 
 ## Decisions

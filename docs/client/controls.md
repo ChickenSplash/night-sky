@@ -35,6 +35,7 @@ See [realistic rendering](rendering.md) for the physical model.
 | Select a visible star | Click it |
 | Visit its system | Click the selected star again or press Enter |
 | Select a planet/task | Click its marker or the task index |
+| Select a star or pair of the loaded system | Click its marker (a pair's is a small cross) |
 | Follow a planet | Click the selected planet again or use `follow` |
 | Inspect without travel | Click an item in either breadcrumb trail |
 | Fly to/frame a system | Inspector's Fly to system / Frame system |

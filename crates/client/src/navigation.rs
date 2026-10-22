@@ -15,7 +15,8 @@ pub enum Visit {
 }
 
 /// The one clicked object. A second click activates it: a star is visited, a
-/// planet followed.
+/// planet followed. A loaded system's star or barycentre marker selects
+/// without a second action.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Selection {
     /// Any star in the galaxy, by stable ID.
@@ -24,6 +25,8 @@ pub enum Selection {
     Planet(String),
     /// A live craft, by its own ID (`craft::Fleet`).
     Craft(String),
+    /// A pair of a multiple system, by member ID, such as `…#AB`.
+    Barycentre(String),
 }
 
 impl Selection {
@@ -38,6 +41,7 @@ impl Selection {
             },
             Self::Planet(id) => objects::ObjectRef::Planet { id: id.clone() },
             Self::Craft(id) => objects::ObjectRef::Craft { id: id.clone() },
+            Self::Barycentre(id) => objects::ObjectRef::Barycentre { id: id.clone() },
         }
     }
 }
@@ -229,6 +233,13 @@ impl Navigation {
                 .planets
                 .iter()
                 .position(|planet| planet.id == *id),
+            _ => None,
+        }
+    }
+
+    pub fn selected_barycentre(&self) -> Option<&str> {
+        match &self.selection {
+            Some(Selection::Barycentre(id)) => Some(id),
             _ => None,
         }
     }

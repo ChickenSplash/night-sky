@@ -92,14 +92,7 @@ pub fn trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
     let Some(system) = nav.location(galaxy) else {
         return trail;
     };
-    // A list's stars are its systems, numbered as the page controls number them.
-    let name = if list.is_some() {
-        let pages = system.pages();
-        let number = pages.iter().position(|p| *p == nav.page).unwrap_or(0) + 1;
-        format!("System {number}")
-    } else {
-        system.name.clone()
-    };
+    let name = objects::system_name(galaxy, system, nav.page);
     // A multiple system is its outermost barycentre, named for all its stars.
     trail.push(Crumb {
         level: Level::Star,
@@ -185,7 +178,9 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy, now: crate::craft::Now
 
 fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Crumb> {
     let star = match &object {
-        ObjectRef::Star { id } => id.as_str(),
+        ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
+            space_simulation::multiple::system_key(id)
+        }
         ObjectRef::Planet { id } => match objects::parent_star(id) {
             Some(id) => id,
             None => return Vec::new(),
@@ -217,19 +212,18 @@ fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Cru
                 },
             });
         }
-        let name = if list.is_some() {
-            format!(
-                "System {}",
-                system.pages().iter().position(|p| *p == page).unwrap_or(0) + 1
-            )
-        } else {
-            system.name.clone()
-        };
+        let name = objects::system_name(galaxy, system, page);
         trail.push(Crumb {
             level: Level::Star,
             label: objects::member_label(&name, &root_letters(system, page)),
             object: ObjectRef::Star { id: star.into() },
         });
+        // A star or pair below the whole system, as the location shows it.
+        if let ObjectRef::Star { id } | ObjectRef::Barycentre { id } = &object
+            && id != star
+        {
+            trail.extend(members(system, page, id, &name));
+        }
         if let ObjectRef::Planet { id } = &object
             && let Some(planet) = system.planets.iter().find(|planet| planet.id == *id)
         {

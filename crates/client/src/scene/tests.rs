@@ -1305,3 +1305,31 @@ fn free_flight_far_from_home_moves_its_frame_and_keeps_every_centimetre() {
         assert!((moved - DVec3::X * 0.01).length() < 1e-6, "{moved}");
     }
 }
+
+#[test]
+fn a_loaded_page_marks_each_star_and_pair_and_the_table_only_its_primary() {
+    use super::draw::member_markers;
+    let galaxy = space_simulation::demo_galaxy();
+    let system = &galaxy.systems[0];
+    let [single, multiple] = [0, 1].map(|index| system.pages()[index]);
+    assert_eq!(
+        member_markers(system, single, false),
+        [Marked::Star(system.star(single).unwrap().id.clone())]
+    );
+    let marked = member_markers(system, multiple, false);
+    let stars: Vec<_> = system.stars_on(multiple).collect();
+    let pairs: Vec<_> = system.barycentres_on(multiple).collect();
+    assert!(stars.len() >= 2 && pairs.len() == stars.len() - 1);
+    assert_eq!(marked.len(), stars.len() + pairs.len());
+    for star in &stars {
+        assert!(marked.contains(&Marked::Star(star.id.clone())));
+    }
+    // The whole system's pair included.
+    for pair in &pairs {
+        assert!(marked.contains(&Marked::Barycentre(pair.id.clone())));
+    }
+    assert_eq!(
+        member_markers(system, multiple, true),
+        [Marked::Star(stars[0].id.clone())]
+    );
+}

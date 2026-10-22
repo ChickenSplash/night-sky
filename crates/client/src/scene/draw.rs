@@ -1,5 +1,5 @@
 //! Wireframe bodies, orbits and constellation links drawn with gizmos, and
-//! the lights and planet markers gathered while drawing them.
+//! the lights and markers gathered while drawing them.
 use super::{
     camera::{CameraPose, SpaceCamera},
     frames::{page_frame, page_offsets, spin_basis},
@@ -18,8 +18,8 @@ use space_simulation::{
 };
 use std::f64::consts::TAU;
 
-/// A planet's or craft's label and hit target. Stars have none: they are
-/// picked from the streamed galaxy like any other star.
+/// A label and hit target: a planet's, craft's, or a loaded system's star
+/// or barycentre. Every other star is picked from the streamed galaxy.
 #[derive(Clone)]
 pub struct Marker {
     pub point: Vec2,
@@ -35,6 +35,27 @@ pub enum Marked {
     Planet(usize),
     /// A craft's ID.
     Craft(String),
+    /// A star of the loaded page, by member ID.
+    Star(String),
+    /// A pair of the loaded page, the whole system's included, by member ID.
+    Barycentre(String),
+}
+
+/// Barycentres have nothing to see, so their markers are drawn in one colour.
+pub const BARYCENTRE_COLOUR: [u8; 3] = [175, 195, 215];
+
+/// What a loaded page marks: each star drawn, and each pair, the whole
+/// system's included, except in the table, which gathers them at the primary.
+pub(super) fn member_markers(system: &StarSystem, page: u32, table: bool) -> Vec<Marked> {
+    let stars = system
+        .stars_on(page)
+        .take(if table { 1 } else { usize::MAX })
+        .map(|star| Marked::Star(star.id.clone()));
+    let pairs = system
+        .barycentres_on(page)
+        .filter(|_| !table)
+        .map(|pair| Marked::Barycentre(pair.id.clone()));
+    stars.chain(pairs).collect()
 }
 
 /// Craft are drawn in one colour, apart from any task's.
@@ -130,6 +151,7 @@ struct Canvas<'a> {
     scale: f64,
     pose: &'a CameraPose,
     nav: &'a Navigation,
+    galaxy: &'a space_shared::Galaxy,
     system: &'a StarSystem,
     /// Plane of the page on display.
     frame: DQuat,
@@ -340,24 +362,49 @@ impl Canvas<'_> {
         orbital * (1.0 - self.pose.layout)
     }
 
-    /// The visited page's stars, within `body_range`. Every other star,
-    /// including the rest of its list, is a streamed galactic point. The table
-    /// shows only the primary, its largest.
-    fn stars(&self, gizmos: &mut Gizmos, lights: &mut Lights) {
+    /// The visited page's stars, within `body_range`, with a marker for each
+    /// star and pair. Every other star, including the rest of its list, is a
+    /// streamed galactic point. The table shows only the primary, its largest.
+    fn stars(&self, gizmos: &mut Gizmos, lights: &mut Lights, markers: &mut Vec<Marker>) {
         let (pose, system) = (self.pose, self.system);
         let table = pose.layout > 0.5;
         let stars: Vec<_> = system.stars_on(pose.page).collect();
         if stars.is_empty() {
             self.star(gizmos, lights, None, DVec3::ZERO);
         }
+        let mut drawn = Vec::new();
         for (index, body) in stars.into_iter().enumerate() {
             if index == 0 || !table {
-                self.star(gizmos, lights, Some(body), self.member(&body.id));
+                let pixels = self.star(gizmos, lights, Some(body), self.member(&body.id));
+                drawn.push((body, pixels));
             }
+        }
+        for object in member_markers(system, pose.page, table) {
+            let (Marked::Star(id) | Marked::Barycentre(id)) = &object else {
+                continue;
+            };
+            let star = drawn.iter().find(|(body, _)| body.id == *id);
+            let Some(point) = self.screen(self.world(self.frame * self.member(id))) else {
+                continue;
+            };
+            markers.push(Marker {
+                point,
+                radius: star.and_then(|(_, pixels)| *pixels).unwrap_or(0.0).max(5.0),
+                label: crate::objects::page_member_label(self.galaxy, system, pose.page, id),
+                colour: star.map_or(BARYCENTRE_COLOUR, |(body, _)| body.colour),
+                object,
+            });
         }
     }
 
-    fn star(&self, gizmos: &mut Gizmos, lights: &mut Lights, body: Option<&Star>, local: DVec3) {
+    /// Draws a star and returns its on-screen radius.
+    fn star(
+        &self,
+        gizmos: &mut Gizmos,
+        lights: &mut Lights,
+        body: Option<&Star>,
+        local: DVec3,
+    ) -> Option<f32> {
         let (nav, pose) = (self.nav, self.pose);
         let wide = pose.distance > WIDE_METRES && pose.eye.length() > WIDE_METRES;
         let table = pose.layout > 0.5;
@@ -402,7 +449,7 @@ impl Canvas<'_> {
             colour(tint),
             basis,
             table,
-        );
+        )
     }
 
     /// Each star's orbit around its pair's barycentre, which itself moves.
@@ -636,6 +683,7 @@ pub fn draw(
         scale: pose.render_scale(),
         pose: &pose,
         nav: &nav,
+        galaxy: &universe.0,
         system,
         frame: page_frame(system, pose.page),
         seconds: clock.0.seconds,
@@ -652,9 +700,11 @@ pub fn draw(
         let arrive = range / LEAVE_FACTOR;
         lights.streaks = ((arrive - pose.eye.length()) / (0.5 * arrive)).clamp(0.0, 1.0) as f32;
     }
+    let mut stars = Vec::new();
     if planets_shown {
-        canvas.stars(&mut gizmos, &mut lights);
+        canvas.stars(&mut gizmos, &mut lights, &mut stars);
         canvas.planets(&mut gizmos, clock.0.seconds, markers, &mut lights);
     }
     canvas.craft(&mut gizmos, &fleet, markers);
+    markers.extend(stars);
 }

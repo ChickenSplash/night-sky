@@ -16,6 +16,10 @@ pub enum UiCommand {
     SelectStar {
         id: String,
     },
+    /// Select a pair of the loaded system by member ID, such as `…#AB`.
+    SelectBarycentre {
+        id: String,
+    },
     /// Open a list's constellation from any view.
     Jump {
         list: String,
@@ -316,6 +320,11 @@ impl UiCommand {
                         format!("Star `{id}` is not loaded, visited, mapped or found by search")
                     })
             }
+            UiCommand::SelectBarycentre { id } => nav
+                .system(galaxy)
+                .and_then(|system| system.barycentre(id))
+                .map(|_| ())
+                .ok_or_else(|| format!("The visited system has no barycentre `{id}`")),
             UiCommand::Jump { list: id } => list(id).map(|_| ()),
             UiCommand::FindTask { list: id, task } => {
                 let index = list(id)?;
@@ -441,6 +450,7 @@ fn spawn_body(
     match &nav.selection {
         Some(Selection::Planet(id)) => return Some(id.clone()),
         Some(Selection::Star(star)) => return Some(star.id.clone()),
+        Some(Selection::Barycentre(id)) => return Some(id.clone()),
         _ => {}
     }
     nav.location_body.clone().or_else(|| {
@@ -530,6 +540,14 @@ pub fn apply(
             UiCommand::SelectStar { id } => {
                 if let Some(star) = crate::galaxy_nav::selectable_star(&nav, galaxy, &field, id) {
                     nav.select(Some(Selection::Star(star)));
+                }
+            }
+            UiCommand::SelectBarycentre { id } => {
+                if nav
+                    .system(galaxy)
+                    .is_some_and(|system| system.barycentre(id).is_some())
+                {
+                    nav.select(Some(Selection::Barycentre(id.clone())));
                 }
             }
             UiCommand::Jump { list: id } => {

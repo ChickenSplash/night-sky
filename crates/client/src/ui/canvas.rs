@@ -1,4 +1,4 @@
-//! Captions, planet labels, hover rings, the velocity marker and clicks on
+//! Captions, marker labels, hover rings, the velocity marker and clicks on
 //! the 3D view itself.
 use super::kit::ACCENT;
 use super::pointer_captured;
@@ -59,7 +59,13 @@ pub(super) fn canvas_overlay(
         .input(|i| i.pointer.interact_pos())
         .filter(|_| !pointer_captured(ctx));
     let mut click = pointer.is_some() && ctx.input(|i| i.pointer.primary_clicked());
-    if let Some(star) = nav.selected_star() {
+    let system = nav.system(galaxy);
+    let selected = |object: &Marked| selected(nav, galaxy, system, object);
+    // A loaded system's star or pair is ringed by its own marker instead.
+    let marked = markers.0.iter().any(|marker| {
+        matches!(marker.object, Marked::Star(_) | Marked::Barycentre(_)) && selected(&marker.object)
+    });
+    if let Some(star) = nav.selected_star().filter(|_| !marked) {
         let camera =
             rig.rotation().inverse() * (star.position_ly - rig.galactic_ly(pose)).as_vec3();
         if let Some(point) =
@@ -77,11 +83,14 @@ pub(super) fn canvas_overlay(
     }
     // Bevy viewport coordinates are window logical pixels; egui has a further UI scale.
     let scale = ctx.zoom_factor();
-    let system = nav.system(galaxy);
     // A horizontal table needs its captions below each planet: putting them to
     // the right covers the next planet, especially on pages with many slots.
-    let table_column = markers
+    let planets: Vec<_> = markers
         .0
+        .iter()
+        .filter(|marker| matches!(marker.object, Marked::Planet(_)))
+        .collect();
+    let table_column = planets
         .windows(2)
         .map(|pair| (pair[1].point.x - pair[0].point.x).abs() / scale)
         .filter(|gap| *gap > 1.0)
@@ -95,15 +104,23 @@ pub(super) fn canvas_overlay(
         let tint = egui::Color32::from_rgb(c[0], c[1], c[2]);
         let radius = (marker.radius / scale).max(7.0);
         let hovered = pointer.is_some_and(|p| rect.contains(p) && p.distance(point) < radius + 8.0);
-        let selected = match &marker.object {
-            Marked::Planet(index) => nav.selected_planet(galaxy) == Some(*index),
-            Marked::Craft(id) => nav.selected_craft() == Some(id.as_str()),
-        };
+        let selected = selected(&marker.object);
         if selected || hovered {
             painter.circle_stroke(point, radius + 5.0, egui::Stroke::new(1.0, tint));
         }
-        // Markers remain visible at true physical body sizes.
-        if nav.markers && marker.radius < 6.0 {
+        // Nothing is at a barycentre, so its marker is a small cross.
+        if nav.markers && matches!(marker.object, Marked::Barycentre(_)) {
+            let stroke = egui::Stroke::new(1.0, tint);
+            painter.line_segment(
+                [point - egui::vec2(4.0, 0.0), point + egui::vec2(4.0, 0.0)],
+                stroke,
+            );
+            painter.line_segment(
+                [point - egui::vec2(0.0, 4.0), point + egui::vec2(0.0, 4.0)],
+                stroke,
+            );
+        } else if nav.markers && marker.radius < 6.0 {
+            // Markers remain visible at true physical body sizes.
             painter.circle_stroke(point, 4.0, egui::Stroke::new(1.0, tint));
         }
         // Task labels would smear across the screen mid-flight.
@@ -144,11 +161,14 @@ pub(super) fn canvas_overlay(
             // Labels sit over star glare in tables and close-ups.
             crate::ui::kit::halo::halo_galley(&painter, egui::pos2(x, y), text, tint);
         }
-        // A second click on the selected planet or craft follows it.
+        // A second click on the selected planet or craft follows it. Stars
+        // and barycentres are not followed yet.
         if hovered && click {
             click = false;
             if selected {
-                out.push(UiCommand::Follow);
+                if matches!(marker.object, Marked::Planet(_) | Marked::Craft(_)) {
+                    out.push(UiCommand::Follow);
+                }
             } else {
                 match &marker.object {
                     Marked::Planet(index) => {
@@ -159,6 +179,10 @@ pub(super) fn canvas_overlay(
                         }
                     }
                     Marked::Craft(id) => out.push(UiCommand::SelectCraft { id: id.clone() }),
+                    Marked::Star(id) => out.push(UiCommand::SelectStar { id: id.clone() }),
+                    Marked::Barycentre(id) => {
+                        out.push(UiCommand::SelectBarycentre { id: id.clone() })
+                    }
                 }
             }
         }
@@ -180,6 +204,29 @@ pub(super) fn canvas_overlay(
         )
     {
         out.push(UiCommand::PickStar { id: star.id });
+    }
+}
+
+/// Whether a marker's object is the selection. Selecting a multiple system
+/// as a whole selects its outermost barycentre.
+pub(super) fn selected(
+    nav: &Navigation,
+    galaxy: &Galaxy,
+    system: Option<&space_shared::StarSystem>,
+    object: &Marked,
+) -> bool {
+    let star = nav.selected_star().map(|star| star.id.as_str());
+    match object {
+        Marked::Planet(index) => nav.selected_planet(galaxy) == Some(*index),
+        Marked::Craft(id) => nav.selected_craft() == Some(id.as_str()),
+        Marked::Star(id) => star == Some(id.as_str()),
+        Marked::Barycentre(id) => {
+            nav.selected_barycentre() == Some(id.as_str())
+                || system.is_some_and(|system| {
+                    system.root(nav.page) == Some(id.as_str())
+                        && star == Some(crate::objects::star_id(system, nav.page).as_str())
+                })
+        }
     }
 }
 

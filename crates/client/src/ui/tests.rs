@@ -683,3 +683,40 @@ fn camera_drag_crossing_time_text_stays_with_the_scene() {
         },
     ]));
 }
+
+#[test]
+fn star_and_barycentre_markers_show_the_selection() {
+    use crate::{Selection, Visit, scene::Marked};
+    let galaxy = space_simulation::demo_galaxy();
+    let system = &galaxy.systems[0];
+    let page = system.pages()[1];
+    let mut nav = Navigation {
+        visit: Some(Visit::List(0)),
+        page,
+        arrived: true,
+        ..Navigation::default()
+    };
+    let root = system.barycentres_on(page).last().unwrap().id.clone();
+    let star = system.stars_on(page).last().unwrap().id.clone();
+    let pick = |id: String| crate::galaxy_nav::PickedStar {
+        id,
+        position_ly: bevy::math::DVec3::ZERO,
+    };
+    let selected = |nav: &Navigation, object: Marked| {
+        super::canvas::selected(nav, &galaxy, nav.system(&galaxy), &object)
+    };
+
+    nav.select(Some(Selection::Star(pick(star.clone()))));
+    assert!(selected(&nav, Marked::Star(star.clone())));
+    assert!(!selected(&nav, Marked::Barycentre(root.clone())));
+
+    nav.select(Some(Selection::Barycentre(root.clone())));
+    assert!(selected(&nav, Marked::Barycentre(root.clone())));
+    assert!(!selected(&nav, Marked::Star(star.clone())));
+
+    // Selecting the system as a whole is selecting its outermost pair.
+    let whole = crate::objects::star_id(system, page);
+    nav.select(Some(Selection::Star(pick(whole))));
+    assert!(selected(&nav, Marked::Barycentre(root)));
+    assert!(!selected(&nav, Marked::Star(star)));
+}
