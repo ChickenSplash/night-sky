@@ -590,14 +590,20 @@ def ship(args):
     sent = time.time() * 1000
     result = request(args.port, "/command", json.dumps(command).encode("utf-8"))
     if plotting and result.get("status") == "accepted":
-        # Report the plotted route, with its best time if it runs late.
-        deadline = time.monotonic() + 2
+        # Report the plotted route, with its best time if it runs late. One to
+        # another system is plotted once that system's data has loaded.
+        deadline = time.monotonic() + 5
+        latest = None
         while time.monotonic() < deadline:
             for entry in request(args.port, endpoint("state", "craft"))["craft"]:
                 route = entry.get("route") or {}
                 if route and route.get("start_tick") != before.get(entry["id"]):
-                    return dict(result, craft=entry["id"], route=route)
+                    latest = dict(result, craft=entry["id"], route=route)
+                    if route.get("stage") != "plotting":
+                        return latest
             time.sleep(0.1)
+        if latest:
+            return latest
     if args.ship == "spawn" and result.get("status") == "accepted":
         # The new ship is selected: report it from the first later snapshot.
         deadline = time.monotonic() + 2

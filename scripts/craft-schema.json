@@ -692,7 +692,7 @@
       ]
     },
     {
-      "about": "Engages warp, turns to the target, then slows all the way in, dropping out at a standoff of a few times the target's size. Moving targets are tracked every step. Turning, warp speed, disengage and match orders take over; warp is left as it was.",
+      "about": "Engages warp, turns to the target, curves round bodies in the way, then slows all the way in, dropping out at a standoff of a few times the target's size. Another system is loaded first and entered on the slowdown. Moving targets are tracked every step. Turning, warp speed, disengage and match orders take over; warp is left as it was.",
       "at": [
         "command"
       ],
@@ -745,7 +745,7 @@
         }
       ],
       "group": "warp",
-      "help": "Fly to a body in the ship's system and drop out near it.",
+      "help": "Fly to a body, here or in another system, and drop out near it.",
       "off": null,
       "order": {
         "action": "warp",
@@ -1539,6 +1539,16 @@
         ],
         "kind": "text",
         "label": "slowed by"
+      },
+      {
+        "group": "route",
+        "help": "The page star of the target's system.",
+        "key": [
+          "route",
+          "system"
+        ],
+        "kind": "text",
+        "label": "system"
       },
       {
         "group": "attitude",

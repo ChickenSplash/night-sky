@@ -187,8 +187,9 @@ fn flies_to_each_kind_of_target_and_drops_out_at_its_standoff_on_time() {
         let route = craft.route.as_ref().unwrap();
         assert_eq!(route.stage, Stage::Arrived, "{target}: {route:?}");
         assert!(!craft.warp.engaged);
+        // At the standoff, by at most a step's travel either side.
         assert!(
-            route.distance_m <= route.standoff_m && route.distance_m > 0.9 * route.standoff_m,
+            (route.distance_m / route.standoff_m - 1.0).abs() < 0.1,
             "{target}: {route:?}"
         );
         assert!((flown - route.trip_s).abs() < 0.5, "{target}: {flown} s");
@@ -381,7 +382,7 @@ fn refused_routes_leave_the_ship_unchanged() {
     let tight = triple(0.02);
     let craft = lined_up(&field, "t#B", 1e3);
     let refusals: [(&Field, WarpOrder, &str); 6] = [
-        (&field, to("nowhere", false, false, None), "No body"),
+        (&field, to("t/99", false, false, None), "No body"),
         (&field, to("ship", false, false, None), "itself"),
         (&tight, to("t#B", false, false, None), "no safe standoff"),
         (&field, to("t#B", false, false, Some(9.0)), "Trip time"),
@@ -394,13 +395,23 @@ fn refused_routes_leave_the_ship_unchanged() {
         assert!(err.contains(reason), "{err}");
         assert_eq!(tried, craft);
     }
-    let mut tried = craft.clone();
-    let err = Order::Warp {
-        command: to("t#B", false, false, None),
+    // Another system's target, or any from galactic space, waits for its
+    // system's data without engaging warp; a thrusting ship is refused.
+    for field in [Some(&field), None] {
+        let mut tried = craft.clone();
+        Order::Warp {
+            command: to("elsewhere#A/2", false, true, None),
+        }
+        .apply(&mut tried, field)
+        .unwrap();
+        let route = tried.route.as_ref().unwrap();
+        assert_eq!(
+            (route.stage, route.system.as_str()),
+            (Stage::Plotting, "elsewhere")
+        );
+        assert!(!tried.warp.engaged);
+        assert_eq!(tried.autopilot, craft.autopilot);
     }
-    .apply(&mut tried, None)
-    .unwrap_err();
-    assert!(err.contains("galactic"), "{err}");
     // Already there.
     let mut near = lined_up(&field, "t#B", 0.5);
     let before = near.clone();

@@ -819,9 +819,27 @@ Checkpoints:
      (1 − cos turn), plus pointing's settling scaled by the turn.
    - `ns ship warp to` now replies with the plotted route, including the
      best time and `slowed_by` when the asked time cannot be met.
-3. **Interstellar routes:** requesting the destination's data at plotting,
+3. ✅ **Interstellar routes:** requesting the destination's data at plotting,
    aiming at its star then its body, and entry on the slowdown. Tests with a
    seeded system and a list system, through the background loader.
+   - Done 2026-10-22. Changed from the plan: the pilot does not aim at the
+     star while the data loads. A path that changed when the data arrived
+     would depend on loading speed, which voyages forbid. The order is
+     accepted in a `plotting` stage, and each step first waits for the
+     destination's location (a new `Wait::Star`) and bodies, holding the
+     clock as entry already does; the first step that has them plots it.
+   - While outside the destination, the pilot sees its target and bodies
+     converted into the ship's frame, so wrapping and aiming need nothing
+     new. A 2 ly trip in 40 s peaks near 0.6 ly/s and enters about
+     570,000 km out, below light speed, as planned.
+   - Found while testing: with too short a time, τ pins at its minimum and
+     the speed ramp cannot brake as fast as the profile asks, so the ship
+     covered its last million kilometres in one step and passed through the
+     standoff. The pilot now drops out when the coming step would reach it.
+   - Tests: a seeded system, a charted list page from galactic space,
+     leaving from behind a planet, a whole system matched on arrival, an ID
+     naming no system, a slow loader giving the identical path, and a trip
+     through the app's command path.
 4. **Ships as targets:** the craft source, start-of-step reads, formation
    matching, `warp match <ship-id>` and a despawned target. Tests with a
    coasting, a thrusting and a warping target, and two ships chasing each

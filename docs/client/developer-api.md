@@ -320,6 +320,7 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 # Plotted routes, to a body in the ship's current system:
 ./scripts/ns ship warp to 'body-id'                  # fly there, keep velocity on arrival
 ./scripts/ns ship warp to 'body-id' --orbit          # drop into a rough orbit
+./scripts/ns ship warp to 'other-system-body-id'     # loads that system first, then flies there
 ./scripts/ns ship warp to 'body-id' --match --time 120  # match it, in two minutes; replies with the plotted route
 ./scripts/ns ship state              # its route: stage, distance, ETA, lateness
 ./scripts/ns ship warp cancel        # end the route; warp stays engaged
@@ -332,7 +333,7 @@ bubble rather than the turning thrusters, at up to the turn rate (default
 disengagement the ship keeps no spin, and a held rotation input or pointing
 pilot passes back to the turning thrusters. `warp to` engages warp, turns,
 curves round bodies in the way, slows all the way in and drops out at a
-standoff; turning, warp speed,
+standoff, in this system or another (loaded first, clock held); turning, warp speed,
 `disengage` and `match` orders take over from it (see
 [plotted routes](../simulation/craft.md#plotted-routes)). Manual warp is
 unsafe: no collision checks, proximity slowdown, automatic arrival stop or

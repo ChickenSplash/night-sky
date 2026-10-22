@@ -423,8 +423,9 @@ predicts. The crew would feel no turning force.
 ### Plotted routes
 
 `ns ship warp to <id> [--match | --orbit] [--time <s>]` plots a trip to a
-planet, star, barycentre or system key (its star or outermost barycentre) in
-the ship's current system, engages warp and flies it (`craft::route`). The
+planet, star, barycentre or system key (its star or outermost barycentre),
+in the ship's current system or another, engages warp and flies it
+(`craft::route`). The
 route pilot is ship state beside the attitude pilot. Each step, before the
 ship moves, it gives the orders a player would: pointing at a direction,
 the requested speed and, at the standoff, dropout. It never moves the ship
@@ -484,21 +485,45 @@ itself, so replays and servers run it from the same inputs.
 - **Arrival:** at the standoff, `keep` disengages with ordinary velocity,
   `match` takes the target's velocity and `orbit` adds rough-orbit speed, as
   [matched dropout](#matched-dropout) does. The attitude pilot returns to
-  manual, with no spin.
+  manual, with no spin. The ship also drops out when the coming step's
+  travel (the speed ramp's integral plus drift) would reach the standoff,
+  so it stops at most one step early and can never pass through. That
+  matters when τ is pinned at its minimum by too short a time: the ramp
+  then cannot slow the ship as fast as the profile asks, and a 2 ly trip
+  asked to take 10 s drops out at about 1.8 standoffs, still faster than
+  light and so in galactic space, entering the system the next step.
 - **Takeover:** `warp cancel`, any turning order (`rotate`, `point`, `stop`,
   `release`, `cut`), a warp speed order, `disengage` or `match` ends the
   route. Warp is left as it was, so nothing jumps; turning returns to manual.
-- **Refused when given, leaving the ship unchanged:** an unknown ID, the ship
-  itself, no safe standoff, already within the standoff, galactic space,
-  sublight thrust still on, or a trip time out of range.
-- **Readout:** `route` in the ship state holds the target, arrival mode,
-  stage (`align`, `cruise`, `approach`, `arrived`, `released`), trip time, τ,
+- **Another system:** a target whose system key is not the ship's own
+  system, or any target from galactic space, is accepted in the `plotting`
+  stage without engaging warp. Each step, `Voyage` first needs that
+  system's location (`Wait::Star`, from seeds, or from the lists for a
+  legacy page) and then its bodies (`Wait::System`), waiting like any other
+  data, so the client holds the clock while they load and a slow machine
+  flies the same path. The first step that has them plots the route as an
+  in-system order would be, from the same step; a refusal then ends it in
+  `released` with the reason, warp still off. While the ship is outside
+  the destination, the pilot sees its target and bodies converted into the
+  ship's frame (`Rebase` from the destination's frame, system velocities
+  included), for aiming and wrapping alike; gravity stays the local
+  system's. Leaving, re-anchoring and entering are the usual frame rules:
+  the profile only drops below light speed about c × τ from the target, so
+  the ship crosses most of the destination's range in galactic space and
+  enters on the slowdown, typically a few hundred thousand kilometres out.
+  A 2 ly trip in 40 s peaks near 0.6 ly/s.
+- **Refused when given, leaving the ship unchanged:** an unknown ID in the
+  ship's own system, the ship itself, no safe standoff, already within the
+  standoff, sublight thrust still on, or a trip time out of range.
+- **Readout:** `route` in the ship state holds the target and its system,
+  arrival mode, stage (`plotting`, `align`, `cruise`, `approach`, `arrived`,
+  `released`), trip time, τ,
   standoff, distance, ETA, lateness and its cause, the detour beyond the
   straight line, the body being steered round, whether the top speed
   stretches it and how it ended. It is kept after the route ends.
 
-Interstellar routes and ships as targets are later
-checkpoints of [phase 9](../plans/flight-sim.md#9--plotted-warp-autopilot).
+Ships as targets are a later
+checkpoint of [phase 9](../plans/flight-sim.md#9--plotted-warp-autopilot).
 
 Below the gravity cutoff, active warp retains its final gravity sample for
 the next step, including ordinary flight after dropout. Samples use the
@@ -530,8 +555,9 @@ inputs give the same path on any machine, wherever the camera is.
   reach then needs its bodies for its exact range and gravity. Charted list
   pages take the place of the generated systems they are assigned to; legacy
   pages with no cell star are added as candidates of their own.
-- **Waiting, not guessing:** when a step needs a region or a system's bodies
-  that its `Atlas` does not have yet, it returns `Wait` and changes nothing.
+- **Waiting, not guessing:** when a step needs a region, a system's bodies or
+  a route destination's location that its `Atlas` does not have yet, it
+  returns `Wait` and changes nothing.
   `Library` answers synchronously for tests and offline replay. The client asks its
   background worker and holds the clock until the answer arrives, so a slow
   machine arrives at the same step, only later in real time.
@@ -595,7 +621,9 @@ at the command's application tick. It resolves the same stable planet, star or
 barycentre IDs used by inspection, selection and orbit references, against the
 craft's current system, or a system key as its star or outermost barycentre.
 Galactic-space and remote matching are refused. A plotted route's `--match`
-and `--orbit` arrivals use the same rules. There is no separate target picker
+and `--orbit` arrivals use the same rules, except that a route to another
+system sees its target converted into the ship's frame, so it can match on
+arrival before the ship has entered the system. There is no separate target picker
 or persistent matching setting; in-app selection-to-flight actions remain
 later work.
 

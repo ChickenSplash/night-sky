@@ -41,6 +41,10 @@ impl Atlas for Charts {
     fn arrival(&self, star: &str) -> Option<&Arrival> {
         self.loader.cache.arrival(star)
     }
+
+    fn locate(&self, star: &str) -> Option<Option<&Candidate>> {
+        self.loader.cache.locate(star)
+    }
 }
 
 impl Charts {
@@ -147,6 +151,7 @@ impl Live {
             None => format!("in {}", self.star()),
             Some(Wait::Region(_)) => "waiting for nearby systems (clock held)".into(),
             Some(Wait::System(candidate)) => format!("loading {} (clock held)", candidate.id),
+            Some(Wait::Star(id)) => format!("locating {id} (clock held)"),
         }
     }
 }

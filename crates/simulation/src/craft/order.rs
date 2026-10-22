@@ -136,12 +136,13 @@ pub enum WarpOrder {
     Down,
     /// Developer gravity policy; change only while disengaged.
     Gravity { policy: GravityPolicy },
-    /// Fly to a body in the ship's system and drop out near it.
+    /// Fly to a body, here or in another system, and drop out near it.
     ///
-    /// Engages warp, turns to the target, then slows all the way in, dropping
-    /// out at a standoff of a few times the target's size. Moving targets are
-    /// tracked every step. Turning, warp speed, disengage and match orders
-    /// take over; warp is left as it was.
+    /// Engages warp, turns to the target, curves round bodies in the way,
+    /// then slows all the way in, dropping out at a standoff of a few times
+    /// the target's size. Another system is loaded first and entered on the
+    /// slowdown. Moving targets are tracked every step. Turning, warp speed,
+    /// disengage and match orders take over; warp is left as it was.
     To {
         /// Planet, star or barycentre ID, or a system's key.
         target: String,

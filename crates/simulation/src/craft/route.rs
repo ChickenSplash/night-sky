@@ -65,6 +65,9 @@ pub enum ArrivalMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    /// Waiting for the data of the target's system, when it is not the
+    /// ship's own; plotted on the first step that has it.
+    Plotting,
     /// Turning to the target, at the lowest speed.
     Align,
     /// Lined up, slowing all the way in.
@@ -83,6 +86,9 @@ pub struct Route {
     /// The target's ID: a system's key resolves to its star or outermost
     /// barycentre.
     pub target: String,
+    /// The page star of the target's system.
+    #[serde(default)]
+    pub system: String,
     pub arrival: ArrivalMode,
     pub stage: Stage,
     /// Trip time asked for; none for the distance-scaled default.
@@ -129,7 +135,10 @@ pub struct Route {
 
 impl Route {
     pub fn active(&self) -> bool {
-        matches!(self.stage, Stage::Align | Stage::Cruise | Stage::Approach)
+        matches!(
+            self.stage,
+            Stage::Plotting | Stage::Align | Stage::Cruise | Stage::Approach
+        )
     }
 }
 
@@ -306,6 +315,13 @@ fn others(field: &impl Gravity, target: &str, seconds: f64) -> Vec<Obstacle> {
     obstacles
 }
 
+/// Whether moving by `travel` passes within `radius` of a point `offset`
+/// away.
+fn reaches(offset: DVec3, travel: DVec3, radius: f64) -> bool {
+    let along = (offset.dot(travel) / travel.length_squared()).clamp(0.0, 1.0);
+    along.is_finite() && (offset - travel * along).length() <= radius
+}
+
 /// Seconds the bubble takes to turn the nose `angle` radians and settle
 /// within `ALIGNED_DEG`, at `turn_rate` rad/s: flat out, then easing in as
 /// pointing does.
@@ -320,8 +336,11 @@ pub fn align_seconds(angle: f64, turn_rate: f64) -> f64 {
 }
 
 impl Craft {
-    /// Plot a route to `id` in the ship's system and engage warp. All
-    /// checks come first, so a refused order leaves the ship unchanged.
+    /// Plot a route to `id` and engage warp. A target in the ship's system
+    /// is plotted at once, with every check first, so a refused order leaves
+    /// the ship unchanged. One in another system, or from galactic space,
+    /// waits in `Stage::Plotting` for its system's data and is plotted on the
+    /// first step that has it; a refusal then ends the route with its reason.
     pub fn fly_to(
         &mut self,
         field: Option<&Field>,
@@ -332,15 +351,58 @@ impl Craft {
         if id == self.id {
             return Err("A ship cannot fly to itself".into());
         }
-        let field = field.ok_or("Routes start inside a system; galactic routes come later")?;
-        let seconds = self.seconds();
-        let target = field
-            .target(id, seconds)
-            .ok_or_else(|| format!("No body `{id}` in this ship's system"))?;
+        let system = crate::multiple::system_key(id);
+        if let Some(field) = field {
+            if let Some(target) = field.target(id, self.seconds()) {
+                return self.plot(field, target, arrival, requested_s);
+            }
+            let own = field.system().root(field.page());
+            if own.map(crate::multiple::system_key) == Some(system) {
+                return Err(format!("No body `{id}` in this ship's system"));
+            }
+        }
+        if !self.warp.engaged {
+            self.check_engage()?;
+        }
+        self.route = Some(Route {
+            target: id.into(),
+            system: system.into(),
+            arrival,
+            stage: Stage::Plotting,
+            requested_s,
+            trip_s: requested_s.unwrap_or(LONG_TRIP_S),
+            start_tick: self.tick,
+            standoff_m: 0.0,
+            tau_s: 0.0,
+            distance_m: 0.0,
+            eta_s: 0.0,
+            late_s: 0.0,
+            capped: false,
+            detour_m: 0.0,
+            bends_s: 0.0,
+            around: None,
+            slowed_by: None,
+            aligned: false,
+            end: None,
+        });
+        Ok(())
+    }
+
+    /// Plot a route to a target `field` knows and engage warp. All checks
+    /// come first, so a refusal changes nothing.
+    fn plot(
+        &mut self,
+        field: &impl Gravity,
+        target: Target,
+        arrival: ArrivalMode,
+        requested_s: Option<f64>,
+    ) -> Result<(), String> {
+        let id = &target.id;
         if arrival == ArrivalMode::Orbit && target.reach_m.is_none() {
             return Err(format!("`{id}` cannot be orbited"));
         }
         let standoff = target.standoff()?;
+        let seconds = self.seconds();
         let from = DVec3::from_array(self.state().position);
         let goal = DVec3::from_array(target.state.position);
         let distance = from.distance(goal);
@@ -372,6 +434,7 @@ impl Craft {
         let capped = path / tau > MAX_SPEED;
         self.route = Some(Route {
             target: target.id,
+            system: target.system,
             arrival,
             stage: Stage::Align,
             requested_s,
@@ -395,6 +458,26 @@ impl Craft {
         Ok(())
     }
 
+    /// Plot a route waiting for its system's data, which `field` now has, or
+    /// end it with the reason it cannot be flown. Turning is left alone,
+    /// as nothing took it over.
+    fn plot_waiting(&mut self, field: &impl Gravity) {
+        let Some(route) = self.route.as_ref() else {
+            return;
+        };
+        let (id, arrival, requested_s) = (route.target.clone(), route.arrival, route.requested_s);
+        let result = match field.target(&id, self.seconds()) {
+            Some(target) => self.plot(field, target, arrival, requested_s),
+            None => Err(format!("No body `{id}` found in system `{}`", route.system)),
+        };
+        if let Err(reason) = result
+            && let Some(route) = self.route.as_mut()
+        {
+            route.stage = Stage::Released;
+            route.end = Some(reason);
+        }
+    }
+
     /// End an active route, handing turning back to manual. Warp is left as
     /// it is. Returns whether there was one.
     pub fn end_route(&mut self, reason: &str) -> bool {
@@ -414,6 +497,13 @@ impl Craft {
     /// One step of the route pilot, before the ship moves: drop out at the
     /// standoff, else aim and set the speed for this step.
     pub(super) fn fly_route(&mut self, field: &impl Gravity) {
+        if self
+            .route
+            .as_ref()
+            .is_some_and(|route| route.stage == Stage::Plotting)
+        {
+            self.plot_waiting(field);
+        }
         let Some(route) = self.route.as_ref().filter(|route| route.active()) else {
             return;
         };
@@ -523,6 +613,7 @@ impl Craft {
         route.late_s = seconds + eta - super::tick_seconds(route.start_tick) - route.trip_s;
         route.capped = remaining / route.tau_s > MAX_SPEED;
         route.around = aim.around.map(|i| obstacles[i].id.clone());
+        let standoff = route.standoff_m;
         match &mut self.autopilot {
             AttitudePilot::Point {
                 target: PointTarget::Vector(vector),
@@ -535,6 +626,13 @@ impl Craft {
                     attitude: self.orientation,
                 }
             }
+        }
+        // Drop out now if this step would carry the ship to the standoff, so
+        // a ship still braking hard, as from between the stars, cannot pass
+        // through it within one step.
+        let travel = nose * self.warp_travel() - drift * STEP_SECONDS;
+        if reaches(offset, travel, standoff) {
+            self.arrive(&target, distance);
         }
     }
 

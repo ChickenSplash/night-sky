@@ -467,7 +467,7 @@ fn manual_dropout_takes_effect_from_the_next_fixed_step() {
         live.craft.engage_warp().unwrap();
         live.craft.warp.actual_ms = speed;
         live.previous = live.craft.state();
-        live.voyage.advance();
+        live.voyage.advance(None);
         ordinary
     };
     let mid = epoch + STEP_SECONDS * 0.4;
@@ -616,6 +616,65 @@ fn a_plotted_route_reaches_its_target_and_the_readout_shows_it() {
     let live = &app.world().resource::<Fleet>().craft[0];
     assert!(!live.craft.warp.engaged);
     assert_eq!(live.craft.warp.last_match.as_ref().unwrap().body, star);
+}
+
+#[test]
+fn a_route_to_another_system_flies_through_the_command_path() {
+    use space_simulation::{craft::voyage, neighbourhood};
+    let mut app = app();
+    let (system, page, planet) = planet_system();
+    send(
+        &mut app,
+        UiCommand::SpawnShip {
+            body: Some(planet),
+            altitude_km: 400.0,
+            speed_kms: None,
+            velocity_kms: None,
+        },
+    );
+    // A generated neighbour's planet, a light year or more away.
+    let mut sky = space_simulation::cells::Sky::default();
+    let origin = voyage::frame_origin_pc(&mut sky, &system, page);
+    let mut near = neighbourhood::stars_within(&mut sky, origin, 2.0, 1);
+    near.sort_by(|a, b| a.id.cmp(&b.id));
+    let target = near
+        .iter()
+        .filter(|star| {
+            let pc = (0..3)
+                .map(|i| (star.position_pc[i] - origin[i]).powi(2))
+                .sum::<f64>();
+            pc.sqrt() * space_simulation::galaxy::PC_METRES > space_simulation::LY_METRES
+        })
+        .find_map(|star| {
+            let candidate = neighbourhood::candidate(&mut sky, &star.id)?;
+            let generated = voyage::generated_arrival(&candidate);
+            let planet = generated.field.system().planets.first()?;
+            Some(planet.id.clone())
+        })
+        .expect("a neighbour with a planet");
+    let command: UiCommand = serde_json::from_value(serde_json::json!({
+        "type": "steer_craft", "order": {"action": "warp", "command": {
+            "command": "to", "target": target, "time": 20.0,
+        }}
+    }))
+    .unwrap();
+    send(&mut app, command);
+    let readout = |app: &App| {
+        let fleet = app.world().resource::<Fleet>();
+        super::readout(fleet, fleet.craft[0].craft.seconds())["craft"][0]["route"].clone()
+    };
+    assert_eq!(readout(&app)["stage"], "plotting");
+    for _ in 0..(25.0 / STEP_SECONDS) as usize {
+        app.world_mut().resource_mut::<Clock>().0.seconds += STEP_SECONDS;
+        app.update();
+    }
+    let route = readout(&app);
+    assert_eq!(route["stage"], "arrived", "{route}");
+    let live = &app.world().resource::<Fleet>().craft[0];
+    assert_eq!(
+        live.craft.frame.star(),
+        space_simulation::multiple::system_key(&target)
+    );
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {

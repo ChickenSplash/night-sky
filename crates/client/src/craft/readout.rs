@@ -480,6 +480,7 @@ fn route_facts(
         return rows;
     }
     let stage = match route.stage {
+        Stage::Plotting => "Loading the destination",
         Stage::Align => "Turning to target",
         Stage::Cruise => "Cruise",
         Stage::Approach => "Approach",

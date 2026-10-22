@@ -1,6 +1,6 @@
 use super::*;
 use crate::cells::{Cell, CellStar, Sky};
-use crate::craft::{CraftKind, warp::GravityPolicy};
+use crate::craft::{CraftKind, route::Stage, warp::GravityPolicy};
 use crate::galaxy::GalaxyModel;
 use crate::population::TIERS;
 
@@ -623,4 +623,309 @@ fn frames_are_anchored_from_seeds_else_from_the_list() {
         let ly = (origin[i] - home[i]) * PC_METRES / LY_METRES;
         assert!((ly - legacy.position_ly[i]).abs() < 1e-9);
     }
+}
+
+/// A generated neighbour of `star` with planets, a few light years off.
+fn neighbour(star: &CellStar) -> (crate::neighbourhood::Candidate, space_shared::StarSystem) {
+    let mut sky = Sky::default();
+    let mut near = crate::neighbourhood::stars_within(&mut sky, star.position_pc, 2.0, threads());
+    near.sort_by(|a, b| a.id.cmp(&b.id));
+    near.into_iter()
+        .filter(|other| {
+            let ly = DVec3::from_array(other.position_pc)
+                .distance(DVec3::from_array(star.position_pc))
+                * PC_METRES
+                / LY_METRES;
+            (1.0..6.0).contains(&ly)
+        })
+        .find_map(|other| {
+            let candidate = crate::neighbourhood::candidate(&mut sky, &other.id)?;
+            let system = crate::generated_system(&candidate.id, candidate_ly(&candidate))?;
+            (system.planets.len() >= 2).then_some((candidate, system))
+        })
+        .expect("a neighbour with planets")
+}
+
+/// A ship at rest in `star`'s system, `position` from its centre.
+fn in_system(star: &CellStar, position: [f64; 3]) -> Voyage {
+    let mut craft = Craft::new(
+        "craft-1".into(),
+        "Ship 1".into(),
+        CraftKind::Ship,
+        Frame::System {
+            star: star.id.clone(),
+        },
+        0,
+    );
+    craft.place(
+        State {
+            position,
+            velocity: [0.0; 3],
+        },
+        0,
+    );
+    Voyage::new(craft, arrival(star).field, star.position_pc)
+}
+
+fn warp_to(target: &str, orbit: bool, time: Option<f64>) -> Order {
+    Order::Warp {
+        command: crate::craft::WarpOrder::To {
+            target: target.into(),
+            matched: false,
+            orbit,
+            time,
+        },
+    }
+}
+
+/// What a route's flight did, step by step, until it ended.
+#[derive(Debug, Default)]
+struct Trip {
+    seconds: f64,
+    top_speed: f64,
+    /// The step's frame change into the destination, and the warp speed
+    /// then.
+    entered: Option<(i64, f64)>,
+    /// Nearest any of the start system's bodies came, in keep-clear radii.
+    nearest: f64,
+}
+
+fn fly_trip(
+    voyage: &mut Voyage,
+    atlas: &mut impl FnMut(&mut Voyage) -> Step,
+    start: &Field,
+) -> Trip {
+    let begin = voyage.craft.seconds();
+    let mut trip = Trip {
+        nearest: f64::INFINITY,
+        ..Trip::default()
+    };
+    for _ in 0..20_000 {
+        let step = atlas(voyage);
+        let route = voyage.craft.route.as_ref().unwrap();
+        trip.top_speed = trip.top_speed.max(voyage.craft.warp.actual_ms);
+        if step.rebase.is_some_and(|r| r.frame_changed) && !voyage.in_galaxy() {
+            trip.entered = Some((voyage.craft.tick, voyage.craft.warp.actual_ms));
+        }
+        if voyage.craft.frame.star() == start.system().id {
+            let at = DVec3::from_array(voyage.craft.state().position);
+            for body in start.bodies(voyage.craft.seconds()) {
+                let clear = crate::craft::route::KEEP_CLEAR * body.radius_m;
+                trip.nearest = trip
+                    .nearest
+                    .min(at.distance(DVec3::from_array(body.state.position)) / clear);
+            }
+        }
+        if !route.active() {
+            break;
+        }
+    }
+    trip.seconds = voyage.craft.seconds() - begin;
+    trip
+}
+
+#[test]
+fn a_route_to_another_system_waits_for_it_then_enters_on_the_slowdown_on_time() {
+    let star = star();
+    let (candidate, system) = neighbour(&star);
+    let target = system.planets[1].id.clone();
+    let mut voyage = in_system(&star, [AU, 0.0, 0.0]);
+    let start = voyage.field.clone();
+    voyage.order(0, warp_to(&target, true, Some(40.0))).unwrap();
+    // Where the destination is, then its bodies, before anything moves.
+    let unchanged = voyage.craft.clone();
+    assert_eq!(
+        voyage.step(&Blank).unwrap_err(),
+        Wait::Star(candidate.id.clone())
+    );
+    let mut library = Library::default();
+    library.supply(&Wait::Star(candidate.id.clone()));
+    assert_eq!(
+        voyage.step(&library).unwrap_err(),
+        Wait::System(candidate.clone())
+    );
+    assert_eq!(voyage.craft, unchanged);
+    let trip = fly_trip(&mut voyage, &mut |v| library.step(v), &start);
+    let route = voyage.craft.route.as_ref().unwrap();
+    assert_eq!(route.stage, Stage::Arrived, "{route:?}");
+    assert_eq!(
+        route.end.as_deref(),
+        Some(format!("Arrived at `{target}`").as_str())
+    );
+    assert!((trip.seconds - 40.0).abs() < 0.5, "{} s", trip.seconds);
+    assert_eq!(voyage.craft.frame.star(), candidate.id);
+    // Faster than light between the stars, entering only once below it.
+    assert!(trip.top_speed > 0.1 * LY_METRES, "{trip:?}");
+    let (_, speed) = trip.entered.expect("entered the destination");
+    assert!(speed < ARRIVAL_MAX_SPEED, "{trip:?}");
+    // Into a rough orbit round the planet.
+    library.step(&mut voyage);
+    assert_eq!(voyage.craft.reference.as_deref(), Some(target.as_str()));
+}
+
+#[test]
+fn a_charted_list_page_is_flown_to_from_galactic_space() {
+    let lists = crate::demo_galaxy();
+    let list = &lists.systems[0];
+    let page = list.first_page();
+    let page_star = page_star_id(list, page);
+    let target = list.on_page(page).next().unwrap().id.clone();
+    let mut library = Library::new(lists.clone());
+    library.supply(&Wait::Star(page_star.clone()));
+    let candidate = library.locate(&page_star).unwrap().unwrap().clone();
+    // Half a light year out, in galactic space.
+    let origin = (DVec3::from_array(candidate.position_pc)
+        + DVec3::new(0.5, 0.0, 0.0) * LY_METRES / PC_METRES)
+        .to_array();
+    let mut craft = Craft::new(
+        "craft-1".into(),
+        "Ship 1".into(),
+        CraftKind::Ship,
+        Frame::Galaxy { origin_pc: origin },
+        0,
+    );
+    craft.place(State::default(), 0);
+    let mut voyage = Voyage::new(craft, arrival(&star()).field, origin);
+    voyage.order(0, warp_to(&target, false, None)).unwrap();
+    let start = voyage.field.clone();
+    let trip = fly_trip(&mut voyage, &mut |v| library.step(v), &start);
+    let route = voyage.craft.route.as_ref().unwrap();
+    assert_eq!(route.stage, Stage::Arrived, "{route:?}");
+    assert_eq!(voyage.craft.frame.star(), page_star);
+    // The charted page's bodies, not the generated ones it replaces.
+    assert_eq!(voyage.field.system(), list);
+    assert!(
+        (trip.seconds - route.trip_s).abs() < 0.5,
+        "{} s of {}",
+        trip.seconds,
+        route.trip_s
+    );
+}
+
+#[test]
+fn leaving_from_behind_a_planet_for_another_system_climbs_round_it() {
+    let star = star();
+    let (candidate, system) = neighbour(&star);
+    let home = arrival(&star);
+    let planet = home
+        .field
+        .bodies(0.0)
+        .into_iter()
+        .filter(|body| body.kind == crate::craft::BodyKind::Planet)
+        .max_by(|a, b| a.radius_m.total_cmp(&b.radius_m))
+        .expect("a planet");
+    // The far side from the destination, inside the keep-clear sphere.
+    let probe = in_system(&star, [0.0; 3]);
+    let away = -(probe.basis().inverse()
+        * (DVec3::from_array(candidate.position_pc) - DVec3::from_array(star.position_pc)))
+    .normalize();
+    let altitude = 1.2 * planet.radius_m;
+    let at = DVec3::from_array(planet.state.position) + away * altitude;
+    let mut voyage = in_system(&star, at.to_array());
+    voyage.craft.orientation =
+        DQuat::from_rotation_arc(-DVec3::Z, away.any_orthonormal_vector()).to_array();
+    voyage
+        .order(0, warp_to(&system.planets[0].id, false, Some(30.0)))
+        .unwrap();
+    let mut library = Library::default();
+    library.step(&mut voyage);
+    let around = voyage.craft.route.as_ref().unwrap().around.clone();
+    assert_eq!(around.as_deref(), Some(planet.id.as_str()));
+    let trip = fly_trip(&mut voyage, &mut |v| library.step(v), &home.field);
+    let route = voyage.craft.route.as_ref().unwrap();
+    assert_eq!(route.stage, Stage::Arrived, "{route:?}");
+    // It starts inside the sphere and never sinks deeper.
+    let start = altitude / (crate::craft::route::KEEP_CLEAR * planet.radius_m);
+    assert!(trip.nearest > 0.98 * start, "{trip:?}");
+    assert!((trip.seconds - 30.0).abs() < 1.0, "{} s", trip.seconds);
+}
+
+#[test]
+fn a_route_to_no_system_ends_unplotted_with_warp_off() {
+    let star = star();
+    let mut voyage = in_system(&star, [AU, 0.0, 0.0]);
+    voyage
+        .order(0, warp_to("nowhere#A/1", false, None))
+        .unwrap();
+    let mut library = Library::default();
+    library.step(&mut voyage);
+    let route = voyage.craft.route.as_ref().unwrap();
+    assert_eq!(route.stage, Stage::Released);
+    assert!(route.end.as_ref().unwrap().contains("No body"), "{route:?}");
+    assert!(!voyage.craft.warp.engaged);
+}
+
+#[test]
+fn waiting_for_a_destination_never_changes_the_route() {
+    let star = star();
+    let (_, system) = neighbour(&star);
+    let mut prompt = in_system(&star, [AU, 0.0, 0.0]);
+    prompt
+        .order(0, warp_to(&system.planets[0].id, false, Some(20.0)))
+        .unwrap();
+    let mut slow = prompt.clone();
+    let mut library = Library::default();
+    let mut delayed = Slow {
+        library: Library::default(),
+        refusals: 0,
+    };
+    let mut waits = 0;
+    while prompt.craft.route.as_ref().unwrap().active() {
+        library.step(&mut prompt);
+        loop {
+            match slow.step(&delayed.library) {
+                Ok(_) => break,
+                Err(wait) => {
+                    waits += 1;
+                    delayed.refusals += 1;
+                    if delayed.refusals.is_multiple_of(5) {
+                        delayed.library.supply(&wait);
+                    }
+                }
+            }
+        }
+        assert_eq!(slow.craft, prompt.craft);
+    }
+    assert!(waits >= 10, "{waits}");
+    assert_eq!(prompt.craft.route.as_ref().unwrap().stage, Stage::Arrived);
+}
+
+#[test]
+fn a_whole_system_is_matched_on_arrival_wherever_the_ship_drops_out() {
+    let star = star();
+    let (candidate, _) = neighbour(&star);
+    let mut voyage = in_system(&star, [AU, 0.0, 0.0]);
+    voyage
+        .order(
+            0,
+            Order::Warp {
+                command: crate::craft::WarpOrder::To {
+                    target: candidate.id.clone(),
+                    matched: true,
+                    orbit: false,
+                    time: Some(10.0),
+                },
+            },
+        )
+        .unwrap();
+    let start = voyage.field.clone();
+    let mut library = Library::default();
+    let trip = fly_trip(&mut voyage, &mut |v| library.step(v), &start);
+    let route = voyage.craft.route.clone().unwrap();
+    assert_eq!(route.stage, Stage::Arrived, "{route:?}");
+    // Too short a time to slow down on the profile: still braking hard, it
+    // drops out a step early, never inside the standoff, and faster than
+    // light, so still in galactic space. It enters at the next step.
+    assert!(route.distance_m > route.standoff_m, "{route:?}");
+    assert!(trip.entered.is_none() && voyage.in_galaxy(), "{trip:?}");
+    library.step(&mut voyage);
+    assert_eq!(voyage.craft.frame.star(), candidate.id);
+    // At rest beside the system's root, in its own frame.
+    let root = voyage
+        .field
+        .target(&candidate.id, voyage.craft.seconds())
+        .unwrap();
+    let relative =
+        DVec3::from_array(voyage.craft.state().velocity) - DVec3::from_array(root.state.velocity);
+    assert!(relative.length() < 1.0, "{relative}");
 }

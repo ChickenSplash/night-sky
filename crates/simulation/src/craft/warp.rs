@@ -229,15 +229,21 @@ impl Craft {
         if self.warp.engaged {
             return Err("Warp is already engaged");
         }
-        let c = self.input.controls;
-        if self.input.thrust != [0.0; 3] || c.throttle != 0.0 || c.translation != [0.0; 3] {
-            return Err("Cut sublight thrust before engaging warp");
-        }
+        self.check_engage()?;
         self.warp.engaged = true;
         self.warp.actual_ms = 0.0;
         self.warp.stop_reason = None;
         self.warp.last_match = None;
         self.gravity = None;
+        Ok(())
+    }
+
+    /// Whether warp could engage now, interlocked with sublight thrust.
+    pub fn check_engage(&self) -> Result<(), &'static str> {
+        let c = self.input.controls;
+        if self.input.thrust != [0.0; 3] || c.throttle != 0.0 || c.translation != [0.0; 3] {
+            return Err("Cut sublight thrust before engaging warp");
+        }
         Ok(())
     }
 
@@ -249,15 +255,21 @@ impl Craft {
         self.spin = [0.0; 3];
     }
 
+    /// How far the bubble carries the ship in the next step: the integral of
+    /// the exponential speed ramp, not endpoint speed times the step.
+    pub(super) fn warp_travel(&self) -> f64 {
+        let decay = (-STEP_SECONDS / RAMP_SECONDS).exp();
+        self.warp.requested_ms * STEP_SECONDS
+            + (self.warp.actual_ms - self.warp.requested_ms) * RAMP_SECONDS * (1.0 - decay)
+    }
+
     /// One fixed step of bubble transport, with ordinary drift and, under
     /// the active policy, gravity. No collision or route checks.
     pub(super) fn warp_step(&mut self, gravity: &impl Gravity) {
         let dt = STEP_SECONDS;
         let decay = (-dt / RAMP_SECONDS).exp();
         let speed = self.warp.requested_ms + (self.warp.actual_ms - self.warp.requested_ms) * decay;
-        // Integral of the exponential speed ramp, not endpoint speed times dt.
-        let travel = self.warp.requested_ms * dt
-            + (self.warp.actual_ms - self.warp.requested_ms) * RAMP_SECONDS * (1.0 - decay);
+        let travel = self.warp_travel();
         // The turn rate follows the same ramp towards the steering target,
         // and the path bends with the nose at the step's midpoint attitude.
         let target = self.steering(gravity);

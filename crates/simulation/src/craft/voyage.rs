@@ -171,6 +171,7 @@ pub fn seeded_arrival(candidate: &Candidate, system: Option<space_shared::StarSy
 pub enum Request {
     Region { region: Region },
     System { id: String, position_ly: [f64; 3] },
+    Star { id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -182,6 +183,9 @@ pub enum Reply {
     System {
         system: Option<space_shared::StarSystem>,
     },
+    Star {
+        candidate: Option<Candidate>,
+    },
 }
 
 impl Request {
@@ -192,6 +196,7 @@ impl Request {
                 id: candidate.id.clone(),
                 position_ly: candidate_ly(candidate),
             },
+            Wait::Star(id) => Self::Star { id: id.clone() },
         }
     }
 
@@ -204,6 +209,9 @@ impl Request {
             Self::System { id, position_ly } => Reply::System {
                 system: crate::generated_system(id, *position_ly),
             },
+            Self::Star { id } => Reply::Star {
+                candidate: crate::neighbourhood::candidate(sky, id),
+            },
         };
         trim_sky(sky);
         reply
@@ -215,6 +223,8 @@ impl Request {
 pub enum Wait {
     Region(Region),
     System(Candidate),
+    /// Where a system is, by its page star's ID: a route's destination.
+    Star(String),
 }
 
 /// A change of frame coordinates: `rotation * x + translation` for positions,
@@ -531,6 +541,7 @@ impl Voyage {
     /// One fixed step: any frame change due at the current state, then
     /// motion. On `Err` nothing has changed; supply the data and step again.
     pub fn step(&mut self, atlas: &impl Atlas) -> Result<Step, Wait> {
+        let destination = self.destination(atlas)?;
         let rebase = self.settle(atlas)?;
         let mut step = Step {
             rebase,
@@ -538,8 +549,45 @@ impl Voyage {
             from_orientation: self.craft.orientation,
             refused: Vec::new(),
         };
-        step.refused = self.advance();
+        step.refused = self.advance(destination);
         Ok(step)
+    }
+
+    /// The system an active route flies to, when it is not the craft's own:
+    /// where it is, then its bodies, waited for like any other data. An ID
+    /// that names no system gives none, and the route ends unplotted.
+    fn destination<'a>(&self, atlas: &'a impl Atlas) -> Result<Option<&'a Arrival>, Wait> {
+        let Some(route) = self.craft.route.as_ref().filter(|route| route.active()) else {
+            return Ok(None);
+        };
+        if route.system.is_empty() || !self.in_galaxy() && route.system == self.craft.frame.star() {
+            return Ok(None);
+        }
+        if let Some(arrival) = atlas.arrival(&route.system) {
+            return Ok(Some(arrival));
+        }
+        match atlas.locate(&route.system) {
+            None => Err(Wait::Star(route.system.clone())),
+            Some(None) => Ok(None),
+            Some(Some(candidate)) => Err(Wait::System(candidate.clone())),
+        }
+    }
+
+    /// From another system's frame into this one.
+    fn rebase_from(&self, arrival: &Arrival) -> Rebase {
+        let (system, page) = (arrival.field.system(), arrival.field.page());
+        let frame = Frame::System {
+            star: page_star_id(system, page),
+        };
+        let inverse = self.basis().inverse();
+        Rebase {
+            rotation: inverse * page_basis(system, page),
+            translation: inverse
+                * ((DVec3::from_array(arrival.origin_pc) - DVec3::from_array(self.origin_pc))
+                    * PC_METRES),
+            velocity: inverse * (frame_velocity(&frame, arrival.origin_pc) - self.frame_velocity()),
+            frame_changed: true,
+        }
     }
 
     /// The frame change due at the current state, if any, before moving.
@@ -613,12 +661,29 @@ impl Voyage {
     }
 
     /// Moves the craft by one fixed step in its current frame, then applies
-    /// the orders kept for the step it reaches.
-    pub fn advance(&mut self) -> Vec<Refused> {
+    /// the orders kept for the step it reaches. A route to another system
+    /// sees `destination`'s target and bodies from this frame.
+    pub fn advance(&mut self, destination: Option<&Arrival>) -> Vec<Refused> {
+        let remote = destination
+            .filter(|arrival| {
+                self.in_galaxy()
+                    || page_star_id(arrival.field.system(), arrival.field.page())
+                        != self.craft.frame.star()
+            })
+            .map(|arrival| Remote {
+                field: &arrival.field,
+                rebase: self.rebase_from(arrival),
+            });
         if self.in_galaxy() {
-            self.craft.step(&Empty);
+            self.craft.step(&Bound {
+                local: &Empty,
+                remote,
+            });
         } else {
-            self.craft.step(&self.field);
+            self.craft.step(&Bound {
+                local: &self.field,
+                remote,
+            });
         }
         self.apply_due()
     }
@@ -682,6 +747,74 @@ pub fn frame_velocity(frame: &Frame, origin_pc: [f64; 3]) -> DVec3 {
         Frame::System { star } => {
             DVec3::from_array(crate::kinematics::system_velocity_kms(star, origin_pc)) * 1_000.0
         }
+    }
+}
+
+/// The gravity a craft steps in, with the target and bodies of another
+/// system its route flies to, seen from the craft's frame. They steer the
+/// route only: gravity is the local system's alone.
+struct Bound<'a, G> {
+    local: &'a G,
+    remote: Option<Remote<'a>>,
+}
+
+struct Remote<'a> {
+    field: &'a Field,
+    /// From its frame into the craft's.
+    rebase: Rebase,
+}
+
+impl<G: Gravity> Gravity for Bound<'_, G> {
+    fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3] {
+        self.local.acceleration(position, seconds)
+    }
+
+    fn reference(&self, id: Option<&str>, position: [f64; 3], seconds: f64) -> Option<State> {
+        self.local.reference(id, position, seconds)
+    }
+
+    fn orbit_reference(
+        &self,
+        current: Option<&str>,
+        position: [f64; 3],
+        seconds: f64,
+    ) -> Option<super::Reference> {
+        self.local.orbit_reference(current, position, seconds)
+    }
+
+    fn closest(&self, position: [f64; 3], seconds: f64) -> Option<super::Closest> {
+        self.local.closest(position, seconds)
+    }
+
+    fn target(&self, id: &str, seconds: f64) -> Option<super::Target> {
+        self.local.target(id, seconds).or_else(|| {
+            let remote = self.remote.as_ref()?;
+            let mut target = remote.field.target(id, seconds)?;
+            target.state = remote.rebase.state(target.state);
+            Some(target)
+        })
+    }
+
+    fn obstacles(&self, seconds: f64) -> Vec<super::route::Obstacle> {
+        let mut obstacles = self.local.obstacles(seconds);
+        if let Some(remote) = &self.remote {
+            obstacles.extend(
+                remote
+                    .field
+                    .obstacles(seconds)
+                    .into_iter()
+                    .map(|mut obstacle| {
+                        let state = remote.rebase.state(State {
+                            position: obstacle.centre.to_array(),
+                            velocity: obstacle.velocity.to_array(),
+                        });
+                        obstacle.centre = DVec3::from_array(state.position);
+                        obstacle.velocity = DVec3::from_array(state.velocity);
+                        obstacle
+                    }),
+            );
+        }
+        obstacles
     }
 }
 

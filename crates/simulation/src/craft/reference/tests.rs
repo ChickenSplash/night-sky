@@ -273,8 +273,8 @@ fn queued_matched_exit_resolves_at_execution_tick_and_replays() {
     }
     while voyage.craft.tick < tick {
         assert!(voyage.craft.warp.engaged);
-        assert!(voyage.advance().is_empty());
-        assert!(restored.advance().is_empty());
+        assert!(voyage.advance(None).is_empty());
+        assert!(restored.advance(None).is_empty());
         assert_eq!(voyage.craft, restored.craft);
     }
     assert!(!voyage.craft.warp.engaged);
