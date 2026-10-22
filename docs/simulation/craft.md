@@ -450,7 +450,31 @@ itself, so replays and servers run it from the same inputs.
   from the turn rate and pointing's easing. τ is fitted to it at plotting,
   again once lined up, and once a second until the approach (the last ten
   standoffs), so a trip whose turn ran long catches up. A time that cannot
-  be met (a 10 s trip facing away) is accepted and shows as `late_s`.
+  be met (a 10 s trip facing away, or a tight detour) is accepted and shows
+  as `late_s`, with its cause in `slowed_by`: the first turn, the costliest
+  bend, or the top warp speed.
+- **Bodies in the way:** every star and planet but the target has a
+  keep-clear sphere of 1.5 radii. Each step the pilot checks the line to
+  the standoff against them; when one is in the way it aims along the
+  tangent to the nearest such sphere, on the side the target lies, and
+  checks that tangent against the others in turn. Worked out afresh every
+  step, it curves the ship round like a string pulled tight, so moving
+  bodies and several in a row need nothing more. A ship starting inside a
+  sphere, such as low over a planet, aims along its horizon and climbs out.
+  - **Bend speed:** rounding a body, speed is capped so the aim turns at no
+    more than half the turn rate, leaving the rest for pointing to follow.
+    The lead then uses the tangent's own turn rate, not the line of sight's.
+  - **Impact slowdown:** heading into a sphere it is outside of, speed is
+    capped to the gap over 1.7 s (pointing's response plus the speed ramp),
+    so a late turn never cuts into it.
+  - **Timing:** at plotting and once a second, the trip is measured along
+    the wrapped path (tangents and arcs round spheres frozen where they are
+    now), and τ is fitted to the time left after the bends. A bend of turn θ
+    allows (1 − cos θ) over half the turn rate up to a quarter turn, the
+    rest at that rate, plus pointing's 1.4 s settling scaled by θ up to a
+    quarter turn: a barely hidden target costs almost nothing.
+  - **Cost:** one line-to-sphere test per body per step, over the bodies
+    gravity already sums; the path is measured only once a second.
 - **Aim:** the bubble's wanted velocity closes along the line of sight and
   cancels the drift between the ship's ordinary velocity and the target's,
   so moving targets are met. Flying off the line turns the line of sight
@@ -469,10 +493,11 @@ itself, so replays and servers run it from the same inputs.
   sublight thrust still on, or a trip time out of range.
 - **Readout:** `route` in the ship state holds the target, arrival mode,
   stage (`align`, `cruise`, `approach`, `arrived`, `released`), trip time, τ,
-  standoff, distance, ETA, lateness, whether the top speed stretches it and
-  how it ended. It is kept after the route ends.
+  standoff, distance, ETA, lateness and its cause, the detour beyond the
+  straight line, the body being steered round, whether the top speed
+  stretches it and how it ended. It is kept after the route ends.
 
-Bodies in the way, interstellar routes and ships as targets are later
+Interstellar routes and ships as targets are later
 checkpoints of [phase 9](../plans/flight-sim.md#9--plotted-warp-autopilot).
 
 Below the gravity cutoff, active warp retains its final gravity sample for

@@ -582,8 +582,22 @@ def ship(args):
                 raise RuntimeError(f"no craft `{args.id}`")
             return found[0]
         return craft
+    plotting = (getattr(args, "order", None) or {}).get("words") == ["warp", "to"] \
+        and "tick" not in command and "in_s" not in command
+    if plotting:
+        before = {entry["id"]: (entry.get("route") or {}).get("start_tick")
+                  for entry in request(args.port, endpoint("state", "craft"))["craft"]}
     sent = time.time() * 1000
     result = request(args.port, "/command", json.dumps(command).encode("utf-8"))
+    if plotting and result.get("status") == "accepted":
+        # Report the plotted route, with its best time if it runs late.
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            for entry in request(args.port, endpoint("state", "craft"))["craft"]:
+                route = entry.get("route") or {}
+                if route and route.get("start_tick") != before.get(entry["id"]):
+                    return dict(result, craft=entry["id"], route=route)
+            time.sleep(0.1)
     if args.ship == "spawn" and result.get("status") == "accepted":
         # The new ship is selected: report it from the first later snapshot.
         deadline = time.monotonic() + 2

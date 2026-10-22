@@ -8,7 +8,12 @@
 //! that reaches the standoff after τ × ln(distance ÷ standoff).
 use super::*;
 use crate::AU_METRES;
+use std::f64::consts::FRAC_PI_2;
 use warp::{MAX_SPEED, MIN_SPEED, RAMP_SECONDS};
+use wrap::Bend;
+pub use wrap::Obstacle;
+
+mod wrap;
 
 /// Trip times an order may ask for, in seconds.
 pub const MIN_TRIP_S: f64 = 10.0;
@@ -33,6 +38,14 @@ pub const MAX_LEAD_DEG: f64 = 45.0;
 pub const APPROACH_STANDOFFS: f64 = 10.0;
 /// Shortest time constant: the speed ramp must keep up with the profile.
 pub const MIN_TAU_S: f64 = 2.0 * RAMP_SECONDS;
+/// Share of the turn rate a bend round a body may use, leaving the rest for
+/// pointing to catch up.
+pub const BEND_SHARE: f64 = 0.5;
+/// Least time the ship takes to reach a sphere it is heading into: enough
+/// for pointing to respond and the speed ramp to slow it.
+pub const IMPACT_SECONDS: f64 = attitude::WARP_POINT_SECONDS + RAMP_SECONDS;
+/// A trip this far behind its time says what is slowing it.
+pub const LATE_S: f64 = 0.5;
 /// Why a turning or warp speed order ends a route.
 pub(super) const TAKEOVER: &str = "Manual takeover";
 
@@ -97,6 +110,17 @@ pub struct Route {
     pub late_s: f64,
     /// The top warp speed stretches the trip.
     pub capped: bool,
+    /// How much longer the path round bodies in the way is than the straight
+    /// line, as last measured.
+    #[schemars(extend("x-unit" = "m"))]
+    pub detour_m: f64,
+    /// Time allowed for slowing round the bends still ahead.
+    #[schemars(extend("x-unit" = "s"))]
+    pub bends_s: f64,
+    /// The body being steered round now.
+    pub around: Option<String>,
+    /// What keeps a late trip from its time, such as a detour.
+    pub slowed_by: Option<String>,
     /// The nose has lined up once.
     pub aligned: bool,
     /// How the route ended.
@@ -240,6 +264,48 @@ pub fn default_trip_s(distance_m: f64) -> f64 {
     (SHORT_TRIP_S + 10.0 * (distance_m / AU_METRES).log10()).clamp(SHORT_TRIP_S, LONG_TRIP_S)
 }
 
+/// Seconds allowed for slowing round bends at `turn_rate` rad/s. Round
+/// each, speed is capped by how far the aim is pulled off the line, which
+/// eases as the target comes into view: the last quarter turn takes
+/// 1 − cos of what is left of it, any more is flown at the full cap. Then
+/// pointing settles on the new line, for longer the larger the turn.
+fn bend_seconds(bends: &[Bend], turn_rate: f64) -> f64 {
+    bends
+        .iter()
+        .map(|bend| one_bend_seconds(bend.turn, turn_rate))
+        .sum()
+}
+
+fn one_bend_seconds(turn: f64, turn_rate: f64) -> f64 {
+    let eased = 1.0 - turn.min(FRAC_PI_2).cos();
+    let settle = attitude::WARP_POINT_SECONDS * (turn / FRAC_PI_2).min(1.0);
+    (eased + (turn - FRAC_PI_2).max(0.0)) / (BEND_SHARE * turn_rate) + settle
+}
+
+/// What keeps a trip from its time: the first turn, the slowest bend or the
+/// top warp speed, whichever costs most.
+fn slowed_by(align_s: f64, bends: &[Bend], turn_rate: f64, capped: bool) -> Option<String> {
+    let bend = bends
+        .iter()
+        .map(|bend| (bend, one_bend_seconds(bend.turn, turn_rate)))
+        .max_by(|a, b| a.1.total_cmp(&b.1));
+    match bend {
+        Some((bend, seconds)) if seconds >= align_s => {
+            Some(format!("the detour round `{}`", bend.id))
+        }
+        _ if capped && align_s < LATE_S => Some("the top warp speed".into()),
+        _ if align_s > 0.0 => Some("turning round first".into()),
+        _ => None,
+    }
+}
+
+/// Every obstacle but the target, which the route ends outside of anyway.
+fn others(field: &impl Gravity, target: &str, seconds: f64) -> Vec<Obstacle> {
+    let mut obstacles = field.obstacles(seconds);
+    obstacles.retain(|obstacle| obstacle.id != target);
+    obstacles
+}
+
 /// Seconds the bubble takes to turn the nose `angle` radians and settle
 /// within `ALIGNED_DEG`, at `turn_rate` rad/s: flat out, then easing in as
 /// pointing does.
@@ -275,28 +341,35 @@ impl Craft {
             return Err(format!("`{id}` cannot be orbited"));
         }
         let standoff = target.standoff()?;
-        let offset =
-            DVec3::from_array(target.state.position) - DVec3::from_array(self.state().position);
-        let distance = offset.length();
+        let from = DVec3::from_array(self.state().position);
+        let goal = DVec3::from_array(target.state.position);
+        let distance = from.distance(goal);
         if distance <= standoff {
             return Err(format!(
                 "Already within the standoff of `{id}`; use warp match to drop out here"
             ));
         }
+        // Timed along the path round bodies in the way, with its bends.
+        let obstacles = others(field, &target.id, seconds);
+        let aim = wrap::aim(&obstacles, from, goal, standoff);
+        let (path, bends) = wrap::path(&obstacles, from, goal, standoff);
+        let turn_rate = self.turn_rate();
         let nose = DQuat::from_array(self.orientation) * -DVec3::Z;
-        let align = align_seconds(nose.angle_between(offset), self.turn_rate());
+        let align = align_seconds(nose.angle_between(aim.direction), turn_rate);
+        let bends_s = bend_seconds(&bends, turn_rate);
         let trip = requested_s.unwrap_or_else(|| default_trip_s(distance));
-        let tau = fit_tau(distance, standoff, trip - align);
+        let tau = fit_tau(path, standoff, trip - align - bends_s);
         if !self.warp.engaged {
             self.engage_warp()?;
         }
         self.input.controls.rotation = [0.0; 3];
         self.autopilot = AttitudePilot::Point {
-            target: PointTarget::Vector((offset / distance).to_array()),
+            target: PointTarget::Vector(aim.direction.to_array()),
             up: None,
             attitude: self.orientation,
         };
-        let eta = align + profile_seconds(distance, standoff, tau);
+        let eta = align + bends_s + profile_seconds(path, standoff, tau);
+        let capped = path / tau > MAX_SPEED;
         self.route = Some(Route {
             target: target.id,
             arrival,
@@ -309,7 +382,13 @@ impl Craft {
             distance_m: distance,
             eta_s: eta,
             late_s: eta - trip,
-            capped: distance / tau > MAX_SPEED,
+            capped,
+            detour_m: path - distance,
+            bends_s,
+            around: aim.around.map(|i| obstacles[i].id.clone()),
+            slowed_by: (eta - trip > LATE_S)
+                .then(|| slowed_by(align, &bends, turn_rate, capped))
+                .flatten(),
             aligned: false,
             end: None,
         });
@@ -349,39 +428,81 @@ impl Craft {
             return;
         };
         let state = self.state();
-        let offset = DVec3::from_array(target.state.position) - DVec3::from_array(state.position);
+        let from = DVec3::from_array(state.position);
+        let goal = DVec3::from_array(target.state.position);
+        let offset = goal - from;
         let distance = offset.length();
         if distance <= route.standoff_m {
             self.arrive(&target, distance);
             return;
         }
+        let obstacles = others(field, &target.id, seconds);
+        let aim = wrap::aim(&obstacles, from, goal, route.standoff_m);
         let nose = DQuat::from_array(self.orientation) * -DVec3::Z;
         let turn_rate = self.turn_rate();
         let tick = self.tick;
+        let bubble_velocity = nose * self.warp.actual_ms;
         let route = self.route.as_mut().expect("active route");
         let approach = distance < APPROACH_STANDOFFS * route.standoff_m;
-        // Fit τ again once lined up, then once a second: the turn and the
-        // speed ramp rarely take exactly the time allowed for them.
-        let first = !route.aligned && nose.angle_between(offset) <= ALIGNED_DEG.to_radians();
-        if first || (route.aligned && !approach && (tick - route.start_tick) % REFERENCE_STEPS == 0)
-        {
-            let left = super::tick_seconds(route.start_tick) + route.trip_s - seconds;
-            route.tau_s = fit_tau(distance, route.standoff_m, left);
+        // Measure the wrapped path once lined up, then once a second, and
+        // fit τ again until the approach: the turn, the bends and the speed
+        // ramp rarely take exactly the time allowed for them.
+        let first = !route.aligned && nose.angle_between(aim.direction) <= ALIGNED_DEG.to_radians();
+        let due = route.aligned && (tick - route.start_tick) % REFERENCE_STEPS == 0;
+        if first || due {
+            let (path, bends) = wrap::path(&obstacles, from, goal, route.standoff_m);
+            route.detour_m = path - distance;
+            route.bends_s = bend_seconds(&bends, turn_rate);
+            if first || !approach {
+                let left = super::tick_seconds(route.start_tick) + route.trip_s - seconds;
+                route.tau_s = fit_tau(path, route.standoff_m, left - route.bends_s);
+            }
+            let late =
+                seconds + route.bends_s + profile_seconds(path, route.standoff_m, route.tau_s)
+                    - super::tick_seconds(route.start_tick)
+                    - route.trip_s;
+            let capped = path / route.tau_s > MAX_SPEED;
+            // Time lost to a bend already passed stays lost: keep its cause.
+            route.slowed_by = if late > LATE_S {
+                slowed_by(0.0, &bends, turn_rate, capped).or(route.slowed_by.take())
+            } else {
+                None
+            };
         }
         route.aligned |= first;
-        // Close on the target along the line to it, and cancel the drift of
-        // the ship's ordinary velocity against the target's.
+        // Close on the target along the line to it, or the edge of the body
+        // in the way, and cancel the drift of the ship's ordinary velocity
+        // against the target's.
         let sight = offset / distance;
         let drift = DVec3::from_array(target.state.velocity) - DVec3::from_array(state.velocity);
-        let bubble = sight * profile_speed(distance, route.tau_s) + drift;
+        let remaining = distance + route.detour_m;
+        let mut speed = profile_speed(remaining, route.tau_s);
         // Flying off the line turns the line of sight, faster than pointing
         // follows once τ is short. Aiming ahead by as much as it turns over
         // pointing's response keeps the nose on it.
-        let closing = drift - nose * self.warp.actual_ms;
-        let lead = (sight.cross(closing) / distance * attitude::WARP_POINT_SECONDS)
-            .clamp_length_max(MAX_LEAD_DEG.to_radians());
-        let direction = DQuat::from_scaled_axis(lead) * bubble.normalize_or(sight);
-        let angle = nose.angle_between(direction);
+        let mut turn = sight.cross(drift - bubble_velocity) / distance;
+        if let Some(i) = aim.around {
+            // Rounding a body, the aim turns at speed over distance from its
+            // centre, which must stay within a share of the turn rate. The
+            // further the aim is pulled off the line, the more the ship turns.
+            let obstacle = &obstacles[i];
+            let deflection = sight.angle_between(aim.direction).min(FRAC_PI_2);
+            let bend = BEND_SHARE * turn_rate * obstacle.centre.distance(from) / deflection.sin();
+            speed = speed.min(bend);
+            let velocity = DVec3::from_array(state.velocity) + bubble_velocity;
+            turn = wrap::edge_turn(obstacle, from, velocity, aim.direction);
+        }
+        // Heading into a sphere, leave time to turn away and slow down.
+        if let Some(gap) = wrap::impact(&obstacles, from, nose) {
+            speed = speed.min(gap / IMPACT_SECONDS);
+        }
+        let bubble = aim.direction * speed + drift;
+        let lead =
+            (turn * attitude::WARP_POINT_SECONDS).clamp_length_max(MAX_LEAD_DEG.to_radians());
+        let wanted = bubble.normalize_or(aim.direction);
+        let direction = DQuat::from_scaled_axis(lead) * wanted;
+        // Off by the lead alone, the nose is on its line.
+        let angle = nose.angle_between(wanted);
         let share = ((ALIGNING_DEG.to_radians() - angle)
             / (ALIGNING_DEG - ALIGNED_DEG).to_radians())
         .clamp(0.0, 1.0);
@@ -390,7 +511,8 @@ impl Craft {
             0.0
         } else {
             align_seconds(angle, turn_rate)
-        } + profile_seconds(distance, route.standoff_m, route.tau_s);
+        } + route.bends_s
+            + profile_seconds(remaining, route.standoff_m, route.tau_s);
         route.stage = match (route.aligned, approach) {
             (false, _) => Stage::Align,
             (true, false) => Stage::Cruise,
@@ -399,7 +521,8 @@ impl Craft {
         route.distance_m = distance;
         route.eta_s = eta;
         route.late_s = seconds + eta - super::tick_seconds(route.start_tick) - route.trip_s;
-        route.capped = distance / route.tau_s > MAX_SPEED;
+        route.capped = remaining / route.tau_s > MAX_SPEED;
+        route.around = aim.around.map(|i| obstacles[i].id.clone());
         match &mut self.autopilot {
             AttitudePilot::Point {
                 target: PointTarget::Vector(vector),
@@ -442,6 +565,7 @@ impl Craft {
         self.autopilot = AttitudePilot::Manual;
         let route = self.route.as_mut().expect("active route");
         route.stage = Stage::Arrived;
+        route.around = None;
         route.distance_m = distance;
         route.eta_s = 0.0;
         route.late_s =

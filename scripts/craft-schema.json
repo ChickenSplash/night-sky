@@ -1469,6 +1469,28 @@
       },
       {
         "group": "route",
+        "help": "How much longer the path round bodies in the way is than the straight line, as last measured.",
+        "key": [
+          "route",
+          "detour_m"
+        ],
+        "kind": "number",
+        "label": "detour",
+        "unit": "m"
+      },
+      {
+        "group": "route",
+        "help": "Time allowed for slowing round the bends still ahead.",
+        "key": [
+          "route",
+          "bends_s"
+        ],
+        "kind": "number",
+        "label": "bends",
+        "unit": "s"
+      },
+      {
+        "group": "route",
         "help": "The nose has lined up once.",
         "key": [
           "route",
@@ -1476,6 +1498,16 @@
         ],
         "kind": "boolean",
         "label": "aligned"
+      },
+      {
+        "group": "route",
+        "help": "The body being steered round now.",
+        "key": [
+          "route",
+          "around"
+        ],
+        "kind": "text",
+        "label": "around"
       },
       {
         "group": "route",
@@ -1497,6 +1529,16 @@
         "kind": "number",
         "label": "requested",
         "unit": "s"
+      },
+      {
+        "group": "route",
+        "help": "What keeps a late trip from its time, such as a detour.",
+        "key": [
+          "route",
+          "slowed_by"
+        ],
+        "kind": "text",
+        "label": "slowed by"
       },
       {
         "group": "attitude",

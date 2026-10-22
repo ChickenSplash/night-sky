@@ -450,3 +450,305 @@ fn the_profile_fits_its_time_and_scales_its_default() {
     let turn = align_seconds(std::f64::consts::PI, 30f64.to_radians());
     assert!((7.0..10.0).contains(&turn), "{turn}");
 }
+
+fn planet(
+    index: u32,
+    semi_major_au: f64,
+    phase_rad: f64,
+    radius_km: f64,
+    mass_earth: f64,
+) -> Planet {
+    Planet {
+        id: format!("t/{index}"),
+        host: "t".into(),
+        orbit: Orbit {
+            semi_major_au,
+            phase_rad,
+            ..Orbit::default()
+        },
+        radius_km,
+        mass_earth,
+        ..Planet::default()
+    }
+}
+
+/// One star, `t`, with a Jupiter `t/0` at 1 AU, a Saturn `t/2` at 1.5 AU and
+/// an Earth `t/1` at 2 AU in line behind it, and an Earth `t/3` at 1 AU
+/// opposite.
+fn blocked() -> Field {
+    let mut sun = star("A", 1.0);
+    sun.id = "t".into();
+    Field::new(
+        StarSystem {
+            id: "t".into(),
+            name: "Blocked".into(),
+            position_ly: [0.0; 3],
+            planets: vec![
+                planet(0, 1.0, 0.0, 69_911.0, 317.8),
+                planet(1, 2.0, 0.0, 6_371.0, 1.0),
+                planet(2, 1.5, 0.0, 58_232.0, 95.2),
+                planet(3, 1.0, std::f64::consts::PI, 6_371.0, 1.0),
+            ],
+            stars: vec![sun],
+            barycentres: Vec::new(),
+            page_stars: Vec::new(),
+        },
+        0,
+    )
+}
+
+/// A flight's record: seconds flown, the nearest it came to any body's
+/// keep-clear sphere, as a share of its radius, and the bodies steered
+/// round.
+struct Flight {
+    seconds: f64,
+    nearest: f64,
+    nearest_body: String,
+    around: std::collections::BTreeSet<String>,
+}
+
+fn fly_watched(craft: &mut Craft, field: &Field) -> Flight {
+    let start = craft.seconds();
+    let mut flight = Flight {
+        seconds: 0.0,
+        nearest: f64::INFINITY,
+        nearest_body: String::new(),
+        around: Default::default(),
+    };
+    for _ in 0..(2.0 * MAX_TRIP_S / STEP_SECONDS) as usize {
+        let route = craft.route.as_ref().unwrap();
+        if !route.active() {
+            break;
+        }
+        flight.around.extend(route.around.clone());
+        craft.step(field);
+        let target = &craft.route.as_ref().unwrap().target;
+        for obstacle in others(field, target, craft.seconds()) {
+            let share = obstacle
+                .centre
+                .distance(DVec3::from_array(craft.state().position))
+                / obstacle.clear_m;
+            if share < flight.nearest {
+                flight.nearest = share;
+                flight.nearest_body = obstacle.id;
+            }
+        }
+    }
+    flight.seconds = craft.seconds() - start;
+    flight
+}
+
+fn centre(field: &Field, id: &str) -> DVec3 {
+    DVec3::from_array(field.target(id, 0.0).unwrap().state.position)
+}
+
+/// A ship at rest at `at`, facing `towards`.
+fn ship_at(at: DVec3, towards: DVec3) -> Craft {
+    let mut craft = ship(&single(), "t", DVec3::X, towards - at);
+    craft.place(
+        State {
+            position: at.to_array(),
+            velocity: [0.0; 3],
+        },
+        0,
+    );
+    craft
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_target_directly_or_barely_behind_a_planet_is_reached_round_it_on_time() {
+    let field = blocked();
+    let (jupiter, behind) = (centre(&field, "t/0"), centre(&field, "t/2"));
+    let clear = KEEP_CLEAR * 69_911e3;
+    let line = (jupiter - behind).normalize();
+    let side = line.any_orthonormal_vector();
+    // Straight through its centre, and grazing 0.95 keep-clear radii out.
+    for miss in [0.0, 0.95] {
+        let at = jupiter + line * 30.0 * clear + side * miss * clear * 31.0 / 30.0;
+        let mut craft = ship_at(at, behind);
+        order(&mut craft, &field, to("t/2", true, false, Some(40.0))).unwrap();
+        let route = craft.route.clone().unwrap();
+        assert_eq!(route.around.as_deref(), Some("t/0"), "{miss}");
+        assert!(
+            route.detour_m > 0.0 && route.late_s.abs() < 1e-6,
+            "{route:?}"
+        );
+        let flight = fly_watched(&mut craft, &field);
+        let route = craft.route.as_ref().unwrap();
+        assert_eq!(route.stage, Stage::Arrived, "{miss}: {route:?}");
+        assert!(flight.around.contains("t/0"));
+        assert!(
+            flight.nearest > 0.9,
+            "{miss}: {} of {}",
+            flight.nearest,
+            flight.nearest_body
+        );
+        assert!(
+            (flight.seconds - 40.0).abs() < 1.0,
+            "{miss}: {} s",
+            flight.seconds
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn two_bodies_in_a_row_are_both_wrapped_round() {
+    let field = blocked();
+    let (jupiter, far) = (centre(&field, "t/0"), centre(&field, "t/1"));
+    let line = (jupiter - far).normalize();
+    let mut craft = ship_at(jupiter + line * 1e9, far);
+    order(&mut craft, &field, to("t/1", false, false, Some(40.0))).unwrap();
+    let flight = fly_watched(&mut craft, &field);
+    assert_eq!(craft.route.as_ref().unwrap().stage, Stage::Arrived);
+    assert_eq!(
+        flight.around,
+        ["t/0", "t/2"].map(String::from).into(),
+        "{:?}",
+        craft.route
+    );
+    assert!(
+        flight.nearest > 0.9,
+        "{} of {}",
+        flight.nearest,
+        flight.nearest_body
+    );
+    assert!((flight.seconds - 40.0).abs() < 1.0, "{} s", flight.seconds);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_binary_companion_on_the_line_is_steered_round() {
+    let field = triple(20.0);
+    let (a, b) = (centre(&field, "t#A"), centre(&field, "t#B"));
+    let line = (b - a).normalize();
+    let mut craft = ship_at(b + line * 50.0 * crate::SUN_RADIUS_METRES, a);
+    order(&mut craft, &field, to("t#A", true, false, Some(30.0))).unwrap();
+    assert_eq!(craft.route.as_ref().unwrap().around.as_deref(), Some("t#B"));
+    let flight = fly_watched(&mut craft, &field);
+    assert_eq!(craft.route.as_ref().unwrap().stage, Stage::Arrived);
+    assert!(
+        flight.nearest > 0.9,
+        "{} of {}",
+        flight.nearest,
+        flight.nearest_body
+    );
+    assert!((flight.seconds - 30.0).abs() < 1.0, "{} s", flight.seconds);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn bodies_well_off_the_line_change_nothing() {
+    let field = blocked();
+    let (jupiter, behind) = (centre(&field, "t/0"), centre(&field, "t/2"));
+    let clear = KEEP_CLEAR * 69_911e3;
+    let line = (jupiter - behind).normalize();
+    let at = jupiter + line * 30.0 * clear + line.any_orthonormal_vector() * 10.0 * clear;
+    let mut craft = ship_at(at, behind);
+    order(&mut craft, &field, to("t/2", false, false, Some(30.0))).unwrap();
+    let route = craft.route.clone().unwrap();
+    assert_eq!(
+        (route.around, route.detour_m, route.bends_s),
+        (None, 0.0, 0.0)
+    );
+    let flight = fly_watched(&mut craft, &field);
+    assert!(flight.around.is_empty());
+    assert!((flight.seconds - 30.0).abs() < 0.5, "{} s", flight.seconds);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_planet_moving_onto_the_line_is_steered_round_when_it_gets_there() {
+    let field = blocked();
+    // From 10 AU in to the star over 20 minutes, the ship crosses 1 AU
+    // about a third of the way through. Aim the line where the Earth `t/3`
+    // will be then: at the start it is well clear.
+    let crossing = 0.37 * 1_200.0;
+    let earth = DVec3::from_array(field.target("t/3", crossing).unwrap().state.position);
+    let star = centre(&field, "t");
+    let mut craft = ship_at(star + (earth - star) * 10.0, star);
+    order(&mut craft, &field, to("t", false, false, Some(1_200.0))).unwrap();
+    assert_eq!(craft.route.as_ref().unwrap().around, None);
+    let flight = fly_watched(&mut craft, &field);
+    assert_eq!(craft.route.as_ref().unwrap().stage, Stage::Arrived);
+    assert!(flight.around.contains("t/3"), "{:?}", flight.around);
+    assert!(
+        flight.nearest > 0.9,
+        "{} of {}",
+        flight.nearest,
+        flight.nearest_body
+    );
+    assert!(
+        (flight.seconds - 1_200.0).abs() < 1.0,
+        "{} s",
+        flight.seconds
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn leaving_from_behind_a_planet_climbs_round_it() {
+    // Low over the Earth's night side, bound for the far star C: the line
+    // runs through the planet. Interstellar departures start the same way.
+    let field = triple(20.0);
+    let (earth, far) = (centre(&field, "t#A/0"), centre(&field, "t#C"));
+    let away = (earth - far).normalize();
+    let at = earth + away * (6_371e3 + 400e3);
+    let mut craft = ship_at(at, at + away.any_orthonormal_vector());
+    order(&mut craft, &field, to("t#C", false, false, Some(30.0))).unwrap();
+    assert_eq!(
+        craft.route.as_ref().unwrap().around.as_deref(),
+        Some("t#A/0")
+    );
+    let flight = fly_watched(&mut craft, &field);
+    let route = craft.route.as_ref().unwrap();
+    assert_eq!(route.stage, Stage::Arrived, "{route:?}");
+    // It starts inside the keep-clear sphere and never sinks deeper.
+    let start = (6_371e3 + 400e3) / (KEEP_CLEAR * 6_371e3);
+    assert!(
+        flight.nearest > 0.98 * start,
+        "{} of {}",
+        flight.nearest,
+        flight.nearest_body
+    );
+    assert!((flight.seconds - 30.0).abs() < 1.0, "{} s", flight.seconds);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_time_too_short_for_its_detour_is_flown_as_fast_as_it_can_be() {
+    let field = blocked();
+    let (jupiter, behind) = (centre(&field, "t/0"), centre(&field, "t/2"));
+    let line = (jupiter - behind).normalize();
+    let at = jupiter + line * 80_000e3;
+    // Facing along the horizon, so the bend, not the first turn, costs most,
+    // and turning slowly.
+    let side = line.any_orthonormal_vector();
+    let mut craft = ship_at(at, at + side);
+    craft.warp.turn_rate_dps = 10.0;
+    order(
+        &mut craft,
+        &field,
+        to("t/2", false, false, Some(MIN_TRIP_S)),
+    )
+    .unwrap();
+    let route = craft.route.clone().unwrap();
+    assert!(route.late_s > 0.0, "{route:?}");
+    assert_eq!(route.slowed_by.as_deref(), Some("the detour round `t/0`"));
+    let flight = fly_watched(&mut craft, &field);
+    assert_eq!(craft.route.as_ref().unwrap().stage, Stage::Arrived);
+    assert!(
+        flight.nearest > 0.9 * 80.0 / (1.5 * 69.911),
+        "{}",
+        flight.nearest
+    );
+    let route_after = craft.route.as_ref().unwrap();
+    assert_eq!(route_after.slowed_by, route.slowed_by);
+    let planned = MIN_TRIP_S + route.late_s;
+    assert!(
+        (flight.seconds - planned).abs() < 2.0,
+        "{} s, planned {planned} s",
+        flight.seconds
+    );
+}

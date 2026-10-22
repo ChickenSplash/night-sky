@@ -486,17 +486,25 @@ fn route_facts(
         Stage::Arrived | Stage::Released => "",
     };
     rows.push(("Route stage".into(), stage.into()));
-    rows.push((
-        "Route distance".into(),
-        km_text((route.distance_m - route.standoff_m).max(0.0) / 1_000.0) + " to standoff",
-    ));
+    let mut distance =
+        km_text((route.distance_m - route.standoff_m).max(0.0) / 1_000.0) + " to standoff";
+    if route.detour_m > 0.0 {
+        distance += &format!(" · detour {}", km_text(route.detour_m / 1_000.0));
+    }
+    rows.push(("Route distance".into(), distance));
+    if let Some(around) = &route.around {
+        rows.push(("Route around".into(), body_label(live, galaxy, around)));
+    }
     let mut eta = format!(
         "{} · trip {}",
         duration_text(route.eta_s),
         duration_text(route.trip_s)
     );
-    if route.late_s > 0.5 {
+    if route.late_s > space_simulation::craft::route::LATE_S {
         eta += &format!(" · {} late", duration_text(route.late_s));
+        if let Some(cause) = &route.slowed_by {
+            eta += &format!(", {cause}");
+        }
     }
     if route.capped {
         eta += " · top speed";

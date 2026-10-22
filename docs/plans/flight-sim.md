@@ -801,12 +801,24 @@ Checkpoints:
      long is made up. A 10 s trip facing away runs about 4 s late: the
      turn alone takes about 9 s at 30 °/s, not the 6 s guessed above.
    - `--match` with `--orbit` is accepted as `--orbit`, which matches too.
-2. **Bodies in the way:** the per-step clearance check, aiming at the edge,
+2. ✅ **Bodies in the way:** the per-step clearance check, aiming at the edge,
    the bend speed cap, and the wrapped path in the trip time, best
    achievable time and ETA. Tests with a target directly and barely behind
    a planet, a binary companion on the line, two bodies in the way, a moving
    blocker, bodies well off the line, an interstellar departure from behind
    a planet, and a trip time too short for its detour.
+   - Done 2026-10-22. The departure test flies to a far star of the same
+     system from low over a planet's night side; true interstellar
+     departures wait for checkpoint 3 but start the same way.
+   - Found while testing: aiming at the edge alone let the nose lag into
+     the keep-clear spheres. The lead now follows the edge's own turn, and
+     speed is capped when heading into a sphere so there is time to turn
+     away and slow.
+   - Timing each bend by its full turn was far too pessimistic: speed round
+     an arc recovers as the target comes into view, so a bend costs
+     (1 − cos turn), plus pointing's settling scaled by the turn.
+   - `ns ship warp to` now replies with the plotted route, including the
+     best time and `slowed_by` when the asked time cannot be met.
 3. **Interstellar routes:** requesting the destination's data at plotting,
    aiming at its star then its body, and entry on the slowdown. Tests with a
    seeded system and a list system, through the background loader.

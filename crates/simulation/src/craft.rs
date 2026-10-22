@@ -238,6 +238,11 @@ pub trait Gravity {
     fn target(&self, _id: &str, _seconds: f64) -> Option<Target> {
         None
     }
+    /// The keep-clear spheres a route wraps round. Fields without bodies may
+    /// omit them.
+    fn obstacles(&self, _seconds: f64) -> Vec<route::Obstacle> {
+        Vec::new()
+    }
 }
 
 /// The body with the shortest free-fall time from a point.
@@ -522,6 +527,18 @@ impl Gravity for Field {
 
     fn target(&self, id: &str, seconds: f64) -> Option<Target> {
         Field::target(self, id, seconds)
+    }
+
+    fn obstacles(&self, seconds: f64) -> Vec<route::Obstacle> {
+        self.bodies(seconds)
+            .into_iter()
+            .map(|body| route::Obstacle {
+                id: body.id,
+                centre: DVec3::from_array(body.state.position),
+                velocity: DVec3::from_array(body.state.velocity),
+                clear_m: route::KEEP_CLEAR * body.radius_m,
+            })
+            .collect()
     }
 
     fn closest(&self, position: [f64; 3], seconds: f64) -> Option<Closest> {
