@@ -305,6 +305,7 @@ them from `/state/craft` (see [craft](../simulation/craft.md#in-the-client)).
 ./scripts/ns ship warp engage
 ./scripts/ns ship warp up          # multiply requested speed by √10
 ./scripts/ns ship warp down
+./scripts/ns ship warp sweep 0.5 --for 2  # sweep speed up 1 decade over 2 s (1 is 2 decades/s)
 # Steering while engaged: the same turning commands steer the bubble.
 ./scripts/ns ship rotate --yaw 0.5        # turn at half the turn rate, until changed
 ./scripts/ns ship rotate                  # stop turning (eases out over ~0.3 s)
@@ -349,7 +350,7 @@ The API uses `steer_craft`, for example
 or `{"type":"steer_craft","order":{"action":"warp","command":{"command":"set","speed_ms":1000000}}}`.
 The turn rate order is `{"action":"warp","command":{"command":"turn_rate","degrees_per_second":90}}`.
 `/state/craft/craft/<index>/warp` contains `engaged`, `requested_ms`, `actual_ms`,
-`gravity`, `stop_reason`, `turn_rate_dps` and the last step's `bubble_delta_m`
+`gravity`, `stop_reason`, `turn_rate_dps`, the held `sweep` and the last step's `bubble_delta_m`
 in frame axes. The bubble's current turn rate is `spin_rads`, body axes.
 `last_match` is null or the last successful matched exit's `body`, `orbit`,
 `tick` and `velocity_ms` (system-frame velocity at exit, not current velocity).

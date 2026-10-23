@@ -59,11 +59,18 @@ pub fn controls(ui: &mut egui::Ui, bindings: &Bindings) {
             (&keys(&[Up, Down]), "Fine thrusters up / down".into()),
             (
                 &keys(&[ThrottleUp, ThrottleDown]),
-                "Hold: throttle up / down, below zero is reverse".into(),
+                "Hold: throttle up / down, below zero is reverse; in warp, speed".into(),
             ),
             (
                 &keys(&[FullThrottle, CutThrottle]),
-                "Full / cut throttle".into(),
+                format!(
+                    "Full / cut throttle; {} in warp: slowest speed",
+                    keys(&[CutThrottle])
+                ),
+            ),
+            (
+                &keys(&[EngageWarp]),
+                "Cut thrust and engage warp, or drop out".into(),
             ),
             (
                 &keys(&[PitchUp, PitchDown, YawLeft, YawRight]),

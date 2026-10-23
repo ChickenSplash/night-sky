@@ -369,3 +369,31 @@ fn speed_validation_and_ramp() {
     let z = craft.state().position[2];
     assert!(z < 0.0 && z > -50.0);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_held_sweep_takes_as_long_for_every_factor_of_ten_and_dropout_ends_it() {
+    let mut craft = ship();
+    craft.engage_warp().unwrap();
+    craft.warp.sweep = 1.0;
+    let steps = (1.0 / (SWEEP_DECADES_PER_S * STEP_SECONDS)).round() as usize;
+    for _ in 0..steps {
+        craft.step(&Constant);
+    }
+    assert!((craft.warp.requested_ms - 10.0).abs() < 1e-9);
+    for _ in 0..steps {
+        craft.step(&Constant);
+    }
+    assert!((craft.warp.requested_ms - 100.0).abs() < 1e-9);
+    craft.warp.sweep = -1.0;
+    for _ in 0..10 * steps {
+        craft.step(&Constant);
+    }
+    assert_eq!(craft.warp.requested_ms, MIN_SPEED);
+    craft.disengage_warp("test");
+    assert_eq!(craft.warp.sweep, 0.0);
+    // An old snapshot has no sweep.
+    let mut old = serde_json::to_value(&craft.warp).unwrap();
+    old.as_object_mut().unwrap().remove("sweep");
+    assert_eq!(serde_json::from_value::<Warp>(old).unwrap().sweep, 0.0);
+}

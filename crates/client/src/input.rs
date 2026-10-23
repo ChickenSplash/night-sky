@@ -27,11 +27,15 @@ pub enum Action {
     PitchDown,
     YawLeft,
     YawRight,
-    /// Held: the main drive's throttle lever up or down.
+    /// Held: the main drive's throttle lever up or down, or in warp the
+    /// speed sweeping up or down.
     ThrottleUp,
     ThrottleDown,
     FullThrottle,
+    /// Cut the throttle, or in warp go to the slowest warp speed.
     CutThrottle,
+    /// Cut sublight thrust and engage warp, or drop out.
+    EngageWarp,
     StopRotation,
     /// Pilot the selected ship, or stop piloting.
     Pilot,
@@ -117,6 +121,7 @@ impl Default for Bindings {
             (K::ControlRight, ThrottleDown),
             (K::KeyZ, FullThrottle),
             (K::KeyX, CutThrottle),
+            (K::KeyG, EngageWarp),
             (K::KeyT, StopRotation),
             (K::Tab, Pilot),
             (K::Escape, Cancel),

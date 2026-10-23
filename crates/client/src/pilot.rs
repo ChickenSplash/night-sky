@@ -5,6 +5,7 @@ use crate::craft::{Fleet, Live, Order};
 use crate::input::{Action, Actions, Bindings};
 use crate::{Clock, Navigation, presentation::PresentationMode};
 use bevy::prelude::*;
+use space_simulation::craft::{WarpOrder, warp::MIN_SPEED};
 
 /// How fast Shift and Ctrl move the throttle lever, in full throttle per
 /// second.
@@ -31,14 +32,22 @@ pub struct Held {
     pub translation: [f64; 3],
     /// Pitch (nose up), yaw (nose left) and roll (left).
     pub rotation: [f64; 3],
+    /// Warp speed sweep, up positive.
+    pub sweep: f64,
 }
 
 /// What the held keys ask of the ship. Fine thrusters do nothing in warp,
-/// where thrust is refused; turning steers the bubble there.
+/// where thrust is refused; turning steers the bubble there, and the
+/// throttle keys sweep its speed.
 pub fn held(actions: &Actions, warp: bool) -> Held {
     use Action::*;
     let axis = |positive, negative| f64::from(actions.axis(positive, negative));
     Held {
+        sweep: if warp {
+            axis(ThrottleUp, ThrottleDown)
+        } else {
+            0.0
+        },
         translation: if warp {
             [0.0; 3]
         } else {
@@ -59,14 +68,38 @@ pub fn lever(throttle: f64, rate: f64, seconds: f64, reverse: bool) -> f64 {
     (throttle + rate * THROTTLE_RATE * seconds).clamp(low, 1.0)
 }
 
+fn warp(command: WarpOrder) -> Order {
+    Order::Warp { command }
+}
+
 /// The orders this frame's actions give, against the held controls last
-/// ordered.
+/// ordered. G drops out first, or cuts sublight thrust before engaging, so
+/// every order is valid when it applies.
 fn orders(actions: &Actions, live: &Live, sent: Held, seconds: f64) -> (Vec<Order>, Held) {
     let craft = &live.craft;
-    let warp = craft.warp.engaged;
-    let now = held(actions, warp);
+    let toggle = actions.just_pressed(Action::EngageWarp);
+    let engaged = craft.warp.engaged;
+    let in_warp = engaged != toggle;
+    let now = held(actions, in_warp);
     let mut orders = Vec::new();
-    if now.translation != sent.translation {
+    let engage = toggle && !engaged;
+    if toggle && engaged {
+        orders.push(warp(WarpOrder::Disengage));
+    }
+    if engage {
+        let controls = craft.input.controls;
+        if controls.throttle != 0.0 || craft.input.thrust != [0.0; 3] {
+            orders.push(Order::Throttle { value: 0.0 });
+        }
+        if controls.translation != [0.0; 3] {
+            orders.push(Order::Translate {
+                right: 0.0,
+                up: 0.0,
+                forward: 0.0,
+            });
+        }
+        orders.push(warp(WarpOrder::Engage));
+    } else if now.translation != sent.translation {
         let [right, up, forward] = now.translation;
         orders.push(Order::Translate { right, up, forward });
     }
@@ -74,7 +107,18 @@ fn orders(actions: &Actions, live: &Live, sent: Held, seconds: f64) -> (Vec<Orde
         let [pitch, yaw, roll] = now.rotation;
         orders.push(Order::Rotate { pitch, yaw, roll });
     }
-    if !warp {
+    if in_warp {
+        // Against the ship, not `sent`: dropout ends a sweep by itself.
+        let sweep = if engaged { craft.warp.sweep } else { 0.0 };
+        if now.sweep != sweep {
+            orders.push(warp(WarpOrder::Sweep { rate: now.sweep }));
+        }
+        if actions.just_pressed(Action::CutThrottle) && craft.warp.requested_ms != MIN_SPEED {
+            orders.push(warp(WarpOrder::Set {
+                speed_ms: MIN_SPEED,
+            }));
+        }
+    } else if !toggle {
         let throttle = craft.input.controls.throttle;
         let rate = f64::from(actions.axis(Action::ThrottleUp, Action::ThrottleDown));
         let value = if actions.just_pressed(Action::FullThrottle) {
@@ -127,6 +171,9 @@ fn leave(pilot: &mut Pilot, fleet: &mut Fleet) {
                     roll: 0.0,
                 },
             );
+        }
+        if sent.sweep != 0.0 && live.craft.warp.sweep != 0.0 {
+            give(live, warp(WarpOrder::Sweep { rate: 0.0 }));
         }
     }
 }
@@ -189,11 +236,20 @@ pub fn readout(live: &Live, bindings: &Bindings) -> Vec<String> {
         bindings.label(&[Action::Cancel]),
     )];
     let controls = craft.input.controls;
+    let speed = crate::format::speed_label;
+    let warp_key = bindings.label(&[Action::EngageWarp]);
     if craft.warp.engaged {
+        let sweep = match craft.warp.sweep {
+            s if s > 0.0 => " · rising",
+            s if s < 0.0 => " · falling",
+            _ => "",
+        };
         lines.push(format!(
-            "Warp {} · thrusters off",
-            crate::format::speed_label(craft.warp.actual_ms)
+            "Warp {} · set {}{sweep}",
+            speed(craft.warp.actual_ms),
+            speed(craft.warp.requested_ms)
         ));
+        lines.push(format!("{warp_key} drops out · thrusters off"));
     } else {
         let throttle = match controls.throttle {
             t if t < 0.0 => format!("Reverse {:.0}%", -t * 100.0),
@@ -207,6 +263,15 @@ pub fn readout(live: &Live, bindings: &Bindings) -> Vec<String> {
         lines.push(format!("{throttle}{fine}"));
         let spin = craft.spin.iter().map(|v| v * v).sum::<f64>().sqrt();
         lines.push(format!("Spin {:.1} °/s", spin.to_degrees()));
+        let cuts = if craft.check_engage().is_ok() {
+            ""
+        } else {
+            " cuts thrust and"
+        };
+        lines.push(format!(
+            "{warp_key}{cuts} warps at {}",
+            speed(craft.warp.requested_ms)
+        ));
     }
     lines
 }

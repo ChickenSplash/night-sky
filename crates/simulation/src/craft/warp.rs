@@ -22,6 +22,9 @@ pub const SPIN_TOLERANCE: f64 = 1e-6;
 pub const MIN_TURN_RATE_DPS: f64 = 1.0;
 pub const MAX_TURN_RATE_DPS: f64 = 360.0;
 pub const DEFAULT_TURN_RATE_DPS: f64 = 30.0;
+/// How fast a full speed sweep moves the requested speed, in factors of ten
+/// per second: 1 m/s to the top speed in about 10 s.
+pub const SWEEP_DECADES_PER_S: f64 = 2.0;
 /// Bubble speed at and above which gravity is ignored under either policy.
 /// A pass this fast changes ordinary velocity by at most metres per second
 /// for a main-sequence star, while sampling gravity only at the ends of each
@@ -55,6 +58,12 @@ pub struct Warp {
     #[serde(default = "default_turn_rate")]
     #[schemars(extend("x-unit" = "°/s"))]
     pub turn_rate_dps: f64,
+    /// Held sweep of the requested speed while engaged, from -1 to 1 of
+    /// `SWEEP_DECADES_PER_S`, so every factor of ten takes as long. Dropout
+    /// ends it.
+    #[serde(default)]
+    #[schemars(extend("x-unit" = "fraction"))]
+    pub sweep: f64,
     /// The displacement from bubble motion alone on the last physics step.
     #[schemars(extend("x-unit" = "m"))]
     pub bubble_delta_m: [f64; 3],
@@ -83,6 +92,7 @@ impl Default for Warp {
             gravity: GravityPolicy::Active,
             stop_reason: None,
             turn_rate_dps: DEFAULT_TURN_RATE_DPS,
+            sweep: 0.0,
             bubble_delta_m: [0.0; 3],
             last_match: None,
         }
@@ -122,8 +132,17 @@ impl Warp {
         Ok(())
     }
 
+    /// One step of the held sweep, kept on the speed scale.
+    fn sweep_step(&mut self) {
+        if self.sweep != 0.0 {
+            let factor = 10_f64.powf(self.sweep * SWEEP_DECADES_PER_S * STEP_SECONDS);
+            self.requested_ms = (self.requested_ms * factor).clamp(MIN_SPEED, MAX_SPEED);
+        }
+    }
+
     fn stop(&mut self, reason: &str) {
         self.engaged = false;
+        self.sweep = 0.0;
         self.actual_ms = 0.0;
         self.bubble_delta_m = [0.0; 3];
         self.stop_reason = Some(reason.into());
@@ -293,6 +312,7 @@ impl Craft {
     /// One fixed step of bubble transport, with ordinary drift and, under
     /// the active policy, gravity. No collision or route checks.
     pub(super) fn warp_step(&mut self, gravity: &impl Gravity) {
+        self.warp.sweep_step();
         let dt = STEP_SECONDS;
         let decay = (-dt / RAMP_SECONDS).exp();
         let speed = self.warp.requested_ms + (self.warp.actual_ms - self.warp.requested_ms) * decay;
