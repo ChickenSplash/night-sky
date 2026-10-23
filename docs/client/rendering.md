@@ -99,6 +99,34 @@ of that peak, a half-lit disc ($\alpha=\pi/2$) has about 32% of its full-phase l
 and a new planet contributes none from that star. The factor avoids confusing
 the brightest point on a sphere with its average brightness.
 
+### Atmospheres (prototype)
+
+A planet drawn as a disc may have an atmosphere: a shell mesh slightly larger
+than the air's top, whose pixels march single scattering along the line of
+sight (`render/atmosphere.rs`, `atmosphere.wgsl`). The shader finds the ground
+and the top analytically, in planet radii and measured from the ray's closest
+approach to the centre, so the limb holds in f32 at real distances; the mesh
+only chooses which pixels run. At each of 16 steps, light from every star is
+attenuated by an 8-step march towards it (none where the planet is in the
+way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase).
+Densities fall exponentially with height; an absorbing layer, such as ozone,
+falls linearly either side of its peak. For extinction coefficient
+$\sigma_t$, scattering $\sigma_s$, phase $p(\mu)$ and star flux $F$:
+
+$$
+L = \sum_\star \int F\,T_\star(s)\,T_\mathrm{eye}(s)\,\sigma_s(s)\,p(\mu)\,ds
+$$
+
+$F$ is exposed with the planet's gain and balance, so $L$ is on the surface's
+$AF/\pi$ scale. Output is premultiplied: $L$ is added and whatever lies behind
+is dimmed by the line of sight's transmittance, averaged to grey. Seen from
+inside, the far side of the shell is drawn over everything instead.
+
+For now only the selected planet has air, with Earth's coefficients from
+Hillaire (2020); `set_debug atmospheres false` hides it. There is no multiple
+scattering, the ground is lit by unattenuated starlight and points have no
+atmosphere. See [the plan](../plans/atmospheres.md).
+
 ### Physical model versus presentation
 
 Luminosities, reflectance and orbit geometry supply the light; exposure,
@@ -112,8 +140,7 @@ lighting, so it should not be interpreted as a physical snapshot of the system.
 and representative surfaces. CIE observer functions use the analytic fits of
 Wyman, Sloan & Shirley (2013); the illumination and phase relations are standard
 inverse-square and Lambertian approximations. These models do not include dust
-extinction, atmospheric transmission, relativistic light propagation or a
-physically evolving atmosphere.
+extinction, relativistic light propagation or a physically evolving atmosphere.
 
 ## Pipeline and light inputs
 

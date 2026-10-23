@@ -24,13 +24,13 @@ pub(super) struct PointSprite;
 
 #[derive(Resource)]
 pub(super) struct Meshes {
-    sphere: Handle<Mesh>,
+    pub(super) sphere: Handle<Mesh>,
     square: Handle<Mesh>,
 }
 
 /// Reused entities, grown on demand and hidden when unused.
 #[derive(Resource)]
-pub(super) struct Pool<M: Material>(Vec<(Entity, Handle<M>)>);
+pub(super) struct Pool<M: Material>(pub(super) Vec<(Entity, Handle<M>)>);
 
 impl<M: Material> Default for Pool<M> {
     fn default() -> Self {
@@ -40,7 +40,9 @@ impl<M: Material> Default for Pool<M> {
 
 pub(super) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     commands.insert_resource(Meshes {
-        sphere: meshes.add(Sphere::new(1.0).mesh().uv(48, 24)),
+        // Fine enough that the facets stay within 0.06% of the sphere, which
+        // an atmosphere's limb assumes (`atmosphere.wgsl`).
+        sphere: meshes.add(Sphere::new(1.0).mesh().uv(192, 96)),
         square: meshes.add(Rectangle::new(2.0, 2.0)),
     });
 }
@@ -117,21 +119,21 @@ pub(super) fn shade(
     };
 }
 
-type Placement = (
+pub(super) type Placement = (
     &'static mut Transform,
     &'static mut GlobalTransform,
     &'static mut CellCoord,
     &'static mut Visibility,
 );
 
-type SpaceCameraCell = (
+pub(super) type SpaceCameraCell = (
     &'static CellCoord,
     &'static ChildOf,
     &'static GlobalTransform,
 );
 
 /// Grows a pool to `count` hidden entities in the camera's grid.
-fn grow<M: Material + Default>(
+pub(super) fn grow<M: Material + Default>(
     commands: &mut Commands,
     pool: &mut Pool<M>,
     materials: &mut Assets<M>,
@@ -166,7 +168,7 @@ fn grow<M: Material + Default>(
 
 /// Shows an entity in the camera's cell: the local translation is the render
 /// position. Sets the global transform too, because propagation has run.
-fn place(
+pub(super) fn place(
     (mut transform, mut global, mut cell, mut visibility): (
         Mut<Transform>,
         Mut<GlobalTransform>,
@@ -182,7 +184,7 @@ fn place(
     *visibility = Visibility::Inherited;
 }
 
-fn hide(mut visibility: Mut<Visibility>) {
+pub(super) fn hide(mut visibility: Mut<Visibility>) {
     if *visibility != Visibility::Hidden {
         *visibility = Visibility::Hidden;
     }

@@ -30,6 +30,7 @@ fn planet(flux: f64, pixels: f32) -> PlanetLight {
             kelvin: 5772.0,
         }],
         surface: light::surface("Rocky planet"),
+        air: None,
     }
 }
 
@@ -365,4 +366,30 @@ fn crescents_are_dimmer_than_full_discs() {
     assert!((phase(0.0) - 2.0 / 3.0).abs() < 1e-9);
     assert!(phase(PI / 2.0) < phase(0.0) / 2.0);
     assert!(phase(PI).abs() < 1e-9);
+}
+
+#[test]
+fn an_atmosphere_is_lit_on_the_surface_exposure_and_only_around_discs() {
+    let photometry = Photometry::default();
+    let earth = atmosphere::Atmosphere::EARTH.scaled(6.371e6);
+    // About 100 km of air on Earth's 6,371 km, its gas scale height 8 km.
+    assert!((earth.top - 1.0157).abs() < 1e-3);
+    assert!((earth.rayleigh.w * 6.371e6 - 8e3).abs() < 1.0);
+    let mut air = lights();
+    for planet in &mut air.planets {
+        planet.air = Some(earth);
+    }
+    let plain = resolve(&lights(), &photometry, -30.0, 0.0, PSF_SIGMA_PX);
+    let lit = resolve(&air, &photometry, -30.0, 0.0, PSF_SIGMA_PX);
+    assert!(plain.shells.is_empty());
+    // Only the two disc planets, not the points.
+    assert_eq!(lit.shells.len(), 2);
+    let (shell, body) = (&lit.shells[0], &lit.bodies[1]);
+    assert_eq!(shell.lights, body.lights);
+    // The flux against the surface's AF/π, both on one exposure.
+    let surface = light::surface("Rocky planet");
+    let ratio = f64::from(shell.suns[0].x / body.tints[0].x);
+    let expected = std::f64::consts::PI / (surface.albedo * surface.tint[0]);
+    assert!((ratio / expected - 1.0).abs() < 1e-4, "{ratio} {expected}");
+    assert_eq!(shell.suns[1], Vec4::ZERO);
 }

@@ -2,6 +2,7 @@
 //! for the GPU (`resolve`).
 use super::{
     POINT_PIXELS, PointMaterial,
+    atmosphere::Shell,
     lights::{Lights, MAX_LIGHTS, Photometry, granulation_contrast, phase},
 };
 use bevy::{math::DVec3, prelude::*};
@@ -276,6 +277,8 @@ pub struct Frame {
     pub points: Vec<Point>,
     /// Sprites around discs: blurred limbs, coronas and streaks.
     pub rims: Vec<Point>,
+    /// Atmospheres of planets drawn as discs.
+    pub shells: Vec<Shell>,
 }
 
 /// Exposes every body with the shared manual gain, then moves each towards its
@@ -394,6 +397,21 @@ pub fn resolve(
         for (i, (towards, tint, radiance)) in shine.iter().enumerate() {
             directions[i] = towards.extend(0.0);
             tints[i] = hdr_colour(*tint, exposure.value(*radiance) * balance).extend(0.0);
+        }
+        if let Some(air) = planet.air {
+            // Each star's flux in its own colour, on the surface's exposure.
+            let mut suns = [Vec4::ZERO; MAX_LIGHTS];
+            for (sun, l) in suns.iter_mut().zip(planet.light.iter()) {
+                let colour = DVec3::from_array(photometry.colour(l.kelvin));
+                *sun = hdr_colour(colour, exposure.value(l.flux) * balance).extend(0.0);
+            }
+            frame.shells.push(Shell {
+                centre: planet.centre,
+                radius: planet.radius,
+                air,
+                lights: directions,
+                suns,
+            });
         }
         frame.bodies.push(Shaded {
             centre: planet.centre,

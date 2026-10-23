@@ -551,6 +551,9 @@ impl Canvas<'_> {
                 && let Some(per_pixel) = self.per_pixel(centre)
             {
                 let disc = self.units(radius);
+                // Prototype: Earth's air on the selected planet only.
+                let selected = matches!(&nav.selection,
+                    Some(crate::Selection::Planet(id)) if *id == planet.id);
                 lights.planets.push(PlanetLight {
                     centre,
                     radius: disc,
@@ -558,6 +561,7 @@ impl Canvas<'_> {
                     per_pixel,
                     light: self.illumination(orbital, local),
                     surface: space_simulation::light::surface(&planet.class),
+                    air: selected.then(|| render::atmosphere::Atmosphere::EARTH.scaled(radius)),
                 });
             }
             let pixels = self.outline(gizmos, centre, self.units(radius), tint, basis, false);

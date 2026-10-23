@@ -78,6 +78,8 @@ The Bevy/egui client in `crates/client`:
   state, generating `ns ship` and the TUI's Ship tab.
 - [Native only](plans/native-only.md): why the browser/WASM build was dropped
   and what the removal covered.
+- [Planetary atmospheres](plans/atmospheres.md): the rendering prototype first,
+  then lookup tables and the simulated atmosphere and climate.
 
 ## Current limitations
 
@@ -97,6 +99,9 @@ The Bevy/egui client in `crates/client`:
   controls, automatic arrivals, atmospheric exclusion, saving or collisions yet;
   predicted impacts outside warp are shown but not enforced.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
+- Atmospheres are a rendering prototype: Earth's air on the selected planet
+  only, single scattering without lookup tables. No planet has a simulated
+  atmosphere yet.
 
 ## Organisation
 

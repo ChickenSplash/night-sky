@@ -170,7 +170,7 @@ pub(super) fn publish(
             "freeze_stream": debug.freeze_stream, "galactic_points": debug.galactic_points,
             "point_pixels": debug.point_pixels, "msaa": debug.msaa, "bloom": debug.bloom,
             "cull_blocks": debug.cull_blocks, "point_stars": debug.point_stars,
-            "split_multiples": debug.split_multiples,
+            "split_multiples": debug.split_multiples, "atmospheres": debug.atmospheres,
         },
         "performance": {
             "averages": metrics.live(&field),

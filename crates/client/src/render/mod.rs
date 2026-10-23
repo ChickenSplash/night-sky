@@ -11,6 +11,7 @@
 //! - Colours reach the GPU already exposed, so half-float HDR targets never see
 //!   raw radiance.
 
+pub mod atmosphere;
 pub mod black_hole;
 pub mod debug;
 pub mod exposure;
@@ -37,6 +38,7 @@ pub use resolve::*;
 
 const BODY_SHADER: Handle<Shader> = uuid_handle!("6f1f3c47-2a8e-4d61-9b53-4f8e0d7a91c2");
 const POINT_SHADER: Handle<Shader> = uuid_handle!("0c9b5d2e-7a41-4e8f-a3d6-5b2f81c4e970");
+const ATMOSPHERE_SHADER: Handle<Shader> = uuid_handle!("b4e2a9d1-58c3-4f7e-9a06-3d1c7e5f2b84");
 
 /// Deep navy behind the wireframes; realistic space is black.
 pub const SPACE_BLUE: Color = Color::srgb(0.015, 0.035, 0.09);
@@ -53,9 +55,11 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(app, BODY_SHADER, "body.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, POINT_SHADER, "point.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, ATMOSPHERE_SHADER, "atmosphere.wgsl", Shader::from_wgsl);
         app.add_plugins((
             MaterialPlugin::<BodyMaterial>::default(),
             MaterialPlugin::<PointMaterial>::default(),
+            MaterialPlugin::<atmosphere::AtmosphereMaterial>::default(),
             crate::render::exposure::ExposurePlugin,
             window_blur::WindowBlurPlugin,
         ))
@@ -64,11 +68,17 @@ impl Plugin for RenderPlugin {
         .init_resource::<Frame>()
         .init_resource::<Pool<BodyMaterial>>()
         .init_resource::<Pool<PointMaterial>>()
+        .init_resource::<Pool<atmosphere::AtmosphereMaterial>>()
         .add_systems(Startup, setup)
         .add_systems(Update, switch_camera)
         .add_systems(
             PostUpdate,
-            (shade, sync_bodies, sync_points)
+            (
+                shade,
+                sync_bodies,
+                sync_points,
+                atmosphere::sync_atmospheres,
+            )
                 .chain()
                 .after(crate::scene::draw)
                 .before(VisibilitySystems::VisibilityPropagate),

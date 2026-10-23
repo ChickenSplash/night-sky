@@ -26,6 +26,8 @@ pub enum DebugSwitch {
     /// Draw nearby multiple systems star by star once their stars could show
     /// apart, rather than as one point until arrival (`starfield.rs`).
     SplitMultiples,
+    /// Draw planetary atmospheres (`atmosphere.rs`).
+    Atmospheres,
 }
 
 impl DebugSwitch {
@@ -55,6 +57,9 @@ impl DebugSwitch {
             Self::SplitMultiples => {
                 "Resolve nearby multiple-star systems into individual stars once their separation is visible, rather than drawing one combined point until arrival."
             }
+            Self::Atmospheres => {
+                "Draw the scattering shell of planetary atmospheres. Turn off to compare the look and its GPU cost."
+            }
         }
     }
 }
@@ -69,6 +74,7 @@ pub struct RenderDebug {
     pub cull_blocks: bool,
     pub point_stars: bool,
     pub split_multiples: bool,
+    pub atmospheres: bool,
 }
 
 impl Default for RenderDebug {
@@ -82,12 +88,13 @@ impl Default for RenderDebug {
             cull_blocks: true,
             point_stars: true,
             split_multiples: true,
+            atmospheres: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 8] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 9] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -96,6 +103,7 @@ impl RenderDebug {
         (DebugSwitch::CullBlocks, "Cull blocks outside the view"),
         (DebugSwitch::PointStars, "Stars as points"),
         (DebugSwitch::SplitMultiples, "Split multiple stars"),
+        (DebugSwitch::Atmospheres, "Atmospheres"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -108,6 +116,7 @@ impl RenderDebug {
             DebugSwitch::CullBlocks => self.cull_blocks,
             DebugSwitch::PointStars => self.point_stars,
             DebugSwitch::SplitMultiples => self.split_multiples,
+            DebugSwitch::Atmospheres => self.atmospheres,
         }
     }
 
@@ -121,6 +130,7 @@ impl RenderDebug {
             DebugSwitch::CullBlocks => &mut self.cull_blocks,
             DebugSwitch::PointStars => &mut self.point_stars,
             DebugSwitch::SplitMultiples => &mut self.split_multiples,
+            DebugSwitch::Atmospheres => &mut self.atmospheres,
         } = on;
     }
 }

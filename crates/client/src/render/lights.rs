@@ -45,6 +45,7 @@ pub struct PlanetLight {
     /// Each star's light, brightest first, at most `MAX_LIGHTS`.
     pub light: Vec<Illumination>,
     pub surface: Surface,
+    pub air: Option<super::atmosphere::Air>,
 }
 
 /// One frame's realistic bodies, gathered while drawing the wireframes.
