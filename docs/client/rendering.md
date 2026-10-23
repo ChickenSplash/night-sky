@@ -141,7 +141,12 @@ the point reaches optical depth 10 in its least dimmed channel (less than
 depth between two points on a ray is the difference of their depths to the
 top of the air from the transmittance table, taken forwards along the ray,
 or backwards for a ray that reaches the ground, as its backward line never
-meets the ground; about ten halvings, one table read each, find the point.
+meets the ground; about ten halvings, one table read each, find the point
+(a test checks it lands between optical depths 9 and 13 on Venus). What lies
+behind is still dimmed by the whole ray's optical depth from the table, and
+ground behind by its own lost sunlight: it is drawn in full sunlight, so
+even 1/20,000 of it outshone Venus's scattered light and showed the distant
+ground, and the sun, through the haze.
 In thick air (Venus) rays either side of the horizon, or of the ground's
 limb from above, then end alike in the haze and meet without a seam, the
 ground is hidden where it should be, and all the steps go where light is

@@ -121,24 +121,26 @@ fn to_top(p: vec3<f32>, way: vec3<f32>, top: f32) -> vec3<f32> {
 // two points' depths to the top of the air, taken forwards, or backwards
 // for a ray that reaches the ground, whose backward line never meets it.
 // `base` is `start`'s depth that way.
-fn depth_to(nearest: vec3<f32>, dir: vec3<f32>, t: f32, base: vec3<f32>, reaches: bool, top: f32) -> f32 {
+fn depth_to(nearest: vec3<f32>, dir: vec3<f32>, t: f32, base: vec3<f32>, reaches: bool, top: f32) -> vec3<f32> {
     let p = nearest + dir * t;
-    let d = select(base - to_top(p, dir, top), to_top(p, -dir, top) - base, reaches);
-    return min(d.r, min(d.g, d.b));
+    return select(base - to_top(p, dir, top), to_top(p, -dir, top) - base, reaches);
+}
+
+fn least(depth: vec3<f32>) -> f32 {
+    return min(depth.r, min(depth.g, depth.b));
 }
 
 // Where the air between `start` and the point turns opaque in its least
-// dimmed channel, found by halving, or `end` if it never does.
-fn opaque_at(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32, reaches: bool, top: f32) -> f32 {
-    let base = to_top(nearest + dir * start, select(dir, -dir, reaches), top);
-    if depth_to(nearest, dir, end, base, reaches, top) < OPAQUE {
+// dimmed channel, found by halving, given `whole`, the depth to `end`.
+fn opaque_at(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32, base: vec3<f32>, whole: vec3<f32>, reaches: bool, top: f32) -> f32 {
+    if least(whole) < OPAQUE {
         return end;
     }
     var low = start;
     var high = end;
     for (var i = 0; i < 10; i++) {
         let mid = 0.5 * (low + high);
-        if depth_to(nearest, dir, mid, base, reaches, top) < OPAQUE {
+        if least(depth_to(nearest, dir, mid, base, reaches, top)) < OPAQUE {
             low = mid;
         } else {
             high = mid;
@@ -192,13 +194,17 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if end <= start {
         return vec4(0.0);
     }
-    // Past where the air turns opaque nothing is seen, ground or not, so the
-    // ray ends there. Rays either side of the horizon then end alike in
-    // thick air, and every step goes where light can be seen.
+    // Past where the air turns opaque no more scattered light is seen,
+    // ground or not, so the march ends there. Rays either side of the
+    // horizon then end alike in thick air, and every step goes where light
+    // can be seen. What lies behind is still dimmed by the whole ray's air.
     var stopped = false;
+    var whole = vec3(0.0);
 #ifdef TABLES
     if air.switches.y != 0.0 {
-        let opaque = opaque_at(nearest, dir, start, end, reaches, top);
+        let base = to_top(nearest + dir * start, select(dir, -dir, reaches), top);
+        whole = depth_to(nearest, dir, end, base, reaches, top);
+        let opaque = opaque_at(nearest, dir, start, end, base, whole, reaches, top);
         stopped = opaque < end;
         end = opaque;
     }
@@ -248,9 +254,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The ground behind was lit with undimmed starlight, so dim it by the
     // air between it and the stars as well, weighted by each star's share
     // of its light.
+    if stopped {
+        depth = whole;
+    }
     var sunlit = 1.0;
-    if reaches && !stopped {
-        let surface = normalize(nearest + dir * end);
+    if reaches {
+        let surface = normalize(nearest + dir * ground);
         var lit = 0.0;
         var total = 0.0;
         for (var j = 0u; j < 4u; j++) {

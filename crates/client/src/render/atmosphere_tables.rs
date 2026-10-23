@@ -188,6 +188,7 @@ impl AtmosphereTables {
 mod tests {
     use super::*;
     use crate::render::atmosphere::{AirSettings, Preset};
+    use bevy::math::DVec2;
 
     const EARTH_M: f64 = 6.371e6;
 
@@ -268,6 +269,71 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// The point where the air in front turns opaque, found as the shader
+    /// does from differences of the table's depths, is where a fine march
+    /// reaches that depth, on Venus from the ground up, looking down and
+    /// along the horizon.
+    #[test]
+    fn the_table_finds_where_the_air_turns_opaque() {
+        const OPAQUE: f64 = 10.0;
+        let radius = 5.756e6;
+        let air = AirSettings::preset(Preset::Venus)
+            .atmosphere()
+            .scaled(radius);
+        let top = f64::from(air.top);
+        let table = depths(&air);
+        for km in [0.05, 0.5, 2.0, 10.0, 40.0] {
+            let r = 1.0 + km * 1e3 / radius;
+            for mu in [-1.0_f64, -0.5, -0.1, -0.01, 0.0, 0.1] {
+                let along = |t: f64| DVec2::new(t * (1.0 - mu * mu).sqrt(), r + t * mu);
+                let b = r * mu;
+                let ground = -b - (b * b - r * r + 1.0).max(0.0).sqrt();
+                let reaches = b * b - r * r + 1.0 > 0.0 && ground > 0.0;
+                let end = if reaches {
+                    ground
+                } else {
+                    distance_to_top(top, r, mu)
+                };
+                // Forwards to the top, or backwards for rays reaching the
+                // ground, whose backward line never meets it.
+                let way = if reaches { -1.0 } else { 1.0 };
+                let to_top = |t: f64| {
+                    let p = along(t);
+                    let dir = DVec2::new((1.0 - mu * mu).sqrt(), mu) * way;
+                    sample(&table, top, p.length(), p.dot(dir) / p.length())
+                };
+                let depth = |t: f64| (way * (to_top(0.0) - to_top(t))).min_element();
+                let marched = |t: f64| -> f64 {
+                    let ds = t / 20_000.0;
+                    (0..20_000)
+                        .map(|i| {
+                            extinction(&air, along((f64::from(i) + 0.5) * ds).length() - 1.0) * ds
+                        })
+                        .sum::<DVec3>()
+                        .min_element()
+                };
+                if depth(end) < OPAQUE {
+                    assert!(marched(end) < OPAQUE * 1.3, "{km} km, mu {mu}: never stops");
+                    continue;
+                }
+                let (mut low, mut high) = (0.0, end);
+                for _ in 0..10 {
+                    let mid = 0.5 * (low + high);
+                    if depth(mid) < OPAQUE {
+                        low = mid;
+                    } else {
+                        high = mid;
+                    }
+                }
+                let got = marched(high);
+                assert!(
+                    (OPAQUE * 0.9..OPAQUE * 1.3).contains(&got),
+                    "{km} km, mu {mu}: stops at optical depth {got}"
+                );
             }
         }
     }
