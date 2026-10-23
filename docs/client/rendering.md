@@ -209,7 +209,11 @@ Titan and hydrogen giant presets use measured pressures and scale heights,
 with haze tuned by eye.
 
 **Limits.** There is no multiple scattering, so thick air is too dark and
-Venus's surface is nearly black; transmittance is grey, so colour does not
+Venus's surface is nearly black. A Monte Carlo reference
+(`render/atmosphere_reference.rs`, tests only) measures what is missing: on
+Earth, all orders give 1.4 to 2 times the sky light of one, on Titan 10 to
+over 1000 times; see [the plan](../plans/atmospheres.md) for its findings.
+Also, transmittance is grey, so colour does not
 shift through thick air; points have no atmosphere. The lookup-table stage
 adds multiple scattering and per-channel dimming. See
 [the plan](../plans/atmospheres.md).

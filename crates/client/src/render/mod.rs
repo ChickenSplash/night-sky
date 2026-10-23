@@ -12,6 +12,8 @@
 //!   raw radiance.
 
 pub mod atmosphere;
+#[cfg(test)]
+mod atmosphere_reference;
 pub mod atmosphere_tables;
 pub mod black_hole;
 pub mod debug;

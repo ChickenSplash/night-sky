@@ -215,12 +215,40 @@ Checkpoints:
    check: Venus is a smooth ball from orbit with no ground or limb edge,
    no seam from inside, Earth unchanged; "the fix we should have gone for
    from the start".
-4. **Light under Venus's cloud.** Today its surface is black: single
-   scattering through cloud of optical depth about 30 leaves no direct light
-   low down, while real Venus gets 2 to 3% of sunlight at the surface as a
-   dim orange overcast. Simplest approach first: one precomputed diffuse
-   transmittance per air, added as even light low in the air and on the
-   ground. Judged on Venus alone; Earth must not change visibly.
+4. **Light under Venus's cloud: multiple scattering.** Planned with the
+   user on 2026-10-23, in four steps, each checked before the next:
+   - 4a ✅ **Reference** (`render/atmosphere_reference.rs`, tests only).
+     Light followed backwards from the eye through the same air, scattering
+     off the air and a grey ground (albedo 0.3) any number of times: Monte
+     Carlo with delta tracking, starlight at each event from the
+     transmittance table, kept by scattering order. A fast test checks that
+     scattering once matches a fine march of the shader's maths; the
+     measurement is `cargo test --release -p space-client
+     atmosphere_reference -- --ignored --nocapture` (20 s, output in
+     `data/logs/atmosphere-reference.log`). Findings, as all orders over
+     scattering once (red, green, blue):
+     - Earth: sky light on the ground 1.6, 1.7, 2.0 with the star overhead;
+       the sky overhead 1.4 to 1.8; seen from orbit 1.07 to 1.36.
+     - Mars and the hydrogen giant: 1.2 to 4.4. Titan: 10 to over 1000, so
+       its look is almost all multiple scattering.
+     - **Venus stays black even with every order.** The preset's haze
+       absorbs like Earth's (scattering albedo 0.9), so light is lost long
+       before it gets through optical depth 30: the ground gets 0.02% of
+       the starlight in red, and from orbit the planet's reflectance is
+       0.35 to 0.61 (real Venus about 0.75).
+     - With a barely absorbing cloud (albedo 0.999, as real sulphuric acid
+       cloud), the ground gets 15%, 8%, 3% under an overhead star (5%, 3%,
+       1% at 60°), an orange overcast, and the reflectance from orbit is
+       0.92 to 1.01: brighter than real Venus both ways (about 2.5% of the
+       mean starlight reaches its ground). Real Venus lies in between, so
+       the preset needs its own haze absorption, tuned to these two numbers.
+   - 4b **Multiple scattering table** (Hillaire 2020): 32 x 32 by height and
+     the star's angle, built in the background per air, one lookup per view
+     step. Its own switch; compared with the reference for every preset.
+   - 4c **Light on the ground**: the sky's light falling on the ground, by
+     the star's angle, read by the surface shader. Its own switch.
+   - 4d Only if the table is far off the reference in thick air (Titan,
+     Venus): a correction for it.
 5. **Every planet with air.** The renderer takes an atmosphere per planet,
    not one tuning for the selected planet:
    - A per-planet source of `AirSettings` (a resource keyed by planet ID),
@@ -248,8 +276,9 @@ air if their cost is still high.
 
 Stage 1 is done (branch `atmospheres`). Stage 2's checkpoints 1 to 3b
 (jitter, transmittance table, fitted steps, stop where opaque) are done:
-no banding, no seams, Venus a smooth ball. Next: light under Venus's cloud
-(checkpoint 4).
+no banding, no seams, Venus a smooth ball. Checkpoint 4a, the multiple
+scattering reference, is done; next is 4b, the multiple scattering table,
+and with it a haze absorption for the Venus preset (see 4a's findings).
 
 - **Default view steps:** 16 now. Even 4 look smooth on Venus from orbit,
   so settle a lower default with the user; jitter is on by default but the

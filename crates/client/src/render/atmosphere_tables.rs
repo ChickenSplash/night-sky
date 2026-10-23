@@ -24,7 +24,7 @@ const STEPS: usize = 512;
 const CACHED: usize = 8;
 
 /// Extinction at `height` above the ground, as `medium` in `atmosphere.wgsl`.
-fn extinction(air: &Air, height: f64) -> DVec3 {
+pub(super) fn extinction(air: &Air, height: f64) -> DVec3 {
     let above = height.max(0.0);
     let rayleigh = (-above / f64::from(air.rayleigh.w)).exp();
     let mie = (-above / f64::from(air.shape.x)).exp();
@@ -48,6 +48,20 @@ fn unit(top: f64, r: f64, mu: f64) -> (f64, f64) {
     let (near, far) = (top - r, rho + horizon);
     let along = (distance_to_top(top, r, mu) - near) / (far - near).max(1e-12);
     (along.clamp(0.0, 1.0), (rho / horizon).clamp(0.0, 1.0))
+}
+
+/// The table's optical depth from radius `r` at cosine `mu`, bilinear, as
+/// the GPU samples it.
+#[cfg(test)]
+pub(super) fn sample(table: &[DVec3], top: f64, r: f64, mu: f64) -> DVec3 {
+    let [w, h] = SIZE;
+    let (along, height) = unit(top, r, mu);
+    let (x, y) = (along * (w - 1) as f64, height * (h - 1) as f64);
+    let (i, j) = ((x as usize).min(w - 2), (y as usize).min(h - 2));
+    let (fx, fy) = (x - i as f64, y - j as f64);
+    let at = |i: usize, j: usize| table[j * w + i];
+    (at(i, j) * (1.0 - fx) + at(i + 1, j) * fx) * (1.0 - fy)
+        + (at(i, j + 1) * (1.0 - fx) + at(i + 1, j + 1) * fx) * fy
 }
 
 /// The ray at Bruneton's coordinates: its radius and cosine from the zenith.
@@ -77,7 +91,7 @@ fn optical_depth(air: &Air, r: f64, mu: f64) -> DVec3 {
 }
 
 /// Optical depth per texel, row by row from the ground up.
-fn depths(air: &Air) -> Vec<DVec3> {
+pub(super) fn depths(air: &Air) -> Vec<DVec3> {
     let top = f64::from(air.top);
     let [w, h] = SIZE;
     (0..h)
@@ -194,18 +208,6 @@ mod tests {
 
     fn air(preset: Preset) -> Air {
         AirSettings::preset(preset).atmosphere().scaled(EARTH_M)
-    }
-
-    /// Bilinear, as the GPU samples the table.
-    fn sample(table: &[DVec3], top: f64, r: f64, mu: f64) -> DVec3 {
-        let [w, h] = SIZE;
-        let (along, height) = unit(top, r, mu);
-        let (x, y) = (along * (w - 1) as f64, height * (h - 1) as f64);
-        let (i, j) = ((x as usize).min(w - 2), (y as usize).min(h - 2));
-        let (fx, fy) = (x - i as f64, y - j as f64);
-        let at = |i: usize, j: usize| table[j * w + i];
-        (at(i, j) * (1.0 - fx) + at(i + 1, j) * fx) * (1.0 - fy)
-            + (at(i, j + 1) * (1.0 - fx) + at(i + 1, j + 1) * fx) * fy
     }
 
     #[test]
