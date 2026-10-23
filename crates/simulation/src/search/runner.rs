@@ -1,7 +1,5 @@
-//! Runs every open request in turn, a slice of work each, on whatever runs
-//! it: the native search thread, the browser's search worker, or the
-//! browser's frame-sliced fallback. Clocks are the caller's, in
-//! milliseconds, so this builds for every target.
+//! Runs every open request in turn, a slice of work each, on the search
+//! thread (`worker`). Clocks are the caller's, in milliseconds.
 use super::engine::{Progress, Search, SearchRequest, SearchResult, State};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -29,8 +27,7 @@ impl SearchUpdate {
     }
 }
 
-/// What a front end sends whoever runs its searches; the browser's search
-/// worker takes these as JSON.
+/// What a front end sends whoever runs its searches.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Order {

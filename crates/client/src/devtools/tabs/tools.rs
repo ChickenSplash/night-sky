@@ -1,18 +1,14 @@
-//! The `tools` tab: the GPU and core load tests and bug reports natively,
-//! the star-stream benchmark in the browser.
+//! The `tools` tab: the GPU and core load tests and bug reports.
 use crate::devtools::DevTools;
 use crate::devtools::core_load::CoreLoad;
 use crate::devtools::gpu_test::GpuTest;
+use crate::format::grouped;
+use crate::scene::{CameraPose, CameraRig};
 use crate::stars::stream::{Starfield, StreamMetrics};
 use crate::ui::terminal;
+use crate::{Clock, Navigation, Universe};
+use bevy::prelude::*;
 use bevy_egui::egui;
-#[cfg(not(target_arch = "wasm32"))]
-use {
-    crate::format::grouped,
-    crate::scene::{CameraPose, CameraRig},
-    crate::{Clock, Navigation, Universe},
-    bevy::prelude::*,
-};
 
 /// Returns whether Save bug report was clicked.
 pub fn tools_tab(
@@ -22,41 +18,24 @@ pub fn tools_tab(
     field: &Starfield,
     metrics: &StreamMetrics,
 ) -> bool {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        gpu_test(ui, gpu, field, metrics);
-        core_load_test(ui, core_load, field);
-        terminal::heading(ui, "bug report");
-        let report = terminal::button(ui, "save bug report");
-        terminal::note(
-            ui,
-            "Saves state, recent log lines and a screenshot under data/logs/bug-*.",
+    gpu_test(ui, gpu, field, metrics);
+    core_load_test(ui, core_load, field);
+    terminal::heading(ui, "bug report");
+    let report = terminal::button(ui, "save bug report");
+    terminal::note(
+        ui,
+        "Saves state, recent log lines and a screenshot under data/logs/bug-*.",
+    );
+    if !tools.report.is_empty() {
+        ui.label(
+            egui::RichText::new(&tools.report)
+                .font(terminal::font())
+                .color(terminal::CYAN),
         );
-        if !tools.report.is_empty() {
-            ui.label(
-                egui::RichText::new(&tools.report)
-                    .font(terminal::font())
-                    .color(terminal::CYAN),
-            );
-        }
-        report
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = (tools, core_load, gpu, field, metrics);
-        terminal::heading(ui, "benchmark");
-        if terminal::button(ui, "run star-stream benchmark") {
-            crate::devtools::benchmark::restart();
-        }
-        terminal::note(
-            ui,
-            "Reloads with no stars loaded, then flies 15 seconds from home towards the galactic centre at 1,000 ly/s. Results appear on screen and in the browser console.",
-        );
-        false
-    }
+    report
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &StreamMetrics) {
     use crate::devtools::gpu_test::{MEASURE_S, SETTLE_S};
     terminal::heading(ui, "gpu test");
@@ -161,7 +140,6 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
     terminal::facts_with_details(ui, "debug-gpu-test", &[("status", status, None)]);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn core_load_test(ui: &mut egui::Ui, load: &mut CoreLoad, field: &Starfield) {
     terminal::heading(ui, "core load test");
     if terminal::button(ui, "load the galactic centre from scratch") {
@@ -207,7 +185,6 @@ fn core_load_test(ui: &mut egui::Ui, load: &mut CoreLoad, field: &Starfield) {
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn save_bug_report(
     commands: &mut Commands,
     universe: &Universe,

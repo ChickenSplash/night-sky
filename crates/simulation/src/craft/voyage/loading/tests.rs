@@ -40,8 +40,7 @@ fn region(i: i64) -> Wait {
     Wait::Region(Region([i, 0, 0]))
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn bounded_deduplicated_demands_precede_speculation_and_expire() {
     let lists = Galaxy::default();
     let fake = Fake::default();
@@ -70,8 +69,7 @@ fn bounded_deduplicated_demands_precede_speculation_and_expire() {
     assert_eq!(loader.counts(), (0, 0));
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn one_ship_waits_while_another_advances_then_replays_identically() {
     let lists = Galaxy::default();
     let fake = Fake::default();
@@ -115,8 +113,7 @@ fn one_ship_waits_while_another_advances_then_replays_identically() {
     assert!(slow.pending_orders().is_empty());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn failed_jobs_are_retryable_without_inline_generation() {
     let lists = Galaxy::default();
     let fake = Fake::default();
@@ -139,8 +136,7 @@ fn failed_jobs_are_retryable_without_inline_generation() {
     assert!(loader.request(&region(0), true, &lists));
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn prefetch_tracks_boundaries_slowdown_and_turns_without_scanning_ftl_routes() {
     let mut ship = voyage();
     ship.origin_pc = [0.5, 0.5, 0.000_000_01];
@@ -176,8 +172,7 @@ fn prefetch_tracks_boundaries_slowdown_and_turns_without_scanning_ftl_routes() {
     assert_ne!(predicted[0], region(0));
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn only_approached_systems_are_prefetched() {
     use crate::neighbourhood::Candidate;
     let lists = Galaxy::default();
@@ -203,8 +198,7 @@ fn only_approached_systems_are_prefetched() {
     assert_eq!(prefetch(&ship, &cache), vec![Wait::System(near)]);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn an_orbit_needs_no_census_but_a_near_departure_prepares_one() {
     let mut ship = voyage();
     ship.craft.frame = Frame::System {
@@ -221,8 +215,7 @@ fn an_orbit_needs_no_census_but_a_near_departure_prepares_one() {
     assert!(!prefetch(&ship, &Blank).is_empty());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_speculative_request_is_promoted_when_a_step_needs_it() {
     let lists = Galaxy::default();
     let fake = Fake::default();

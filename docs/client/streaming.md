@@ -23,8 +23,8 @@ See [galaxy cells](../simulation/galaxy.md),
 - `try_point` only reads the `Sky`; it reports a missing integration or
   rejection bound as a `Need`, which `supply`/`complete` work out.
   `Loader::with_threads(n)` shares each cell's stars among n threads:
-  native `star_threads` uses three quarters of the machine's threads, at least
-  1; the browser uses 1. The perf tab's **threads** row shows them and how
+  `star_threads` uses three quarters of the machine's threads, at least
+  1. The perf tab's **threads** row shows them and how
   many were busy, from `Loader::take_worked`.
 - Stars needing something become holes, made again once it is worked out,
   so a cell is identical with any thread count (tested). With several threads,
@@ -40,24 +40,18 @@ See [galaxy cells](../simulation/galaxy.md),
   `Sky::descend` with `place`, so sliced loading gives the same stars.
   Loaded cells drop beyond `KEEP` × reach. Stars stream as compact `StarPoint`s.
 
-## Native and browser transports
+## Loader thread
 
 - `crates/client/src/stars/stream/` aims the loader at the camera
   (`CameraRig::galactic_ly`, lists anchored at home) to `Navigation::magnitude`
-  (6.5 by default): a worker thread natively (`native.rs`), a dedicated module
-  Web Worker in the browser (`web.rs`), into the `Starfield` resource.
-- The generation-only WASM crate is `crates/sim-worker` (shared with the
-  search worker), with `web/star-worker.js` as its entry point; both WASM
-  bundles are built by `scripts/build-web.sh`. `stream_wire` transfers cells
-  in binary with f64 positions. Browser startup/worker errors fall back to
-  the old 4 ms per-frame loader.
-- Recorded native loading near home: about 1.06 million stars in 175 cells in
-  2.3 s; the pre-worker browser took about 8 to 14 s. These are historical
-  measurements, not current performance guarantees.
+  (6.5 by default) on a worker thread (`native.rs`), into the `Starfield`
+  resource.
+- Recorded loading near home: about 1.06 million stars in 175 cells in
+  2.3 s. This is a historical measurement, not a current performance guarantee.
 - `space-simulation` builds at opt-level 3 in dev, or loading and tests crawl.
 - `StreamMetrics` (`stars/stream/metrics.rs`) samples generation time, cancelled
   jobs, mesh backlog and wait, render-sync time and frame-time percentiles
-  once per second; the debug window's `perf` tab shows them on both clients.
+  once per second; the debug window's `perf` tab shows them.
   Instrumentation does not change loading policy.
 
 ## Magnitude changes
@@ -66,8 +60,7 @@ The magnitude limit is the faintest apparent magnitude drawn as a star point:
 default `VISIBLE_MAGNITUDE` (6.5), adjustable from 3 to 10.5 in tenths. A HUD
 drag previews the value and applies it on release (`SetMagnitude`,
 `set_magnitude 5.5`), because a change restarts streaming from nothing.
-`stars/stream/mod.rs` starts a new `Backend` whenever its magnitude differs;
-the browser terminates the old worker and starts `star-worker.js?magnitude=`.
+`stars/stream/mod.rs` starts a new `Backend` whenever its magnitude differs.
 
 The upload filter, shader cutoff, rebuild distance, star picking and glow's
 unresolved light table all follow the limit. Fainter stars move into the glow,

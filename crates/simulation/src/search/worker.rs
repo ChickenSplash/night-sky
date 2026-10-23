@@ -1,6 +1,5 @@
 //! The native search service: one thread running every open request in
-//! turn (`Runner`), using `threads` threads for large cells. The browser
-//! runs the same `Runner` in its own Web Worker instead.
+//! turn (`Runner`), using `threads` threads for large cells.
 use super::engine::SearchRequest;
 use super::runner::{Order, Runner, SearchUpdate};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};

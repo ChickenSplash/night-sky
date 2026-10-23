@@ -1,6 +1,6 @@
 # Shared UI kit
 
-Both clients use the same egui interface over the 3D scene. The visual direction
+The client uses one egui interface over the 3D scene. The visual direction
 is precision: compact controls, consistent spacing and restrained accent motion,
 without changing the simulator's layout into a sidebar or HTML overlay.
 See [the object browser](browser.md) for its use in query editing and results,
@@ -120,6 +120,5 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
    descriptions outside painting loops; do not generate systems every frame.
 6. Add egui regressions for geometry, long presses, theme feedback and stable
    IDs. Larger feature test suites live beside their modules in `tests.rs`.
-7. Run `./scripts/check.sh` and `./scripts/build-web.sh`. Refresh the browser
-   to load rebuilt WASM. See [Development](../../development.md#checks) for optional
+7. Run `./scripts/check.sh`. See [Development](../../development.md#checks) for optional
    graphical checks and [Object browser](browser.md) for its controls.

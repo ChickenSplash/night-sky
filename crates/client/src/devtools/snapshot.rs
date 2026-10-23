@@ -11,27 +11,21 @@ use std::time::Duration;
 #[derive(Resource, Default)]
 pub struct Snapshot {
     pub revision: u64,
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub json: String,
     published_at: Option<Instant>,
     inspector: crate::ui::inspector::Cache,
-    #[cfg(not(target_arch = "wasm32"))]
     writer: Option<std::sync::mpsc::SyncSender<Published>>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) http: Option<super::http::SharedState>,
 }
 
 /// A published snapshot whose `performance.history` is an empty placeholder,
 /// and the history as recorded. Turning thousands of frames into JSON is left
 /// to readers that want them, on their own thread.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Clone)]
 pub struct Published {
     pub state: Arc<Value>,
     pub history: Arc<[FrameSample]>,
 }
 
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 impl Published {
     /// The whole snapshot, history included.
     pub fn full(&self) -> Value {
@@ -47,7 +41,6 @@ fn history_json(history: &[FrameSample]) -> Value {
 
 pub fn install(app: &mut App) {
     let snapshot = Snapshot {
-        #[cfg(not(target_arch = "wasm32"))]
         writer: file_writer(),
         ..Default::default()
     };
@@ -81,7 +74,6 @@ pub(super) fn publish(
     if scene.0.is_changed() {
         snapshot.inspector.invalidate();
     }
-    #[cfg(not(target_arch = "wasm32"))]
     if snapshot.writer.is_none() && snapshot.http.is_none() {
         return;
     }
@@ -197,7 +189,6 @@ pub(super) fn publish(
             "timing_note": "CPU elapsed timings exclude GPU uploads/rendering. Frame interval precedes the recorded CPU work; a CPU stall can lengthen the following interval. GPU diagnostics are delayed and not frame-correlated. Peaks are independent maxima. Render extract/prepare and recording/snapshot instrumentation are a frame or so behind.",
         },
     });
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let mut state = state;
         state["process_id"] = json!(std::process::id());
@@ -224,18 +215,11 @@ pub(super) fn publish(
             let _ = writer.try_send(published);
         }
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let mut state = state;
-        state["performance"]["history"] = history_json(metrics.history.make_contiguous());
-        snapshot.json = state.to_string();
-    }
     snapshot.published_at = Some(Instant::now());
     snapshot.revision += 1;
     metrics.instrumentation_latest.snapshot_ms = snapshot_start.elapsed().as_secs_f64() * 1000.0;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn file_writer() -> Option<std::sync::mpsc::SyncSender<Published>> {
     if std::env::var("NIGHT_SKY_SNAPSHOT").as_deref() != Ok("1") {
         return None;
@@ -280,12 +264,12 @@ fn file_writer() -> Option<std::sync::mpsc::SyncSender<Published>> {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn shared_snapshot_preserves_browser_fields_and_exports_history() {
+    fn snapshot_publishes_state_and_exports_history() {
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         let mut app = App::new();
         app.insert_resource(Snapshot {

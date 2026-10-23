@@ -8,9 +8,9 @@ use axum::{
 };
 use space_shared::Galaxy;
 use space_simulation::demo_galaxy;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_http::{compression::CompressionLayer, services::ServeDir};
+use tower_http::compression::CompressionLayer;
 
 struct Snapshot {
     galaxy: Galaxy,
@@ -22,9 +22,6 @@ type AppState = Arc<RwLock<Snapshot>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let root = std::env::var_os("SPACE_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
     // A client may survive a backend restart: its old ETag must not match the
     // first snapshot of the new process even when both have revision zero.
     let generation = std::time::SystemTime::now()
@@ -45,14 +42,13 @@ async fn main() -> Result<()> {
             get(|| async { Json(serde_json::json!({"service": "night-sky", "status": "ok"})) }),
         )
         .route("/galaxy", get(galaxy))
-        .fallback_service(ServeDir::new(root.join("web/dist")).precompressed_gzip())
         .layer(CompressionLayer::new())
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("no-cache"),
         ))
         .with_state(state);
-    println!("Night Sky: http://{bind} (Ctrl+C to stop)");
+    println!("Night Sky server: http://{bind}/galaxy (Ctrl+C to stop)");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             tokio::signal::ctrl_c().await.ok();

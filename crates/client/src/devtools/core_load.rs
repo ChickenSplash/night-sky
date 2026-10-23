@@ -1,7 +1,6 @@
 //! Core load test (debug window, `tools` tab, native): jumps beside the
 //! central black hole with no stars loaded, as at startup, and times loading
 //! every cell in reach, for before-and-after comparisons of star generation.
-#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use crate::Navigation;
 use crate::presentation::PresentationMode;

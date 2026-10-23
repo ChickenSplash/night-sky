@@ -22,8 +22,7 @@ impl Gravity for Nothing {
 
 const EARTH_GM: f64 = EARTH_SOLAR * SUN_GM;
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn body_drives_and_fine_thrusters_follow_attitude() {
     for axis in 0..3 {
         let mut craft = ship(State::default());
@@ -62,8 +61,7 @@ fn body_drives_and_fine_thrusters_follow_attitude() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn spin_persists_and_turning_uses_each_body_axis() {
     for axis in 0..3 {
         let mut craft = ship(State::default());
@@ -92,8 +90,7 @@ fn spin_persists_and_turning_uses_each_body_axis() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn commands_refuse_invalid_inputs_without_changing_state() {
     let mut craft = ship(State::default());
     craft.thrusters.reverse = 0.0;
@@ -137,8 +134,7 @@ fn energy(state: State, gm: f64) -> f64 {
     length(state.velocity).powi(2) / 2.0 - gm / length(state.position)
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn an_orbit_keeps_its_energy_for_a_hundred_laps() {
     // An eccentric, inclined orbit from 400 km up.
     let r = 6_771_000.0;
@@ -169,8 +165,7 @@ fn an_orbit_keeps_its_energy_for_a_hundred_laps() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn thrust_accelerates_a_ship_in_empty_space() {
     let mut craft = ship(State::default());
     craft.input.thrust = [0.0, 0.0, 9.81];
@@ -183,8 +178,7 @@ fn thrust_accelerates_a_ship_in_empty_space() {
     assert_eq!(craft.advance(&Nothing, 1e9, 5), 5);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_saved_craft_steps_exactly_like_the_original() {
     let mut craft = ship(State {
         position: [7e6, 0.0, 0.0],
@@ -197,8 +191,7 @@ fn a_saved_craft_steps_exactly_like_the_original() {
     assert_eq!(craft.state(), copy.state());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn gravity_is_finite_and_continuous_inside_a_body() {
     let surface = 6_371_000.0;
     let a = |r: f64| length(Point(EARTH_GM).acceleration([r, 0.0, 0.0], 0.0));
@@ -220,8 +213,7 @@ fn planet_field() -> (Field, Planet) {
     (Field::new(system.clone(), planet.page), planet.clone())
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_ship_orbits_a_planet_moving_around_its_star() {
     let (field, planet) = planet_field();
     let seconds = 1.0e6;
@@ -275,8 +267,7 @@ fn a_ship_orbits_a_planet_moving_around_its_star() {
     assert_eq!(craft.reference.as_deref(), Some(planet.id.as_str()));
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn elements_give_the_apsides_and_period_of_an_orbit() {
     let r = 7e6;
     let circular = Elements::of(
@@ -309,8 +300,7 @@ fn elements_give_the_apsides_and_period_of_an_orbit() {
     assert_eq!(escape.apsides(), None);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn every_craft_steps_on_one_world_grid() {
     for tick in [-41, 0, 1, 3, 7, 120_000_001, 631_152_000_000] {
         assert_eq!(tick_at(tick_seconds(tick)), tick);

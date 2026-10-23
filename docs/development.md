@@ -1,30 +1,20 @@
 # Development
 
-Run commands from the repository root. Native Linux and browser/WASM are both
-supported targets and share the same Rust simulation and egui interface.
-Browser rendering uses WebGL 2; the native client
-also provides graphical smoke tests and screenshot-based bug reports.
+Run commands from the repository root. Native Linux on Vulkan is the only
+client target. The client provides graphical smoke tests and
+screenshot-based bug reports.
 
 ## Prerequisites
 
 - Rust via rustup; `rust-toolchain.toml` pins the toolchain and components.
 - Linux native builds: Clang, LLD, pkg-config and Wayland/X11 development libraries,
   plus a Vulkan-capable driver and desktop session to launch the client.
-- Scripts: Bash and curl. Web builds additionally need Python 3 available as
-  `python`, tar and gzip. `build-web.sh` currently downloads an x86-64 Linux
-  wasm-bindgen binary matched to `Cargo.lock` and installs the WASM target.
-- Browser tests: Node.js, npm, Chromium and
-  `npm install --prefix tools/browser playwright-core`.
+- Scripts: Bash, curl and Python 3.
 
-See [the README](../README.md) for native and browser launch commands.
+See [the README](../README.md) for launch commands.
 `./scripts/run.sh` builds and starts both processes, cleaning up the backend
-on client exit. It enables the [native developer API](client/developer-api.md)
+on client exit. It enables the [developer API](client/developer-api.md)
 by default; `NIGHT_SKY_API=0 ./scripts/run.sh` disables it for that run.
-`./scripts/build-web.sh` builds WebGL 2 WASM into `web/dist/`.
-`./scripts/dev-web.sh` builds the browser client and starts the server with the
-HTML and worker entry points linked to their sources. Refresh for changes to
-those files; rerun the script after Rust changes.
-Both workers load the `sim-worker` WASM in separate instances.
 
 ## Project structure
 
@@ -33,11 +23,10 @@ crates/client/       Bevy client and egui interface
   src/main.rs        Entry point and system scheduling
   src/navigation.rs  Destination, visits and selection
   src/format.rs      Shared text formatting
-  src/search/        Object search requests, settings, the shared store and the
-                     browser's search worker transport
+  src/search/        Object search requests, settings and the shared store
   src/scene/         Camera, controls, location, placement and wireframes
   src/stars/         Galactic star streaming, batching, drawing and shaders
-    stream/          Native/web backends and streaming metrics
+    stream/          Loader thread backend and streaming metrics
   src/render/        Bodies, exposure, glow, black hole and shaders
   src/ui/            HUD, breadcrumbs, inspector, tasks and the debug console's skin
   src/ui/kit/        Shared themes, controls, windows, scrolling, animation and halo text
@@ -45,12 +34,11 @@ crates/client/       Bevy client and egui interface
   src/ui/tasks/      Task-panel regression tests
   src/devtools/      Debug window, tests, benchmarks and diagnostics
     tabs/            One module per debug tab
-crates/server/       Axum API and static browser file server
+crates/server/       Axum demo galaxy API
 crates/shared/       Serializable models
 crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generation
   src/objects.rs     ObjectRef: stable identities for inspection and search
-  src/search/        Object registry, query model, search engine, runner and native thread
-crates/sim-worker/   Generation-only WASM for the browser's star and search workers
+  src/search/        Object registry, query model, search engine, runner and thread
 docs/               Explanations grouped by simulation, client, shared and server
   simulation/        Galaxy, stars, planetary systems, orbits and search
   client/            Navigation, streaming, rendering and developer tooling
@@ -62,14 +50,12 @@ scripts/            Launch, build and verification commands
 assets/             Reserved project assets
 data/               Local logs, fixtures and screenshots (ignored)
 target/             Compiled output (ignored)
-web/                Browser page, worker entry points and generated dist/
-tools/              Downloaded build/test tools (ignored)
+tools/              The TUI's Python environment and UI prototypes (ignored)
 vendor/             Documented Bevy renderer patch
 ```
 
 Large test blocks live in sibling `tests.rs` files. Shaders are beside their Rust
-modules; internal asset paths are relative to the loading `.rs` file. Keep both
-native and WASM configurations working when moving code.
+modules; internal asset paths are relative to the loading `.rs` file.
 
 The [UI kit guide](client/ui/kit.md) describes module ownership, shared interaction
 rules and how to add controls without duplicating theme or animation logic.
@@ -81,16 +67,14 @@ Runtime files and build output stay in the project. Rust toolchains and Cargo's
 dependency cache use their normal user-level locations. Set
 `CARGO_HOME="$PWD/.cargo-home"` to isolate future dependency downloads if needed.
 
-Keep native threading/reqwest and browser fetch/timers behind target-specific
-code. Bevy, big_space and bevy_egui are pinned as a compatible set; check
+Bevy, big_space and bevy_egui are pinned as a compatible set; check
 compatibility before upgrading any one. No global desktop or Cargo
 configuration changes are needed.
 
 ## Backend
 
 See [the galaxy backend](server/backend.md) for serving, configuration, polling
-and network exposure. It serves demo data and the web build, not the native
-client's developer API.
+and network exposure. It serves demo data, not the client's developer API.
 
 ## Logs and bug reports
 
@@ -112,42 +96,28 @@ Keep it in step with Bevy upgrades.
 ./scripts/check.sh
 ```
 
-It checks formatting, workspace unit tests and strict Clippy, natively and
-for the browser's WebAssembly build.
+It runs the `ns` CLI tests, then checks formatting, workspace unit tests and
+strict Clippy.
 Tests cover orbital and clock invariants, deterministic generation, multiple
 systems, streaming, persistent task slots, presentation layout and camera flights.
 UI regressions cover long presses, window movement/resizing, title alignment,
 selection-driven rows, responsive result panes and reset placement, numeric
 precision/validation, dropdown geometry, themed tooltips and scrollbar easing.
 
-Additional graphical and browser checks:
+Additional graphical check:
 
 ```sh
 ./scripts/run.sh --smoke-test
-./scripts/build-web.sh
-node scripts/test-browser.mjs
-SPACE_URL=http://127.0.0.1:4321 node scripts/test-breadcrumbs.mjs
-node scripts/test-star-worker.mjs
-node scripts/test-craft-worker.mjs
-node scripts/test-exposure.mjs
 ```
 
-Browser checks need a running server serving the current build. Set
-`SPACE_CHROMIUM` to your Chromium executable and `SPACE_URL` to override a test's
-server URL. The general browser test defaults to localhost port 4321; some
-specialised checks default to port 4322, so set `SPACE_URL` explicitly when needed.
-
-The native smoke test requires a desktop session and saves eighteen screenshots
+The smoke test requires a desktop session and saves eighteen screenshots
 under `data/`: system views, tracking, galaxy travel, pagination, constellation
 framing, camera flights and realistic lighting at both compression extremes.
 These include a 50-task pagination fixture, mid-flight list/page jumps, and
 seven realistic captures: at 0 stops, system at 100%/0% compression, lit planet,
 constellation and star at both compression settings; then corona structure
 at -16 stops and 0% compression.
-Set `SPACE_SMOKE_TASKS=1400` for a larger constellation fixture. The browser smoke
-test covers startup, navigation, resize, static-file isolation and a 50-task
-fixture through `window.space`. The breadcrumb test covers remote selection,
-inspection without travel and narrow viewports, saving captures under `data/logs/`.
+Set `SPACE_SMOKE_TASKS=1400` for a larger constellation fixture.
 
 The user runs performance benchmarks in their own focused window. Agents read
 results rather than launching benchmarks. Routes, baselines and output files are

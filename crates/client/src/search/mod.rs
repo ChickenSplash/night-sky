@@ -1,8 +1,7 @@
 //! Object searches (`space_simulation::search`) for the client: the request
 //! the object browser shows (`UiCommand::Search`), the developer API's own
 //! requests, their log lines, and the debug window's settings and counters.
-//! Requests never run on the app's thread: natively they run on
-//! `SearchService`'s, in the browser on the search worker (`web.rs`).
+//! Requests never run on the app's thread: they run on `SearchService`'s.
 use crate::actions::UiCommand;
 use crate::scene::{CameraPose, CameraRig};
 use bevy::prelude::*;
@@ -16,13 +15,8 @@ use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-#[cfg(not(target_arch = "wasm32"))]
 use space_simulation::search::SearchService as Service;
-#[cfg(target_arch = "wasm32")]
-mod web;
-#[cfg(target_arch = "wasm32")]
-use web::Service;
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests;
 
 /// The log target of search lines.
@@ -34,7 +28,6 @@ pub const WORK_CAP_MILLIONS: RangeInclusive<f64> = 1.0..=10_000.0;
 pub const KEPT: usize = 32;
 
 /// Who asked: the in-game browser's request is separate from the CLI's.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Asker {
@@ -125,13 +118,9 @@ impl Searches {
         self.hub.summaries(false).unwrap_or_default()
     }
 
-    /// How searches run: natively on threads, in the browser on the search
-    /// worker or, if that failed, in frame slices.
+    /// How searches run.
     pub fn mode(&self) -> &'static str {
-        #[cfg(not(target_arch = "wasm32"))]
-        return "NATIVE THREAD";
-        #[cfg(target_arch = "wasm32")]
-        self.hub.service.try_lock().map_or("BUSY", |s| s.mode())
+        "NATIVE THREAD"
     }
 }
 
@@ -270,7 +259,7 @@ fn summary(entry: &Entry) -> String {
     )
 }
 
-/// The requests kept by ID, and the service running them. Natively it is
+/// The requests kept by ID, and the service running them. It is
 /// shared by the app and the developer API's thread; each lock is held
 /// briefly and never with the other.
 pub struct Hub {
@@ -291,7 +280,6 @@ impl Hub {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn work_cap(&self) -> u64 {
         self.work_cap.load(Ordering::Relaxed)
     }
@@ -464,7 +452,6 @@ impl Hub {
     }
 
     /// One request with its results so far.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn get(&self, id: u64) -> Option<Entry> {
         self.poll(true);
         self.store.lock().ok()?.iter().find(|e| e.id == id).cloned()

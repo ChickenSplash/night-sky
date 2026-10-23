@@ -20,8 +20,7 @@ impl Gravity for Counted {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn warp_reuses_gravity_and_invalidates_it_across_skipped_samples() {
     let field = Counted {
         calls: std::cell::Cell::new(0),
@@ -93,8 +92,7 @@ fn steer(craft: &mut Craft, rotation: [f64; 3]) {
         .unwrap();
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn steady_yaw_bends_the_path_into_a_circle_of_speed_over_rate() {
     let mut craft = ship();
     let speed = 1_000.0;
@@ -127,8 +125,7 @@ fn steady_yaw_bends_the_path_into_a_circle_of_speed_over_rate() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn steering_ramps_shares_the_turn_rate_and_stops_on_release() {
     let mut craft = ship();
     craft.engage_warp().unwrap();
@@ -153,8 +150,7 @@ fn steering_ramps_shares_the_turn_rate_and_stops_on_release() {
     assert!(forward(&craft).angle_between(held) < 1e-8);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn roll_turns_the_ship_without_changing_the_direction_of_travel() {
     let mut craft = ship();
     craft.warp.set_speed(1_000.0).unwrap();
@@ -170,8 +166,7 @@ fn roll_turns_the_ship_without_changing_the_direction_of_travel() {
     assert!(up.angle_between(DVec3::Y) > 1.0, "rolled well over");
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn engaging_takes_over_spin_and_eases_it_out_and_dropout_leaves_none() {
     let mut craft = ship();
     craft.spin = [0.3, -0.2, 0.1];
@@ -194,8 +189,7 @@ fn engaging_takes_over_spin_and_eases_it_out_and_dropout_leaves_none() {
     assert_eq!(forward(&craft), held);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn pointing_in_warp_settles_without_overshoot_within_the_turn_rate() {
     for (target, rate) in [
         ([1.0, 0.0, 0.0], 30.0),
@@ -223,8 +217,7 @@ fn pointing_in_warp_settles_without_overshoot_within_the_turn_rate() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn turn_rate_is_bounded_and_older_snapshots_get_the_default() {
     let mut warp = Warp::default();
     for valid in [MIN_TURN_RATE_DPS, MAX_TURN_RATE_DPS] {
@@ -250,8 +243,7 @@ fn ship() -> Craft {
     )
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn speed_limit_accepts_ten_thousand_light_years_per_second() {
     let mut warp = Warp::default();
     assert_eq!(MAX_SPEED, 10_000.0 * crate::LY_METRES);
@@ -263,8 +255,7 @@ fn speed_limit_accepts_ten_thousand_light_years_per_second() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn ordinary_momentum_and_bubble_are_separate_under_both_policies() {
     for policy in [GravityPolicy::Active, GravityPolicy::Suspended] {
         let mut craft = ship();
@@ -297,8 +288,7 @@ fn ordinary_momentum_and_bubble_are_separate_under_both_policies() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn gravity_is_ignored_at_and_above_light_speed() {
     let mut craft = ship();
     craft.engage_warp().unwrap();
@@ -315,8 +305,7 @@ fn gravity_is_ignored_at_and_above_light_speed() {
     assert!((slowed - 2.0 * STEP_SECONDS).abs() < 1e-12);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn engagement_and_control_interlocks() {
     let mut craft = ship();
     craft
@@ -351,8 +340,7 @@ fn engagement_and_control_interlocks() {
     assert_eq!(craft.seconds(), STEP_SECONDS);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn speed_validation_and_ramp() {
     let mut craft = ship();
     for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY, MAX_SPEED * 2.0] {
@@ -370,8 +358,7 @@ fn speed_validation_and_ramp() {
     assert!(z < 0.0 && z > -50.0);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_held_sweep_takes_as_long_for_every_factor_of_ten_and_dropout_ends_it() {
     let mut craft = ship();
     craft.engage_warp().unwrap();

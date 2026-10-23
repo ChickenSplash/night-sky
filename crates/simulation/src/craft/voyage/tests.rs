@@ -51,8 +51,7 @@ fn galactic_state(voyage: &Voyage, reference: [f64; 3]) -> (DVec3, DVec3, DVec3)
 
 const AU: f64 = crate::AU_METRES;
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn frame_changes_rotate_persistent_frame_axis_inputs() {
     use crate::craft::{AttitudePilot, PointTarget};
     let mut voyage = empty_voyage();
@@ -104,8 +103,7 @@ fn frame_changes_rotate_persistent_frame_axis_inputs() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn future_orders_reject_invalid_values_and_excessive_horizons_at_submission() {
     use crate::craft::{MAX_THRUST, PointTarget, Thrusters, WarpOrder};
     let mut voyage = empty_voyage();
@@ -212,8 +210,7 @@ fn empty_voyage() -> Voyage {
     Voyage::new(craft, Field::new(system, 0), [0.0; 3])
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn orders_are_step_keyed_ordered_and_refused_atomically() {
     use crate::craft::{Order, WarpOrder};
     let mut voyage = empty_voyage();
@@ -249,8 +246,7 @@ fn orders_are_step_keyed_ordered_and_refused_atomically() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn timed_orders_end_themselves_unless_replaced() {
     use crate::craft::{Order, WarpOrder};
     let throttle = |value| Order::Throttle { value };
@@ -332,8 +328,7 @@ fn timed_orders_end_themselves_unless_replaced() {
     assert!(voyage.pending_orders().is_empty());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn timed_orders_need_room_for_their_end() {
     use crate::craft::Order;
     let mut voyage = empty_voyage();
@@ -347,8 +342,7 @@ fn timed_orders_need_room_for_their_end() {
     assert_eq!(voyage.pending_orders().len(), MAX_PENDING_ORDERS);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn queued_warp_orders_replay_after_a_snapshot() {
     use crate::craft::{Order, WarpOrder};
     let mut voyage = empty_voyage();
@@ -430,8 +424,7 @@ fn queued_warp_orders_replay_after_a_snapshot() {
     assert_eq!(voyage.craft.input.controls.throttle, 1.0);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn pending_orders_are_bounded_and_waits_do_not_consume_them() {
     use crate::craft::Order;
     let mut voyage = empty_voyage();
@@ -451,8 +444,7 @@ fn pending_orders_are_bounded_and_waits_do_not_consume_them() {
     assert_eq!(voyage.pending_orders(), pending);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn dropout_beside_an_uncharted_star_enters_it_from_seeds_alone() {
     let star = star();
     let mut voyage = galactic(&star, [100.0 * AU, 0.0, 0.0], [0.0; 3]);
@@ -489,8 +481,7 @@ struct Slow {
     refusals: usize,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn waiting_for_data_never_changes_the_path() {
     let star = star();
     let start = |voyage: &mut Voyage| {
@@ -527,8 +518,7 @@ fn waiting_for_data_never_changes_the_path() {
     assert!(!slow.in_galaxy());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn fast_warp_needs_no_system_data_and_keeps_local_precision() {
     let star = star();
     let mut voyage = galactic(&star, [0.0; 3], [0.0; 3]);
@@ -557,8 +547,7 @@ fn fast_warp_needs_no_system_data_and_keeps_local_precision() {
 
 const STEP: f64 = crate::craft::STEP_SECONDS;
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn leaving_and_reanchoring_preserve_position_heading_and_momentum() {
     let star = star();
     let arrival = arrival(&star);

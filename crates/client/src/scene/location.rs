@@ -102,9 +102,6 @@ pub(super) fn within(arrived: bool, distance: f64, range: f64) -> bool {
 /// craft in a system brings the camera there itself (`place_camera`).
 #[allow(clippy::too_many_arguments)]
 pub fn locate(
-    #[cfg(target_arch = "wasm32")] benchmark: Option<
-        Res<crate::devtools::benchmark::BenchmarkFlight>,
-    >,
     field: Res<crate::stars::stream::Starfield>,
     mut metrics: ResMut<crate::stars::stream::StreamMetrics>,
     lists: Res<Universe>,
@@ -122,10 +119,6 @@ pub fn locate(
             let distance = (page_origin_ly(s, nav.page) - eye_ly).length() * LY_METRES;
             within(arrived, distance, system_range(s, nav.page))
         });
-    #[cfg(target_arch = "wasm32")]
-    if benchmark.is_some() {
-        return;
-    }
     let craft = nav
         .following
         .then(|| nav.selected_craft().and_then(|id| fleet.get(id)))

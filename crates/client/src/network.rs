@@ -49,7 +49,6 @@ impl Link {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn start() -> mpsc::Receiver<Update> {
     use reqwest::{StatusCode, header};
     let (tx, rx) = mpsc::channel();
@@ -109,50 +108,6 @@ pub fn start() -> mpsc::Receiver<Update> {
     rx
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn start() -> mpsc::Receiver<Update> {
-    let (tx, rx) = mpsc::channel();
-    wasm_bindgen_futures::spawn_local(async move {
-        let mut link = Link::default();
-        loop {
-            let mut request = gloo_net::http::Request::get("/galaxy");
-            if let Some(etag) = &link.etag {
-                // Set by hand, so the browser passes 304 through instead of
-                // replaying its cached body for us to parse again.
-                request = request.header("If-None-Match", etag);
-            }
-            let update = match request.send().await {
-                Err(err) => link.offline(err, OFFLINE),
-                Ok(response) if response.status() == 304 => link.online(Update::Unchanged),
-                Ok(response) if !response.ok() => {
-                    link.offline(format!("HTTP {}", response.status()), OFFLINE)
-                }
-                Ok(response) => {
-                    let etag = response.headers().get("etag");
-                    match response.json::<Galaxy>().await {
-                        Ok(galaxy) => {
-                            link.etag = etag;
-                            link.online(Update::Galaxy(galaxy))
-                        }
-                        Err(err) => link.offline(err, "Invalid API response"),
-                    }
-                }
-            };
-            if tx.send(update).is_err() {
-                break;
-            }
-            gloo_timers::future::TimeoutFuture::new(2000).await;
-        }
-    });
-    rx
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn now_ms() -> i64 {
-    js_sys::Date::now() as i64
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

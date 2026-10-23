@@ -8,11 +8,8 @@ use space_simulation::craft::{
 };
 
 /// Prediction steps all craft may take in one frame together, about a
-/// millisecond natively. WebAssembly's steps are slower, so it takes fewer.
-#[cfg(not(target_arch = "wasm32"))]
+/// millisecond.
 pub const STEPS_PER_FRAME: usize = 250;
-#[cfg(target_arch = "wasm32")]
-pub const STEPS_PER_FRAME: usize = 120;
 /// While coasting, start a new prediction once the craft is this share of
 /// the shown one's period, or horizon when unbound, past its start. Below
 /// `predict::LEAD`, so a bound path is still a whole lap ahead meanwhile.

@@ -29,25 +29,10 @@ Each run is logged (`GPU test (...)`) and appended as one JSON line to
 window size, MSAA state and magnitude limit. The star pass sums
 `main_transparent_pass_3d` and `star_points`, and records which rendering path ran.
 
-## Browser star flight
-
-The browser debug window's **run star-stream benchmark** (`tools` tab) reloads
-into a fresh, empty starfield at home, then follows -X (towards the galactic centre)
-at 1,000 ly/s for 15 s without auto-visits. `crates/client/src/devtools/benchmark.rs`
-records each `StreamMetrics::sample`, logs the results to the console and shows
-them in an egui window with a JSON download.
-
-`?benchmark=star-flight` is the identical route used by
-`SPACE_HEADFUL=1 node scripts/benchmark-star-flight.mjs <label>`; it writes JSON
-results under `data/logs/`. Headless SwiftShader is too slow for meaningful
-comparisons, so use headed Chromium on Wayland. Visual tests belong on the
-secondary monitor.
-
 ## Search measurements
 
 The original [search implementation history](../plans/object-search.md#performance)
-retains the native search probe results and
-[browser worker measurements](../plans/object-search.md#session-4--browser-search-worker-done).
+retains the search probe results.
 The engine probe is
 `cargo test -p space-simulation --release search_probe -- --ignored --nocapture`.
 It is an ignored measurement test, not part of normal checks. These measurements

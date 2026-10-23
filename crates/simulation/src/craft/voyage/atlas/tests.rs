@@ -28,8 +28,7 @@ fn put_region(cache: &mut Cache, i: i64) {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn active_fleets_can_exceed_cache_targets_without_reload_churn() {
     let mut cache = Cache::default();
     let regions = REGIONS + 5;
@@ -56,8 +55,7 @@ fn active_fleets_can_exceed_cache_targets_without_reload_churn() {
     assert_eq!(cache.counts(), (REGIONS, ARRIVALS));
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn idle_cache_is_bounded_and_reads_protect_recent_entries() {
     let mut cache = Cache::default();
     for i in 0..200 {
@@ -75,8 +73,7 @@ fn idle_cache_is_bounded_and_reads_protect_recent_entries() {
     assert!(cache.region(Region([193, 0, 0])).is_none());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn library_and_async_cache_share_list_replacement_and_legacy_rules() {
     let lists = crate::demo_galaxy();
     let list = &lists.systems[0];

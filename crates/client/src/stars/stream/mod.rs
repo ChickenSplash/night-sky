@@ -1,5 +1,4 @@
-//! Streams the galaxy's stars around the camera: on a worker thread natively,
-//! in a slice of each frame in the browser.
+//! Streams the galaxy's stars around the camera on a worker thread.
 
 use crate::scene::{CameraPose, CameraRig};
 use bevy::{
@@ -45,8 +44,6 @@ pub struct Starfield {
 #[derive(Resource, Default)]
 pub struct StreamRestart(pub bool);
 
-#[cfg(target_arch = "wasm32")]
-pub use metrics::StreamSample;
 pub use metrics::{CraftFrame, FrameSample, StreamMetrics, SyncFrame};
 
 impl Starfield {
@@ -248,16 +245,9 @@ fn stream(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 use native::Backend;
-#[cfg(target_arch = "wasm32")]
-use web::Backend;
 
-#[cfg(not(target_arch = "wasm32"))]
 mod native;
-
-#[cfg(target_arch = "wasm32")]
-mod web;
 
 #[cfg(test)]
 mod tests {

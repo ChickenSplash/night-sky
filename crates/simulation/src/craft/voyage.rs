@@ -120,13 +120,9 @@ pub fn range_m(field: &Field) -> f64 {
     crate::neighbourhood::range_m(crate::system_extent_au(field.system(), field.page()))
 }
 
-/// Threads a native lookup may use; one in the browser.
+/// Threads a lookup may use.
 pub fn threads() -> usize {
-    if cfg!(target_arch = "wasm32") {
-        1
-    } else {
-        std::thread::available_parallelism().map_or(1, |n| n.get())
-    }
+    std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
 /// A candidate's position in light years from home, as systems carry it.

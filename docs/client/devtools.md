@@ -1,8 +1,7 @@
 # Debug tools and diagnostics
 
 Settings and debug tooling are unified in `devtools/mod.rs`: a floating,
-movable/resizable window toggled by the cog, backtick or F3 on both clients,
-including the public site. There is no separate settings window. Client paths
+movable/resizable window toggled by the cog, backtick or F3. There is no separate settings window. Client paths
 are relative to `crates/client/src/`. See [controls](controls.md),
 [benchmarks](benchmarks.md), [developer API/CLI](developer-api.md) and
 [development logs](../development.md#logs-and-bug-reports).
@@ -16,11 +15,11 @@ New debug readouts/switches belong here, not in separate windows or the canvas.
 | --- | --- |
 | `log` | Last 2,000 tracing events from `devtools::log_layers`, level filter and grep; marks errors/warnings logged while hidden |
 | `terminal` | Command line and output |
-| `perf` | Frame graph, star generation/stream/draw metrics, cells/blocks/grid boxes, native GPU passes and performance switches |
+| `perf` | Frame graph, star generation/stream/draw metrics, cells/blocks/grid boxes, GPU passes and performance switches |
 | `render` | Scene overlays with its nested switches (orbits, labels, markers, velocity marker, craft predicted paths, body wireframes), FOV, realistic lighting, exposure/compression facts, glow and galaxy reference views |
 | `controls` | Shortcut help |
 | `state` | Camera, location, open list, anchor/page, presentation, selection, anchor star, clock and shown search |
-| `tools` | Native GPU/core-load tests and bug report; browser star-stream benchmark |
+| `tools` | GPU/core-load tests and bug report |
 
 Performance sections are collapsible and skip UI work while closed. Counts are
 live; timings use trailing-second averages refreshed every frame. Logging and
@@ -47,7 +46,7 @@ They are A/B tests, reset on restart and can be set with `set_debug <switch> <on
 freeze star streaming (loader keeps its last aim), galactic points, shade point
 pixels (off still runs vertices, never rasterises), 4x MSAA (both window cameras),
 bloom, cull blocks outside the view (default on), split multiple systems, and
-stars as points (native only, default on natively).
+stars as points (default on).
 
 ## Terminal interaction
 
@@ -89,13 +88,13 @@ See [the API command route](developer-api.md#commands-and-screenshots).
 
 ## Snapshots and measurement meaning
 
-`devtools/snapshot.rs` builds a shared versioned native/browser snapshot at most
+`devtools/snapshot.rs` builds a versioned snapshot at most
 every 250 ms. It includes f64 camera position (parsecs from galactic centre),
 debug switches, stream counts, performance averages, latest CPU timings and
-one-second peaks, fresh native GPU diagnostics with measurement ages, and
+one-second peaks, fresh GPU diagnostics with measurement ages, and
 per-frame history (10 seconds, capped at 4,096 frames).
 
-- History collects with UI closed and native export disabled.
+- History collects with UI closed and file export disabled.
 - Frame intervals precede the recorded CPU work. GPU measurements are delayed
   and not matched to individual CPU frames.
 - Peaks are component-wise maxima, not one correlated slow frame.
@@ -105,10 +104,10 @@ per-frame history (10 seconds, capped at 4,096 frames).
   the cost of measurement itself. The perf tab shows `star sync` and
   `instrumentation`.
 - New per-frame measurements must be fixed-size numbers, no strings/allocation.
-- Native publication has a history placeholder plus a plain frame copy;
+- Publication has a history placeholder plus a plain frame copy;
   HTTP/file writers encode history only when needed (`snapshot::Published::full`).
 
-### Optional native file export
+### Optional file export
 
 `NIGHT_SKY_SNAPSHOT=1 ./scripts/run.sh` enables atomic JSON export to
 `data/logs/live-snapshot.json`, at most four times a second. Final JSON encoding
@@ -120,13 +119,3 @@ Enabling file export does not itself introduce commands, movement, benchmarks
 or an HTTP listener; the run script independently enables the API by default.
 Snapshot construction is main-thread CPU work, so exported diagnostics are opt-in.
 The API can enable shared snapshots without file export.
-
-### Browser automation
-
-`devtools/automation.rs` is a test hook, not UI: `window.space.command` sends
-`UiCommand` JSON and `window.space.state()` reads a small snapshot (list, page,
-presentation mode, display options, stream caption, benchmark results).
-`node scripts/test-browser.mjs` clicks egui panels at 1600 × 1000, runs a search
-on the worker and checks results through `window.space`. Update coordinates
-when layout changes. SwiftShader frames take one to two seconds: wait for state,
-not fixed times. See [development checks](../development.md#checks).

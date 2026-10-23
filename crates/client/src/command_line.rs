@@ -3,7 +3,7 @@
 //! name; quote values with spaces, or IDs that look like numbers. Vectors
 //! are JSON lists without spaces: `set_thrust [0,0,1]`.
 //!
-//! Lines come from the debug window's terminal tab or, natively, from the
+//! Lines come from the debug window's terminal tab or from the
 //! terminal that started the app, as `Typed` messages. `run` handles both the
 //! same way and logs its output under `TARGET`.
 use crate::actions::{self, UiCommand};
@@ -25,11 +25,9 @@ pub struct Typed {
 pub enum Source {
     /// The debug window's terminal tab.
     Window,
-    /// Standard input, natively.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    /// Standard input.
     Stdin,
     /// The native developer API (`ns cmd`).
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Api,
 }
 
@@ -39,7 +37,6 @@ impl Plugin for CommandLinePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Typed>()
             .add_systems(Update, run.before(actions::apply));
-        #[cfg(not(target_arch = "wasm32"))]
         app.insert_resource(Stdin(std::sync::Mutex::new(read_stdin())))
             .add_systems(Update, forward_stdin.before(run));
     }
@@ -96,13 +93,11 @@ fn run(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource)]
 struct Stdin(std::sync::Mutex<std::sync::mpsc::Receiver<String>>);
 
 /// Reads standard input on its own thread until it closes. A detached launch
 /// has none, and the thread ends at once.
-#[cfg(not(target_arch = "wasm32"))]
 fn read_stdin() -> std::sync::mpsc::Receiver<String> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new()
@@ -120,7 +115,6 @@ fn read_stdin() -> std::sync::mpsc::Receiver<String> {
     receiver
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn forward_stdin(stdin: Res<Stdin>, mut typed: MessageWriter<Typed>) {
     let Ok(receiver) = stdin.0.lock() else {
         return;

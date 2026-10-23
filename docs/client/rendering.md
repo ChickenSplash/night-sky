@@ -204,10 +204,6 @@ physically evolving atmosphere.
   it becomes an unbalanced galactic point, a jump at high compression.
   `set_exposure <stops>` and `set_compression <0..1>` use the same path as
   the HUD. Future auto-exposure should supply stops, separately from rendering.
-  `node scripts/test-exposure.mjs` checks WebGL shaders, that compression
-  never changes the galaxy, planet shading at 100% and immediate HUD text drags
-  headlessly, after a web build with a server running (`SPACE_URL` for
-  another port; it waits for streaming to finish before comparing).
 
 ## Bodies and cameras
 
@@ -226,7 +222,7 @@ physically evolving atmosphere.
 - Cameras sharing the window must agree on `Hdr`: the egui overlay camera switches
   with the 3D camera (without tone mapping), or it presents a stale frame.
 - The 3D camera carries `NoIndirectDrawing`: GPU-driven culling drops every mesh
-  with its 1e30 far plane. WebGL 2 never draws indirectly anyway. The far
+  with its 1e30 far plane. The far
   plane lies past the galaxy even at the closest zoom's render scale.
 
 ## Precision, scale and wireframes

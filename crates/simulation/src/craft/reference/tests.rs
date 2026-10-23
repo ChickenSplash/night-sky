@@ -94,8 +94,7 @@ fn dropout_ship(field: &Field, body: &str) -> Craft {
     craft
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn matched_dropout_uses_current_analytic_body_velocity_without_moving_or_turning() {
     use crate::craft::{Order, WarpOrder, warp::GravityPolicy};
     let field = triple();
@@ -135,8 +134,7 @@ fn matched_dropout_uses_current_analytic_body_velocity_without_moving_or_turning
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn rough_orbit_exit_is_tangential_and_circular_in_two_body_estimate() {
     let field = triple();
     let body = "t#A/0";
@@ -176,8 +174,7 @@ fn rough_orbit_exit_is_tangential_and_circular_in_two_body_estimate() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_near_radial_course_falls_back_to_the_ship_axes_not_noise() {
     let field = triple();
     let body = "t#A/0";
@@ -196,8 +193,7 @@ fn a_near_radial_course_falls_back_to_the_ship_axes_not_noise() {
     assert!(v.normalize().dot(DVec3::Y) > 1.0 - 1e-12);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn refused_matched_exits_are_atomic_and_do_not_stop_warp() {
     let field = triple();
     let mut craft = dropout_ship(&field, "t#A/0");
@@ -244,8 +240,7 @@ fn refused_matched_exits_are_atomic_and_do_not_stop_warp() {
     assert_eq!(craft, before);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn queued_matched_exit_resolves_at_execution_tick_and_replays() {
     use crate::craft::{Order, WarpOrder, voyage::Voyage};
     let field = triple();
@@ -290,8 +285,7 @@ fn queued_matched_exit_resolves_at_execution_tick_and_replays() {
     assert!(voyage.pending_orders().is_empty());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn the_reference_walks_down_the_stellar_hierarchy() {
     let field = triple();
     let ab = at(&field, "t#AB", [0.0; 3]);
@@ -330,8 +324,7 @@ fn the_reference_walks_down_the_stellar_hierarchy() {
     assert!((speed / 29_785.0 - 1.0).abs() < 1e-3, "{speed}");
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_reference_is_kept_past_its_boundary_by_the_margin() {
     let field = triple();
     let zone = field.reference_by_id("t#A", 0.0).unwrap().reach_m / AU_METRES;
@@ -355,8 +348,7 @@ fn a_reference_is_kept_past_its_boundary_by_the_margin() {
     assert_eq!(chosen(&field, Some("t#A/0"), gone), "t#A");
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_craft_keeps_its_reference_and_points_relative_to_it() {
     let field = triple();
     let star = field.reference_by_id("t#A", 0.0).unwrap();

@@ -3,7 +3,6 @@
 //! does. Once every star is uploaded it settles briefly, then measures frames
 //! and GPU pass times, for before-and-after comparisons of star rendering.
 //! Each run is logged and appended to `data/logs/gpu-test.jsonl`.
-#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use crate::Navigation;
 use crate::render::debug::RenderDebug;
@@ -124,7 +123,6 @@ fn commit() -> String {
     format!("{head}{}", if dirty { "+dirty" } else { "" })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn save(results: &GpuResults) {
     use std::io::Write;
     let path = crate::devtools::diagnostics::logs_dir().join("gpu-test.jsonl");
@@ -234,7 +232,6 @@ pub fn run(
                 results.gpu_total_ms,
                 results.drawn_stars
             );
-            #[cfg(not(target_arch = "wasm32"))]
             save(&results);
             *test = GpuTest::Done(Box::new(results));
         }

@@ -1,8 +1,6 @@
 # Night Sky
 
-A space simulator built in Rust around scientific plausibility, running natively on Linux and in a browser. Explore a procedurally generated galaxy at real distances, with orbiting planets, multiple-star systems and physical lighting.
-
-Both native Linux and browser clients are supported, with neither the primary target. They share the simulation and interface, with some platform-specific capabilities.
+A space simulator built in Rust around scientific plausibility, running natively on Linux. Explore a procedurally generated galaxy at real distances, with orbiting planets, multiple-star systems and physical lighting.
 
 Highly optimised star generation, streaming and GPU rendering make galaxy-scale exploration possible. The project is actively developed, with plans to simulate more physical phenomena and improve visual fidelity. The galaxy is synthetic, grounded in real-world observations and scientific research.
 
@@ -30,16 +28,7 @@ While the native client runs, `./scripts/ns` is a CLI that can read and drive al
 
 If you are on any other platform outside of Linux, just chuck this to your AI of choice, I'm sure they can figure it out.
 
-## Run in a browser
-
-The build script currently targets x86-64 Linux. It requires Rust via rustup, Clang, LLD, Python 3 (available as `python`), curl, tar and gzip.
-
-```sh
-./scripts/build-web.sh
-cargo run --locked -p space-server
-```
-
-Open **http://127.0.0.1:4321/** in a desktop browser with WebGL 2 and hardware acceleration enabled. The server serves the browser build and demo data; rendering happens on your device. Stop the server with Ctrl+C.
+The browser build was dropped; the last version with it is tagged `web-final`.
 
 ## For developers and agents
 

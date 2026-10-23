@@ -185,16 +185,13 @@ it (a pair's stars together), for the two-body readouts below.
   eccentric orbit from 400 km keeps its energy to better than $10^{-8}$ over
   100 laps (11 million steps). Thrust is applied in both half kicks.
 - Gravity at the end of each step is kept for the start of the next, so a
-  step costs one field evaluation (about 1 µs natively for a star with ten
+  step costs one field evaluation (about 1 µs for a star with ten
   planets). It is not serialized: a loaded craft recomputes the same value
   and steps identically.
 - `advance` steps until the craft reaches a time, with a cap on steps so a
   long stall cannot freeze the frame.
-- Native and WebAssembly may differ in the last digits of trigonometry and
-  powers, so later client correction must tolerate small differences.
-
-The craft tests run natively and, through `wasm-bindgen-test-runner` under
-Node, as WebAssembly (`./scripts/check.sh`).
+- Different CPUs or libm builds may differ in the last digits of trigonometry
+  and powers, so a future server's correction must tolerate small differences.
 
 ## Coast prediction
 
@@ -238,7 +235,7 @@ and clock are never touched.
   The path is not re-referenced after one.
 
 `Predictor` does this in slices of steps, for spreading over frames; slices
-give exactly the same path as one go. Each step costs about 4 µs natively,
+give exactly the same path as one go. Each step costs about 4 µs,
 so a forecast of about 1,750 steps costs about 7 ms in total.
 
 ## In the client
@@ -272,7 +269,7 @@ in memory only: nothing is saved or shared yet.
 - **Forecasts:** each craft keeps its last finished
   [coast prediction](#coast-prediction) (`craft::Forecast`) on show while a
   newer one is worked on. `craft::forecast` runs after stepping and shares
-  250 prediction steps a frame (120 in WebAssembly) evenly between craft,
+  250 prediction steps a frame evenly between craft,
   so a lap takes several frames. A new prediction starts when there is
   none, when the inputs or orbit reference differ from the shown one's
   (dropping any work begun under the old ones), throughout a burn, and while
@@ -317,7 +314,7 @@ in memory only: nothing is saved or shared yet.
   place arrival uses, never where the camera has streamed it, so leaving and
   re-entering the spawn system cannot shift the ship. A legacy list page with
   no cell star is anchored where its list places it. The first spawn works
-  out the galaxy's coarse cells on the frame, about 150 ms once natively.
+  out the galaxy's coarse cells on the frame, about 150 ms once.
 - **Selection and following:** `Selection::Craft` and `ObjectRef::Craft`.
   Clicking a craft's marker selects it; a second click, **Follow ship** or
   `fly_to_craft` follows it from 200 m, visiting its system first if needed.
@@ -582,11 +579,9 @@ inputs give the same path on any machine, wherever the camera is.
   machine arrives at the same step, only later in real time.
 - **Cost:** every star of every tier is placed to know whether it is near, and
   bright tiers hold millions of stars per coarse cell. A region takes about
-  10 ms near home, 50 ms in the inner disc and 90 ms in the bulge natively with
+  10 ms near home, 50 ms in the inner disc and 90 ms in the bulge with
   20 threads (300 ms and 700 ms on one thread), plus about 200 ms the first
-  time while coarse cells are integrated. The browser's single-threaded
-  worker takes about 30 ms near home (450 ms the first time), 550 ms in the
-  inner disc and 1.3 s in the bulge. Workers keep their `Sky` warm. A
+  time while coarse cells are integrated. Workers keep their `Sky` warm. A
   region is reused while cached, and below light speed a craft takes years of
   simulated time to cross one. The figures above are historical query timings,
   not timings for the bounded live worker pool described below.
@@ -675,17 +670,15 @@ are unchanged, and ordinary gravity resumes on the following step.
 ### Background preparation and future server hosting
 
 `craft::voyage::loading::Loader` shares the atlas cache, request deduplication,
-priority and prefetch rules between the native client, browser transport and a
-future server. Generation never runs in its polling or stepping methods.
+priority and prefetch rules between the client and a future server. Generation never runs in its polling or stepping methods.
 
 - At most 128 requests are queued and two are in flight. Required step data
   displaces speculative queued work and dispatches first. Queued interests
   expire each host round and are refreshed by the fleet, so turns, speed changes
   and despawns discard obsolete work. Already running work finishes and may be
   cached; it cannot be preempted, but is bounded to two jobs.
-- Native generation uses two warm workers with one generation thread each,
-  rather than an all-core lookup per ship. The browser retains its single
-  generation worker, with the same two-request in-flight bound. Failures are
+- Generation uses two warm workers with one generation thread each,
+  rather than an all-core lookup per ship. Failures are
   retried without running expensive work on the caller.
 - Prefetch considers the current region and a five-simulated-second projected
   endpoint, then only candidate bodies whose upper entry range intersects
@@ -712,8 +705,7 @@ accuracy never authorize a different frame handoff or skipping gravity.
 `ns ship state` and the inspector expose requested/actual speed, gravity policy,
 `warp_mode: "unsafe_manual"`, `arrival` (whether it can enter systems, or
 what its next step waits for) and stop reason. Waiting holds time, never the
-drive. Phase 4 has joint native live acceptance; browser flight visuals have
-not been manually tested.
+drive. Phase 4 has joint live acceptance.
 
 The fleet-level `system_loading` readout reports queued/running jobs and cached
 region/system counts; `system_loading_error` retains the last transport failure.
