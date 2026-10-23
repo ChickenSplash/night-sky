@@ -28,20 +28,18 @@ below the visible magnitude limit. Both share the manual exposure described in
   Filter points beyond 1.25 times their apparent-magnitude reach before upload;
   the shader applies the exact cutoff. Rebuild retained cells after the camera
   travels 0.2 of the tier's reach.
-- Natively, `point_stars` (on by default) uses `stars/points.rs` to draw the
+- `point_stars` (on by default) uses `stars/points.rs` to draw the
   same batches as single-pixel points, one vertex rather than three. The
   `StarPoints` node (between `MainOpaquePass` and `MainTransmissivePass`, GPU
   span `star_points`) draws additively into `Rgba16Float` at `SUPERSAMPLE` (2)
   times the view resolution per axis, without MSAA.
 - `starfield_points.wgsl` applies the same cutoff, near hiding, colour and glare
   storage as `starfield.wgsl`; keep them in step. It depth-tests each centre
-  against opaque bodies (the space camera's depth texture has `TEXTURE_BINDING`
-  natively; never enable it on WebGL's multisampled depth texture, which panics
-  with "Tex storage 2D multisample is not supported").
+  against opaque bodies (the space camera's depth texture has `TEXTURE_BINDING`).
 - One full-screen draw in `Transparent3d` (`starfield_points_composite.wgsl`)
   gives each point the 0.55 px Gaussian from the 6x6 supersampled pixels around
   each view pixel, so points land within a quarter pixel. There is no alternate
-  compact-footprint switch. The browser always uses triangles.
+  compact-footprint switch. With `point_stars` off, stars are triangles.
 - A compute splat with atomics (`b6a078f`, reverted) was slower than triangles:
   17.3 vs 14.3 ms. The [GPU benchmark](benchmarks.md#native-gpu-rendering) records
   which path ran and sums both relevant passes.
@@ -147,7 +145,6 @@ below the visible magnitude limit. Both share the manual exposure described in
   are built lazily and hidden when disabled.
 - Glow is shown only with realistic lighting and **Smooth galaxy glow (prototype)**
   enabled (render tab), alongside Inside, Face-on and Edge-on reference camera
-  commands on both clients. `node scripts/test-galaxy-glow.mjs` saves comparison
-  screenshots and on/off timings to `data/logs/`, on the secondary monitor.
+  commands.
 - Dust, detailed spiral structure, other galaxy types and moving stars are
   not implemented. Glow is a smooth prototype, not a dust-attenuated renderer.

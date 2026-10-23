@@ -1,7 +1,7 @@
 # Scene interface, HUD and inspection
 
-Both clients use the same egui interface (`crates/client/src/ui/mod.rs`) in the
-same frame as the scene. The 3D view fills the whole window: no sidebar or HTML
+The egui interface (`crates/client/src/ui/mod.rs`) draws in the same frame as
+the scene. The 3D view fills the whole window: no sidebar or HTML
 UI. HTML/CEF prototypes were abandoned (`prototype-cef-overlay`). See
 [controls](../controls.md) for shortcuts, [navigation](../navigation.md) for
 physical location, [the UI kit](kit.md) for shared widgets, and

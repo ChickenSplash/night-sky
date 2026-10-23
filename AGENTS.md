@@ -1,8 +1,8 @@
 # Night Sky
 
 A procedural space simulator at real distances and physical planet radii.
-Native Linux and browser/WASM are both supported targets, neither is primary.
-They share the Bevy/egui client, with some platform-specific capabilities.
+Native Linux is the only client target: a Bevy/egui client on Vulkan.
+The browser/WASM build was dropped (tag `web-final`); see [the plan](docs/plans/native-only.md).
 Lists and tasks are an optional information overlay, currently demo-only.
 External integrations are optional extensions, not part of the simulator core.
 Repository: `ChickenSplash/night-sky`.
@@ -22,7 +22,7 @@ for implementation details.
 | Object registry, queries and search | `crates/simulation/src/search`, client `search/` | [Search](docs/simulation/search.md) |
 | Lists, pages, tasks and wire models | `crates/shared`, simulation and client | [Information overlay](docs/shared/information-overlay.md) |
 | Visits, selection, camera and presentation | Client `navigation.rs`, `scene/`, `galaxy_nav.rs`, `presentation.rs` | [Navigation](docs/client/navigation.md) |
-| Visible-star loading and spatial queries | Client `stars/stream/`, `crates/sim-worker`, `web/` | [Streaming](docs/client/streaming.md) |
+| Visible-star loading and spatial queries | Client `stars/stream/`, `crates/simulation` | [Streaming](docs/client/streaming.md) |
 | Bodies, lighting, star points and galaxy glow | Client `render/`, `stars/` | [Rendering](docs/client/rendering.md), [galactic rendering](docs/client/galactic-rendering.md) |
 | Key bindings and piloting | Client `input.rs`, `pilot.rs` | [Controls](docs/client/controls.md) |
 | HUD, breadcrumbs, inspector and panels | Client `ui/` | [Interface](docs/client/ui/interface.md), [controls](docs/client/controls.md), [browser](docs/client/ui/browser.md) |
@@ -38,15 +38,16 @@ Current limitations are listed in [the documentation index](docs/README.md#curre
 ## Working rules
 
 - Run `./scripts/check.sh` after code changes: formatting, tests and strict
-  Clippy for native and WebAssembly. Build/run details live in the development guide.
+  Clippy. Build/run details live in the development guide.
 - The user runs GPU, core-load and star-flight benchmarks in their own focused
   window. Read `data/logs/` results; do not launch benchmark runs yourself.
 - Keep runtime files in project-local `data/`, compiled output in `target/`.
   Do not change global desktop or Cargo configuration.
-- Keep both client targets working. Check Bevy/big_space/bevy_egui compatibility
-  before upgrades, including the patch documented in `vendor/README.md`.
-- Credentials belong only in the backend, never API models, logs or WASM.
-  Browser galaxy requests stay same-origin. Keep the native developer API loopback-only.
+- Do not reintroduce browser/WASM support or WebGL fallbacks. Check
+  Bevy/big_space/bevy_egui compatibility before upgrades, including the patch
+  documented in `vendor/README.md`.
+- Credentials belong only in the backend, never API models, logs or the client.
+  Keep the developer API loopback-only.
 - Preserve physical scale, f64 simulation/camera precision, deterministic
   generation and stable body identities. Read the relevant guides
   for these cross-system constraints before changing them.

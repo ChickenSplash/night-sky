@@ -1,6 +1,6 @@
 # Controls and interface
 
-Both clients use the same egui interface over a full-window 3D view. Debug console
+The egui interface sits over a full-window 3D view. Debug console
 (⚙), Tasks (✔) and Object browser (🔍) open from the top right. The top-left **Location** and
 **Selected** trails distinguish physical location from selection. Clicking a
 breadcrumb inspects it without changing selection or moving the camera.
@@ -104,9 +104,8 @@ The underlying simulation continues in every mode.
 
 ## Debug tools
 
-Toggle the debug console with the cog, F3 or the backtick key on either client.
-Toggle the object browser with the 🔍 icon or Ctrl+K. Browser shortcuts can
-also be intercepted by the web browser; the icon is always available.
+Toggle the debug console with the cog, F3 or the backtick key.
+Toggle the object browser with the 🔍 icon or Ctrl+K.
 There is no separate Settings window. Display options and realistic lighting
 live in `render`; shortcut help lives in `controls`.
 Scene overlays (`set_display overlays false`) hides everything drawn over the

@@ -88,17 +88,11 @@ measurements and future ideas, not the current UI specification.
 ## Execution services
 
 - `Runner` (`search/runner.rs`) runs open requests in turn, a work slice each,
-  taking `Order`s and giving `SearchUpdate`s. Clocks are the caller's, so it
-  builds for every target. Cancellation stops at the next budget check.
-- Native `SearchService` runs on one service thread, a million work units per
+  taking `Order`s and giving `SearchUpdate`s. Clocks are the caller's.
+  Cancellation stops at the next budget check.
+- `SearchService` runs on one service thread, a million work units per
   slice, with several threads for large cells. By default search gets a quarter
   of the machine's threads; star loading gets three quarters.
-- A dedicated browser Web Worker (`web/search-worker.js`, `SearchWorker` in
-  `crates/sim-worker`) uses the star worker's WASM in its own instance, one
-  thread, with orders/updates as JSON. It is separate from the star worker,
-  which is replaced on magnitude changes.
-- If that worker fails, the client runs searches in 4 ms frame slices and
-  restarts unfinished requests. The perf tab and snapshot report search `mode`.
 
 ## Live objects
 
@@ -127,13 +121,13 @@ them (`search::live`).
 
 ## Client requests
 
-- Client `search/` owns the service (`web.rs` in the browser). `Searches` owns
-  a `Hub`, shared natively with the HTTP thread, keeping the last 32 requests
+- Client `search/` owns the service. `Searches` owns
+  a `Hub`, shared with the HTTP thread, keeping the last 32 requests
   by ID. Several requests can coexist without overwriting one another.
 - `UiCommand::Search { query }` searches from the camera and becomes
   `Searches::shown`, cancelling the previous shown request. `clear_search`
   clears it; `set_search threads=<n> work_cap_millions=<m>` changes debug
-  settings (threads are native-only).
+  settings.
 - Shown results' systems are charted in `Navigation::charted`, allowing visits
   without streamed cells. Locating a star from its ID alone was measured at
   about 150 ms, so the result carries its system position.

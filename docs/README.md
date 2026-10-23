@@ -5,9 +5,8 @@ grounded in observations and scientific research. Fictional lists and tasks
 are an optional information overlay. Future external integrations belong in
 optional plugins, not the simulator core; see [the overlay guide](shared/information-overlay.md).
 
-Native Linux and browser/WASM clients are both supported, with neither treated
-as the primary target. They share the simulation and interface; some capabilities
-are platform-specific.
+Native Linux is the only client target. The browser/WASM build was dropped
+(tag `web-final`); see [the native-only plan](plans/native-only.md).
 
 Start with [development](development.md) for setup, project structure, logs and
 checks, or [controls](client/controls.md) to use the app.
@@ -27,26 +26,25 @@ Engine-independent models in `crates/simulation`:
 - [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
-  nearest-first search, completeness and native/browser execution.
+  nearest-first search, completeness and the search thread.
 - [Craft](simulation/craft.md): the man-made object model, gravity from every
   body, and fixed-step integration.
 
 ## Client
 
-The shared native/browser client in `crates/client`, with browser workers in
-`crates/sim-worker` and `web/`:
+The Bevy/egui client in `crates/client`:
 
 - [Controls](client/controls.md): shortcuts, travel, inspection and presentation modes.
 - [Navigation](client/navigation.md): visits, physical arrival, selection,
   picking, camera frames and precision.
 - [Streaming](client/streaming.md): compact generation, loading, magnitude
-  changes, native/web workers and spatial queries.
+  changes, the loader thread and spatial queries.
 - [Realistic rendering](client/rendering.md): physical light, reflectance and phase,
   exposure, compression, HDR, sprites, scale and cameras.
 - [Galactic rendering](client/galactic-rendering.md): GPU point batches,
   precise sprites, multiple-system resolution and diffuse galaxy glow.
 - [Debug tools](client/devtools.md): console, command path, performance
-  readouts, snapshots and browser automation.
+  readouts and snapshots.
 - [Developer API and CLI](client/developer-api.md): local reads, discovery,
   commands, captures, inspector export and search endpoints.
 - [Benchmarks](client/benchmarks.md): fixed routes, historical baselines,
@@ -78,6 +76,8 @@ The shared native/browser client in `crates/client`, with browser workers in
   breadcrumb and the camera's motion, and star and barycentre markers.
 - [Ship schema](plans/ship-schema.md): one source of truth for ship orders and
   state, generating `ns ship` and the TUI's Ship tab.
+- [Native only](plans/native-only.md): why the browser/WASM build was dropped
+  and what the removal covered.
 
 ## Current limitations
 
@@ -95,8 +95,7 @@ The shared native/browser client in `crates/client`, with browser workers in
   can match a local body's velocity or add speed for a rough orbit, without
   navigating to it. No in-app piloting
   controls, automatic arrivals, atmospheric exclusion, saving or collisions yet;
-  predicted impacts outside warp are shown but not enforced. Phase 4 warp has
-  native live acceptance; browser flight visuals have not been manually tested.
+  predicted impacts outside warp are shown but not enforced.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 
 ## Organisation
@@ -104,6 +103,6 @@ The shared native/browser client in `crates/client`, with browser workers in
 Folders follow logical code ownership, not individual source files. Cross-cutting
 setup stays in `development.md`; plans/history stay separate from current behaviour.
 Each topic has one owning explanation, linked from related guides. Paths beginning
-with `crates/`, `scripts/` or `web/` are repository-relative; shorter source paths
+with `crates/` or `scripts/` are repository-relative; shorter source paths
 are relative to the crate named by their guide. Source code remains authoritative
 for implementation details.

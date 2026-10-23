@@ -384,8 +384,7 @@ or galactic flight, prediction reports unavailable rather than an old orbit.
   requests are retained. API requests never change the browser's shown query.
 - Typed `search <query text>` becomes `UiCommand::Search`, opening/updating
   the browser and cancelling its prior shown request. `clear_search` clears
-  it; `set_search threads=<n> work_cap_millions=<m>` adjusts debug settings
-  (threads are native-only).
+  it; `set_search threads=<n> work_cap_millions=<m>` adjusts debug settings.
 
 ```sh
 ./scripts/ns catalogue

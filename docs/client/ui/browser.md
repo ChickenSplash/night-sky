@@ -1,9 +1,8 @@
 # Object browser
 
 The object browser opens with the search icon, Ctrl+K, or a `search` command.
-It builds the shared search query using registry-driven filter chips. Native
-and browser clients draw the same egui controls, using the
-[shared UI kit](kit.md). The query and engine are described in
+It builds the shared search query using registry-driven filter chips, drawn
+with the [shared UI kit](kit.md). The query and engine are described in
 [object search](../../simulation/search.md).
 
 ## Search and filter controls
