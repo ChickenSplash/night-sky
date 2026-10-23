@@ -371,7 +371,9 @@ fn crescents_are_dimmer_than_full_discs() {
 #[test]
 fn an_atmosphere_is_lit_on_the_surface_exposure_and_only_around_discs() {
     let photometry = Photometry::default();
-    let earth = atmosphere::Atmosphere::EARTH.scaled(6.371e6);
+    let earth = atmosphere::AirSettings::preset(atmosphere::Preset::Earth)
+        .atmosphere()
+        .scaled(6.371e6);
     // About 100 km of air on Earth's 6,371 km, its gas scale height 8 km.
     assert!((earth.top - 1.0157).abs() < 1e-3);
     assert!((earth.rayleigh.w * 6.371e6 - 8e3).abs() < 1.0);
@@ -392,4 +394,34 @@ fn an_atmosphere_is_lit_on_the_surface_exposure_and_only_around_discs() {
     let expected = std::f64::consts::PI / (surface.albedo * surface.tint[0]);
     assert!((ratio / expected - 1.0).abs() < 1e-4, "{ratio} {expected}");
     assert_eq!(shell.suns[1], Vec4::ZERO);
+}
+
+#[test]
+fn atmosphere_presets_and_changes() {
+    use atmosphere::{AirSettings, AtmosphereChange, AtmosphereTuning, Preset};
+    // Earth's preset gives Hillaire's (2020) air: 100 km deep, blue 33.1e-6.
+    let earth = AirSettings::preset(Preset::Earth).atmosphere();
+    assert!((earth.top - 100e3).abs() < 1.0);
+    assert!((earth.rayleigh.z / 33.1e-6 - 1.0).abs() < 1e-3);
+    let mut tuning = AtmosphereTuning::default();
+    tuning.apply(&AtmosphereChange {
+        preset: Some(Preset::Mars),
+        haze: Some(2.0),
+        view_steps: Some(1000),
+        ..default()
+    });
+    assert_eq!(tuning.preset, Preset::Mars);
+    assert_eq!(tuning.air.pressure_bar, 0.006);
+    assert_eq!(tuning.air.haze, 2.0);
+    assert_eq!(tuning.view_steps, *atmosphere::VIEW_STEPS.end());
+    assert!(AtmosphereChange::default().check().is_err());
+    // Every preset stays within the sliders' ranges.
+    for (preset, _) in Preset::ALL {
+        let air = AirSettings::preset(preset);
+        assert!(atmosphere::PRESSURE_BAR.contains(&air.pressure_bar));
+        assert!(atmosphere::HEIGHT_KM.contains(&air.scale_height_km));
+        assert!(atmosphere::HEIGHT_KM.contains(&air.haze_height_km));
+        assert!(atmosphere::GAS.contains(&air.gas));
+        assert!(atmosphere::HAZE.contains(&air.haze));
+    }
 }

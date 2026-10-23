@@ -29,6 +29,7 @@ pub use capture::log_layers;
 pub use http::install as install_http;
 use tabs::tools::save_bug_report;
 use tabs::{
+    atmosphere::atmosphere,
     controls::controls,
     log::{log, unseen_badges},
     perf::perf,
@@ -47,17 +48,19 @@ enum Tab {
     Terminal,
     Perf,
     Render,
+    Atmosphere,
     Controls,
     State,
     Tools,
 }
 
 impl Tab {
-    const ALL: [(Self, &str); 7] = [
+    const ALL: [(Self, &str); 8] = [
         (Self::Log, "log"),
         (Self::Terminal, "terminal"),
         (Self::Perf, "perf"),
         (Self::Render, "render"),
+        (Self::Atmosphere, "atmosphere"),
         (Self::Controls, "controls"),
         (Self::State, "state"),
         (Self::Tools, "tools"),
@@ -129,6 +132,7 @@ type Rendering<'w> = (
     Option<Res<'w, DiagnosticsStore>>,
     ResMut<'w, CoreLoad>,
     ResMut<'w, GpuTest>,
+    Res<'w, crate::render::atmosphere::AtmosphereTuning>,
 );
 
 pub fn draw(
@@ -147,7 +151,7 @@ pub fn draw(
     let (mut contexts, mut writer, mut typed, mut commands) = interaction;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (searches, starfield, mut metrics, debug, diagnostics, mut core_load, mut gpu_test) =
+    let (searches, starfield, mut metrics, debug, diagnostics, mut core_load, mut gpu_test, tuning) =
         rendering;
     metrics.instrumentation_latest.debug_window_ms = 0.0;
     if tools.frames.len() == FRAMES {
@@ -207,6 +211,13 @@ pub fn draw(
                             &mut out,
                         ),
                         Tab::Render => render(ui, &nav, &mut out),
+                        Tab::Atmosphere => atmosphere(
+                            ui,
+                            &nav,
+                            (&debug, &tuning),
+                            diagnostics.as_deref(),
+                            &mut out,
+                        ),
                         Tab::Controls => controls(ui, &mut bindings),
                         Tab::State => state(
                             ui,

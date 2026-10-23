@@ -52,6 +52,18 @@ fn every_usage_parses() {
             parse(r#"{"type":"inspect_object","inspection":{"source":"location","object":{"kind":"galaxy"}}}"#).expect("nested inspection uses the documented JSON command route");
             continue;
         }
+        if usage.name == "set_atmosphere" {
+            for line in [
+                "set_atmosphere venus",
+                "set_atmosphere mars 0.01 12 3 10 11 [1,0.6,0.3] 24 6",
+                "set_atmosphere haze=5 haze_colour=[1,0.8,0.6]",
+            ] {
+                parse(line).unwrap_or_else(|err| panic!("{line}: {err}"));
+            }
+            assert!(parse("set_atmosphere").is_err());
+            assert!(parse("set_atmosphere pressure_bar=5000").is_err());
+            continue;
+        }
         if usage.name == "spawn_ship" {
             // A speed or a velocity, not both.
             for line in [

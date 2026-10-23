@@ -642,16 +642,20 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
 /// GPU bytes per uploaded star (`stars::render::StarInstance`).
 const STAR_BYTES: usize = size_of::<crate::stars::render::StarInstance>();
 
-/// GPU and render-thread time, and shader invocations, per render pass, from
-/// Bevy's render diagnostics.
-fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_ms: f32) {
-    #[derive(Default)]
-    struct Pass {
-        gpu: Option<f64>,
-        cpu: Option<f64>,
-        vertices: Option<f64>,
-        fragments: Option<f64>,
-    }
+/// One render pass's smoothed figures, per frame.
+#[derive(Default)]
+pub(super) struct Pass {
+    pub gpu: Option<f64>,
+    pub cpu: Option<f64>,
+    pub vertices: Option<f64>,
+    pub fragments: Option<f64>,
+}
+
+/// Each render pass that ran in the last second, by name, from Bevy's render
+/// diagnostics. Nested passes are named `outer/inner`.
+pub(super) fn pass_times(
+    diagnostics: Option<&DiagnosticsStore>,
+) -> std::collections::BTreeMap<&str, Pass> {
     let mut passes = std::collections::BTreeMap::<&str, Pass>::new();
     for diagnostic in diagnostics.iter().flat_map(|store| store.iter()) {
         let Some((pass, field)) = diagnostic
@@ -680,15 +684,26 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
             _ => {}
         }
     }
+    passes
+}
+
+/// GPU time of the top-level passes, which hold the nested ones.
+pub(super) fn gpu_total(passes: &std::collections::BTreeMap<&str, Pass>) -> f64 {
+    passes
+        .iter()
+        .filter(|(pass, _)| !pass.contains('/'))
+        .filter_map(|(_, p)| p.gpu)
+        .sum()
+}
+
+/// GPU and render-thread time, and shader invocations, per render pass.
+fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_ms: f32) {
+    let passes = pass_times(diagnostics);
     if passes.is_empty() {
         terminal::note(ui, "Waiting for render diagnostics…");
         return;
     }
-    let total: f64 = passes
-        .iter()
-        .filter(|(pass, _)| !pass.contains('/'))
-        .filter_map(|(_, p)| p.gpu)
-        .sum();
+    let total = gpu_total(&passes);
     terminal::facts_with_details(
         ui,
         "debug-gpu-total",

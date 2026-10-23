@@ -1,6 +1,7 @@
 //! The `render` tab: exposure readouts and rendering controls.
 use crate::Navigation;
 use crate::actions::{Display, GalaxyReference, UiCommand};
+use crate::ui::kit;
 use crate::ui::terminal::{self};
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -82,16 +83,21 @@ pub fn render(ui: &mut egui::Ui, nav: &Navigation, out: &mut Vec<UiCommand>) {
             on: !nav.realistic,
         });
     }
-    let mut degrees = nav.fov_deg;
-    if ui
-        .add(
-            egui::Slider::new(&mut degrees, crate::FOV_DEG)
-                .text("Field of view")
-                .suffix("°"),
-        )
-        .changed()
-    {
-        out.push(UiCommand::SetFov { degrees });
+    if let Some(degrees) = terminal::slider(
+        ui,
+        &kit::Slider {
+            label: "Field of view",
+            detail: "Vertical field of view. Wider shows more of the sky at once; narrower magnifies.",
+            range: f64::from(*crate::FOV_DEG.start())..=f64::from(*crate::FOV_DEG.end()),
+            unit: "°",
+            logarithmic: false,
+            integer: true,
+        },
+        f64::from(nav.fov_deg),
+    ) {
+        out.push(UiCommand::SetFov {
+            degrees: degrees as f32,
+        });
     }
     terminal::heading(ui, "exposure");
     terminal::facts_with_details(ui, "debug-exposure", &crate::render::exposure::facts(nav));

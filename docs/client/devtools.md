@@ -17,6 +17,7 @@ New debug readouts/switches belong here, not in separate windows or the canvas.
 | `terminal` | Command line and output |
 | `perf` | Frame graph, star generation/stream/draw metrics, cells/blocks/grid boxes, GPU passes and performance switches |
 | `render` | Scene overlays with its nested switches (orbits, labels, markers, velocity marker, craft predicted paths, body wireframes), FOV, realistic lighting, exposure/compression facts, glow and galaxy reference views |
+| `atmosphere` | The prototype air on the selected planet: on/off switch, presets, sliders for pressure, scale height, gas, haze and its colour, shader steps, derived top and optical depths, and the GPU frame and transparent-pass times |
 | `controls` | Shortcut help |
 | `state` | Camera, location, open list, anchor/page, presentation, selection, anchor star, clock and shown search |
 | `tools` | GPU/core-load tests and bug report |

@@ -307,6 +307,7 @@ fn run(galaxy: space_shared::Galaxy, commands: Vec<UiCommand>) -> App {
         .init_resource::<Clock>()
         .init_resource::<crate::stars::stream::Starfield>()
         .init_resource::<crate::render::debug::RenderDebug>()
+        .init_resource::<crate::render::atmosphere::AtmosphereTuning>()
         .init_resource::<crate::craft::Fleet>()
         .add_systems(Update, apply);
     send(&mut app, commands);

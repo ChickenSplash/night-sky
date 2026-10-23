@@ -324,6 +324,12 @@ def parser():
     despawn.add_argument("id", nargs="?", help="one craft (default: all)")
     ships.add_parser("tree", help="print every ship command as a tree, without connecting")
     add_orders(ships, craft_schema())
+    atmosphere = sub.add_parser(
+        "atmosphere", help="read or set the prototype air on the selected planet, with its GPU cost",
+        description="Without arguments, prints the air, the shader steps and the GPU time. Arguments are "
+        "set_atmosphere's: a preset (earth, venus, mars, titan, hydrogen_giant), then any values over it.",
+        epilog="example: ns atmosphere mars haze=20 haze_colour=[1,0.5,0.3]")
+    atmosphere.add_argument("words", nargs="*", help="preset and field=value pairs")
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
     watch.add_argument("target", choices=("state", "perf"))
     watch.add_argument("path", nargs="?", default="", help="optional nested path")
@@ -617,6 +623,29 @@ def ship(args):
     return result
 
 
+def atmosphere(args):
+    if args.words:
+        result = request(args.port, "/command", ("set_atmosphere " + " ".join(args.words)).encode("utf-8"))
+        if result.get("status") != "accepted":
+            return result
+    # The command has run once accepted; wait for a snapshot taken after it.
+    after = time.time() * 1000
+    deadline = time.monotonic() + 2
+    state = request(args.port, endpoint("state"))
+    while args.words and state.get("sampled_unix_ms", 0) <= after and time.monotonic() < deadline:
+        time.sleep(0.05)
+        state = request(args.port, endpoint("state"))
+    gpu = {}
+    for entry in state["performance"].get("gpu_diagnostics", []):
+        pass_name, _, field = entry["path"].removeprefix("render/").rpartition("/")
+        if field == "elapsed_gpu":
+            gpu[pass_name] = entry["smoothed"] if entry["smoothed"] is not None else entry["latest"]
+    return dict(state["atmosphere"], switch=state["debug"]["atmospheres"],
+                selection=state.get("selection"),
+                gpu_ms={"frame": round(sum(v for k, v in gpu.items() if "/" not in k), 3),
+                        "transparent_pass": round(gpu.get("main_transparent_pass_3d", 0.0), 3)})
+
+
 def lists(state):
     return [{"id": entry["id"], "name": entry["name"], "tasks": entry["tasks"],
              "systems": [system["star"] for system in entry["systems"]]} for entry in state]
@@ -662,6 +691,9 @@ def main(argv=None):
             result = ship(args)
             if result is not None:
                 output(result, args.json)
+            return 0
+        elif args.action == "atmosphere":
+            output(atmosphere(args), args.json)
             return 0
         elif args.action == "lists":
             output(lists(request(args.port, endpoint("state", "lists"))), args.json)

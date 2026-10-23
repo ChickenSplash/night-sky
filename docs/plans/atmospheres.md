@@ -28,7 +28,12 @@ the same model as just another body.
    simulation work.
 2. **Lookup tables:** transmittance and multiple scattering precomputed per
    planet (Bruneton 2008, Hillaire 2020). The direct shader stays as a
-   reference toggle, to compare the look and frame time.
+   reference toggle, to compare the look and frame time. Also colour-dependent
+   dimming of what lies behind, through dual-source blending (wgpu's
+   `DUAL_SOURCE_BLENDING` feature), so red light no longer leaks through
+   thick air under a grey average. Multiple scattering is what lights Venus's
+   surface as a dim overcast; its preset then needs nearly non-absorbing
+   cloud (about 0.1% per scattering, against Earth haze's 10%).
 3. **Simulation:** retention (the cosmic shoreline, Zahnle & Catling 2017,
    with stripping near flaring M dwarfs), composition, pressure and scale
    height, then climate. The sliders stay as a debug override.
@@ -76,12 +81,19 @@ behind the camera. Follow-up fixes after the live check:
   with the air filling the screen from inside it, as estimated for the
   direct version. The lookup tables are expected to bring this down.
 
+Checkpoint 2 passed the user's live check. It adds
+`AtmosphereTuning`: the sliders and presets set physical
+values (pressure in bar, scale heights in km, gas and haze against Earth's),
+converted to coefficients per metre for the shader. The tab's GPU readout is
+the frame's GPU time and the transparent pass, compared with the switch on
+and off, as the shell has no pass of its own.
+
 Checkpoints, each checked live by the user and committed:
 
 1. ✅ **Shell and shader:** the atmosphere material and `render/atmosphere.wgsl`
    on the selected planet, with fixed Earth values, and a debug switch
    (`set_debug atmospheres`) to compare with and without.
-2. **Debug tab and CLI:** an `atmosphere` tab in the debug console with
+2. ✅ **Debug tab and CLI:** an `atmosphere` tab in the debug console with
    on/off, surface pressure, thickness, gas scattering strength, haze amount
    and colour, and steps per pixel; presets for Earth, Venus, Mars, Titan
    and a hydrogen giant; a GPU frame time readout; `ns atmosphere ...` to
@@ -89,8 +101,20 @@ Checkpoints, each checked live by the user and committed:
 3. **Polish:** the camera inside the atmosphere (sky colour, stars fading),
    precision from AU distances down to low orbit, two-star lighting and the
    rendering guide. The user runs a GPU benchmark for a baseline before the
-   lookup tables.
+   lookup tables. From inside thick air (Venus), the ground shows with a hard
+   edge at the horizon instead of fading into the sky. Two fixes:
+   - **Sunlight at the ground:** the surface shader lights the ground with
+     undimmed starlight. For pixels that reach the ground, the atmosphere
+     shader also dims what lies behind by the transmittance from that ground
+     point to each star. Cost: one more light march, for ground pixels only.
+   - **Steps:** each step adds its light with the energy-conserving form
+     (Hillaire 2015), $S\,(1 - e^{-\sigma_t \Delta s})/\sigma_t$, rather than
+     $S\,e^{-\sigma_t \Delta s/2}\,\Delta s$, which loses the light of
+     optically thick steps. Steps are also spaced closer near the camera, so
+     rays either side of the horizon (one ending at the ground, one crossing
+     the whole air) settle to the same colour. No extra samples.
 
 Known prototype limits: no multiple scattering, so thick atmospheres look too
-dark; the ground is lit by unattenuated starlight, so the terminator is not
-reddened; grey transmittance over the ground.
+dark and Venus's surface is black; the ground is lit by unattenuated
+starlight, so the terminator is not reddened (fixed in checkpoint 3); grey
+transmittance over the ground (fixed with the lookup tables).

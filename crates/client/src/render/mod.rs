@@ -72,6 +72,7 @@ impl Plugin for RenderPlugin {
         .init_resource::<Pool<BodyMaterial>>()
         .init_resource::<Pool<PointMaterial>>()
         .init_resource::<Pool<atmosphere::AtmosphereMaterial>>()
+        .init_resource::<atmosphere::AtmosphereTuning>()
         .add_systems(Startup, setup)
         .add_systems(Update, switch_camera)
         .add_systems(

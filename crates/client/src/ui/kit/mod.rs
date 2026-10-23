@@ -14,6 +14,7 @@ mod number;
 mod pill;
 mod range;
 mod scroll;
+mod slider;
 mod theme;
 mod tooltip;
 mod widgets;
@@ -30,6 +31,7 @@ pub use pill::Pills;
 pub use range::parse_range_end;
 pub use range::{NumericRange, RangeField, RangeInput, RangeScale, RangeSlider, range_field};
 pub use scroll::ScrollArea;
+pub use slider::Slider;
 pub use theme::{ACCENT, SPACING, Theme, plain_style};
 pub use tooltip::TooltipExt;
 pub use widgets::{

@@ -17,6 +17,7 @@ use bevy::{
     },
     shader::ShaderRef,
 };
+use std::ops::RangeInclusive;
 
 /// The shell mesh's radius over the top of the air: the sphere mesh's facets
 /// lie slightly inside the sphere they approximate.
@@ -26,8 +27,21 @@ const MESH_MARGIN: f32 = 1.01;
 /// below. Generous, as oblique points are clipped closer than their distance.
 const NEAR_MARGIN: f32 = 10.0;
 /// Steps along a pixel's line of sight, and from each towards every star.
-const VIEW_STEPS: f32 = 16.0;
-const LIGHT_STEPS: f32 = 8.0;
+pub const VIEW_STEPS: RangeInclusive<u32> = 4..=64;
+pub const LIGHT_STEPS: RangeInclusive<u32> = 2..=32;
+/// Slider and command ranges.
+pub const PRESSURE_BAR: RangeInclusive<f64> = 1e-4..=1000.0;
+pub const HEIGHT_KM: RangeInclusive<f64> = 0.1..=200.0;
+pub const GAS: RangeInclusive<f64> = 0.0..=10.0;
+pub const HAZE: RangeInclusive<f64> = 0.0..=1000.0;
+/// The top of the air, in scale heights of its gas or haze, whichever is taller.
+const TOP_HEIGHTS: f64 = 12.5;
+/// Rayleigh scattering of Earth's air per bar at the ground, for 680, 550 and
+/// 440 nm (Hillaire 2020, at 1.01325 bar).
+const AIR_PER_BAR: DVec3 = DVec3::new(5.726e-6, 13.381e-6, 32.667e-6);
+/// Earth's continental haze at the ground: Mie scattering and absorption.
+const HAZE_SCATTERING: f64 = 3.996e-6;
+const HAZE_ABSORPTION: f64 = 0.444e-6;
 
 /// A planet's air, physical: coefficients per metre, heights in metres.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,21 +65,6 @@ pub struct Atmosphere {
 }
 
 impl Atmosphere {
-    /// Earth's, as in Hillaire (2020): Rayleigh scattering for 680, 550 and
-    /// 440 nm, a continental haze and the ozone layer.
-    pub const EARTH: Self = Self {
-        top: 100e3,
-        rayleigh: DVec3::new(5.802e-6, 13.558e-6, 33.1e-6),
-        rayleigh_height: 8e3,
-        mie: DVec3::splat(3.996e-6),
-        mie_absorption: 0.444e-6,
-        mie_height: 1.2e3,
-        mie_asymmetry: 0.8,
-        absorption: DVec3::new(0.650e-6, 1.881e-6, 0.085e-6),
-        layer_height: 25e3,
-        layer_width: 15e3,
-    };
-
     /// The air in units of a planet's radius, as the shader takes it.
     pub fn scaled(&self, radius: f64) -> Air {
         let per = |v: DVec3| (v * radius).as_vec3();
@@ -82,6 +81,261 @@ impl Atmosphere {
             ),
             absorption: per(self.absorption),
         }
+    }
+}
+
+/// An atmosphere as the debug sliders set it, by hand until the simulation
+/// stage generates one per planet.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct AirSettings {
+    pub pressure_bar: f64,
+    /// Scale height of the gas.
+    pub scale_height_km: f64,
+    /// Rayleigh scattering per bar at the ground, against Earth's air. Folds
+    /// in the gas (carbon dioxide about 2.4, hydrogen about 0.2) and its
+    /// number density per bar, higher in colder air.
+    pub gas: f64,
+    /// Haze at the ground, against Earth's continental haze, whatever the
+    /// pressure.
+    pub haze: f64,
+    pub haze_height_km: f64,
+    /// The haze's scattering per channel (red, green, blue), from 0 to 1. Its
+    /// absorption stays grey.
+    pub haze_colour: [f64; 3],
+    /// Cornette-Shanks `g`: how far forward the haze scatters.
+    pub haze_asymmetry: f64,
+    /// Absorption peaking in a layer, per metre, such as ozone or methane.
+    pub absorption: [f64; 3],
+    pub layer_km: f64,
+    pub layer_width_km: f64,
+}
+
+impl AirSettings {
+    pub fn preset(preset: Preset) -> Self {
+        let earth = Self {
+            pressure_bar: 1.01325,
+            scale_height_km: 8.0,
+            gas: 1.0,
+            haze: 1.0,
+            haze_height_km: 1.2,
+            haze_colour: [1.0; 3],
+            haze_asymmetry: 0.8,
+            absorption: [0.650e-6, 1.881e-6, 0.085e-6],
+            layer_km: 25.0,
+            layer_width_km: 15.0,
+        };
+        let clear = Self {
+            absorption: [0.0; 3],
+            ..earth
+        };
+        // Rough values, to judge the look: surface pressures and scale
+        // heights as measured, haze tuned by eye.
+        match preset {
+            Preset::Earth => earth,
+            // Carbon dioxide at 737 K, under thick sulphuric acid cloud.
+            Preset::Venus => Self {
+                pressure_bar: 92.0,
+                scale_height_km: 15.9,
+                gas: 0.95,
+                haze: 300.0,
+                haze_height_km: 15.0,
+                haze_colour: [1.0, 0.92, 0.65],
+                haze_asymmetry: 0.7,
+                ..clear
+            },
+            // Thin carbon dioxide at 210 K, with reddish dust.
+            Preset::Mars => Self {
+                pressure_bar: 0.006,
+                scale_height_km: 11.1,
+                gas: 3.3,
+                haze: 11.0,
+                haze_height_km: 11.1,
+                haze_colour: [1.0, 0.6, 0.35],
+                haze_asymmetry: 0.75,
+                ..clear
+            },
+            // Nitrogen at 94 K, its low gravity giving a deep column, under
+            // a tall orange haze.
+            Preset::Titan => Self {
+                pressure_bar: 1.5,
+                scale_height_km: 21.0,
+                gas: 3.0,
+                haze: 20.0,
+                haze_height_km: 60.0,
+                haze_colour: [1.0, 0.6, 0.25],
+                haze_asymmetry: 0.6,
+                ..clear
+            },
+            // Hydrogen at 165 K above its 1 bar level, ammonia haze and
+            // methane taking red light throughout.
+            Preset::HydrogenGiant => Self {
+                pressure_bar: 1.0,
+                scale_height_km: 27.0,
+                gas: 0.4,
+                haze: 5.0,
+                haze_height_km: 27.0,
+                haze_colour: [1.0, 0.95, 0.85],
+                haze_asymmetry: 0.7,
+                absorption: [2e-6, 0.5e-6, 0.0],
+                layer_km: 0.0,
+                layer_width_km: 300.0,
+            },
+        }
+    }
+
+    /// The physical air these settings describe.
+    pub fn atmosphere(&self) -> Atmosphere {
+        let colour = DVec3::from_array(self.haze_colour);
+        let tallest = self.scale_height_km.max(self.haze_height_km);
+        Atmosphere {
+            top: (tallest * TOP_HEIGHTS).max(self.layer_km + self.layer_width_km) * 1e3,
+            rayleigh: AIR_PER_BAR * self.gas * self.pressure_bar,
+            rayleigh_height: self.scale_height_km * 1e3,
+            mie: colour * HAZE_SCATTERING * self.haze,
+            mie_absorption: HAZE_ABSORPTION * self.haze,
+            mie_height: self.haze_height_km * 1e3,
+            mie_asymmetry: self.haze_asymmetry,
+            absorption: DVec3::from_array(self.absorption),
+            layer_height: self.layer_km * 1e3,
+            layer_width: self.layer_width_km * 1e3,
+        }
+    }
+}
+
+/// Starting points for the sliders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Preset {
+    Earth,
+    Venus,
+    Mars,
+    Titan,
+    HydrogenGiant,
+}
+
+impl Preset {
+    pub const ALL: [(Self, &str); 5] = [
+        (Self::Earth, "Earth"),
+        (Self::Venus, "Venus"),
+        (Self::Mars, "Mars"),
+        (Self::Titan, "Titan"),
+        (Self::HydrogenGiant, "hydrogen giant"),
+    ];
+}
+
+/// The prototype's air, applied to the selected planet, and the shader's
+/// steps. Set from the debug window's `atmosphere` tab or `set_atmosphere`.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct AtmosphereTuning {
+    /// The preset last applied; the sliders may have moved since.
+    pub preset: Preset,
+    pub air: AirSettings,
+    pub view_steps: u32,
+    pub light_steps: u32,
+}
+
+impl Default for AtmosphereTuning {
+    fn default() -> Self {
+        Self {
+            preset: Preset::Earth,
+            air: AirSettings::preset(Preset::Earth),
+            view_steps: 16,
+            light_steps: 8,
+        }
+    }
+}
+
+/// A change to the tuning: a preset first, then any values over it.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct AtmosphereChange {
+    #[serde(default)]
+    pub preset: Option<Preset>,
+    #[serde(default)]
+    pub pressure_bar: Option<f64>,
+    #[serde(default)]
+    pub scale_height_km: Option<f64>,
+    #[serde(default)]
+    pub gas: Option<f64>,
+    #[serde(default)]
+    pub haze: Option<f64>,
+    #[serde(default)]
+    pub haze_height_km: Option<f64>,
+    #[serde(default)]
+    pub haze_colour: Option<[f64; 3]>,
+    #[serde(default)]
+    pub view_steps: Option<u32>,
+    #[serde(default)]
+    pub light_steps: Option<u32>,
+}
+
+impl AtmosphereChange {
+    /// Why a typed change would be clamped or do nothing.
+    pub fn check(&self) -> Result<(), String> {
+        fn within<T: PartialOrd + std::fmt::Display>(
+            name: &str,
+            value: Option<T>,
+            range: RangeInclusive<T>,
+        ) -> Result<(), String> {
+            match value {
+                Some(value) if !range.contains(&value) => Err(format!(
+                    "{name} must be {} to {}, not {value}",
+                    range.start(),
+                    range.end()
+                )),
+                _ => Ok(()),
+            }
+        }
+        if *self == Self::default() {
+            return Err("Give a preset or at least one value".into());
+        }
+        within("pressure_bar", self.pressure_bar, PRESSURE_BAR)?;
+        within("scale_height_km", self.scale_height_km, HEIGHT_KM)?;
+        within("gas", self.gas, GAS)?;
+        within("haze", self.haze, HAZE)?;
+        within("haze_height_km", self.haze_height_km, HEIGHT_KM)?;
+        within("view_steps", self.view_steps, VIEW_STEPS)?;
+        within("light_steps", self.light_steps, LIGHT_STEPS)?;
+        if let Some(colour) = self.haze_colour
+            && !colour.iter().all(|c| (0.0..=1.0).contains(c))
+        {
+            return Err("haze_colour must be three numbers, each 0 to 1".into());
+        }
+        Ok(())
+    }
+}
+
+impl AtmosphereTuning {
+    /// Applies a change, clamping what the sliders could not reach.
+    pub fn apply(&mut self, change: &AtmosphereChange) {
+        fn set<T: PartialOrd + Copy>(to: &mut T, value: Option<T>, range: RangeInclusive<T>) {
+            if let Some(value) = value {
+                *to = clamped(value, range);
+            }
+        }
+        fn clamped<T: PartialOrd + Copy>(value: T, range: RangeInclusive<T>) -> T {
+            if value < *range.start() {
+                *range.start()
+            } else if value > *range.end() {
+                *range.end()
+            } else {
+                value
+            }
+        }
+        if let Some(preset) = change.preset {
+            self.preset = preset;
+            self.air = AirSettings::preset(preset);
+        }
+        let air = &mut self.air;
+        set(&mut air.pressure_bar, change.pressure_bar, PRESSURE_BAR);
+        set(&mut air.scale_height_km, change.scale_height_km, HEIGHT_KM);
+        set(&mut air.gas, change.gas, GAS);
+        set(&mut air.haze, change.haze, HAZE);
+        set(&mut air.haze_height_km, change.haze_height_km, HEIGHT_KM);
+        if let Some(colour) = change.haze_colour {
+            air.haze_colour = colour.map(|c| clamped(c, 0.0..=1.0));
+        }
+        set(&mut self.view_steps, change.view_steps, VIEW_STEPS);
+        set(&mut self.light_steps, change.light_steps, LIGHT_STEPS);
     }
 }
 
@@ -195,11 +449,11 @@ impl Shell {
     }
 
     /// `near` is the camera's near plane, in render units.
-    fn material(&self, eye: Vec3, near: f32) -> AtmosphereMaterial {
+    fn material(&self, eye: Vec3, near: f32, steps: (u32, u32)) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
-            steps: Vec4::new(self.air.top, VIEW_STEPS, LIGHT_STEPS, 0.0),
+            steps: Vec4::new(self.air.top, steps.0 as f32, steps.1 as f32, 0.0),
             rayleigh: self.air.rayleigh,
             mie: self.air.mie,
             shape: self.air.shape,
@@ -215,7 +469,7 @@ pub(super) fn sync_atmospheres(
     mut commands: Commands,
     frame: Res<Frame>,
     meshes: Res<Meshes>,
-    debug: Res<super::debug::RenderDebug>,
+    (debug, tuning): (Res<super::debug::RenderDebug>, Res<AtmosphereTuning>),
     (mut pool, mut materials): (
         ResMut<Pool<AtmosphereMaterial>>,
         ResMut<Assets<AtmosphereMaterial>>,
@@ -258,7 +512,7 @@ pub(super) fn sync_atmospheres(
             *cell,
             Transform::from_translation(shell.centre).with_scale(Vec3::splat(shell.extent())),
         );
-        let changed = shell.material(eye, near);
+        let changed = shell.material(eye, near, (tuning.view_steps, tuning.light_steps));
         if materials.get(material).is_some_and(|m| *m != changed)
             && let Some(m) = materials.get_mut(material)
         {

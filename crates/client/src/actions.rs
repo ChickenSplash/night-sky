@@ -142,6 +142,8 @@ pub enum UiCommand {
         switch: crate::render::debug::DebugSwitch,
         on: bool,
     },
+    /// The prototype atmosphere's preset, values and steps (`render/atmosphere.rs`).
+    SetAtmosphere(crate::render::atmosphere::AtmosphereChange),
     /// Search from the camera and show the request in the object browser,
     /// replacing the one it shows (`search.rs`). In `ns search` text.
     Search {
@@ -216,6 +218,7 @@ impl UiCommand {
                 within("stops", *stops, crate::render::exposure::STOPS)
             }
             UiCommand::SetCompression { amount } => within("amount", *amount, 0.0..=1.0),
+            UiCommand::SetAtmosphere(change) => change.check(),
             UiCommand::SpawnShip {
                 altitude_km,
                 speed_kms,
@@ -519,7 +522,10 @@ pub fn apply(
     mut nav: ResMut<Navigation>,
     mut clock: ResMut<Clock>,
     field: Res<crate::stars::stream::Starfield>,
-    mut debug: ResMut<crate::render::debug::RenderDebug>,
+    (mut debug, mut tuning): (
+        ResMut<crate::render::debug::RenderDebug>,
+        ResMut<crate::render::atmosphere::AtmosphereTuning>,
+    ),
     mut fleet: ResMut<crate::craft::Fleet>,
 ) {
     let galaxy = &universe.0;
@@ -744,6 +750,7 @@ pub fn apply(
             UiCommand::SetCompression { amount } => nav.set_compression(*amount),
             UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
             UiCommand::SetDebug { switch, on } => debug.set(*switch, *on),
+            UiCommand::SetAtmosphere(change) => tuning.apply(change),
             // `search::apply` runs these.
             UiCommand::Search { .. } | UiCommand::ClearSearch | UiCommand::SetSearch { .. } => {}
         }

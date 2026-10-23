@@ -44,6 +44,10 @@ readouts; extending an object should extend that source, not duplicate it.
   for individual controls.
 - Section separation uses space instead of decorative lines. Checkbox split
   dividers and intentional diagnostic rules remain functional separators.
+- `Slider` rows split like checkboxes: label, a text-mode `[=====|-----]`
+  track and the value, then the square `+` that opens their description.
+  Labels share a column so neighbouring tracks line up. Use them instead of
+  egui's slider in the debug console.
 - `eyebrow_text` supplies the shared selectable section/table-label typography.
 - `TooltipExt::on_hover_text_themed` supplies opaque, theme-matched tooltip
   frames and text, independent of translucent window fills.

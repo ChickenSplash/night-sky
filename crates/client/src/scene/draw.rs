@@ -160,6 +160,8 @@ struct Canvas<'a> {
     seconds: f64,
     photometry: &'a Photometry,
     frame_ly: DVec3,
+    /// The prototype's air, for the selected planet.
+    air: render::atmosphere::Atmosphere,
 }
 
 impl Canvas<'_> {
@@ -551,7 +553,7 @@ impl Canvas<'_> {
                 && let Some(per_pixel) = self.per_pixel(centre)
             {
                 let disc = self.units(radius);
-                // Prototype: Earth's air on the selected planet only.
+                // Prototype: the debug air on the selected planet only.
                 let selected = matches!(&nav.selection,
                     Some(crate::Selection::Planet(id)) if *id == planet.id);
                 lights.planets.push(PlanetLight {
@@ -561,7 +563,7 @@ impl Canvas<'_> {
                     per_pixel,
                     light: self.illumination(orbital, local),
                     surface: space_simulation::light::surface(&planet.class),
-                    air: selected.then(|| render::atmosphere::Atmosphere::EARTH.scaled(radius)),
+                    air: selected.then(|| self.air.scaled(radius)),
                 });
             }
             let pixels = self.outline(gizmos, centre, self.units(radius), tint, basis, false);
@@ -674,11 +676,15 @@ pub fn draw(
     pose: Res<CameraPose>,
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
     mut markers: ResMut<Markers>,
-    light: (ResMut<Lights>, Res<Photometry>),
+    light: (
+        ResMut<Lights>,
+        Res<Photometry>,
+        Res<render::atmosphere::AtmosphereTuning>,
+    ),
     fleet: Res<crate::craft::Fleet>,
     rig: Res<super::CameraRig>,
 ) {
-    let (mut lights, photometry) = light;
+    let (mut lights, photometry, tuning) = light;
     markers.0.clear();
     lights.clear();
     let Ok((camera, view)) = camera.single() else {
@@ -706,6 +712,7 @@ pub fn draw(
         seconds: clock.0.seconds,
         photometry: &photometry,
         frame_ly: rig.frame_ly,
+        air: tuning.air.atmosphere(),
     };
     let markers = &mut markers.0;
     if nav.overlays && nav.presentation_mode == PresentationMode::Constellation {

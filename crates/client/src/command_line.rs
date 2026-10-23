@@ -140,7 +140,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 32] = [
+pub const USAGE: [Usage; 33] = [
     Usage {
         name: "steer_craft",
         fields: &["order", "id", "tick", "in_s", "for_s"],
@@ -285,6 +285,21 @@ pub const USAGE: [Usage; 32] = [
         name: "set_debug",
         fields: &["switch", "on"],
         about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples or atmospheres; true or false",
+    },
+    Usage {
+        name: "set_atmosphere",
+        fields: &[
+            "preset",
+            "pressure_bar",
+            "scale_height_km",
+            "gas",
+            "haze",
+            "haze_height_km",
+            "haze_colour",
+            "view_steps",
+            "light_steps",
+        ],
+        about: "Prototype air on the selected planet: a preset (earth, venus, mars, titan, hydrogen_giant), then any values over it; haze_colour as [r,g,b] 0 to 1",
     },
     Usage {
         name: "search",

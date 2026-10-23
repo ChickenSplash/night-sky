@@ -106,7 +106,7 @@ than the air's top, whose pixels march single scattering along the line of
 sight (`render/atmosphere.rs`, `atmosphere.wgsl`). The shader finds the ground
 and the top analytically, in planet radii and measured from the ray's closest
 approach to the centre, so the limb holds in f32 at real distances; the mesh
-only chooses which pixels run. At each of 16 steps, light from every star is
+only chooses which pixels run. At each of 16 steps (by default), light from every star is
 attenuated by an 8-step march towards it (none where the planet is in the
 way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase).
 Densities fall exponentially with height; an absorbing layer, such as ozone,
@@ -126,8 +126,15 @@ after its planet's limb sprites. Seen from inside, or close enough above that
 the near plane would cut its near side, the far side of the shell is drawn
 over everything instead.
 
-For now only the selected planet has air, with Earth's coefficients from
-Hillaire (2020); `set_debug atmospheres false` hides it. There is no multiple
+For now only the selected planet has air, set by hand
+(`AtmosphereTuning`) from the debug window's `atmosphere` tab, `set_atmosphere`
+or `ns atmosphere`; `set_debug atmospheres false` hides it. Earth's preset uses
+Hillaire's (2020) coefficients. The sliders are physical: gas scattering is
+Earth's air per bar scaled by pressure and a gas factor (the gas and its
+number density per bar), haze is Earth's continental haze times an amount,
+coloured per channel, and the top sits 12.5 scale heights up. The Venus, Mars,
+Titan and hydrogen giant presets use measured pressures and scale heights,
+with haze tuned by eye. There is no multiple
 scattering, the ground is lit by unattenuated starlight and points have no
 atmosphere. See [the plan](../plans/atmospheres.md).
 

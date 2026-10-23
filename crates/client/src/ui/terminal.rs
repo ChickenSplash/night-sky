@@ -49,6 +49,12 @@ pub fn check(ui: &mut Ui, on: bool, label: &str, enabled: bool, detail: &str) ->
     kit::check(ui, &THEME, on, label, enabled, detail)
 }
 
+/// Split row: label, `[=====|-----]` track and value on the left, square
+/// description button on the right. Returns the new value while dragged.
+pub fn slider(ui: &mut Ui, slider: &kit::Slider, value: f64) -> Option<f64> {
+    slider.show(ui, &THEME, value)
+}
+
 /// `[ label ]`, sized to its text.
 pub fn button(ui: &mut Ui, label: &str) -> bool {
     kit::button(ui, &THEME, label).clicked()

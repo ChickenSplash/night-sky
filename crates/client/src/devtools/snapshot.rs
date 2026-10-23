@@ -47,6 +47,14 @@ pub fn install(app: &mut App) {
     app.insert_resource(snapshot).add_systems(Last, publish);
 }
 
+type Rendering<'w> = (
+    Res<'w, RenderDebug>,
+    Option<Res<'w, DiagnosticsStore>>,
+    Res<'w, crate::search::Searches>,
+    Res<'w, crate::ui::browser::Browser>,
+    Res<'w, crate::render::atmosphere::AtmosphereTuning>,
+);
+
 pub(super) fn publish(
     mut snapshot: ResMut<Snapshot>,
     mut metrics: ResMut<StreamMetrics>,
@@ -58,12 +66,7 @@ pub(super) fn publish(
         Res<crate::craft::Fleet>,
     ),
     camera: (Res<CameraPose>, Res<CameraRig>),
-    render: (
-        Res<RenderDebug>,
-        Option<Res<DiagnosticsStore>>,
-        Res<crate::search::Searches>,
-        Res<crate::ui::browser::Browser>,
-    ),
+    render: Rendering,
     time: Res<Time>,
 ) {
     let record_start = Instant::now();
@@ -89,7 +92,7 @@ pub(super) fn publish(
     let (universe, nav, clock, fleet) = scene;
     let now = fleet.at(clock.0.seconds);
     let (pose, rig) = camera;
-    let (debug, diagnostics, searches, browser) = render;
+    let (debug, diagnostics, searches, browser, tuning) = render;
     let trail = crate::ui::breadcrumb::trail(&nav, &universe.0);
     let selection_trail = crate::ui::breadcrumb::selection_trail(&nav, &universe.0, now);
     let inspection =
@@ -192,6 +195,8 @@ pub(super) fn publish(
     {
         let mut state = state;
         state["process_id"] = json!(std::process::id());
+        // The prototype air on the selected planet, for `ns atmosphere`.
+        state["atmosphere"] = json!(*tuning);
         state["sampled_unix_ms"] = json!(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -285,6 +290,7 @@ mod tests {
         .insert_resource(CameraPose::default())
         .insert_resource(CameraRig::default())
         .insert_resource(RenderDebug::default())
+        .init_resource::<crate::render::atmosphere::AtmosphereTuning>()
         .init_resource::<crate::search::Searches>()
         .init_resource::<crate::ui::browser::Browser>()
         .insert_resource(Time::<()>::default())
