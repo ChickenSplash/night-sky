@@ -47,7 +47,8 @@ cost is the GPU total with it on less the same view with it off, as the shell
 has no pass of its own. The test then restores the air, the switch and the
 clock, and frames the planet again. Each run is logged (`Atmosphere test (...)`)
 and appended as one JSON line to `data/logs/atmosphere-test.jsonl`, with the
-commit, planet, window size, MSAA, field of view and light steps, and per view
+commit, planet, window size, MSAA, field of view, light steps and whether the
+steps were jittered and the transmittance table used, and per view
 the frame mean and 95th percentile, the GPU total and the transparent pass.
 Compare runs on the same planet, as the views scale with its radius.
 

@@ -31,6 +31,9 @@ pub enum DebugSwitch {
     /// Move each pixel's atmosphere samples along its steps, so steps show
     /// as fine grain rather than bands.
     AtmosphereJitter,
+    /// Read the starlight reaching the air from a table built per air,
+    /// rather than marching towards each star (`atmosphere_tables.rs`).
+    AtmosphereTables,
 }
 
 impl DebugSwitch {
@@ -66,6 +69,9 @@ impl DebugSwitch {
             Self::AtmosphereJitter => {
                 "Sample the atmosphere at a different point of each step in neighbouring pixels, so too few steps show as fine grain instead of coloured bands. Turn off to compare."
             }
+            Self::AtmosphereTables => {
+                "Read the starlight reaching each point of the air from a lookup table built once per air, instead of marching towards each star. Should look the same and cost less; turn off to compare."
+            }
         }
     }
 }
@@ -82,6 +88,7 @@ pub struct RenderDebug {
     pub split_multiples: bool,
     pub atmospheres: bool,
     pub atmosphere_jitter: bool,
+    pub atmosphere_tables: bool,
 }
 
 impl Default for RenderDebug {
@@ -97,12 +104,13 @@ impl Default for RenderDebug {
             split_multiples: true,
             atmospheres: true,
             atmosphere_jitter: true,
+            atmosphere_tables: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 10] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 11] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -113,6 +121,7 @@ impl RenderDebug {
         (DebugSwitch::SplitMultiples, "Split multiple stars"),
         (DebugSwitch::Atmospheres, "Atmospheres"),
         (DebugSwitch::AtmosphereJitter, "Jitter atmosphere steps"),
+        (DebugSwitch::AtmosphereTables, "Atmosphere lookup tables"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -127,6 +136,7 @@ impl RenderDebug {
             DebugSwitch::SplitMultiples => self.split_multiples,
             DebugSwitch::Atmospheres => self.atmospheres,
             DebugSwitch::AtmosphereJitter => self.atmosphere_jitter,
+            DebugSwitch::AtmosphereTables => self.atmosphere_tables,
         }
     }
 
@@ -142,6 +152,7 @@ impl RenderDebug {
             DebugSwitch::SplitMultiples => &mut self.split_multiples,
             DebugSwitch::Atmospheres => &mut self.atmospheres,
             DebugSwitch::AtmosphereJitter => &mut self.atmosphere_jitter,
+            DebugSwitch::AtmosphereTables => &mut self.atmosphere_tables,
         } = on;
     }
 }

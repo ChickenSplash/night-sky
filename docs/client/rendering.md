@@ -107,9 +107,8 @@ sight (`render/atmosphere.rs`, `atmosphere.wgsl`). The shader finds the ground
 and the top analytically, in planet radii and measured from the ray's closest
 approach to the centre, so the limb holds in f32 at real distances; the mesh
 only chooses which pixels run. At each of 16 view steps (by default), light
-from every star is attenuated by an 8-step march towards it (none where the
-planet is in the way) and scattered by gas (Rayleigh phase) and haze
-(Cornette-Shanks phase). Densities fall exponentially with height; an
+from every star is attenuated on its way in (none where the planet is in the
+way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase). Densities fall exponentially with height; an
 absorbing layer, such as ozone, falls linearly either side of its peak. For
 extinction coefficient $\sigma_t$, scattering $\sigma_s$, phase $p(\mu)$ and
 star flux $F$:
@@ -149,6 +148,23 @@ along the ray, chiefly the edge of the planet's shadow at twilight, showed as
 coloured bands that only many steps hid; jittered, they blur into a fine,
 static grain. `set_debug atmosphere_jitter false` samples at the midpoints
 again, to compare.
+
+**Transmittance table.** The light lost on the way in from each star is
+read from a table rather than marched (`render/atmosphere_tables.rs`): the
+optical depth from any height, in any direction, to the top of the air,
+256 x 64 texels in Bruneton's parametrisation (by the distance to the top
+of the air between its shortest and the horizon's, and by height as
+$\sqrt{r^2 - 1}$), so the horizon, where the depth changes fastest, gets the
+most texels. It holds RGB optical depth rather than transmittance, as depth
+interpolates smoothly between texels, in `Rgba16Float`. Rays towards the
+ground read the horizon's value; the planet's shadow stays the analytic test.
+The table depends only on the air in planet radii, so it is built on the CPU
+in a background task (about 0.1 s, 512 steps per texel) when the air
+changes and cached by air; until it is ready, and with
+`set_debug atmosphere_tables false`, the shader marches towards each star
+instead (the light steps). A test compares the table with a 20,000-step
+march: within 1% of the light that gets through, for every preset, from the
+ground to the top.
 
 **Output.** Output is premultiplied: $L$ is added and whatever lies behind is
 dimmed by the line of sight's transmittance, averaged to grey. The surface

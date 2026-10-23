@@ -26,8 +26,13 @@ struct Air {
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> air: Air;
+// With TABLES, optical depth to the top of the air (`atmosphere_tables.rs`).
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var transmittance: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var transmittance_sampler: sampler;
 
 const PI: f32 = 3.14159265;
+// The table's size, as `atmosphere_tables.rs`.
+const TABLE: vec2<f32> = vec2(256.0, 64.0);
 
 struct Medium {
     rayleigh: f32,
@@ -54,6 +59,26 @@ fn mie_phase(mu: f32, g: f32) -> f32 {
     return 3.0 / (8.0 * PI) * (1.0 - g2) * (1.0 + mu * mu) / denominator;
 }
 
+// A coordinate from 0 to 1 onto the table's texel centres.
+fn texel(x: f32, size: f32) -> f32 {
+    return 0.5 / size + clamp(x, 0.0, 1.0) * (1.0 - 1.0 / size);
+}
+
+// Where the table holds the ray from radius `r` at cosine `mu` from the
+// zenith (Bruneton's parametrisation, so the horizon gets the most texels).
+fn transmittance_uv(r_in: f32, mu: f32, top: f32) -> vec2<f32> {
+    let r = clamp(r_in, 1.0, top);
+    let horizon = sqrt(top * top - 1.0);
+    let rho = sqrt(max(r * r - 1.0, 0.0));
+    let d = max(-r * mu + sqrt(max(r * r * (mu * mu - 1.0) + top * top, 0.0)), 0.0);
+    let near = top - r;
+    let far = rho + horizon;
+    return vec2(
+        texel((d - near) / max(far - near, 1e-12), TABLE.x),
+        texel(rho / horizon, TABLE.y),
+    );
+}
+
 // Optical depth from `p` towards a star, or none at all when the planet
 // is in the way.
 fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
@@ -62,6 +87,11 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
     if b < 0.0 && r2 - b * b < 1.0 {
         return vec4(0.0, 0.0, 0.0, 0.0);
     }
+#ifdef TABLES
+    let r = sqrt(r2);
+    let uv = transmittance_uv(r, b / r, top);
+    return vec4(textureSampleLevel(transmittance, transmittance_sampler, uv, 0.0).rgb, 1.0);
+#else
     let far = -b + sqrt(max(b * b - r2 + top * top, 0.0));
     let count = air.steps.z;
     let ds = far / count;
@@ -71,6 +101,7 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
         depth += medium(length(q) - 1.0).extinction * ds;
     }
     return vec4(depth, 1.0);
+#endif
 }
 
 // Where each view step takes its sample, from 0 (its start) to 1 (its end).

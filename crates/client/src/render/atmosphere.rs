@@ -3,6 +3,7 @@
 //! shader; the shader finds the ground and the top of the air itself.
 use super::{
     MAX_LIGHTS,
+    atmosphere_tables::AtmosphereTables,
     bodies::{Meshes, Pool, SpaceCameraCell, grow, hide, place},
     resolve::Frame,
 };
@@ -391,6 +392,11 @@ pub struct AtmosphereMaterial {
     lights: [Vec4; MAX_LIGHTS],
     #[uniform(0)]
     suns: [Vec4; MAX_LIGHTS],
+    /// Optical depth to the top of the air (`atmosphere_tables.rs`); without
+    /// it the shader marches towards each star instead.
+    #[texture(1)]
+    #[sampler(2)]
+    transmittance: Option<Handle<Image>>,
     /// The camera is inside the shell mesh, or so close that the near plane
     /// would cut its near side: its far side is drawn instead, over everything.
     inside: bool,
@@ -400,12 +406,14 @@ pub struct AtmosphereMaterial {
 #[derive(Eq, PartialEq, Hash, Copy, Clone)]
 pub struct AtmosphereKey {
     inside: bool,
+    tables: bool,
 }
 
 impl From<&AtmosphereMaterial> for AtmosphereKey {
     fn from(material: &AtmosphereMaterial) -> Self {
         Self {
             inside: material.inside,
+            tables: material.transmittance.is_some(),
         }
     }
 }
@@ -439,6 +447,11 @@ impl Material for AtmosphereMaterial {
                 depth.depth_compare = CompareFunction::Always;
             }
         }
+        if key.bind_group_data.tables
+            && let Some(fragment) = descriptor.fragment.as_mut()
+        {
+            fragment.shader_defs.push("TABLES".into());
+        }
         Ok(())
     }
 }
@@ -456,6 +469,7 @@ impl Shell {
         near: f32,
         steps: (u32, u32),
         jitter: bool,
+        transmittance: Option<Handle<Image>>,
     ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
         AtmosphereMaterial {
@@ -472,6 +486,7 @@ impl Shell {
             absorption: self.air.absorption.extend(0.0),
             lights: self.lights,
             suns: self.suns,
+            transmittance,
             inside: from_eye.length() < self.extent() + NEAR_MARGIN * near,
         }
     }
@@ -479,13 +494,13 @@ impl Shell {
 
 pub(super) fn sync_atmospheres(
     mut commands: Commands,
-    frame: Res<Frame>,
-    meshes: Res<Meshes>,
+    (frame, meshes): (Res<Frame>, Res<Meshes>),
     (debug, tuning): (Res<super::debug::RenderDebug>, Res<AtmosphereTuning>),
     (mut pool, mut materials): (
         ResMut<Pool<AtmosphereMaterial>>,
         ResMut<Assets<AtmosphereMaterial>>,
     ),
+    (mut tables, mut images): (ResMut<AtmosphereTables>, ResMut<Assets<Image>>),
     camera: Query<(SpaceCameraCell, &Projection), With<SpaceCamera>>,
     mut shells: Query<super::bodies::Placement, (With<AtmosphereShell>, Without<SpaceCamera>)>,
 ) {
@@ -529,6 +544,10 @@ pub(super) fn sync_atmospheres(
             near,
             (tuning.view_steps, tuning.light_steps),
             debug.atmosphere_jitter,
+            debug
+                .atmosphere_tables
+                .then(|| tables.get(&shell.air))
+                .flatten(),
         );
         if materials.get(material).is_some_and(|m| *m != changed)
             && let Some(m) = materials.get_mut(material)
@@ -536,4 +555,5 @@ pub(super) fn sync_atmospheres(
             *m = changed;
         }
     }
+    tables.update(&mut images);
 }

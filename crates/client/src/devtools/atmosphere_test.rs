@@ -107,6 +107,8 @@ pub struct AtmosphereResults {
     pub msaa: bool,
     pub fov_deg: f32,
     pub light_steps: u32,
+    pub jitter: bool,
+    pub tables: bool,
     pub cases: Vec<Measured>,
 }
 
@@ -362,6 +364,8 @@ pub fn run(
                 msaa: debug.msaa,
                 fov_deg: nav.fov_deg,
                 light_steps: tuning.light_steps,
+                jitter: debug.atmosphere_jitter,
+                tables: debug.atmosphere_tables,
                 cases: std::mem::take(&mut run.measured),
             };
             info!(

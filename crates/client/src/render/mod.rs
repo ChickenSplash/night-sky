@@ -12,6 +12,7 @@
 //!   raw radiance.
 
 pub mod atmosphere;
+pub mod atmosphere_tables;
 pub mod black_hole;
 pub mod debug;
 pub mod exposure;
@@ -73,6 +74,7 @@ impl Plugin for RenderPlugin {
         .init_resource::<Pool<PointMaterial>>()
         .init_resource::<Pool<atmosphere::AtmosphereMaterial>>()
         .init_resource::<atmosphere::AtmosphereTuning>()
+        .init_resource::<atmosphere_tables::AtmosphereTables>()
         .add_systems(Startup, setup)
         .add_systems(Update, switch_camera)
         .add_systems(

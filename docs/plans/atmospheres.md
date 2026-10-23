@@ -171,7 +171,12 @@ Checkpoints:
    not perfect. Finding the planet's shadow along the ray exactly was
    considered and is not needed. Also kept: with the camera underground the
    air is not drawn.
-2. **Transmittance table.** Optical depth from any height towards any
+2. ✅ **Transmittance table** (`render/atmosphere_tables.rs`, 512 steps
+   per texel, about 0.1 s per air; matches a fine march within 1% in
+   tests). The user's check: looks exactly the same with the switch flipped,
+   and in one view from inside the air the GPU frame went from 5.6 to
+   2.4 ms. The default view steps are still 16, to settle with the banding
+   work. Optical depth from any height towards any
    direction to the top of the air, 256 x 64, by height and the cosine of
    the zenith angle (Bruneton's parametrisation, ground and top in planet
    radii), RGB in `Rgba16Float`. Built on the CPU in a background task when
@@ -214,10 +219,12 @@ air if their cost is still high.
 
 ## Where to pick up
 
-Stage 1 is done (branch `atmospheres`). Stage 2's checkpoint 1 (jitter) is
-done; next is its checkpoint 2, the transmittance table.
+Stage 1 is done (branch `atmospheres`). Stage 2's checkpoints 1 (jitter)
+and 2 (transmittance table) are done. The user still finds the banding and
+grain at twilight unconvincing and wants to revisit how the steps are
+taken before checkpoint 3 (light under Venus's cloud), to be agreed.
 
-- **Default view steps:** 16 now; settled after the transmittance table.
+- **Default view steps:** 16 now; settled with the banding work.
 - **Stage 3 · simulation:** to be planned in detail with the user. Set
   so far: the scale height comes from $H = kT/\bar m g$ once temperature
   and composition exist, with the slider kept as a debug override; the air's

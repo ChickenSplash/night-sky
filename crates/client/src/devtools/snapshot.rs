@@ -175,6 +175,7 @@ pub(super) fn publish(
             "cull_blocks": debug.cull_blocks, "point_stars": debug.point_stars,
             "split_multiples": debug.split_multiples, "atmospheres": debug.atmospheres,
             "atmosphere_jitter": debug.atmosphere_jitter,
+            "atmosphere_tables": debug.atmosphere_tables,
         },
         "performance": {
             "averages": metrics.live(&field),

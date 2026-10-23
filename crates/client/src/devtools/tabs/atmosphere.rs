@@ -52,6 +52,18 @@ pub fn atmosphere(
             on: !debug.atmosphere_jitter,
         });
     }
+    if terminal::check(
+        ui,
+        debug.atmosphere_tables,
+        "Lookup tables",
+        true,
+        DebugSwitch::AtmosphereTables.detail(),
+    ) {
+        out.push(UiCommand::SetDebug {
+            switch: DebugSwitch::AtmosphereTables,
+            on: !debug.atmosphere_tables,
+        });
+    }
     gpu(ui, diagnostics);
     let mut change = |change: AtmosphereChange| out.push(UiCommand::SetAtmosphere(change));
 
@@ -245,7 +257,7 @@ pub fn atmosphere(
         f64::from(tuning.light_steps),
         steps(
             "Light steps",
-            "Steps from each view step towards every star, for the light lost on the way in.",
+            "Steps from each view step towards every star, for the light lost on the way in. Only used with the lookup tables off.",
             atmosphere::LIGHT_STEPS,
         ),
     ) {

@@ -1,0 +1,274 @@
+//! The atmosphere's transmittance table (`atmosphere.wgsl`): optical depth
+//! from any height, in any direction, to the top of the air, so the view
+//! march reads the starlight reaching each step instead of marching towards
+//! each star. Built on the CPU in the background when the air changes and
+//! cached by air, in units of the planet's radius, so identical air on two
+//! planets shares a table.
+use super::atmosphere::Air;
+use bevy::{
+    asset::RenderAssetUsages,
+    image::ImageSampler,
+    math::DVec3,
+    prelude::*,
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    tasks::{AsyncComputeTaskPool, Task, futures::check_ready},
+};
+use std::collections::{HashMap, HashSet};
+
+/// Texels across (the cosine of the zenith angle) and down (height).
+/// Matched in `atmosphere.wgsl`.
+pub const SIZE: [usize; 2] = [256, 64];
+/// Steps along each texel's ray.
+const STEPS: usize = 512;
+/// Tables kept for air no longer drawn.
+const CACHED: usize = 8;
+
+/// Extinction at `height` above the ground, as `medium` in `atmosphere.wgsl`.
+fn extinction(air: &Air, height: f64) -> DVec3 {
+    let above = height.max(0.0);
+    let rayleigh = (-above / f64::from(air.rayleigh.w)).exp();
+    let mie = (-above / f64::from(air.shape.x)).exp();
+    let layer = (1.0 - (height - f64::from(air.shape.z)).abs() / f64::from(air.shape.w)).max(0.0);
+    air.rayleigh.truncate().as_dvec3() * rayleigh
+        + (air.mie.truncate().as_dvec3() + f64::from(air.mie.w)) * mie
+        + air.absorption.as_dvec3() * layer
+}
+
+fn distance_to_top(top: f64, r: f64, mu: f64) -> f64 {
+    (-r * mu + (r * r * (mu * mu - 1.0) + top * top).max(0.0).sqrt()).max(0.0)
+}
+
+/// Bruneton's coordinates, 0 to 1, of the ray from radius `r` at cosine `mu`
+/// from the zenith, as `transmittance_uv` in `atmosphere.wgsl` before its
+/// texel-centre mapping. Rays towards the ground read the horizon's.
+#[cfg(test)]
+fn unit(top: f64, r: f64, mu: f64) -> (f64, f64) {
+    let horizon = (top * top - 1.0).sqrt();
+    let rho = (r * r - 1.0).max(0.0).sqrt();
+    let (near, far) = (top - r, rho + horizon);
+    let along = (distance_to_top(top, r, mu) - near) / (far - near).max(1e-12);
+    (along.clamp(0.0, 1.0), (rho / horizon).clamp(0.0, 1.0))
+}
+
+/// The ray at Bruneton's coordinates: its radius and cosine from the zenith.
+fn ray(top: f64, along: f64, height: f64) -> (f64, f64) {
+    let horizon = (top * top - 1.0).sqrt();
+    let rho = horizon * height;
+    let r = (rho * rho + 1.0).sqrt();
+    let (near, far) = (top - r, rho + horizon);
+    let d = near + along * (far - near);
+    let mu = if d <= 0.0 {
+        1.0
+    } else {
+        ((horizon * horizon - rho * rho - d * d) / (2.0 * r * d)).clamp(-1.0, 1.0)
+    };
+    (r, mu)
+}
+
+fn optical_depth(air: &Air, r: f64, mu: f64) -> DVec3 {
+    let ds = distance_to_top(f64::from(air.top), r, mu) / STEPS as f64;
+    (0..STEPS)
+        .map(|i| {
+            let t = (i as f64 + 0.5) * ds;
+            let height = (r * r + t * t + 2.0 * r * mu * t).sqrt() - 1.0;
+            extinction(air, height) * ds
+        })
+        .sum()
+}
+
+/// Optical depth per texel, row by row from the ground up.
+fn depths(air: &Air) -> Vec<DVec3> {
+    let top = f64::from(air.top);
+    let [w, h] = SIZE;
+    (0..h)
+        .flat_map(|j| (0..w).map(move |i| (i, j)))
+        .map(|(i, j)| {
+            let (r, mu) = ray(top, i as f64 / (w - 1) as f64, j as f64 / (h - 1) as f64);
+            optical_depth(air, r, mu)
+        })
+        .collect()
+}
+
+fn build(air: Air) -> Image {
+    let data = depths(&air)
+        .into_iter()
+        .flat_map(|d| [d.x, d.y, d.z, 0.0])
+        .flat_map(|c| half::f16::from_f64(c.min(65_504.0)).to_le_bytes())
+        .collect();
+    let mut image = Image::new(
+        Extent3d {
+            width: SIZE[0] as u32,
+            height: SIZE[1] as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba16Float,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::linear();
+    image
+}
+
+/// An air, bit for bit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Key([u32; 16]);
+
+impl Key {
+    fn new(air: &Air) -> Self {
+        let mut bits = [0; 16];
+        let values = [air.top]
+            .into_iter()
+            .chain(air.rayleigh.to_array())
+            .chain(air.mie.to_array())
+            .chain(air.shape.to_array())
+            .chain(air.absorption.to_array());
+        for (bit, value) in bits.iter_mut().zip(values) {
+            *bit = value.to_bits();
+        }
+        Self(bits)
+    }
+}
+
+/// Built tables by air, and the one build in flight. Air asked for while
+/// another builds waits, so a slider drag rebuilds only as fast as builds
+/// finish, and only for its latest value.
+#[derive(Resource, Default)]
+pub struct AtmosphereTables {
+    ready: HashMap<Key, Handle<Image>>,
+    building: Option<(Key, Task<Image>)>,
+    wanted: Vec<(Key, Air)>,
+    used: HashSet<Key>,
+}
+
+impl AtmosphereTables {
+    /// The table for this air, or `None` while it is built.
+    pub fn get(&mut self, air: &Air) -> Option<Handle<Image>> {
+        let key = Key::new(air);
+        self.used.insert(key);
+        if let Some(table) = self.ready.get(&key) {
+            return Some(table.clone());
+        }
+        if !self.wanted.iter().any(|w| w.0 == key) {
+            self.wanted.push((key, *air));
+        }
+        None
+    }
+
+    /// Once a frame, after every `get`: takes a finished build, starts the
+    /// next and drops tables unused this frame beyond `CACHED`.
+    pub fn update(&mut self, images: &mut Assets<Image>) {
+        if let Some((key, task)) = self.building.as_mut()
+            && let Some(image) = check_ready(task)
+        {
+            self.ready.insert(*key, images.add(image));
+            self.building = None;
+        }
+        if self.building.is_none()
+            && let Some(&(key, air)) = self.wanted.iter().find(|w| !self.ready.contains_key(&w.0))
+        {
+            let task = AsyncComputeTaskPool::get().spawn(async move { build(air) });
+            self.building = Some((key, task));
+        }
+        self.wanted.clear();
+        let unused: Vec<Key> = self
+            .ready
+            .keys()
+            .filter(|k| !self.used.contains(k))
+            .copied()
+            .collect();
+        for key in unused.into_iter().skip(CACHED) {
+            self.ready.remove(&key);
+        }
+        self.used.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::atmosphere::{AirSettings, Preset};
+
+    const EARTH_M: f64 = 6.371e6;
+
+    fn air(preset: Preset) -> Air {
+        AirSettings::preset(preset).atmosphere().scaled(EARTH_M)
+    }
+
+    /// Bilinear, as the GPU samples the table.
+    fn sample(table: &[DVec3], top: f64, r: f64, mu: f64) -> DVec3 {
+        let [w, h] = SIZE;
+        let (along, height) = unit(top, r, mu);
+        let (x, y) = (along * (w - 1) as f64, height * (h - 1) as f64);
+        let (i, j) = ((x as usize).min(w - 2), (y as usize).min(h - 2));
+        let (fx, fy) = (x - i as f64, y - j as f64);
+        let at = |i: usize, j: usize| table[j * w + i];
+        (at(i, j) * (1.0 - fx) + at(i + 1, j) * fx) * (1.0 - fy)
+            + (at(i, j + 1) * (1.0 - fx) + at(i + 1, j + 1) * fx) * fy
+    }
+
+    #[test]
+    fn the_parametrisation_round_trips() {
+        let top = f64::from(air(Preset::Earth).top);
+        for (along, height) in [(0.0, 0.0), (0.3, 0.1), (0.5, 0.5), (1.0, 0.9), (0.7, 1.0)] {
+            let (r, mu) = ray(top, along, height);
+            let (a, h) = unit(top, r, mu);
+            assert!(
+                (a - along).abs() < 1e-6 && (h - height).abs() < 1e-6,
+                "{along} {height}: {a} {h}"
+            );
+        }
+    }
+
+    #[test]
+    fn straight_up_matches_the_scale_heights() {
+        let air = air(Preset::Earth);
+        let s = AirSettings::preset(Preset::Earth).atmosphere();
+        // Gas, haze and the ozone layer's triangle, up from the ground.
+        let expected = s.rayleigh * s.rayleigh_height
+            + (s.mie + DVec3::splat(s.mie_absorption)) * s.mie_height
+            + s.absorption * s.layer_width;
+        let got = sample(&depths(&air), f64::from(air.top), 1.0, 1.0);
+        for c in 0..3 {
+            assert!(
+                (got[c] / expected[c] - 1.0).abs() < 0.02,
+                "{got} against {expected}"
+            );
+        }
+    }
+
+    /// The starlight the table gives matches a fine march, between texels
+    /// too, from the ground to the top and from overhead to the horizon,
+    /// where it changes fastest.
+    #[test]
+    fn the_table_matches_a_fine_march() {
+        for preset in [Preset::Earth, Preset::Venus, Preset::Mars, Preset::Titan] {
+            let air = air(preset);
+            let top = f64::from(air.top);
+            let table = depths(&air);
+            for height in [0.0, 0.003, 0.02, 0.17, 0.5, 0.95] {
+                let r = 1.0 + height * (top - 1.0);
+                let horizon = -(1.0 - 1.0 / (r * r)).sqrt();
+                for mu in [1.0, 0.61, 0.3, 0.1, 0.03, 0.0, horizon * 0.5, horizon] {
+                    let ds = distance_to_top(top, r, mu) / 20_000.0;
+                    let exact: DVec3 = (0..20_000)
+                        .map(|i| {
+                            let t = (f64::from(i) + 0.5) * ds;
+                            extinction(&air, (r * r + t * t + 2.0 * r * mu * t).sqrt() - 1.0) * ds
+                        })
+                        .sum();
+                    let got = sample(&table, top, r, mu);
+                    // Light that gets through matches closely; light all
+                    // but lost may differ in its tiny remainder.
+                    let (seen, expected) = ((-got).exp(), (-exact).exp());
+                    for c in 0..3 {
+                        assert!(
+                            (seen[c] - expected[c]).abs() < 0.01,
+                            "{preset:?} at {height} up, mu {mu}: {seen} against {expected}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

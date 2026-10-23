@@ -284,7 +284,7 @@ pub const USAGE: [Usage; 33] = [
     Usage {
         name: "set_debug",
         fields: &["switch", "on"],
-        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres or atmosphere_jitter; true or false",
+        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres, atmosphere_jitter or atmosphere_tables; true or false",
     },
     Usage {
         name: "set_atmosphere",
