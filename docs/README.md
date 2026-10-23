@@ -99,8 +99,8 @@ The Bevy/egui client in `crates/client`:
   controls, automatic arrivals, atmospheric exclusion, saving or collisions yet;
   predicted impacts outside warp are shown but not enforced.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
-- Atmospheres are a rendering prototype: Earth's air on the selected planet
-  only, single scattering without lookup tables. No planet has a simulated
+- Atmospheres are a rendering prototype: hand-set air (presets and sliders)
+  on the selected planet only, single scattering without lookup tables. No planet has a simulated
   atmosphere yet.
 
 ## Organisation

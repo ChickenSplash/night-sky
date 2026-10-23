@@ -106,27 +106,60 @@ than the air's top, whose pixels march single scattering along the line of
 sight (`render/atmosphere.rs`, `atmosphere.wgsl`). The shader finds the ground
 and the top analytically, in planet radii and measured from the ray's closest
 approach to the centre, so the limb holds in f32 at real distances; the mesh
-only chooses which pixels run. At each of 16 steps (by default), light from every star is
-attenuated by an 8-step march towards it (none where the planet is in the
-way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase).
-Densities fall exponentially with height; an absorbing layer, such as ozone,
-falls linearly either side of its peak. For extinction coefficient
-$\sigma_t$, scattering $\sigma_s$, phase $p(\mu)$ and star flux $F$:
+only chooses which pixels run. At each of 16 view steps (by default), light
+from every star is attenuated by an 8-step march towards it (none where the
+planet is in the way) and scattered by gas (Rayleigh phase) and haze
+(Cornette-Shanks phase). Densities fall exponentially with height; an
+absorbing layer, such as ozone, falls linearly either side of its peak. For
+extinction coefficient $\sigma_t$, scattering $\sigma_s$, phase $p(\mu)$ and
+star flux $F$:
 
 $$
 L = \sum_\star \int F\,T_\star(s)\,T_\mathrm{eye}(s)\,\sigma_s(s)\,p(\mu)\,ds
 $$
 
 $F$ is exposed with the planet's gain and balance, so $L$ is on the surface's
-$AF/\pi$ scale. Output is premultiplied: $L$ is added and whatever lies behind
-is dimmed by the line of sight's transmittance, averaged to grey. So what
-lies behind must draw first: the galactic glow and star points sort as the
-background (`BACKGROUND_DISTANCE`), and the shell sorts at its near side,
-after its planet's limb sprites. Seen from inside, or close enough above that
-the near plane would cut its near side, the far side of the shell is drawn
-over everything instead.
+$AF/\pi$ scale.
 
-For now only the selected planet has air, set by hand
+**Steps.** Each step adds its light in the energy-conserving form (Hillaire
+2015), integrating the dimming across the step rather than taking it at the
+midpoint:
+
+$$
+\Delta L = T_\mathrm{eye}\,F\,T_\star\,\sigma_s\,p(\mu)\,
+\frac{1 - e^{-\sigma_t \Delta s}}{\sigma_t}
+$$
+
+so an optically thick step (Venus's lower air) keeps its light instead of
+losing it. Step lengths grow with the square of the step index when the
+camera is at the ground, easing to even spacing at the top of the air, so
+the air close to the camera, which sets the colour in thick air, is sampled
+finely. A ray that reaches the ground is spaced over its whole length to the
+top of the air as if the planet were not there, and stops at the ground,
+when it meets the ground at a grazing angle; the steeper the ray, the more its
+spacing shrinks back to its own length. Rays either side of the horizon (or of the
+ground's limb seen from above) then sample the same points and meet without
+a seam. In thick air 16 steps hide the horizon; the look stops changing at
+about 24.
+
+**Output.** Output is premultiplied: $L$ is added and whatever lies behind is
+dimmed by the line of sight's transmittance, averaged to grey. The surface
+shader lights the ground with undimmed starlight, so where the ray reaches
+the ground the shader also dims it by the transmittance from that ground
+point to each star, weighted by each star's share of its light (flux times
+the cosine of its angle from the zenith); this reddens nothing yet, as the
+dimming is grey, but darkens the ground under thick air to match the sky
+beside it. From inside the air the sky is this same scattered light, and the
+stars and galactic glow behind it fade by its transmittance and under its
+brightness; there is no separate sky pass.
+
+**Draw order.** What lies behind must draw first: the galactic glow and star
+points sort as the background (`BACKGROUND_DISTANCE`), and the shell sorts at
+its near side, after its planet's limb sprites. Seen from inside, or close
+enough above that the near plane would cut its near side, the far side of
+the shell is drawn over everything instead.
+
+**Settings.** For now only the selected planet has air, set by hand
 (`AtmosphereTuning`) from the debug window's `atmosphere` tab, `set_atmosphere`
 or `ns atmosphere`; `set_debug atmospheres false` hides it. Earth's preset uses
 Hillaire's (2020) coefficients. The sliders are physical: gas scattering is
@@ -134,9 +167,13 @@ Earth's air per bar scaled by pressure and a gas factor (the gas and its
 number density per bar), haze is Earth's continental haze times an amount,
 coloured per channel, and the top sits 12.5 scale heights up. The Venus, Mars,
 Titan and hydrogen giant presets use measured pressures and scale heights,
-with haze tuned by eye. There is no multiple
-scattering, the ground is lit by unattenuated starlight and points have no
-atmosphere. See [the plan](../plans/atmospheres.md).
+with haze tuned by eye.
+
+**Limits.** There is no multiple scattering, so thick air is too dark and
+Venus's surface is nearly black; transmittance is grey, so colour does not
+shift through thick air; points have no atmosphere. The lookup-table stage
+adds multiple scattering and per-channel dimming. See
+[the plan](../plans/atmospheres.md).
 
 ### Physical model versus presentation
 

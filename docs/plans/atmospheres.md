@@ -118,8 +118,11 @@ Checkpoints, each checked live by the user and committed:
      past the horizon; rays grazing the ground are now spaced as if they
      crossed the whole air and stop at the ground. 16 view steps hide the
      horizon in thick air; 24 is where the look stops changing.
+   - ✅ Sky colour, stars fading from inside and two-star lighting passed the
+     user's live check. The rendering guide's atmospheres section covers the
+     steps, the ground dimming and the limits.
 
 Known prototype limits: no multiple scattering, so thick atmospheres look too
-dark and Venus's surface is black; the ground is lit by unattenuated
-starlight, so the terminator is not reddened (fixed in checkpoint 3); grey
-transmittance over the ground (fixed with the lookup tables).
+dark and Venus's surface is black; the ground is dimmed by its sunlight
+(checkpoint 3), but in grey, so the terminator is not reddened; grey
+transmittance over the ground (both fixed with the lookup tables).
