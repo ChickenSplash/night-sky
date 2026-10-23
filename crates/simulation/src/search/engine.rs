@@ -349,7 +349,7 @@ impl Search {
         .then_some(gap)
     }
 
-    /// Does up to `budget` work with `threads` threads (1 in the browser).
+    /// Does up to `budget` work with `threads` threads.
     pub fn step(&mut self, budget: u64, threads: usize) -> Progress {
         let mut spent = 0;
         while self.progress.state == State::Running {

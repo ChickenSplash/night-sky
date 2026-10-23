@@ -22,7 +22,6 @@ mod loading;
 mod readout;
 pub use readout::{facts, readout};
 // Served only by the native developer API.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod schema;
 mod shape;
 mod travel;
@@ -32,7 +31,7 @@ pub use shape::{HULL_EDGES, HULL_VERTICES};
 /// user's clock setting. Returning to quiet coasting restores that setting.
 pub const MANOEUVRE_RATE: f64 = 10.0;
 
-/// Steps one frame may run, about a millisecond natively. Past this the
+/// Steps one frame may run, about a millisecond. Past this the
 /// clock waits for the craft, so time runs slower than its set rate rather
 /// than the craft falling behind the bodies.
 pub const MAX_STEPS_PER_FRAME: usize = 1_000;

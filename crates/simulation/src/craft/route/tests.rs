@@ -135,8 +135,7 @@ fn lined_up(field: &Field, target: &str, standoffs: f64) -> Craft {
     ship(field, target, away, -away)
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn every_kind_of_body_has_a_standoff_between_its_surface_and_reach() {
     let field = triple(20.0);
     let radius = crate::SUN_RADIUS_METRES;
@@ -166,8 +165,7 @@ fn every_kind_of_body_has_a_standoff_between_its_surface_and_reach() {
     assert!(refused.unwrap_err().contains("no safe standoff"));
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn flies_to_each_kind_of_target_and_drops_out_at_its_standoff_on_time() {
     let (triple, single) = (triple(20.0), single());
     let targets = [
@@ -198,8 +196,7 @@ fn flies_to_each_kind_of_target_and_drops_out_at_its_standoff_on_time() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn arrival_keeps_velocity_matches_or_drops_into_a_rough_orbit() {
     let field = triple(20.0);
     let planet = "t#A/0";
@@ -236,8 +233,7 @@ fn arrival_keeps_velocity_matches_or_drops_into_a_rough_orbit() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn trip_times_from_ten_seconds_to_an_hour_are_kept() {
     let field = triple(20.0);
     for time in [MIN_TRIP_S, 60.0, 600.0, MAX_TRIP_S] {
@@ -251,8 +247,7 @@ fn trip_times_from_ten_seconds_to_an_hour_are_kept() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn the_trip_time_includes_turning_round_first() {
     let field = triple(20.0);
     let target = "t#A/0";
@@ -285,8 +280,7 @@ fn the_trip_time_includes_turning_round_first() {
     assert!((flown - 30.0).abs() < 0.5, "{flown} s");
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn both_gravity_policies_arrive() {
     let field = triple(20.0);
     for policy in [GravityPolicy::Active, GravityPolicy::Suspended] {
@@ -299,8 +293,7 @@ fn both_gravity_policies_arrive() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_moving_target_is_met_despite_the_ships_own_drift() {
     let field = triple(20.0);
     // A slow trip, so the planet moves far further than its standoff, from
@@ -316,8 +309,7 @@ fn a_moving_target_is_met_despite_the_ships_own_drift() {
     assert!(route.distance_m > 0.9 * route.standoff_m);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn cancelling_or_taking_over_leaves_warp_as_it_was() {
     let field = triple(20.0);
     let takeovers = [
@@ -382,8 +374,7 @@ fn cancelling_or_taking_over_leaves_warp_as_it_was() {
     assert!(order(&mut craft, &field, cancel).is_err());
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn refused_routes_leave_the_ship_unchanged() {
     let field = triple(20.0);
     let tight = triple(0.02);
@@ -433,8 +424,7 @@ fn refused_routes_leave_the_ship_unchanged() {
     assert_eq!(thrusting, before);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_route_replays_exactly_from_a_snapshot() {
     let field = triple(20.0);
     let mut craft = lined_up(&field, "t#A/0", 1e4);
@@ -450,8 +440,7 @@ fn a_route_replays_exactly_from_a_snapshot() {
     assert_eq!(craft.route.as_ref().unwrap().stage, Stage::Arrived);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn the_profile_fits_its_time_and_scales_its_default() {
     let (distance, standoff) = (1e12, 1e7);
     let tau = fit_tau(distance, standoff, 30.0);
@@ -574,8 +563,7 @@ fn ship_at(at: DVec3, towards: DVec3) -> Craft {
     craft
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_target_directly_or_barely_behind_a_planet_is_reached_round_it_on_time() {
     let field = blocked();
     let (jupiter, behind) = (centre(&field, "t/0"), centre(&field, "t/2"));
@@ -611,8 +599,7 @@ fn a_target_directly_or_barely_behind_a_planet_is_reached_round_it_on_time() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn two_bodies_in_a_row_are_both_wrapped_round() {
     let field = blocked();
     let (jupiter, far) = (centre(&field, "t/0"), centre(&field, "t/1"));
@@ -636,8 +623,7 @@ fn two_bodies_in_a_row_are_both_wrapped_round() {
     assert!((flight.seconds - 40.0).abs() < 1.0, "{} s", flight.seconds);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_binary_companion_on_the_line_is_steered_round() {
     let field = triple(20.0);
     let (a, b) = (centre(&field, "t#A"), centre(&field, "t#B"));
@@ -656,8 +642,7 @@ fn a_binary_companion_on_the_line_is_steered_round() {
     assert!((flight.seconds - 30.0).abs() < 1.0, "{} s", flight.seconds);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn bodies_well_off_the_line_change_nothing() {
     let field = blocked();
     let (jupiter, behind) = (centre(&field, "t/0"), centre(&field, "t/2"));
@@ -676,8 +661,7 @@ fn bodies_well_off_the_line_change_nothing() {
     assert!((flight.seconds - 30.0).abs() < 0.5, "{} s", flight.seconds);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_planet_moving_onto_the_line_is_steered_round_when_it_gets_there() {
     let field = blocked();
     // From 10 AU in to the star over 20 minutes, the ship crosses 1 AU
@@ -705,8 +689,7 @@ fn a_planet_moving_onto_the_line_is_steered_round_when_it_gets_there() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn leaving_from_behind_a_planet_climbs_round_it() {
     // Low over the Earth's night side, bound for the far star C: the line
     // runs through the planet. Interstellar departures start the same way.
@@ -734,8 +717,7 @@ fn leaving_from_behind_a_planet_climbs_round_it() {
     assert!((flight.seconds - 30.0).abs() < 1.0, "{} s", flight.seconds);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_time_too_short_for_its_detour_is_flown_as_fast_as_it_can_be() {
     let field = blocked();
     let (jupiter, behind) = (centre(&field, "t/0"), centre(&field, "t/2"));

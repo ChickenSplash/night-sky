@@ -115,7 +115,7 @@ pub fn perf(
                     "threads",
                     format!("{} started, {:.1} busy", s.threads, s.busy_threads),
                     Some(
-                        "Threads making stars (natively three quarters of the CPU's), and how many were working on average over the last second, grids included.",
+                        "Threads making stars (three quarters of the CPU's), and how many were working on average over the last second, grids included.",
                     ),
                 ),
                 (
@@ -573,19 +573,13 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
         (
             "runs on",
             searches.mode().to_owned(),
-            Some(
-                "Natively, the search thread. In the browser, the search worker, apart from the star worker; if it fails, slices of each frame.",
-            ),
+            Some("The search thread, apart from the star loader."),
         ),
         (
             "threads",
-            if cfg!(target_arch = "wasm32") {
-                "1".to_owned()
-            } else {
-                searches.threads.to_string()
-            },
+            searches.threads.to_string(),
             Some(
-                "Threads sharing a large cell's stars natively; the browser has one. The star loader keeps its own three quarters of the machine.",
+                "Threads sharing a large cell's stars. The star loader keeps its own three quarters of the machine.",
             ),
         ),
         (
@@ -624,13 +618,11 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
                 work_cap_millions,
             })
         };
-        if cfg!(not(target_arch = "wasm32")) {
-            if terminal::button(ui, "threads -") && threads > *crate::search::THREADS.start() {
-                set(Some(threads - 1), None);
-            }
-            if terminal::button(ui, "threads +") && threads < *crate::search::THREADS.end() {
-                set(Some(threads + 1), None);
-            }
+        if terminal::button(ui, "threads -") && threads > *crate::search::THREADS.start() {
+            set(Some(threads - 1), None);
+        }
+        if terminal::button(ui, "threads +") && threads < *crate::search::THREADS.end() {
+            set(Some(threads + 1), None);
         }
         if terminal::button(ui, "cap ÷10") {
             set(None, Some((cap / 10.0).max(1.0)));
@@ -651,7 +643,7 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
 const STAR_BYTES: usize = size_of::<crate::stars::render::StarInstance>();
 
 /// GPU and render-thread time, and shader invocations, per render pass, from
-/// Bevy's render diagnostics (native only: WebGL 2 has no timestamp queries).
+/// Bevy's render diagnostics.
 fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_ms: f32) {
     #[derive(Default)]
     struct Pass {
@@ -689,14 +681,7 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
         }
     }
     if passes.is_empty() {
-        terminal::note(
-            ui,
-            if cfg!(target_arch = "wasm32") {
-                "Per-pass GPU timings are native only."
-            } else {
-                "Waiting for render diagnostics…"
-            },
-        );
+        terminal::note(ui, "Waiting for render diagnostics…");
         return;
     }
     let total: f64 = passes

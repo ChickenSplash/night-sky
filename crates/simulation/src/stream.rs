@@ -4,8 +4,7 @@
 //!   (`reach_pc`) of the camera hold every star of that tier bright enough to
 //!   see. About three cells per axis per tier, whatever the magnitude limit.
 //! - `Loader` builds wanted cells in small steps, most visible first, and stops
-//!   whenever its caller runs out of time: a worker thread natively, a slice of
-//!   each frame in the browser. Loaded cells are dropped once the camera is well
+//!   whenever its caller, a worker thread, runs out of time. Loaded cells are dropped once the camera is well
 //!   beyond their reach.
 
 use crate::cells::{Cell, ROOT_PC, Sky, cell_star_id};
@@ -660,8 +659,7 @@ impl Loader {
         }
     }
 
-    /// Shares each cell's stars among this many threads (native only; the
-    /// browser has none to spare). Stars are seeded alone, so the sky is the
+    /// Shares each cell's stars among this many threads. Stars are seeded alone, so the sky is the
     /// same with any number.
     pub fn with_threads(mut self, threads: usize) -> Self {
         self.threads = threads.max(1);

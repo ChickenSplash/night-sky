@@ -39,16 +39,9 @@ const CONNECTED: &str = "Local API connected · read-only";
 struct Inbox(Mutex<mpsc::Receiver<network::Update>>);
 
 fn main() {
-    #[cfg(not(target_arch = "wasm32"))]
     devtools::diagnostics::install_crash_reports();
     let smoke_test = std::env::args().any(|arg| arg == "--smoke-test");
     let mut initial_nav = Navigation::default();
-    #[cfg(target_arch = "wasm32")]
-    let benchmark = devtools::benchmark::requested();
-    #[cfg(target_arch = "wasm32")]
-    if benchmark {
-        devtools::benchmark::at_home(&mut initial_nav);
-    }
     if smoke_test {
         // Its captures start in the first list's first system.
         initial_nav.visit = Some(Visit::List(0));
@@ -66,7 +59,6 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Night Sky".into(),
                     resolution: (1440, 900).into(),
-                    #[cfg(not(target_arch = "wasm32"))]
                     mode: if smoke_test {
                         bevy::window::WindowMode::BorderlessFullscreen(
                             bevy::window::MonitorSelection::Current,
@@ -74,12 +66,6 @@ fn main() {
                     } else {
                         bevy::window::WindowMode::Windowed
                     },
-                    #[cfg(target_arch = "wasm32")]
-                    canvas: Some("#space-canvas".into()),
-                    #[cfg(target_arch = "wasm32")]
-                    fit_canvas_to_parent: true,
-                    #[cfg(target_arch = "wasm32")]
-                    prevent_default_event_handling: true,
                     ..default()
                 }),
                 ..default()
@@ -135,12 +121,8 @@ fn main() {
             craft::step,
             craft::forecast,
             scene::controls,
-            #[cfg(not(target_arch = "wasm32"))]
             devtools::core_load::run,
-            #[cfg(not(target_arch = "wasm32"))]
             devtools::gpu_test::run,
-            #[cfg(target_arch = "wasm32")]
-            devtools::benchmark::advance,
             scene::locate,
             scene::place_camera,
             scene::locate_body,
@@ -161,21 +143,8 @@ fn main() {
         EguiPrimaryContextPass,
         (ui::draw_ui, devtools::draw.after(ui::draw_ui)),
     );
-    #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, devtools::smoke::exercise);
-    #[cfg(target_arch = "wasm32")]
-    if benchmark {
-        app.insert_resource(devtools::benchmark::BenchmarkFlight::default())
-            .add_systems(Last, devtools::benchmark::record)
-            .add_systems(
-                EguiPrimaryContextPass,
-                devtools::benchmark::results_window.after(ui::draw_ui),
-            );
-    }
-    #[cfg(target_arch = "wasm32")]
-    devtools::automation::install(&mut app);
     devtools::snapshot::install(&mut app);
-    #[cfg(not(target_arch = "wasm32"))]
     devtools::install_http(&mut app);
     app.run();
 }

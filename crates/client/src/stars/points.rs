@@ -1,4 +1,4 @@
-//! Natively, galactic stars are drawn as single-pixel points while
+//! Galactic stars are drawn as single-pixel points while
 //! `RenderDebug::point_stars` is on, instead of `stars::render`'s
 //! three-corner triangles: at the galactic centre the cost is per vertex, and
 //! a point is one vertex where a triangle is three.

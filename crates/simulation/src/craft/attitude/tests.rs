@@ -23,8 +23,7 @@ fn pointing_error(craft: &Craft, direction: DVec3) -> f64 {
     (DQuat::from_array(craft.orientation) * -DVec3::Z).angle_between(direction)
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn pointing_settles_from_awkward_attitudes_with_real_thrusters() {
     for direction in [DVec3::Z, DVec3::X, DVec3::new(0.2, -0.8, 0.3).normalize()] {
         for spin in [[0.0; 3], [0.1, -0.2, 0.3]] {
@@ -47,8 +46,7 @@ fn pointing_settles_from_awkward_attitudes_with_real_thrusters() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn rest_to_target_turns_do_not_overshoot_and_weak_thrusters_take_longer() {
     let mut times = Vec::new();
     for limit in [0.1, 0.01] {
@@ -73,8 +71,7 @@ fn rest_to_target_turns_do_not_overshoot_and_weak_thrusters_take_longer() {
     assert!(times[1] > times[0]);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn stopping_brakes_without_reversing_and_release_restores_manual_control() {
     let mut craft = ship();
     craft.spin = [0.233, -0.321, 0.014];
@@ -116,8 +113,7 @@ impl Gravity for Reference {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn every_target_uses_relative_position_and_velocity() {
     let field = Reference(State {
         position: [10.0, 20.0, 30.0],
@@ -152,8 +148,7 @@ fn every_target_uses_relative_position_and_velocity() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn invalid_or_undefined_targets_are_safe_and_roll_can_be_specified() {
     let mut craft = ship();
     for v in [[0.0; 3], [f64::NAN, 0.0, 0.0], [f64::INFINITY; 3]] {
@@ -216,8 +211,7 @@ impl Gravity for Orbit {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn prograde_tracks_an_entire_orbit_and_saved_guidance_resumes_within_precision() {
     let mut craft = ship();
     craft.place(
@@ -258,8 +252,7 @@ fn prograde_tracks_an_entire_orbit_and_saved_guidance_resumes_within_precision()
     assert_eq!(craft.tick, loaded.tick);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn exact_half_turn_and_disabled_turning_axes_remain_finite() {
     let mut craft = ship();
     craft

@@ -5,9 +5,7 @@ use crate::{galaxy::PC_METRES, neighbourhood::Region};
 use glam::DVec3;
 use space_shared::Galaxy;
 
-#[cfg(not(target_arch = "wasm32"))]
 mod native;
-#[cfg(not(target_arch = "wasm32"))]
 pub use native::Native;
 
 pub const MAX_QUEUED: usize = 128;

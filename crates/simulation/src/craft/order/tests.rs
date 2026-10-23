@@ -11,8 +11,7 @@ fn ship() -> Craft {
     )
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn legacy_thrust_is_validated_like_every_other_order() {
     let mut craft = ship();
     let thrust = |thrust| Order::Thrust { thrust };
@@ -36,8 +35,7 @@ fn legacy_thrust_is_validated_like_every_other_order() {
     thrust([0.0; 3]).apply(&mut craft, None).unwrap();
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn warp_speed_steps_stay_on_the_scale() {
     let mut craft = ship();
     let warp = |command| Order::Warp { command };
@@ -61,8 +59,7 @@ fn warp_speed_steps_stay_on_the_scale() {
     suspend.apply(&mut craft, None).unwrap();
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn turning_orders_steer_the_bubble_during_warp() {
     let mut craft = ship();
     let warp = |command| Order::Warp { command };
@@ -92,8 +89,7 @@ fn turning_orders_steer_the_bubble_during_warp() {
     assert_eq!(craft.input.controls.rotation, [0.0, 0.5, 0.0]);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn turn_rate_is_validated_and_changes_engaged_or_not() {
     let mut craft = ship();
     let rate = |degrees_per_second| Order::Warp {
@@ -120,8 +116,7 @@ fn turn_rate_is_validated_and_changes_engaged_or_not() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_sweep_needs_warp_except_to_end_it_and_times_out_to_zero() {
     let mut craft = ship();
     let sweep = |rate| Order::Warp {

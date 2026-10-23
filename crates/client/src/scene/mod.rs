@@ -43,9 +43,6 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
             FloatingOrigin,
             Camera3d {
                 // Star points test their depth against it (`stars/points.rs`).
-                // WebGL cannot sample multisampled depth textures: retain
-                // its default render-attachment-only depth buffer.
-                #[cfg(not(target_arch = "wasm32"))]
                 depth_texture_usages:
                     (bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
                         | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
@@ -60,8 +57,7 @@ pub fn setup(mut commands: Commands, mut gizmo_store: ResMut<GizmoConfigStore>) 
                 ..default()
             }),
             Msaa::Sample4,
-            // GPU-driven culling drops every mesh with this far plane. WebGL 2
-            // has no indirect drawing, so native now matches the browser.
+            // GPU-driven culling drops every mesh with this far plane.
             bevy::render::view::NoIndirectDrawing,
         ));
     });

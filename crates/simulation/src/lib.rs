@@ -14,7 +14,6 @@ pub mod search;
 mod search_probe;
 mod star;
 pub mod stream;
-pub mod stream_wire;
 mod system;
 
 use space_shared::{Orbit, Planet, StarSystem};

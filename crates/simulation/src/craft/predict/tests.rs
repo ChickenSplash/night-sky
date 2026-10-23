@@ -54,8 +54,7 @@ fn eccentric() -> (Craft, Elements) {
     (ship(state, 0.0), Elements::of(state, EARTH_GM))
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_bound_prediction_matches_fine_steps_and_its_apsides() {
     let (craft, orbit) = eccentric();
     let before = craft.clone();
@@ -116,8 +115,7 @@ fn a_bound_prediction_matches_fine_steps_and_its_apsides() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn escapes_have_a_finite_horizon_and_impacts_stop_at_the_surface() {
     let r = EARTH_RADIUS + 400_000.0;
     let escape = ship(
@@ -152,8 +150,7 @@ fn escapes_have_a_finite_horizon_and_impacts_stop_at_the_surface() {
     assert!((0.0..50_000.0).contains(&depth), "{depth}");
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_prediction_runs_in_slices_and_says_how_far_it_got() {
     let (craft, _) = eccentric();
     let mut predictor = Predictor::new(&craft, &Earth).unwrap();
@@ -194,8 +191,7 @@ fn around(field: &Field, planet: &Planet, height: f64, speed_share: f64) -> Craf
     ship(state, seconds)
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn an_orbit_around_a_moving_planet_closes_relative_to_it() {
     let (field, planet) = planet_field();
     let craft = around(&field, &planet, 1_000_000.0, 1.0);
@@ -226,8 +222,7 @@ fn an_orbit_around_a_moving_planet_closes_relative_to_it() {
     assert!(moved > 10.0 * r, "{moved}");
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn an_escape_reports_leaving_the_planet_for_its_star() {
     let (field, planet) = planet_field();
     let craft = around(&field, &planet, 1_000_000.0, 2.0);
@@ -252,8 +247,7 @@ fn an_escape_reports_leaving_the_planet_for_its_star() {
     assert!((1.0 + SWITCH_MARGIN..1.2).contains(&out), "{out}");
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_whole_lap_stays_ahead_until_a_refresh_is_due() {
     let (craft, orbit) = eccentric();
     let prediction = predict(&craft, &Earth).unwrap();
@@ -299,8 +293,7 @@ impl Gravity for Tugged {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn only_a_revolution_that_ends_at_the_craft_closes() {
     let (craft, _) = eccentric();
     let quiet = predict(&craft, &Earth).unwrap();
@@ -315,8 +308,7 @@ fn only_a_revolution_that_ends_at_the_craft_closes() {
     assert_eq!(bent.shown_end(0.0), end);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[test]
 fn a_slow_escape_still_reaches_the_edge_of_the_hill_sphere() {
     let (field, planet) = planet_field();
     // Barely unbound: it climbs out far slower than it starts.

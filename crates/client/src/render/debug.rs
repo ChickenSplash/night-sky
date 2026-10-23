@@ -1,6 +1,6 @@
 //! Debug-only switches for A/B performance tests, set from the debug window's
 //! `perf` tab or `set_debug`. They are not product settings and start in the
-//! normal rendering state. Natively, Bevy's render diagnostics also record GPU
+//! normal rendering state. Bevy's render diagnostics also record GPU
 //! time and shader invocations per pass for the `perf` tab.
 use crate::scene::SpaceCamera;
 use bevy::prelude::*;
@@ -20,9 +20,8 @@ pub enum DebugSwitch {
     Bloom,
     /// Hide star batches whose grid block lies outside the view.
     CullBlocks,
-    /// Natively, draw galactic stars as single-pixel points shaped by a
-    /// composite pass, rather than as triangles (`stars/points.rs`).
-    /// No effect in the browser.
+    /// Draw galactic stars as single-pixel points shaped by a composite pass,
+    /// rather than as triangles (`stars/points.rs`).
     PointStars,
     /// Draw nearby multiple systems star by star once their stars could show
     /// apart, rather than as one point until arrival (`starfield.rs`).
@@ -51,7 +50,7 @@ impl DebugSwitch {
                 "Skip drawing star grid blocks outside the camera view. Disabling this draws all uploaded blocks for a culling-cost comparison."
             }
             Self::PointStars => {
-                "Use single-pixel points and a composite pass instead of triangles for galactic stars. Native only; has no effect in the browser."
+                "Use single-pixel points and a composite pass instead of triangles for galactic stars."
             }
             Self::SplitMultiples => {
                 "Resolve nearby multiple-star systems into individual stars once their separation is visible, rather than drawing one combined point until arrival."
@@ -81,7 +80,7 @@ impl Default for RenderDebug {
             msaa: true,
             bloom: true,
             cull_blocks: true,
-            point_stars: cfg!(not(target_arch = "wasm32")),
+            point_stars: true,
             split_multiples: true,
         }
     }
@@ -131,10 +130,8 @@ pub struct RenderDebugPlugin;
 impl Plugin for RenderDebugPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RenderDebug>()
-            .add_systems(Update, apply_msaa);
-        // Timestamp and pipeline-statistics queries exist only natively.
-        #[cfg(not(target_arch = "wasm32"))]
-        app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
+            .add_systems(Update, apply_msaa)
+            .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
     }
 }
 

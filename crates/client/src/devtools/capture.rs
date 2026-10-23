@@ -41,11 +41,10 @@ static LOG: Mutex<Log> = Mutex::new(Log {
 });
 static START: OnceLock<Instant> = OnceLock::new();
 
-/// Bevy's extra log layers: the console's buffer, plus the log file natively.
+/// Bevy's extra log layers: the console's buffer, plus the log file.
 pub fn log_layers(app: &mut App) -> Option<BoxedLayer> {
     START.get_or_init(Instant::now);
     let console: BoxedLayer = Box::new(Console);
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(file) = crate::devtools::diagnostics::file_layer(app) {
         return Some(Box::new(vec![file, console]));
     }

@@ -452,7 +452,6 @@ fn every_property_can_be_filtered() {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_service_answers_cancels_and_refuses() {
     use std::time::Duration;

@@ -4,7 +4,6 @@
 /.env
 /.cargo-home/
 *.log
-/web/dist/
 /tools/
 /deploy/
 /scripts/deploy-homelab.sh

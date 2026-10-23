@@ -1,18 +1,11 @@
 //! The debug window, kept apart from the product UI: the client log, frame and
 //! star-stream timings, display settings, controls, internal state and tools.
-//! The cog, ` or F3 toggles it on both clients. Drawn in the terminal look.
-#[cfg(target_arch = "wasm32")]
-pub mod automation;
-#[cfg(target_arch = "wasm32")]
-pub mod benchmark;
+//! The cog, ` or F3 toggles it. Drawn in the terminal look.
 mod capture;
 pub mod core_load;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod diagnostics;
 pub mod gpu_test;
-#[cfg(not(target_arch = "wasm32"))]
 mod http;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod smoke;
 pub mod snapshot;
 mod tabs;
@@ -33,9 +26,7 @@ use std::collections::VecDeque;
 
 use capture::Line;
 pub use capture::log_layers;
-#[cfg(not(target_arch = "wasm32"))]
 pub use http::install as install_http;
-#[cfg(not(target_arch = "wasm32"))]
 use tabs::tools::save_bug_report;
 use tabs::{
     controls::controls,
@@ -95,7 +86,6 @@ pub struct DevTools {
     /// Recent frame times in milliseconds.
     frames: VecDeque<f32>,
     /// The last bug report's outcome.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     report: String,
 }
 
@@ -155,8 +145,6 @@ pub fn draw(
     mut tools: ResMut<DevTools>,
 ) {
     let (mut contexts, mut writer, mut typed, mut commands) = interaction;
-    #[cfg(target_arch = "wasm32")]
-    let _ = &mut commands;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
     let (searches, starfield, mut metrics, debug, diagnostics, mut core_load, mut gpu_test) =
@@ -243,7 +231,6 @@ pub fn draw(
     });
     metrics.instrumentation_latest.debug_window_ms = window_start.elapsed().as_secs_f64() * 1000.0;
     tools.open = open;
-    #[cfg(not(target_arch = "wasm32"))]
     if report {
         tools.report = save_bug_report(
             &mut commands,
@@ -254,8 +241,6 @@ pub fn draw(
             &starfield,
         );
     }
-    #[cfg(target_arch = "wasm32")]
-    let _ = report;
     writer.write_batch(out);
     typed.write_batch(lines.into_iter().map(|line| Typed {
         line,
