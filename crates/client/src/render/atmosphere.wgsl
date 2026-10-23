@@ -93,20 +93,45 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The ground counts only ahead of the camera: a ray climbing away from
     // the planet can have its line cross the ground behind.
     let ground = -sqrt(max(1.0 - d2, 0.0));
-    if d2 < 1.0 && ground > start {
+    let reaches = d2 < 1.0 && ground > start;
+    if reaches {
         end = min(end, ground);
     }
     if end <= start {
         return vec4(0.0);
     }
+    // Steps bunch up near a camera low in the air, where rays either side of
+    // the horizon (one ending at the ground, one crossing the whole air)
+    // differ most. From the top of the air and above they are even. Rays
+    // grazing the ground are spaced as if they crossed the whole air and
+    // stop at the ground, so they sample the same points as the rays just
+    // past the horizon and the two meet without a seam.
     let count = air.steps.y;
-    let ds = (end - start) / count;
+    let height = clamp((length(eye) - 1.0) / (top - 1.0), 0.0, 1.0);
+    let power = mix(2.0, 1.0, height);
+    var spaced = end;
+    if reaches {
+        spaced = mix(half, end, smoothstep(0.0, 0.25, -ground));
+    }
+    let span = spaced - start;
+    var last = start;
     var depth = vec3(0.0);
     var light = vec3(0.0);
-    for (var i = 0.0; i < count; i += 1.0) {
-        let p = nearest + dir * (start + (i + 0.5) * ds);
+    for (var i = 0.0; i < count && last < end; i += 1.0) {
+        let to = min(start + span * pow((i + 1.0) / count, power), end);
+        let ds = to - last;
+        let p = nearest + dir * (0.5 * (last + to));
+        last = to;
         let m = medium(length(p) - 1.0);
-        let seen = exp(-(depth + 0.5 * m.extinction * ds));
+        // Light scattered across the step, dimmed by the air in front of
+        // each point of it (Hillaire 2015), so thick steps keep their light.
+        let x = m.extinction * ds;
+        let within = select(
+            (1.0 - exp(-x)) / max(x, vec3(1e-4)),
+            1.0 - 0.5 * x,
+            x < vec3(1e-4),
+        );
+        let seen = exp(-depth) * within * ds;
         for (var j = 0u; j < 4u; j++) {
             let sun = air.suns[j].rgb;
             if all(sun == vec3(0.0)) {
@@ -120,10 +145,34 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             let mu = dot(dir, towards);
             let scattering = air.rayleigh.rgb * m.rayleigh * rayleigh_phase(mu)
                 + air.mie.rgb * m.mie * mie_phase(mu, air.shape.y);
-            light += sun * exp(-path.xyz) * seen * scattering * ds;
+            light += sun * exp(-path.xyz) * seen * scattering;
         }
-        depth += m.extinction * ds;
+        depth += x;
     }
-    let through = exp(-depth);
-    return vec4(encode(light), 1.0 - dot(through, vec3(1.0 / 3.0)));
+    // The ground behind was lit with undimmed starlight, so dim it by the
+    // air between it and the stars as well, weighted by each star's share
+    // of its light.
+    var sunlit = 1.0;
+    if reaches {
+        let surface = normalize(nearest + dir * end);
+        var lit = 0.0;
+        var total = 0.0;
+        for (var j = 0u; j < 4u; j++) {
+            let sun = air.suns[j].rgb;
+            let towards = air.lights[j].xyz;
+            let facing = dot(surface, towards);
+            if all(sun == vec3(0.0)) || facing <= 0.0 {
+                continue;
+            }
+            let path = towards_star(surface, towards, top);
+            let weight = dot(sun, vec3(1.0 / 3.0)) * facing;
+            lit += weight * dot(exp(-path.xyz), vec3(1.0 / 3.0));
+            total += weight;
+        }
+        if total > 0.0 {
+            sunlit = lit / total;
+        }
+    }
+    let through = dot(exp(-depth), vec3(1.0 / 3.0)) * sunlit;
+    return vec4(encode(light), 1.0 - through);
 }

@@ -113,6 +113,11 @@ Checkpoints, each checked live by the user and committed:
      optically thick steps. Steps are also spaced closer near the camera, so
      rays either side of the horizon (one ending at the ground, one crossing
      the whole air) settle to the same colour. No extra samples.
+   - ✅ Both fixes passed the user's live check. A faint seam remained, as
+     ground rays were spaced over a far shorter length than the rays just
+     past the horizon; rays grazing the ground are now spaced as if they
+     crossed the whole air and stop at the ground. 16 view steps hide the
+     horizon in thick air; 24 is where the look stops changing.
 
 Known prototype limits: no multiple scattering, so thick atmospheres look too
 dark and Venus's surface is black; the ground is lit by unattenuated
