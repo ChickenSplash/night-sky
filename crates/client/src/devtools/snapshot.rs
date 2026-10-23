@@ -174,6 +174,7 @@ pub(super) fn publish(
             "point_pixels": debug.point_pixels, "msaa": debug.msaa, "bloom": debug.bloom,
             "cull_blocks": debug.cull_blocks, "point_stars": debug.point_stars,
             "split_multiples": debug.split_multiples, "atmospheres": debug.atmospheres,
+            "atmosphere_jitter": debug.atmosphere_jitter,
         },
         "performance": {
             "averages": metrics.live(&field),

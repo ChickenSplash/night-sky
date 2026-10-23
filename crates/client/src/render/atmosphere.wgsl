@@ -10,7 +10,8 @@
 struct Air {
     // The planet's centre from the camera, in render units, and its radius.
     centre: vec4<f32>,
-    // Top of the air in radii, and steps along the view and towards a star.
+    // Top of the air in radii, steps along the view and towards a star, and
+    // 1 to jitter the view steps.
     steps: vec4<f32>,
     // Coefficients per radius. Rayleigh scattering and its scale height; Mie
     // scattering and absorption; Mie scale height and asymmetry, then the
@@ -72,11 +73,27 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
     return vec4(depth, 1.0);
 }
 
+// Where each view step takes its sample, from 0 (its start) to 1 (its end).
+// Neighbouring pixels sample at different points (Jimenez 2014's interleaved
+// gradient noise), so sharp changes along the ray, such as the edge of the
+// planet's shadow at twilight, blur into fine grain instead of bands.
+// Midway without jitter.
+fn jitter(pixel: vec2<f32>) -> f32 {
+    if air.steps.w == 0.0 {
+        return 0.5;
+    }
+    return fract(52.9829189 * fract(dot(floor(pixel), vec2(0.06711056, 0.00583715))));
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let dir = normalize(in.world_position.xyz - view.world_position);
     let eye = -air.centre.xyz / air.centre.w;
     let top = air.steps.x;
+    // Underground nothing is seen, not even the air beyond the far side.
+    if dot(eye, eye) < 1.0 {
+        return vec4(0.0);
+    }
     // Distance along the ray to its closest approach, and that point.
     let closest = -dot(eye, dir);
     let nearest = eye + dir * closest;
@@ -114,13 +131,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         spaced = mix(half, end, smoothstep(0.0, 0.25, -ground));
     }
     let span = spaced - start;
+    let offset = jitter(in.position.xy);
     var last = start;
     var depth = vec3(0.0);
     var light = vec3(0.0);
     for (var i = 0.0; i < count && last < end; i += 1.0) {
         let to = min(start + span * pow((i + 1.0) / count, power), end);
         let ds = to - last;
-        let p = nearest + dir * (0.5 * (last + to));
+        let p = nearest + dir * mix(last, to, offset);
         last = to;
         let m = medium(length(p) - 1.0);
         // Light scattered across the step, dimmed by the air in front of

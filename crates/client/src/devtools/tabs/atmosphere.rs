@@ -40,6 +40,18 @@ pub fn atmosphere(
             on: !debug.atmospheres,
         });
     }
+    if terminal::check(
+        ui,
+        debug.atmosphere_jitter,
+        "Jitter steps",
+        true,
+        DebugSwitch::AtmosphereJitter.detail(),
+    ) {
+        out.push(UiCommand::SetDebug {
+            switch: DebugSwitch::AtmosphereJitter,
+            on: !debug.atmosphere_jitter,
+        });
+    }
     gpu(ui, diagnostics);
     let mut change = |change: AtmosphereChange| out.push(UiCommand::SetAtmosphere(change));
 

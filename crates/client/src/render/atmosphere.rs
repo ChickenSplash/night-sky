@@ -375,7 +375,8 @@ pub struct AtmosphereMaterial {
     /// The planet's centre from the camera, in render units, and its radius.
     #[uniform(0)]
     centre: Vec4,
-    /// Top of the air in radii, and view and light steps.
+    /// Top of the air in radii, view and light steps, and 1 to jitter the
+    /// view steps.
     #[uniform(0)]
     steps: Vec4,
     #[uniform(0)]
@@ -449,11 +450,22 @@ impl Shell {
     }
 
     /// `near` is the camera's near plane, in render units.
-    fn material(&self, eye: Vec3, near: f32, steps: (u32, u32)) -> AtmosphereMaterial {
+    fn material(
+        &self,
+        eye: Vec3,
+        near: f32,
+        steps: (u32, u32),
+        jitter: bool,
+    ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
-            steps: Vec4::new(self.air.top, steps.0 as f32, steps.1 as f32, 0.0),
+            steps: Vec4::new(
+                self.air.top,
+                steps.0 as f32,
+                steps.1 as f32,
+                f32::from(u8::from(jitter)),
+            ),
             rayleigh: self.air.rayleigh,
             mie: self.air.mie,
             shape: self.air.shape,
@@ -512,7 +524,12 @@ pub(super) fn sync_atmospheres(
             *cell,
             Transform::from_translation(shell.centre).with_scale(Vec3::splat(shell.extent())),
         );
-        let changed = shell.material(eye, near, (tuning.view_steps, tuning.light_steps));
+        let changed = shell.material(
+            eye,
+            near,
+            (tuning.view_steps, tuning.light_steps),
+            debug.atmosphere_jitter,
+        );
         if materials.get(material).is_some_and(|m| *m != changed)
             && let Some(m) = materials.get_mut(material)
         {

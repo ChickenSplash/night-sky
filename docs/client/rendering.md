@@ -142,6 +142,14 @@ ground's limb seen from above) then sample the same points and meet without
 a seam. In thick air 16 steps hide the horizon; the look stops changing at
 about 24.
 
+**Jitter.** Each step takes its sample at a point within the step that
+differs from pixel to pixel (interleaved gradient noise, Jimenez 2014), not
+at its midpoint. With every pixel sampling the same depths, sharp changes
+along the ray, chiefly the edge of the planet's shadow at twilight, showed as
+coloured bands that only many steps hid; jittered, they blur into a fine,
+static grain. `set_debug atmosphere_jitter false` samples at the midpoints
+again, to compare.
+
 **Output.** Output is premultiplied: $L$ is added and whatever lies behind is
 dimmed by the line of sight's transmittance, averaged to grey. The surface
 shader lights the ground with undimmed starlight, so where the ray reaches
