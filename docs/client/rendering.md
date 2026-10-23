@@ -133,19 +133,23 @@ so an optically thick step (Venus's lower air) keeps its light instead of
 losing it. Step lengths grow with the square of the step index when the
 camera is at the ground, easing to even spacing at the top of the air, so
 the air close to the camera, which sets the colour in thick air, is sampled
-finely. A ray that reaches the ground is spaced over its whole length to the
-top of the air as if the planet were not there, and stops at the ground,
-when it meets the ground at a grazing angle; the steeper the ray, the more its
-spacing shrinks back to its own length. Rays either side of the horizon (or of the
-ground's limb seen from above) then sample the same points and meet without
-a seam. In thick air 16 steps hide the horizon; the look stops changing at
-about 24. The price is that such a ray keeps only the steps that fall before
-the ground: from 200 km above an Earth-sized planet, the ground near the
-horizon got 4 to 9 of 24, and banded. So this spacing fades out as the camera
-climbs, from full at the ground to none at the top of the air: from above,
-where nearly all the ground in view is grazed, every ray spreads its steps
-over its own path through the air. `set_debug atmosphere_fit_steps false`
-keeps the old spacing at any height, to compare.
+finely. Every ray spreads its steps over its own path through the air.
+
+**Stopping where opaque.** A ray ends where the air between the camera and
+the point reaches optical depth 10 in its least dimmed channel (less than
+1/20,000 of the light gets through), whether or not ground lies beyond. The
+depth between two points on a ray is the difference of their depths to the
+top of the air from the transmittance table, taken forwards along the ray,
+or backwards for a ray that reaches the ground, as its backward line never
+meets the ground; about ten halvings, one table read each, find the point.
+In thick air (Venus) rays either side of the horizon, or of the ground's
+limb from above, then end alike in the haze and meet without a seam, the
+ground is hidden where it should be, and all the steps go where light is
+seen. Earth's air is that thick only along the limb. Without it, rays that
+reach the ground and rays that pass it are stepped over very different
+lengths and the edge between them shows in thick air. It needs the table, so
+does nothing while the table builds or with it off;
+`set_debug atmosphere_stop_opaque false` compares.
 
 **Jitter.** Each step takes its sample at a point within the step that
 differs from pixel to pixel (interleaved gradient noise, Jimenez 2014), not

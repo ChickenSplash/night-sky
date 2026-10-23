@@ -202,18 +202,19 @@ Checkpoints:
    edge between rays that reach the ground and rays past the limb shows,
    where real Venus is a smooth ball, as the two kinds of ray are stepped
    over different lengths.
-   - **Idea for later: stop each ray where the air turns opaque**, at an
-     optical depth of about 10 in its least dimmed channel, found from the
-     transmittance table in about 10 lookups. Rays then end in the haze
-     whether or not ground lies beyond, so the ground and the limb edge
-     vanish under thick air, all steps go where light can be seen, and
-     stage 1's grazing-ray spacing may no longer be needed at all. The
-     optical depth between the camera and a point on its ray is the
-     table's depth from that point backwards along the ray, less the
-     camera's (rays that reach the ground; their backward line never
-     meets it), or the camera's forward depth less the point's (rays that
-     do not). Earth's air is that thick only along the limb, so it should
-     hardly change.
+   Superseded by checkpoint 3b.
+3b. ✅ **Stop where opaque.** Each ray ends where the air between the
+   camera and the point reaches optical depth 10 in its least dimmed
+   channel, found from the transmittance table in about 12 lookups, whether
+   or not ground lies beyond: the table's depth from the point backwards
+   along the ray less the camera's (rays that reach the ground; their
+   backward line never meets it), or the camera's forward depth less the
+   point's (rays that do not). Stage 1's grazing-ray spacing and the fitted
+   steps' switch are removed: every ray spreads its steps over its own
+   path. `set_debug atmosphere_stop_opaque` (needs the table). The user's
+   check: Venus is a smooth ball from orbit with no ground or limb edge,
+   no seam from inside, Earth unchanged; "the fix we should have gone for
+   from the start".
 4. **Light under Venus's cloud.** Today its surface is black: single
    scattering through cloud of optical depth about 30 leaves no direct light
    low down, while real Venus gets 2 to 3% of sunlight at the surface as a
@@ -245,14 +246,14 @@ air if their cost is still high.
 
 ## Where to pick up
 
-Stage 1 is done (branch `atmospheres`). Stage 2's checkpoints 1 to 3
-(jitter, transmittance table, fitted steps from above) are done, and the
-banding is solved. The user is pausing atmospheres here for a while. Next,
-when they return: light under Venus's cloud (checkpoint 4), or first the
-idea of stopping rays where the air turns opaque (under checkpoint 3).
+Stage 1 is done (branch `atmospheres`). Stage 2's checkpoints 1 to 3b
+(jitter, transmittance table, fitted steps, stop where opaque) are done:
+no banding, no seams, Venus a smooth ball. Next: light under Venus's cloud
+(checkpoint 4).
 
-- **Default view steps:** 16 now. With the fitted steps even 4 look smooth
-  on Venus from orbit, so settle a lower default with the user.
+- **Default view steps:** 16 now. Even 4 look smooth on Venus from orbit,
+  so settle a lower default with the user; jitter is on by default but the
+  user checks with it off.
 - **Stage 3 · simulation:** to be planned in detail with the user. Set
   so far: the scale height comes from $H = kT/\bar m g$ once temperature
   and composition exist, with the slider kept as a debug override; the air's

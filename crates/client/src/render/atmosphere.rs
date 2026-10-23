@@ -387,8 +387,8 @@ pub struct AtmosphereMaterial {
     shape: Vec4,
     #[uniform(0)]
     absorption: Vec4,
-    /// 1 to jitter the view steps, and 1 to fit them to each ray's own path
-    /// once the camera is above the air.
+    /// 1 to jitter the view steps, and 1 to end each ray where the air turns
+    /// opaque (with the tables only).
     #[uniform(0)]
     switches: Vec4,
     #[uniform(0)]
@@ -466,7 +466,7 @@ impl Shell {
     }
 
     /// `near` is the camera's near plane, in render units; `switches` jitter
-    /// the view steps and fit them to each ray from above the air.
+    /// the view steps and end each ray where the air turns opaque.
     fn material(
         &self,
         eye: Vec3,
@@ -476,7 +476,7 @@ impl Shell {
         transmittance: Option<Handle<Image>>,
     ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
-        let [jitter, fit] = switches.map(|on| f32::from(u8::from(on)));
+        let [jitter, opaque] = switches.map(|on| f32::from(u8::from(on)));
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
             steps: Vec4::new(self.air.top, steps.0 as f32, steps.1 as f32, 0.0),
@@ -484,7 +484,7 @@ impl Shell {
             mie: self.air.mie,
             shape: self.air.shape,
             absorption: self.air.absorption.extend(0.0),
-            switches: Vec4::new(jitter, fit, 0.0, 0.0),
+            switches: Vec4::new(jitter, opaque, 0.0, 0.0),
             lights: self.lights,
             suns: self.suns,
             transmittance,
@@ -544,7 +544,7 @@ pub(super) fn sync_atmospheres(
             eye,
             near,
             (tuning.view_steps, tuning.light_steps),
-            [debug.atmosphere_jitter, debug.atmosphere_fit_steps],
+            [debug.atmosphere_jitter, debug.atmosphere_stop_opaque],
             debug
                 .atmosphere_tables
                 .then(|| tables.get(&shell.air))

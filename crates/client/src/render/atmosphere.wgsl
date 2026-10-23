@@ -19,8 +19,8 @@ struct Air {
     mie: vec4<f32>,
     shape: vec4<f32>,
     absorption: vec4<f32>,
-    // 1 to jitter the view steps; 1 to fit them to each ray's own path
-    // through the air once the camera is above it.
+    // 1 to jitter the view steps; 1 to end each ray where the air turns
+    // opaque (with TABLES only).
     switches: vec4<f32>,
     // Direction to each star, and the exposed colour of its flux.
     lights: array<vec4<f32>, 4>,
@@ -35,6 +35,9 @@ struct Air {
 const PI: f32 = 3.14159265;
 // The table's size, as `atmosphere_tables.rs`.
 const TABLE: vec2<f32> = vec2(256.0, 64.0);
+// Optical depth beyond which nothing more is seen: e^-10 lets through less
+// than 1/20,000 of the light.
+const OPAQUE: f32 = 10.0;
 
 struct Medium {
     rayleigh: f32,
@@ -106,6 +109,45 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
 #endif
 }
 
+#ifdef TABLES
+// Optical depth from `p` along `way` to the top of the air.
+fn to_top(p: vec3<f32>, way: vec3<f32>, top: f32) -> vec3<f32> {
+    let r = length(p);
+    let uv = transmittance_uv(r, dot(p, way) / r, top);
+    return textureSampleLevel(transmittance, transmittance_sampler, uv, 0.0).rgb;
+}
+
+// Optical depth from `start` to `t` along the ray: the difference of the
+// two points' depths to the top of the air, taken forwards, or backwards
+// for a ray that reaches the ground, whose backward line never meets it.
+// `base` is `start`'s depth that way.
+fn depth_to(nearest: vec3<f32>, dir: vec3<f32>, t: f32, base: vec3<f32>, reaches: bool, top: f32) -> f32 {
+    let p = nearest + dir * t;
+    let d = select(base - to_top(p, dir, top), to_top(p, -dir, top) - base, reaches);
+    return min(d.r, min(d.g, d.b));
+}
+
+// Where the air between `start` and the point turns opaque in its least
+// dimmed channel, found by halving, or `end` if it never does.
+fn opaque_at(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32, reaches: bool, top: f32) -> f32 {
+    let base = to_top(nearest + dir * start, select(dir, -dir, reaches), top);
+    if depth_to(nearest, dir, end, base, reaches, top) < OPAQUE {
+        return end;
+    }
+    var low = start;
+    var high = end;
+    for (var i = 0; i < 10; i++) {
+        let mid = 0.5 * (low + high);
+        if depth_to(nearest, dir, mid, base, reaches, top) < OPAQUE {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    return high;
+}
+#endif
+
 // Where each view step takes its sample, from 0 (its start) to 1 (its end).
 // Neighbouring pixels sample at different points (Jimenez 2014's interleaved
 // gradient noise), so sharp changes along the ray, such as the edge of the
@@ -150,26 +192,23 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if end <= start {
         return vec4(0.0);
     }
-    // Steps bunch up near a camera low in the air, where rays either side of
-    // the horizon (one ending at the ground, one crossing the whole air)
-    // differ most. From the top of the air and above they are even. Rays
-    // grazing the ground are spaced as if they crossed the whole air and
-    // stop at the ground, so they sample the same points as the rays just
-    // past the horizon and the two meet without a seam. That leaves them
-    // only the few steps before the ground, so with the steps fitted it
-    // fades out as the camera climbs: from above the air, where nearly all
-    // the ground in view is seen at a grazing angle, every ray spreads its
-    // steps over its own path.
+    // Past where the air turns opaque nothing is seen, ground or not, so the
+    // ray ends there. Rays either side of the horizon then end alike in
+    // thick air, and every step goes where light can be seen.
+    var stopped = false;
+#ifdef TABLES
+    if air.switches.y != 0.0 {
+        let opaque = opaque_at(nearest, dir, start, end, reaches, top);
+        stopped = opaque < end;
+        end = opaque;
+    }
+#endif
+    // Steps bunch up near a camera low in the air; from the top of the air
+    // and above they are even.
     let count = air.steps.y;
     let height = clamp((length(eye) - 1.0) / (top - 1.0), 0.0, 1.0);
     let power = mix(2.0, 1.0, height);
-    var spaced = end;
-    if reaches {
-        let grazing = 1.0 - smoothstep(0.0, 0.25, -ground);
-        let low = select(1.0, 1.0 - height, air.switches.y != 0.0);
-        spaced = mix(end, half, grazing * low);
-    }
-    let span = spaced - start;
+    let span = end - start;
     let offset = jitter(in.position.xy);
     var last = start;
     var depth = vec3(0.0);
@@ -210,7 +249,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // air between it and the stars as well, weighted by each star's share
     // of its light.
     var sunlit = 1.0;
-    if reaches {
+    if reaches && !stopped {
         let surface = normalize(nearest + dir * end);
         var lit = 0.0;
         var total = 0.0;

@@ -66,14 +66,14 @@ pub fn atmosphere(
     }
     if terminal::check(
         ui,
-        debug.atmosphere_fit_steps,
-        "Fit steps from above",
+        debug.atmosphere_stop_opaque,
+        "Stop where opaque",
         true,
-        DebugSwitch::AtmosphereFitSteps.detail(),
+        DebugSwitch::AtmosphereStopOpaque.detail(),
     ) {
         out.push(UiCommand::SetDebug {
-            switch: DebugSwitch::AtmosphereFitSteps,
-            on: !debug.atmosphere_fit_steps,
+            switch: DebugSwitch::AtmosphereStopOpaque,
+            on: !debug.atmosphere_stop_opaque,
         });
     }
     gpu(ui, diagnostics);
