@@ -602,7 +602,7 @@ Decisions agreed with the user on 2026-10-21:
   phase 9's autopilot reuses.
 - **Turn rate is ship state,** set with `ns ship warp turn-rate <°/s>`, from 1
   to 360 °/s (default 30), engaged or not.
-- **The turn-limit assist is deferred,** to be decided after phase 11.
+- **The turn-limit assist is deferred,** until planetary atmospheres.
 
 Checkpoints:
 
@@ -620,11 +620,12 @@ Checkpoints:
    after disengaging. The user confirmed it visually.
 
 Deferred: **turn-limit assist** (the rate cap falling with speed, its switch
-and the reason for any limit), decided after phase 11's mouse steering.
+and the reason for any limit), until planetary atmospheres.
 
 ### 7 · Collision assist (deferred)
 
-Deferred with phase 6's turn limit and phase 8, to be decided after phase 11.
+Deferred with phase 6's turn limit and phase 8, until planetary atmospheres
+(see [paused work](#paused-until-atmospheres)): clearance includes the atmosphere.
 
 - Assist 2: slow down or disengage ahead of a predicted impact or too-close
   pass, and recover speed gradually once clear.
@@ -636,7 +637,8 @@ Deferred with phase 6's turn limit and phase 8, to be decided after phase 11.
 
 ### 8 · Approach assist (deferred)
 
-Deferred with phase 6's turn limit and phase 7, to be decided after phase 11.
+Deferred with phase 6's turn limit and phase 7, until planetary atmospheres
+(see [paused work](#paused-until-atmospheres)): the standoff clears the atmosphere.
 
 - Assist 3: with a body selected, the maximum warp speed falls on approach
   and warp disengages at a safe standoff distance. Reuses phase 9's speed
@@ -890,7 +892,7 @@ Checkpoints:
 
 ### 10 · Orbit autopilot (deferred)
 
-Deferred with the assists, to be decided after phase 11. Phase 5's rough-orbit
+Deferred with the assists, until planetary atmospheres. Phase 5's rough-orbit
 exit, used by `warp to --orbit`, already ends near-circular (eccentricity 1e-7
 to 1e-3 in the phase 9 live test), so "go to planet" needs no player input.
 
@@ -898,7 +900,13 @@ to 1e-3 in the phase 9 live test), so "go to planet" needs no player input.
 - Close-range correction only; no interplanetary transfer planning.
 - **Done when:** "go to planet" ends in a stable orbit with no player input.
 
-### 11 · Layered controls
+### 11 · Layered controls ⏸ Paused after checkpoint 3
+
+Paused by the user on 2026-10-23, with the ship fully flyable in the app:
+piloting, manual warp and mouse steering are done. The rest (in-app
+autopilot, the layers, the assists and their readout) waits for planetary
+atmospheres, so assists and route standoffs can use each body's atmosphere
+as well as its size. See [paused work](#paused-until-atmospheres).
 
 - In-app piloting: a piloting state where the keys fly the ship instead of
   the camera, with a key layout for all six axes and the throttle.
@@ -985,23 +993,36 @@ to 1e-3 in the phase 9 live test), so "go to planet" needs no player input.
 
 Checkpoints, each checked live by the user and committed:
 
-1. **Actions and piloting:** the binding table with the free camera moved
+1. ✅ **Actions and piloting:** the binding table with the free camera moved
    onto it, the piloting state (Tab, Esc, 1× clock), keyboard thrusters,
    throttle and rotation, and a minimal readout.
-2. **Manual warp:** G (engage and disengage, cutting throttle and fine
+2. ✅ **Manual warp:** G (engage and disengage, cutting throttle and fine
    thrust), the warp speed rate input, X for the slowest warp speed,
    thruster keys inert in warp, and the readout showing the warp speed G
    engages at and that G cuts the throttle. Arrow keys already steer, so
-   warp can be flown before the mouse.
-3. **Mouse steering:** virtual-joystick steering with its reticle and the
-   hidden pointer, free look while piloting, and the invert option.
-4. **The pilot readout:** assists, target, requested and actual speed and
-   the reason for any limit. Its look is decided at this checkpoint.
-5. **The layers:** how Autopilot, Assisted and Manual are chosen (decided
-   at this checkpoint), and an in-app target pick for the autopilot.
-   Assisted, including the sublight rate hold, waits for the user's go.
-6. **Fly it,** then decide on the deferred assists; docs and the phase
-   marked done.
+   warp can be flown before the mouse. The rate input is a held `warp
+   sweep` order in `crates/simulation`.
+3. ✅ **Mouse steering:** virtual-joystick steering with its reticle and the
+   hidden pointer, free look while piloting, and the invert option (in the
+   debug console's `controls` tab, not saved).
+
+#### Paused until atmospheres
+
+What phase 11 still lacks, to be replanned once planets have atmospheres:
+
+- **In-app autopilot:** pick a target and `warp to` it, and cancel, without
+  the CLI; the route's target, distance, ETA and any slowdown in the pilot
+  readout. Route standoffs should clear the atmosphere, not just the body.
+- **The layers:** how Autopilot, Assisted and Manual are chosen. Assisted
+  brings `point` (prograde and so on), matched dropout, circularise, hold
+  orbit and the sublight rate hold to the app.
+- **The assists:** turn limit (phase 6), collision (7), approach (8) and
+  orbit (10). Collision and approach clearances and speed limits take each
+  body's atmosphere extent into account, not only its radius.
+- **The assist readout:** assist switches, requested against actual speed
+  and the reason for any limit. A separate checkpoint was dropped, as there
+  is nothing to show until the assists exist.
+- Not yet planned anywhere: spawning and despawning ships in the app.
 
 ### 12 · Walking inside the ship
 
@@ -1033,6 +1054,10 @@ Checkpoints, each checked live by the user and committed:
 - Warp between galaxies, once there is more than one.
 - The warp arrival burst as a hazard, scaling with faster-than-light trip
   length.
+- **Planetary atmospheres,** before phase 11 resumes: density by altitude
+  above each planet's surface, drag on ships flying through it (relative to
+  the air, which turns with the planet), and how far each atmosphere
+  reaches, for the assists' and autopilot's clearances and speed limits.
 - Moving stars over limited time spans (galaxy rotation stage 2): cells loaded
   by rotating back to stars' birth cells, with padding for wobble.
 
@@ -1042,3 +1067,4 @@ Checkpoints, each checked live by the user and committed:
 - Fuel limits, or unlimited for the alpha?
 - Can the ship crash?
 - Thrust gravity or artificial deck gravity in the long run?
+- What warp does in an atmosphere: refuse to engage, drop out, or feel drag?
