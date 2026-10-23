@@ -8,7 +8,7 @@ use bevy::{
 };
 use bevy_egui::EguiContexts;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,6 +47,8 @@ pub enum Action {
     /// Held mouse buttons, read with the mouse's motion.
     Look,
     Orbit,
+    /// The virtual joystick while piloting.
+    Steer,
     /// Held with Look for field of view, or with the wheel for zoom.
     Alternate,
 }
@@ -96,7 +98,12 @@ fn key_label(key: KeyCode) -> String {
 /// Which bindings trigger which actions. A binding may serve several
 /// actions, read by different modes, and an action may have several.
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Bindings(pub Vec<(Binding, Action)>);
+pub struct Bindings {
+    pub table: Vec<(Binding, Action)>,
+    /// Mouse steering's pitch: pulling the mouse back raises the nose.
+    #[serde(default)]
+    pub invert_pitch: bool,
+}
 
 impl Default for Bindings {
     fn default() -> Self {
@@ -130,9 +137,14 @@ impl Default for Bindings {
             (K::ShiftLeft, Alternate),
             (K::ShiftRight, Alternate),
         ];
-        let buttons = [(MouseButton::Left, Look), (MouseButton::Right, Orbit)];
-        Self(
-            keys.into_iter()
+        let buttons = [
+            (MouseButton::Left, Look),
+            (MouseButton::Right, Orbit),
+            (MouseButton::Right, Steer),
+        ];
+        Self {
+            table: keys
+                .into_iter()
                 .map(|(key, action)| (Binding::Key(key), action))
                 .chain(
                     buttons
@@ -140,7 +152,8 @@ impl Default for Bindings {
                         .map(|(button, action)| (Binding::Mouse(button), action)),
                 )
                 .collect(),
-        )
+            invert_pitch: false,
+        }
     }
 }
 
@@ -150,7 +163,7 @@ impl Bindings {
     pub fn label(&self, actions: &[Action]) -> String {
         let mut labels: Vec<String> = Vec::new();
         for action in actions {
-            for (binding, _) in self.0.iter().filter(|(_, bound)| bound == action) {
+            for (binding, _) in self.table.iter().filter(|(_, bound)| bound == action) {
                 let label = binding.label();
                 if !labels.contains(&label) {
                     labels.push(label);
@@ -167,6 +180,8 @@ impl Bindings {
 pub struct Actions {
     pressed: HashSet<Action>,
     just_pressed: HashSet<Action>,
+    /// Analogue inputs' share of actions, from 0 to 1.
+    analogue: HashMap<Action, f32>,
     /// Mouse wheel lines this frame, upwards positive.
     pub wheel: f32,
     /// Whether the pointer is over the 3D view rather than the interface.
@@ -183,9 +198,21 @@ impl Actions {
     }
 
     /// How far an action is held, from 0 to 1. Keys are all or nothing; an
-    /// analogue axis bound to it later gives the part between.
+    /// analogue input gives the part between, and the larger wins.
     pub fn value(&self, action: Action) -> f32 {
-        f32::from(u8::from(self.pressed(action)))
+        let key = f32::from(u8::from(self.pressed(action)));
+        key.max(self.analogue.get(&action).copied().unwrap_or(0.0))
+    }
+
+    /// Hold an action part way this frame, as an analogue input does.
+    pub fn hold(&mut self, action: Action, value: f32) {
+        self.analogue.insert(action, value.clamp(0.0, 1.0));
+    }
+
+    /// Hold a pair of actions as one axis this frame, from -1 to 1.
+    pub fn hold_axis(&mut self, positive: Action, negative: Action, value: f32) {
+        self.hold(positive, value.max(0.0));
+        self.hold(negative, (-value).max(0.0));
     }
 
     /// A pair of actions as one axis, from -1 to 1.
@@ -210,8 +237,9 @@ impl Actions {
     ) {
         self.pressed.clear();
         self.just_pressed.clear();
+        self.analogue.clear();
         self.pointer_free = pointer_free;
-        for (binding, action) in &bindings.0 {
+        for (binding, action) in &bindings.table {
             let (pressed, just) = match binding {
                 Binding::Key(_) if typing => (false, false),
                 Binding::Mouse(_) if !pointer_free => (false, false),

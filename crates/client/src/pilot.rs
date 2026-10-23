@@ -4,19 +4,97 @@
 use crate::craft::{Fleet, Live, Order};
 use crate::input::{Action, Actions, Bindings};
 use crate::{Clock, Navigation, presentation::PresentationMode};
-use bevy::prelude::*;
+use bevy::{
+    input::mouse::AccumulatedMouseMotion,
+    prelude::*,
+    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
+};
 use space_simulation::craft::{WarpOrder, warp::MIN_SPEED};
 
 /// How fast Shift and Ctrl move the throttle lever, in full throttle per
 /// second.
 pub const THROTTLE_RATE: f64 = 0.5;
 
+/// The virtual joystick's ring, where it reaches full deflection, and its
+/// dead zone, in mouse motion (about points).
+pub const STICK_RING: f32 = 150.0;
+pub const STICK_DEAD_ZONE: f32 = 8.0;
+
 #[derive(Resource, Default)]
 pub struct Pilot {
     /// The ship being flown, by ID.
     pub ship: Option<String>,
+    /// The virtual joystick, while it is held.
+    pub stick: Option<Stick>,
     /// The held controls last ordered, so orders go only when they change.
     sent: Held,
+}
+
+/// A virtual joystick: the mouse moves it from where it was pressed, with
+/// the pointer hidden and held, so the screen's edge never stops it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Stick {
+    /// Where it was pressed, in window logical pixels.
+    pub origin: Vec2,
+    /// How far the mouse has moved it, screen down positive, within the ring.
+    pub offset: Vec2,
+}
+
+impl Stick {
+    fn moved(&mut self, delta: Vec2) {
+        self.offset = (self.offset + delta).clamp_length_max(STICK_RING);
+    }
+
+    /// Pitch (nose up) and yaw (nose left), from -1 to 1: none in the dead
+    /// zone, full at the ring. Mouse up is nose up unless inverted.
+    pub fn deflection(&self, invert_pitch: bool) -> [f32; 2] {
+        let length = self.offset.length();
+        if length <= STICK_DEAD_ZONE {
+            return [0.0, 0.0];
+        }
+        let share = ((length - STICK_DEAD_ZONE) / (STICK_RING - STICK_DEAD_ZONE)).min(1.0);
+        let stick = self.offset / length * share;
+        let pitch = if invert_pitch { stick.y } else { -stick.y };
+        [pitch, -stick.x]
+    }
+}
+
+/// Holding the steering button while piloting takes the pointer for the
+/// virtual joystick, which holds pitch and yaw like the arrow keys.
+pub fn steer(
+    mut actions: ResMut<Actions>,
+    mut pilot: ResMut<Pilot>,
+    bindings: Res<Bindings>,
+    motion: Res<AccumulatedMouseMotion>,
+    mut window: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
+) {
+    let held = pilot.flying() && actions.pressed(Action::Steer);
+    let Ok((window, mut cursor)) = window.single_mut() else {
+        return;
+    };
+    match (&mut pilot.stick, held) {
+        (None, true) => {
+            let origin = window.cursor_position().unwrap_or(window.size() / 2.0);
+            pilot.stick = Some(Stick {
+                origin,
+                offset: Vec2::ZERO,
+            });
+            cursor.visible = false;
+            cursor.grab_mode = CursorGrabMode::Locked;
+        }
+        (Some(stick), true) => stick.moved(motion.delta),
+        (Some(_), false) => {
+            pilot.stick = None;
+            cursor.visible = true;
+            cursor.grab_mode = CursorGrabMode::None;
+        }
+        (None, false) => {}
+    }
+    if let Some(stick) = pilot.stick {
+        let [pitch, yaw] = stick.deflection(bindings.invert_pitch);
+        actions.hold_axis(Action::PitchUp, Action::PitchDown, pitch);
+        actions.hold_axis(Action::YawLeft, Action::YawRight, yaw);
+    }
 }
 
 impl Pilot {

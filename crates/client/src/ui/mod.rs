@@ -133,6 +133,9 @@ pub fn draw_ui(
     if let Some(live) = pilot.ship.as_deref().and_then(|id| fleet.get(id)) {
         hud::pilot_readout(ctx, rect, &crate::pilot::readout(live, &bindings));
     }
+    if let Some(stick) = &pilot.stick {
+        hud::stick_reticle(ctx, stick);
+    }
     let moving_with = match &nav.anchor {
         // The location's deepest crumb, named as the breadcrumb names it.
         Some(crate::Anchor::Body(_)) => crate::ui::breadcrumb::trail(&nav, &universe.0)

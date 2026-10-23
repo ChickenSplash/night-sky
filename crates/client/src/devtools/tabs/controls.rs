@@ -4,7 +4,20 @@ use crate::input::{Action::*, Bindings};
 use crate::ui::terminal;
 use bevy_egui::egui;
 
-pub fn controls(ui: &mut egui::Ui, bindings: &Bindings) {
+pub fn controls(ui: &mut egui::Ui, bindings: &mut Bindings) {
+    controls_help(ui, bindings);
+    if terminal::check(
+        ui,
+        bindings.invert_pitch,
+        "Invert mouse pitch",
+        true,
+        "Mouse steering: pull the mouse back to raise the nose, as on a flight stick. Off, mouse up is nose up. Reset on restart.",
+    ) {
+        bindings.invert_pitch = !bindings.invert_pitch;
+    }
+}
+
+fn controls_help(ui: &mut egui::Ui, bindings: &Bindings) {
     let keys = |actions: &[crate::input::Action]| bindings.label(actions);
     let with = |a, b| format!("{} + {}", keys(&[a]), keys(&[b]));
     terminal::heading(ui, "controls");
@@ -73,15 +86,16 @@ pub fn controls(ui: &mut egui::Ui, bindings: &Bindings) {
                 "Cut thrust and engage warp, or drop out".into(),
             ),
             (
+                &keys(&[Steer]),
+                "Hold and move: steer, a virtual joystick".into(),
+            ),
+            (
                 &keys(&[PitchUp, PitchDown, YawLeft, YawRight]),
                 "Pitch and yaw".into(),
             ),
             (&keys(&[RollLeft, RollRight]), "Roll left / right".into()),
             (&keys(&[StopRotation]), "Stop rotation".into()),
-            (
-                &format!("{} or {}", keys(&[Look]), keys(&[Orbit])),
-                "Drag to look round the ship".into(),
-            ),
+            (&keys(&[Look]), "Drag to look round the ship".into()),
             ("Scroll", "Camera distance".into()),
         ],
     );

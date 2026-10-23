@@ -76,9 +76,9 @@ pub fn controls(
         PresentationMode::Simulation | PresentationMode::Constellation
     ) && !rig.flying();
     if pilot.flying() {
-        // Either button looks round the ship, and the wheel sets how far
-        // the camera follows; the keys are the ship's.
-        if rotating && (actions.pressed(Action::Look) || actions.pressed(Action::Orbit)) {
+        // Look turns round the ship without steering it, and the wheel sets
+        // how far the camera follows; the keys and the stick are the ship's.
+        if rotating && actions.pressed(Action::Look) {
             orbit(&mut nav, motion.delta);
         }
         if free && scroll != 0.0 {

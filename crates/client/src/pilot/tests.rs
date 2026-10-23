@@ -250,3 +250,31 @@ fn the_readout_says_g_cuts_the_throttle_and_the_speed_it_warps_at() {
     assert_eq!(lines[1], "Warp 0.00 m/s · set 1.00 m/s · rising");
     assert_eq!(lines[2], "G drops out · thrusters off");
 }
+
+#[test]
+fn the_stick_has_a_dead_zone_reaches_full_at_the_ring_and_stops_there() {
+    let mut stick = Stick::default();
+    stick.moved(Vec2::new(STICK_DEAD_ZONE, 0.0));
+    assert_eq!(stick.deflection(false), [0.0, 0.0]);
+    stick.moved(Vec2::new(0.0, -(STICK_RING - STICK_DEAD_ZONE) / 2.0));
+    let [pitch, yaw] = stick.deflection(false);
+    assert!(pitch > 0.0 && yaw < 0.0, "up and right: nose up, yaw right");
+    assert_eq!(stick.deflection(true)[0], -pitch);
+    stick.moved(Vec2::new(0.0, -10.0 * STICK_RING));
+    assert!((stick.offset.length() - STICK_RING).abs() < 1e-3);
+    assert!((stick.deflection(false)[0] - 1.0).abs() < 0.1);
+    // Back from the ring at once, not from wherever the mouse went.
+    stick.moved(Vec2::new(0.0, STICK_RING));
+    assert!(stick.offset.length() < STICK_DEAD_ZONE + 10.0);
+}
+
+#[test]
+fn the_stick_holds_pitch_and_yaw_like_the_arrow_keys() {
+    let mut keys = actions(&[]);
+    keys.hold_axis(Action::PitchUp, Action::PitchDown, -0.5);
+    keys.hold_axis(Action::YawLeft, Action::YawRight, 0.25);
+    assert_eq!(held(&keys, true).rotation, [-0.5, 0.25, 0.0]);
+    let mut both = actions(&[KeyCode::ArrowUp]);
+    both.hold_axis(Action::PitchUp, Action::PitchDown, 0.5);
+    assert_eq!(held(&both, false).rotation[0], 1.0);
+}

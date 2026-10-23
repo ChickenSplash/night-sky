@@ -129,6 +129,7 @@ fn main() {
             receive_galaxy,
             actions::apply,
             input::read,
+            pilot::steer,
             pilot::fly,
             tick,
             craft::step,

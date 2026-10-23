@@ -72,6 +72,8 @@ fn labels_name_each_key_once() {
 
 #[test]
 fn bindings_round_trip_as_data() {
+    let old = r#"{"table": []}"#;
+    assert!(!serde_json::from_str::<Bindings>(old).unwrap().invert_pitch);
     let bindings = Bindings::default();
     let json = serde_json::to_string(&bindings).unwrap();
     assert_eq!(serde_json::from_str::<Bindings>(&json).unwrap(), bindings);

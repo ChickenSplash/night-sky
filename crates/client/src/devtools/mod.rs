@@ -151,7 +151,7 @@ pub fn draw(
     scene: Scene,
     camera: Camera,
     rendering: Rendering,
-    bindings: Res<crate::input::Bindings>,
+    mut bindings: ResMut<crate::input::Bindings>,
     mut tools: ResMut<DevTools>,
 ) {
     let (mut contexts, mut writer, mut typed, mut commands) = interaction;
@@ -219,7 +219,7 @@ pub fn draw(
                             &mut out,
                         ),
                         Tab::Render => render(ui, &nav, &mut out),
-                        Tab::Controls => controls(ui, &bindings),
+                        Tab::Controls => controls(ui, &mut bindings),
                         Tab::State => state(
                             ui,
                             &universe,

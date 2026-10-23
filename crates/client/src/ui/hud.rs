@@ -175,6 +175,29 @@ pub(super) fn pilot_readout(ctx: &egui::Context, rect: egui::Rect, lines: &[Stri
         });
 }
 
+/// The virtual joystick: its ring and dead zone round where it was pressed,
+/// and the stick out to its deflection.
+pub(super) fn stick_reticle(ctx: &egui::Context, stick: &crate::pilot::Stick) {
+    use crate::pilot::{STICK_DEAD_ZONE, STICK_RING};
+    // Window logical pixels to egui points, as for the canvas markers.
+    let scale = ctx.zoom_factor();
+    let centre = egui::pos2(stick.origin.x, stick.origin.y) / scale;
+    let end = centre + egui::vec2(stick.offset.x, stick.offset.y) / scale;
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Background,
+        egui::Id::new("stick-reticle"),
+    ));
+    let faint = CURRENT.gamma_multiply(0.35);
+    painter.circle_stroke(centre, STICK_RING / scale, egui::Stroke::new(1.0, faint));
+    painter.circle_stroke(
+        centre,
+        STICK_DEAD_ZONE / scale,
+        egui::Stroke::new(1.0, faint),
+    );
+    painter.line_segment([centre, end], egui::Stroke::new(1.5, CURRENT));
+    painter.circle_filled(end, 4.0, CURRENT);
+}
+
 fn elapsed_text(days: f64) -> String {
     if days >= 365.25 {
         format!("T + {:.2} yr", days / 365.25)
