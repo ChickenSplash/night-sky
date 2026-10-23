@@ -172,3 +172,109 @@ fn the_readout_names_the_keys_to_stop() {
     assert_eq!(lines[0], "Piloting Ship 1 · Tab or Esc to stop");
     assert_eq!(lines[1], "Throttle 0%");
 }
+
+fn craft(app: &App, id: &str) -> space_simulation::craft::Craft {
+    app.world()
+        .resource::<Fleet>()
+        .get(id)
+        .unwrap()
+        .craft
+        .clone()
+}
+
+#[test]
+fn g_cuts_thrust_to_engage_and_the_throttle_keys_then_sweep_warp_speed() {
+    let (fleet, id) = ship();
+    let mut app = app(fleet, &id);
+    press(&mut app, &[KeyCode::Tab]);
+    press(&mut app, &[KeyCode::KeyZ, KeyCode::KeyW]);
+    press(&mut app, &[KeyCode::KeyG, KeyCode::KeyW]);
+    let ship = craft(&app, &id);
+    assert!(ship.warp.engaged);
+    assert_eq!(ship.input.controls.throttle, 0.0);
+    assert_eq!(ship.input.controls.translation, [0.0; 3]);
+    press(&mut app, &[KeyCode::ShiftLeft, KeyCode::KeyW]);
+    assert_eq!(craft(&app, &id).warp.sweep, 1.0);
+    press(&mut app, &[KeyCode::ControlLeft]);
+    assert_eq!(craft(&app, &id).warp.sweep, -1.0);
+    press(&mut app, &[]);
+    assert_eq!(craft(&app, &id).warp.sweep, 0.0);
+    let set = |app: &mut App, speed_ms| {
+        app.world_mut()
+            .resource_mut::<Fleet>()
+            .get_mut(&id)
+            .unwrap()
+            .craft
+            .warp
+            .set_speed(speed_ms)
+            .unwrap();
+    };
+    set(&mut app, 1e6);
+    press(&mut app, &[KeyCode::KeyX]);
+    assert_eq!(craft(&app, &id).warp.requested_ms, MIN_SPEED);
+    press(&mut app, &[KeyCode::ShiftLeft]);
+    press(&mut app, &[KeyCode::KeyG, KeyCode::ShiftLeft]);
+    let ship = craft(&app, &id);
+    assert!(!ship.warp.engaged);
+    assert_eq!(ship.warp.sweep, 0.0);
+}
+
+#[test]
+fn leaving_ends_a_held_sweep_but_not_warp() {
+    let (fleet, id) = ship();
+    let mut app = app(fleet, &id);
+    press(&mut app, &[KeyCode::Tab]);
+    press(&mut app, &[KeyCode::KeyG]);
+    press(&mut app, &[KeyCode::ShiftLeft]);
+    press(&mut app, &[KeyCode::Tab, KeyCode::ShiftLeft]);
+    let ship = craft(&app, &id);
+    assert!(ship.warp.engaged);
+    assert_eq!(ship.warp.sweep, 0.0);
+}
+
+#[test]
+fn the_readout_says_g_cuts_the_throttle_and_the_speed_it_warps_at() {
+    let (mut fleet, id) = ship();
+    let bindings = Bindings::default();
+    let live = fleet.get_mut(&id).unwrap();
+    assert_eq!(readout(live, &bindings)[3], "G warps at 1.00 m/s");
+    live.craft.input.controls.throttle = 0.5;
+    assert_eq!(
+        readout(live, &bindings)[3],
+        "G cuts thrust and warps at 1.00 m/s"
+    );
+    live.craft.input.controls.throttle = 0.0;
+    live.craft.engage_warp().unwrap();
+    live.craft.warp.sweep = 1.0;
+    let lines = readout(live, &bindings);
+    assert_eq!(lines[1], "Warp 0.00 m/s · set 1.00 m/s · rising");
+    assert_eq!(lines[2], "G drops out · thrusters off");
+}
+
+#[test]
+fn the_stick_has_a_dead_zone_reaches_full_at_the_ring_and_stops_there() {
+    let mut stick = Stick::default();
+    stick.moved(Vec2::new(STICK_DEAD_ZONE, 0.0));
+    assert_eq!(stick.deflection(false), [0.0, 0.0]);
+    stick.moved(Vec2::new(0.0, -(STICK_RING - STICK_DEAD_ZONE) / 2.0));
+    let [pitch, yaw] = stick.deflection(false);
+    assert!(pitch > 0.0 && yaw < 0.0, "up and right: nose up, yaw right");
+    assert_eq!(stick.deflection(true)[0], -pitch);
+    stick.moved(Vec2::new(0.0, -10.0 * STICK_RING));
+    assert!((stick.offset.length() - STICK_RING).abs() < 1e-3);
+    assert!((stick.deflection(false)[0] - 1.0).abs() < 0.1);
+    // Back from the ring at once, not from wherever the mouse went.
+    stick.moved(Vec2::new(0.0, STICK_RING));
+    assert!(stick.offset.length() < STICK_DEAD_ZONE + 10.0);
+}
+
+#[test]
+fn the_stick_holds_pitch_and_yaw_like_the_arrow_keys() {
+    let mut keys = actions(&[]);
+    keys.hold_axis(Action::PitchUp, Action::PitchDown, -0.5);
+    keys.hold_axis(Action::YawLeft, Action::YawRight, 0.25);
+    assert_eq!(held(&keys, true).rotation, [-0.5, 0.25, 0.0]);
+    let mut both = actions(&[KeyCode::ArrowUp]);
+    both.hold_axis(Action::PitchUp, Action::PitchDown, 0.5);
+    assert_eq!(held(&both, false).rotation[0], 1.0);
+}

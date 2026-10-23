@@ -653,6 +653,45 @@
       ]
     },
     {
+      "about": "Every factor of ten takes as long, so a short sweep nudges the speed. It continues until changed or dropout and needs warp engaged, except to end it. A sweep takes over a route.",
+      "at": [
+        "command"
+      ],
+      "fields": [
+        {
+          "cli": "positional",
+          "key": [
+            "rate"
+          ],
+          "kind": "number",
+          "max": 1.0,
+          "min": -1.0,
+          "name": "rate",
+          "required": true,
+          "unit": "fraction"
+        }
+      ],
+      "group": "warp",
+      "help": "Hold a sweep of the requested speed [-1, 1]; 1 is up 2 decades/s.",
+      "off": {
+        "action": "warp",
+        "command": {
+          "command": "sweep",
+          "rate": 0.0
+        }
+      },
+      "order": {
+        "action": "warp",
+        "command": {
+          "command": "sweep"
+        }
+      },
+      "words": [
+        "warp",
+        "sweep"
+      ]
+    },
+    {
       "about": null,
       "at": [
         "command"
@@ -1220,6 +1259,17 @@
         ],
         "kind": "text",
         "label": "stop reason"
+      },
+      {
+        "group": "warp",
+        "help": "Held sweep of the requested speed while engaged, from -1 to 1 of `SWEEP_DECADES_PER_S`, so every factor of ten takes as long. Dropout ends it.",
+        "key": [
+          "warp",
+          "sweep"
+        ],
+        "kind": "number",
+        "label": "sweep",
+        "unit": "fraction"
       },
       {
         "group": "warp",

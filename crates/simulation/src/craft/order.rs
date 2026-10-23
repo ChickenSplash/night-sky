@@ -136,6 +136,15 @@ pub enum WarpOrder {
     Up,
     /// Divide the requested speed by √10.
     Down,
+    /// Hold a sweep of the requested speed [-1, 1]; 1 is up 2 decades/s.
+    ///
+    /// Every factor of ten takes as long, so a short sweep nudges the speed.
+    /// It continues until changed or dropout and needs warp engaged, except
+    /// to end it. A sweep takes over a route.
+    Sweep {
+        #[schemars(range(min = -1.0, max = 1.0), extend("x-unit" = "fraction"))]
+        rate: f64,
+    },
     /// Developer gravity policy; change only while disengaged.
     Gravity { policy: GravityPolicy },
     /// Fly to a body, here or in another system, or to another ship, and
@@ -172,6 +181,7 @@ const TRANSLATION: u8 = 2;
 const TURNING: u8 = 4;
 const THRUST: u8 = 8;
 const WARP: u8 = 16;
+const SWEEP: u8 = 32;
 
 impl Order {
     /// The order that ends this one when it is given for a time: its axes
@@ -196,6 +206,11 @@ impl Order {
                 command: WarpOrder::Engage,
             } => Self::Warp {
                 command: WarpOrder::Disengage,
+            },
+            Self::Warp {
+                command: WarpOrder::Sweep { .. },
+            } => Self::Warp {
+                command: WarpOrder::Sweep { rate: 0.0 },
             },
             _ => return None,
         })
@@ -222,6 +237,9 @@ impl Order {
                     | WarpOrder::To { .. }
                     | WarpOrder::Cancel,
             } => WARP,
+            Self::Warp {
+                command: WarpOrder::Sweep { .. },
+            } => SWEEP,
             Self::Configure { .. } | Self::Warp { .. } => 0,
         }
     }
@@ -233,6 +251,9 @@ impl Order {
             Self::Throttle { value } => std::slice::from_ref(value),
             Self::Translate { right, up, forward } => &[*right, *up, *forward],
             Self::Rotate { pitch, yaw, roll } => &[*pitch, *yaw, *roll],
+            Self::Warp {
+                command: WarpOrder::Sweep { rate },
+            } => std::slice::from_ref(rate),
             _ => &[],
         };
         if !fractions
@@ -348,6 +369,15 @@ impl Order {
                             .set_speed((craft.warp.requested_ms / SPEED_FACTOR).max(MIN_SPEED))?;
                         craft.end_route(TAKEOVER);
                     }
+                    WarpOrder::Sweep { rate } => {
+                        if *rate != 0.0 {
+                            if !craft.warp.engaged {
+                                return Err("Engage warp before sweeping its speed".into());
+                            }
+                            craft.end_route(TAKEOVER);
+                        }
+                        craft.warp.sweep = *rate;
+                    }
                     WarpOrder::To {
                         target,
                         matched,
@@ -360,6 +390,7 @@ impl Order {
                             (false, false) => ArrivalMode::Keep,
                         };
                         craft.fly_to(field, ships, target, arrival, *time)?;
+                        craft.warp.sweep = 0.0;
                     }
                     WarpOrder::Cancel => {
                         if !craft.end_route("Cancelled") {

@@ -383,7 +383,10 @@ or damage response. Arrival detection is separate and does not stop the drive.
   destination. This is a game rule, not a relativistic spacetime solution.
 - **Speed:** 1 m/s to 10,000 ly/s, matching the free camera's maximum,
   with each up/down multiplying/dividing by
-  √10. Requested speed persists; actual speed approaches it with a 0.3 simulated
+  √10. A held sweep (-1 to 1, piloting's Shift/Ctrl) moves it each step at up
+  to 2 factors of ten per second, so every decade takes as long; it needs warp
+  engaged, ends at dropout and takes over a route. Requested speed persists;
+  actual speed approaches it with a 0.3 simulated
   second exponential response. Displacement integrates that ramp. Pause stops
   motion; warp alone does not activate the sublight manoeuvre time cap. Normal
   fixed-step catch-up limits still apply.

@@ -119,3 +119,33 @@ fn turn_rate_is_validated_and_changes_engaged_or_not() {
         serde_json::json!({"action": "warp", "command": {"command": "turn_rate", "degrees_per_second": 45.0}})
     );
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_sweep_needs_warp_except_to_end_it_and_times_out_to_zero() {
+    let mut craft = ship();
+    let sweep = |rate| Order::Warp {
+        command: WarpOrder::Sweep { rate },
+    };
+    assert!(sweep(1.5).validate().is_err());
+    assert!(sweep(f64::NAN).validate().is_err());
+    assert!(sweep(1.0).apply(&mut craft, None).is_err());
+    sweep(0.0).apply(&mut craft, None).unwrap();
+    Order::Warp {
+        command: WarpOrder::Engage,
+    }
+    .apply(&mut craft, None)
+    .unwrap();
+    sweep(-0.5).apply(&mut craft, None).unwrap();
+    assert_eq!(craft.warp.sweep, -0.5);
+    assert_eq!(sweep(1.0).off(), Some(sweep(0.0)));
+    assert!(sweep(1.0).overlaps(&sweep(0.0)));
+    assert!(!sweep(1.0).overlaps(&Order::Warp {
+        command: WarpOrder::Disengage
+    }));
+    let json = serde_json::to_value(sweep(1.0)).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"action": "warp", "command": {"command": "sweep", "rate": 1.0}})
+    );
+}

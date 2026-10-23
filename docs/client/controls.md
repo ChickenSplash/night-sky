@@ -42,17 +42,33 @@ keys fly the ship. Piloting holds the clock at 1×, and leaving keeps 1×.
 | Fine thrusters (while held) | W/A/S/D, R/F for up/down |
 | Throttle lever up / down | Hold Shift / Ctrl; below zero is reverse |
 | Full / cut throttle | Z / X |
-| Pitch and yaw | Arrow keys |
+| Engage warp, cutting throttle and fine thrust / drop out | G |
+| Warp speed up / down (in warp) | Hold Shift / Ctrl, 2 factors of ten per second |
+| Slowest warp speed (in warp) | X |
+| Steer (virtual joystick) | Hold right mouse and move |
+| Pitch and yaw at full deflection | Arrow keys |
 | Roll | Q / E |
 | Stop rotation | T |
-| Look round the ship | Left or right mouse drag |
+| Look round the ship without steering | Left mouse drag |
 | Camera distance | Mouse wheel |
 
 Keys become ordinary ship orders only when they change, at the ship's next
 step, so piloting uses the same order path as the CLI. Turning is the raw
 `rotate` input: in sublight the spin keeps growing while held and persists when
 released; in warp it steers the bubble. Fine thrusters and the throttle do
-nothing in warp.
+nothing in warp. Warp speed is a lever like the throttle: releasing Shift or
+Ctrl holds the cruise, and warp engages at the last speed set, which the
+readout shows before G, with a note when G will cut thrust.
+
+Mouse steering is a virtual joystick. While right mouse is held, the pointer
+is hidden and held still, and the mouse's motion moves a stick from the press
+point: past a small dead zone (8 points) it gives pitch and yaw, reaching full
+deflection at a ring about 150 points out, where it stops. A reticle shows
+the ring, dead zone and stick. Holding still keeps the deflection; releasing
+returns it to zero. Mouse up is nose up; the `controls` tab's Invert mouse
+pitch reverses that until restart. The stick holds the same pitch and yaw
+actions as the arrow keys, at part strength, so a flight stick or gamepad
+axis can later bind to them the same way.
 
 ## Selection, inspection and travel
 

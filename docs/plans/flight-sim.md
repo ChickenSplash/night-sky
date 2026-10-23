@@ -988,14 +988,19 @@ Checkpoints, each checked live by the user and committed:
 1. **Actions and piloting:** the binding table with the free camera moved
    onto it, the piloting state (Tab, Esc, 1× clock), keyboard thrusters,
    throttle and rotation, and a minimal readout.
-2. **Manual warp:** G, the warp speed rate input, virtual-joystick steering
-   with its reticle, arrow-key steering and free look.
-3. **The pilot readout:** assists, target, requested and actual speed and
+2. **Manual warp:** G (engage and disengage, cutting throttle and fine
+   thrust), the warp speed rate input, X for the slowest warp speed,
+   thruster keys inert in warp, and the readout showing the warp speed G
+   engages at and that G cuts the throttle. Arrow keys already steer, so
+   warp can be flown before the mouse.
+3. **Mouse steering:** virtual-joystick steering with its reticle and the
+   hidden pointer, free look while piloting, and the invert option.
+4. **The pilot readout:** assists, target, requested and actual speed and
    the reason for any limit. Its look is decided at this checkpoint.
-4. **The layers:** how Autopilot, Assisted and Manual are chosen (decided
+5. **The layers:** how Autopilot, Assisted and Manual are chosen (decided
    at this checkpoint), and an in-app target pick for the autopilot.
    Assisted, including the sublight rate hold, waits for the user's go.
-5. **Fly it,** then decide on the deferred assists; docs and the phase
+6. **Fly it,** then decide on the deferred assists; docs and the phase
    marked done.
 
 ### 12 · Walking inside the ship

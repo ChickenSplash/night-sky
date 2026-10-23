@@ -340,6 +340,9 @@ fn cancelling_or_taking_over_leaves_warp_as_it_was() {
             command: WarpOrder::Set { speed_ms: 1e6 },
         },
         Order::Warp {
+            command: WarpOrder::Sweep { rate: -1.0 },
+        },
+        Order::Warp {
             command: WarpOrder::Cancel,
         },
     ];
@@ -364,7 +367,11 @@ fn cancelling_or_taking_over_leaves_warp_as_it_was() {
         }
         let requested = craft.warp.requested_ms;
         craft.step(&field);
-        assert_eq!(craft.warp.requested_ms, requested, "{takeover:?}");
+        if craft.warp.sweep == 0.0 {
+            assert_eq!(craft.warp.requested_ms, requested, "{takeover:?}");
+        } else {
+            assert!(craft.warp.requested_ms < requested, "{takeover:?}");
+        }
     }
     let mut craft = lined_up(&field, "t#B", 1e3);
     let cancel = WarpOrder::Cancel;
