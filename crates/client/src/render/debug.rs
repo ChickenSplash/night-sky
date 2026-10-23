@@ -34,6 +34,9 @@ pub enum DebugSwitch {
     /// Read the starlight reaching the air from a table built per air,
     /// rather than marching towards each star (`atmosphere_tables.rs`).
     AtmosphereTables,
+    /// From above the air, spread each ray's view steps over its own path
+    /// rather than as if rays grazing the ground crossed the whole air.
+    AtmosphereFitSteps,
 }
 
 impl DebugSwitch {
@@ -72,6 +75,9 @@ impl DebugSwitch {
             Self::AtmosphereTables => {
                 "Read the starlight reaching each point of the air from a lookup table built once per air, instead of marching towards each star. Should look the same and cost less; turn off to compare."
             }
+            Self::AtmosphereFitSteps => {
+                "Spread every view step over the part of each line of sight that is in the air once the camera climbs out of it. Off, lines grazing the ground are stepped as if they crossed the whole air and keep only the few steps before the ground, which bands the ground near the horizon from low orbit."
+            }
         }
     }
 }
@@ -89,6 +95,7 @@ pub struct RenderDebug {
     pub atmospheres: bool,
     pub atmosphere_jitter: bool,
     pub atmosphere_tables: bool,
+    pub atmosphere_fit_steps: bool,
 }
 
 impl Default for RenderDebug {
@@ -105,12 +112,13 @@ impl Default for RenderDebug {
             atmospheres: true,
             atmosphere_jitter: true,
             atmosphere_tables: true,
+            atmosphere_fit_steps: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 11] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 12] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -122,6 +130,7 @@ impl RenderDebug {
         (DebugSwitch::Atmospheres, "Atmospheres"),
         (DebugSwitch::AtmosphereJitter, "Jitter atmosphere steps"),
         (DebugSwitch::AtmosphereTables, "Atmosphere lookup tables"),
+        (DebugSwitch::AtmosphereFitSteps, "Fit atmosphere steps"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -137,6 +146,7 @@ impl RenderDebug {
             DebugSwitch::Atmospheres => self.atmospheres,
             DebugSwitch::AtmosphereJitter => self.atmosphere_jitter,
             DebugSwitch::AtmosphereTables => self.atmosphere_tables,
+            DebugSwitch::AtmosphereFitSteps => self.atmosphere_fit_steps,
         }
     }
 
@@ -153,6 +163,7 @@ impl RenderDebug {
             DebugSwitch::Atmospheres => &mut self.atmospheres,
             DebugSwitch::AtmosphereJitter => &mut self.atmosphere_jitter,
             DebugSwitch::AtmosphereTables => &mut self.atmosphere_tables,
+            DebugSwitch::AtmosphereFitSteps => &mut self.atmosphere_fit_steps,
         } = on;
     }
 }

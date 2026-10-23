@@ -188,13 +188,39 @@ Checkpoints:
    flipped; rerun the atmosphere test and record it here; then settle the
    default view steps (the saving should afford more steps for less than
    today's cost, the remaining fix for the worst twilight views).
-3. **Light under Venus's cloud.** Today its surface is black: single
+3. ✅ **Fitted steps from above.** The user's worst bands were from low
+   orbit (about 200 km up, Earth's air, 24 view steps): stripes of light
+   and dark across a smooth ground near the horizon, worse at twilight. The
+   cause was stage 1's seam fix: rays grazing the ground are spaced as if
+   they crossed the whole air, so they keep only the steps before the
+   ground, 4 to 9 of 24 there. The spacing now fades out as the camera
+   climbs to the top of the air, so from above every ray uses all its
+   steps. `set_debug atmosphere_fit_steps`. The user's check: the banding
+   is entirely gone, Earth looks natural, and Venus is smooth even at 4
+   view steps. Jitter is off in their checks. The exact shadow is not
+   needed. Known and accepted for now: from above thick air (Venus), the
+   edge between rays that reach the ground and rays past the limb shows,
+   where real Venus is a smooth ball, as the two kinds of ray are stepped
+   over different lengths.
+   - **Idea for later: stop each ray where the air turns opaque**, at an
+     optical depth of about 10 in its least dimmed channel, found from the
+     transmittance table in about 10 lookups. Rays then end in the haze
+     whether or not ground lies beyond, so the ground and the limb edge
+     vanish under thick air, all steps go where light can be seen, and
+     stage 1's grazing-ray spacing may no longer be needed at all. The
+     optical depth between the camera and a point on its ray is the
+     table's depth from that point backwards along the ray, less the
+     camera's (rays that reach the ground; their backward line never
+     meets it), or the camera's forward depth less the point's (rays that
+     do not). Earth's air is that thick only along the limb, so it should
+     hardly change.
+4. **Light under Venus's cloud.** Today its surface is black: single
    scattering through cloud of optical depth about 30 leaves no direct light
    low down, while real Venus gets 2 to 3% of sunlight at the surface as a
    dim orange overcast. Simplest approach first: one precomputed diffuse
    transmittance per air, added as even light low in the air and on the
    ground. Judged on Venus alone; Earth must not change visibly.
-4. **Every planet with air.** The renderer takes an atmosphere per planet,
+5. **Every planet with air.** The renderer takes an atmosphere per planet,
    not one tuning for the selected planet:
    - A per-planet source of `AirSettings` (a resource keyed by planet ID),
      filled for now by the sliders for the selected planet, so stage 3
@@ -208,7 +234,7 @@ Checkpoints:
      from point to disc does not pop.
    - Check: several planets with different presets in one system; rerun
      the atmosphere test and a view with several shells on screen.
-5. **Docs:** the rendering guide's atmospheres section no longer
+6. **Docs:** the rendering guide's atmospheres section no longer
    "prototype", benchmarks updated, the documentation index's limits
    updated, and this plan's stage 3 written in detail with the user.
 
@@ -219,17 +245,19 @@ air if their cost is still high.
 
 ## Where to pick up
 
-Stage 1 is done (branch `atmospheres`). Stage 2's checkpoints 1 (jitter)
-and 2 (transmittance table) are done. The user still finds the banding and
-grain at twilight unconvincing and wants to revisit how the steps are
-taken before checkpoint 3 (light under Venus's cloud), to be agreed.
+Stage 1 is done (branch `atmospheres`). Stage 2's checkpoints 1 to 3
+(jitter, transmittance table, fitted steps from above) are done, and the
+banding is solved. The user is pausing atmospheres here for a while. Next,
+when they return: light under Venus's cloud (checkpoint 4), or first the
+idea of stopping rays where the air turns opaque (under checkpoint 3).
 
-- **Default view steps:** 16 now; settled with the banding work.
+- **Default view steps:** 16 now. With the fitted steps even 4 look smooth
+  on Venus from orbit, so settle a lower default with the user.
 - **Stage 3 · simulation:** to be planned in detail with the user. Set
   so far: the scale height comes from $H = kT/\bar m g$ once temperature
   and composition exist, with the slider kept as a debug override; the air's
   top (12.5 scale heights) gives the extent that flight-sim standoffs wait
-  for; it fills the per-planet air source from stage 2's checkpoint 4.
+  for; it fills the per-planet air source from stage 2's checkpoint 5.
 
 Working notes for a fresh session:
 

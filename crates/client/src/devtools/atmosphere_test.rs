@@ -109,6 +109,7 @@ pub struct AtmosphereResults {
     pub light_steps: u32,
     pub jitter: bool,
     pub tables: bool,
+    pub fit_steps: bool,
     pub cases: Vec<Measured>,
 }
 
@@ -366,6 +367,7 @@ pub fn run(
                 light_steps: tuning.light_steps,
                 jitter: debug.atmosphere_jitter,
                 tables: debug.atmosphere_tables,
+                fit_steps: debug.atmosphere_fit_steps,
                 cases: std::mem::take(&mut run.measured),
             };
             info!(

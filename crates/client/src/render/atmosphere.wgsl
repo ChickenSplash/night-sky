@@ -10,8 +10,7 @@
 struct Air {
     // The planet's centre from the camera, in render units, and its radius.
     centre: vec4<f32>,
-    // Top of the air in radii, steps along the view and towards a star, and
-    // 1 to jitter the view steps.
+    // Top of the air in radii, and steps along the view and towards a star.
     steps: vec4<f32>,
     // Coefficients per radius. Rayleigh scattering and its scale height; Mie
     // scattering and absorption; Mie scale height and asymmetry, then the
@@ -20,6 +19,9 @@ struct Air {
     mie: vec4<f32>,
     shape: vec4<f32>,
     absorption: vec4<f32>,
+    // 1 to jitter the view steps; 1 to fit them to each ray's own path
+    // through the air once the camera is above it.
+    switches: vec4<f32>,
     // Direction to each star, and the exposed colour of its flux.
     lights: array<vec4<f32>, 4>,
     suns: array<vec4<f32>, 4>,
@@ -110,7 +112,7 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
 // planet's shadow at twilight, blur into fine grain instead of bands.
 // Midway without jitter.
 fn jitter(pixel: vec2<f32>) -> f32 {
-    if air.steps.w == 0.0 {
+    if air.switches.x == 0.0 {
         return 0.5;
     }
     return fract(52.9829189 * fract(dot(floor(pixel), vec2(0.06711056, 0.00583715))));
@@ -153,13 +155,19 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // differ most. From the top of the air and above they are even. Rays
     // grazing the ground are spaced as if they crossed the whole air and
     // stop at the ground, so they sample the same points as the rays just
-    // past the horizon and the two meet without a seam.
+    // past the horizon and the two meet without a seam. That leaves them
+    // only the few steps before the ground, so with the steps fitted it
+    // fades out as the camera climbs: from above the air, where nearly all
+    // the ground in view is seen at a grazing angle, every ray spreads its
+    // steps over its own path.
     let count = air.steps.y;
     let height = clamp((length(eye) - 1.0) / (top - 1.0), 0.0, 1.0);
     let power = mix(2.0, 1.0, height);
     var spaced = end;
     if reaches {
-        spaced = mix(half, end, smoothstep(0.0, 0.25, -ground));
+        let grazing = 1.0 - smoothstep(0.0, 0.25, -ground);
+        let low = select(1.0, 1.0 - height, air.switches.y != 0.0);
+        spaced = mix(end, half, grazing * low);
     }
     let span = spaced - start;
     let offset = jitter(in.position.xy);

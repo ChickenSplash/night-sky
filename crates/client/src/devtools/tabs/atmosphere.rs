@@ -64,6 +64,18 @@ pub fn atmosphere(
             on: !debug.atmosphere_tables,
         });
     }
+    if terminal::check(
+        ui,
+        debug.atmosphere_fit_steps,
+        "Fit steps from above",
+        true,
+        DebugSwitch::AtmosphereFitSteps.detail(),
+    ) {
+        out.push(UiCommand::SetDebug {
+            switch: DebugSwitch::AtmosphereFitSteps,
+            on: !debug.atmosphere_fit_steps,
+        });
+    }
     gpu(ui, diagnostics);
     let mut change = |change: AtmosphereChange| out.push(UiCommand::SetAtmosphere(change));
 

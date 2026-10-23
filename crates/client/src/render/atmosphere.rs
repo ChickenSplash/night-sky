@@ -376,8 +376,7 @@ pub struct AtmosphereMaterial {
     /// The planet's centre from the camera, in render units, and its radius.
     #[uniform(0)]
     centre: Vec4,
-    /// Top of the air in radii, view and light steps, and 1 to jitter the
-    /// view steps.
+    /// Top of the air in radii, and view and light steps.
     #[uniform(0)]
     steps: Vec4,
     #[uniform(0)]
@@ -388,6 +387,10 @@ pub struct AtmosphereMaterial {
     shape: Vec4,
     #[uniform(0)]
     absorption: Vec4,
+    /// 1 to jitter the view steps, and 1 to fit them to each ray's own path
+    /// once the camera is above the air.
+    #[uniform(0)]
+    switches: Vec4,
     #[uniform(0)]
     lights: [Vec4; MAX_LIGHTS],
     #[uniform(0)]
@@ -462,28 +465,26 @@ impl Shell {
         self.radius * self.air.top * MESH_MARGIN
     }
 
-    /// `near` is the camera's near plane, in render units.
+    /// `near` is the camera's near plane, in render units; `switches` jitter
+    /// the view steps and fit them to each ray from above the air.
     fn material(
         &self,
         eye: Vec3,
         near: f32,
         steps: (u32, u32),
-        jitter: bool,
+        switches: [bool; 2],
         transmittance: Option<Handle<Image>>,
     ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
+        let [jitter, fit] = switches.map(|on| f32::from(u8::from(on)));
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
-            steps: Vec4::new(
-                self.air.top,
-                steps.0 as f32,
-                steps.1 as f32,
-                f32::from(u8::from(jitter)),
-            ),
+            steps: Vec4::new(self.air.top, steps.0 as f32, steps.1 as f32, 0.0),
             rayleigh: self.air.rayleigh,
             mie: self.air.mie,
             shape: self.air.shape,
             absorption: self.air.absorption.extend(0.0),
+            switches: Vec4::new(jitter, fit, 0.0, 0.0),
             lights: self.lights,
             suns: self.suns,
             transmittance,
@@ -543,7 +544,7 @@ pub(super) fn sync_atmospheres(
             eye,
             near,
             (tuning.view_steps, tuning.light_steps),
-            debug.atmosphere_jitter,
+            [debug.atmosphere_jitter, debug.atmosphere_fit_steps],
             debug
                 .atmosphere_tables
                 .then(|| tables.get(&shell.air))

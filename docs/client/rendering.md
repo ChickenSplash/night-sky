@@ -139,7 +139,13 @@ when it meets the ground at a grazing angle; the steeper the ray, the more its
 spacing shrinks back to its own length. Rays either side of the horizon (or of the
 ground's limb seen from above) then sample the same points and meet without
 a seam. In thick air 16 steps hide the horizon; the look stops changing at
-about 24.
+about 24. The price is that such a ray keeps only the steps that fall before
+the ground: from 200 km above an Earth-sized planet, the ground near the
+horizon got 4 to 9 of 24, and banded. So this spacing fades out as the camera
+climbs, from full at the ground to none at the top of the air: from above,
+where nearly all the ground in view is grazed, every ray spreads its steps
+over its own path through the air. `set_debug atmosphere_fit_steps false`
+keeps the old spacing at any height, to compare.
 
 **Jitter.** Each step takes its sample at a point within the step that
 differs from pixel to pixel (interleaved gradient noise, Jimenez 2014), not
