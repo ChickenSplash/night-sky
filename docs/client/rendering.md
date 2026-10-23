@@ -119,8 +119,12 @@ $$
 
 $F$ is exposed with the planet's gain and balance, so $L$ is on the surface's
 $AF/\pi$ scale. Output is premultiplied: $L$ is added and whatever lies behind
-is dimmed by the line of sight's transmittance, averaged to grey. Seen from
-inside, the far side of the shell is drawn over everything instead.
+is dimmed by the line of sight's transmittance, averaged to grey. So what
+lies behind must draw first: the galactic glow and star points sort as the
+background (`BACKGROUND_DISTANCE`), and the shell sorts at its near side,
+after its planet's limb sprites. Seen from inside, or close enough above that
+the near plane would cut its near side, the far side of the shell is drawn
+over everything instead.
 
 For now only the selected planet has air, with Earth's coefficients from
 Hillaire (2020); `set_debug atmospheres false` hides it. There is no multiple

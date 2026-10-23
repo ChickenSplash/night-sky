@@ -363,7 +363,7 @@ fn queue(
         // finds no mesh for the placeholder and leaves the range alone.
         for index in 0..buffers.frame.draws.len() as u32 {
             phase.add(Transparent3d {
-                distance: 0.0,
+                distance: crate::render::BACKGROUND_DISTANCE,
                 pipeline: id,
                 entity: (Entity::PLACEHOLDER, MainEntity::from(Entity::PLACEHOLDER)),
                 draw_function,

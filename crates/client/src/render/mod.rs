@@ -48,6 +48,9 @@ pub const POINT_PIXELS: f32 = 1.5;
 /// The camera's point spread: a Gaussian of this sigma in physical pixels, as
 /// for galactic stars (`starfield.wgsl` `SIGMA_PX`). Bloom adds the wide glow.
 pub const PSF_SIGMA_PX: f32 = 0.55;
+/// Sort distance of the galactic background (star points and glow), so it
+/// draws before every transparent body and an atmosphere dims it.
+pub const BACKGROUND_DISTANCE: f32 = -1e30;
 
 pub struct RenderPlugin;
 

@@ -21,6 +21,10 @@ use bevy::{
 /// The shell mesh's radius over the top of the air: the sphere mesh's facets
 /// lie slightly inside the sphere they approximate.
 const MESH_MARGIN: f32 = 1.01;
+/// Within this many near-plane distances of the shell mesh, the camera draws
+/// it from inside: the near plane would otherwise cut a hole in the side
+/// below. Generous, as oblique points are clipped closer than their distance.
+const NEAR_MARGIN: f32 = 10.0;
 /// Steps along a pixel's line of sight, and from each towards every star.
 const VIEW_STEPS: f32 = 16.0;
 const LIGHT_STEPS: f32 = 8.0;
@@ -132,8 +136,8 @@ pub struct AtmosphereMaterial {
     lights: [Vec4; MAX_LIGHTS],
     #[uniform(0)]
     suns: [Vec4; MAX_LIGHTS],
-    /// The camera is inside the shell mesh: its far side is drawn, over
-    /// everything, as its near side is behind the camera.
+    /// The camera is inside the shell mesh, or so close that the near plane
+    /// would cut its near side: its far side is drawn instead, over everything.
     inside: bool,
 }
 
@@ -162,6 +166,12 @@ impl Material for AtmosphereMaterial {
         AlphaMode::Premultiplied
     }
 
+    /// Sorted at the shell's near side, not its centre, so its planet's limb
+    /// sprites, which share the centre, always draw first, beneath it.
+    fn depth_bias(&self) -> f32 {
+        self.centre.w * self.steps.x * MESH_MARGIN
+    }
+
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
@@ -184,7 +194,8 @@ impl Shell {
         self.radius * self.air.top * MESH_MARGIN
     }
 
-    fn material(&self, eye: Vec3) -> AtmosphereMaterial {
+    /// `near` is the camera's near plane, in render units.
+    fn material(&self, eye: Vec3, near: f32) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
@@ -195,7 +206,7 @@ impl Shell {
             absorption: self.air.absorption.extend(0.0),
             lights: self.lights,
             suns: self.suns,
-            inside: from_eye.length() < self.extent(),
+            inside: from_eye.length() < self.extent() + NEAR_MARGIN * near,
         }
     }
 }
@@ -209,11 +220,15 @@ pub(super) fn sync_atmospheres(
         ResMut<Pool<AtmosphereMaterial>>,
         ResMut<Assets<AtmosphereMaterial>>,
     ),
-    camera: Query<SpaceCameraCell, With<SpaceCamera>>,
+    camera: Query<(SpaceCameraCell, &Projection), With<SpaceCamera>>,
     mut shells: Query<super::bodies::Placement, (With<AtmosphereShell>, Without<SpaceCamera>)>,
 ) {
-    let Ok((cell, parent, view)) = camera.single() else {
+    let Ok(((cell, parent, view), projection)) = camera.single() else {
         return;
+    };
+    let near = match projection {
+        Projection::Perspective(p) => p.near,
+        _ => 0.0,
     };
     let shown: &[Shell] = if debug.atmospheres {
         &frame.shells
@@ -243,7 +258,7 @@ pub(super) fn sync_atmospheres(
             *cell,
             Transform::from_translation(shell.centre).with_scale(Vec3::splat(shell.extent())),
         );
-        let changed = shell.material(eye);
+        let changed = shell.material(eye, near);
         if materials.get(material).is_some_and(|m| *m != changed)
             && let Some(m) = materials.get_mut(material)
         {

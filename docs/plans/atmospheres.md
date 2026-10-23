@@ -63,7 +63,18 @@ with the switch on). The body sphere mesh went from 48 × 24 to 192 × 96
 segments: the coarse facets left a dark sliver between the drawn limb and the
 shader's analytic ground. The live check found a hard edge in the sky from
 inside the air: rays climbing away from the planet were cut off by ground
-behind the camera.
+behind the camera. Follow-up fixes after the live check:
+
+- **Draw order:** the galactic glow and star points now sort as the
+  background, before every transparent body, and the shell sorts at its near
+  side. The glow flickered as its sort distance crossed the shell's, and the
+  planet's limb sprites tied with it.
+- **Near plane:** just above the shell mesh, the near plane cut a hole in its
+  side below the camera, showing the bare ground for a few kilometres of
+  descent. The shell is drawn from inside within ten near-plane distances.
+- **Cost:** about 0.2 ms with the planet in view from orbit, and 1.5 to 2 ms
+  with the air filling the screen from inside it, as estimated for the
+  direct version. The lookup tables are expected to bring this down.
 
 Checkpoints, each checked live by the user and committed:
 

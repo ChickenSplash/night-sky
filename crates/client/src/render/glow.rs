@@ -121,6 +121,9 @@ impl Material for CompositeMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Add
     }
+    fn depth_bias(&self) -> f32 {
+        crate::render::BACKGROUND_DISTANCE
+    }
     fn specialize(
         _: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,

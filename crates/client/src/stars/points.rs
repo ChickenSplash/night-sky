@@ -301,7 +301,7 @@ fn queue(
             hdr: view.hdr,
         };
         phase.add(Transparent3d {
-            distance: 0.0,
+            distance: crate::render::BACKGROUND_DISTANCE,
             pipeline: pipelines.specialize(&cache, &pipeline, composite),
             entity: (Entity::PLACEHOLDER, MainEntity::from(Entity::PLACEHOLDER)),
             draw_function,
