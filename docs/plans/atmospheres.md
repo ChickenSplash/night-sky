@@ -26,15 +26,10 @@ the same model as just another body.
 1. **Rendering prototype** (this plan's first stage): the look and its GPU
    cost, judged in the real app with values set by hand, before any
    simulation work.
-2. **Lookup tables and many planets** (see stage 2 below): transmittance
-   and multiple scattering precomputed per air (Bruneton 2008, Hillaire
-   2020), and the renderer opened to every planet with air. The direct shader stays as a
-   reference toggle, to compare the look and frame time. Also colour-dependent
-   dimming of what lies behind, through dual-source blending (wgpu's
-   `DUAL_SOURCE_BLENDING` feature), so red light no longer leaks through
-   thick air under a grey average. Multiple scattering is what lights Venus's
-   surface as a dim overcast; its preset then needs nearly non-absorbing
-   cloud (about 0.1% per scattering, against Earth haze's 10%).
+2. **Cleaner, cheaper steps, then many planets** (see stage 2 below):
+   jittered steps, a transmittance table, light under Venus's cloud, then
+   the renderer opened to every planet with air. One change at a time, each
+   behind a switch to compare with what came before.
 3. **Simulation:** retention (the cosmic shoreline, Zahnle & Catling 2017,
    with stripping near flaring M dwarfs), composition, pressure and scale
    height, then climate. The sliders stay as a debug override.
@@ -139,80 +134,68 @@ Checkpoints, each checked live by the user and committed:
 Known prototype limits: no multiple scattering, so thick atmospheres look too
 dark and Venus's surface is black; the ground is dimmed by its sunlight
 (checkpoint 3), but in grey, so the terminator is not reddened; grey
-transmittance over the ground (both fixed with the lookup tables).
+transmittance over the ground.
 
-## Stage 2 · Lookup tables and many planets
+## Stage 2 · Cleaner, cheaper steps, then many planets
 
-Agreed with the user on 2026-10-23. **End goal:** optimised, finished
+Replanned with the user on 2026-10-23. **End goal:** good-looking, cheap
 atmosphere rendering on any number of planets, so that all stage 3 has to do
 is supply each planet's air from the simulation. Nothing in this stage
-generates atmospheres: the selected planet keeps the hand-set air until
-checkpoint 5 opens the renderer to every planet.
+generates atmospheres: the selected planet keeps the hand-set air until the
+renderer is opened to every planet.
+
+**The first attempt was rejected.** Its checkpoints 1 to 3 (a transmittance
+table, a two-stream multiple scattering table and dual-source per-channel
+dimming) were built together and looked worse than stage 1: coloured bands
+along the steps that persisted even at 24 view steps, and with three changes
+at once nothing could be pinned down. It is kept only for reference, as the
+stash "stage 2 checkpoints 1-3 (tables, two-stream scattering,
+dual-source), rejected look". Rules for this stage:
+
+- One change per checkpoint, behind a switch to compare with what came
+  before, checked live by the user before the next.
+- A change meant to be faster must look the same with its switch flipped;
+  any visible difference is a bug.
 
 Baseline to beat: the atmosphere test in checkpoint 3 of stage 1 (the air
-adds 0.4 ms from orbit and 0.8 to 1.8 ms inside it). Rerun the atmosphere
-test on `gf008000017.2.23/5` after checkpoints 1, 4 and 5 and record the
-table here.
+adds 0.4 ms from orbit and 0.8 to 1.8 ms inside it).
 
-Approach (Hillaire 2020, "A Scalable and Production Ready Sky and Atmosphere
-Rendering Technique"): the cost today is the march towards each star, 8
-samples at every view step. Tables computed once per air replace it.
+Checkpoints:
 
-- **Built on the CPU**, in a background task when the air changes, and
-  uploaded as float textures (`Image` assets) bound to the atmosphere
-  material. No render-graph nodes or compute passes; move to GPU compute
-  only if generating many planets' tables stalls. A slider drag rebuilds at
-  most a few times a second.
-- **Keyed by the air**, not the planet: in units of the planet's radius,
-  so identical air on two planets shares tables.
-- The direct shader stays as a reference toggle (`set_debug
-  atmosphere_tables`, and the atmosphere tab), to compare look and cost.
-
-Checkpoints, each checked live by the user and committed:
-
-1. **Transmittance table.** 256 x 64, by height and the cosine of the
-   zenith angle (Bruneton's parametrisation, with the ground and top in
-   planet radii), RGB optical depth or transmittance in `Rgba16Float` or
-   `Rgba32Float`. Replaces `towards_star` in the view march and the ground
-   dimming. Expected 3 to 5 times cheaper per pixel. Check: the look
-   matches the direct shader with the toggle; rerun the atmosphere test.
-2. **Multiple scattering, and light on the ground under thick air.**
-   - A 32 x 32 multiple scattering table (Hillaire's isotropic
-     approximation, all orders summed as a geometric series), read at each
-     view step and added to the single scattering.
-   - **Venus's surface:** today it is black, as the cloud (optical depth
-     about 30) leaves no direct light low down. Real Venus gets 2 to 3% of
-     sunlight at the surface after many scatterings, a dim orange overcast
-     without sharp shadows. Venus's preset gets nearly non-absorbing cloud
-     (about 0.1% lost per scattering, against Earth haze's 10%).
-   - **Ground lit by the sky:** for ground pixels, add the sky's irradiance
-     at that point (from the same tables) times the ground's albedo, as the
-     surface shader lights the ground with direct starlight only. The
-     albedo comes from the planet's class tint, passed to the material.
-   - Check: Venus's surface a dim even overcast; Earth's twilight and Mars's
-     and Titan's skies brighter; nothing else darker.
-3. **Colour-dependent dimming** of what lies behind, through dual-source
-   blending (wgpu's `DUAL_SOURCE_BLENDING`, supported on the user's RTX
-   3080): the fragment writes the scattered light and a per-channel
-   transmittance, blended as `src0 + dst * src1`. The ground dimming by
-   its sunlight becomes per channel too, so the terminator reddens and red
-   light stops leaking through thick air. Falls back to grey where the
-   feature is missing. Check: sunsets and the terminator reddened.
-4. **Cost inside the air, if still needed.** After 1 to 3, if the high and
-   low views still cost well above the orbit view: a per-frame sky-view
-   table (about 192 x 108, by azimuth and elevation round the camera) for
-   sky pixels, and fewer view steps for ground pixels. Otherwise dropped.
-   Settle the default view steps (16 now; 24 is where the look stopped
-   changing in stage 1) with the user. Rerun the atmosphere test.
-5. **Every planet with air.** The renderer takes an atmosphere per planet,
+1. ✅ **Jitter** (commit `fd3cc9f`). Each view step samples at a point
+   within the step that differs from pixel to pixel (interleaved gradient
+   noise), not its midpoint, so sharp changes along the ray, chiefly the
+   edge of the planet's shadow at twilight, blur into fine static grain
+   instead of bands. `set_debug atmosphere_jitter`. The user's check: a big
+   improvement for a little noise; the worst twilight views are better but
+   not perfect. Finding the planet's shadow along the ray exactly was
+   considered and is not needed. Also kept: with the camera underground the
+   air is not drawn.
+2. **Transmittance table.** Optical depth from any height towards any
+   direction to the top of the air, 256 x 64, by height and the cosine of
+   the zenith angle (Bruneton's parametrisation, ground and top in planet
+   radii), RGB in `Rgba16Float`. Built on the CPU in a background task when
+   the air changes, cached by the air, bound to the atmosphere material. It
+   replaces the march towards each star (the light steps) in the view march
+   and the ground dimming; the planet's shadow stays an analytic test.
+   `set_debug atmosphere_tables` falls back to the march, as does a planet
+   whose table is not built yet. Check: the look matches with the switch
+   flipped; rerun the atmosphere test and record it here; then settle the
+   default view steps (the saving should afford more steps for less than
+   today's cost, the remaining fix for the worst twilight views).
+3. **Light under Venus's cloud.** Today its surface is black: single
+   scattering through cloud of optical depth about 30 leaves no direct light
+   low down, while real Venus gets 2 to 3% of sunlight at the surface as a
+   dim orange overcast. Simplest approach first: one precomputed diffuse
+   transmittance per air, added as even light low in the air and on the
+   ground. Judged on Venus alone; Earth must not change visibly.
+4. **Every planet with air.** The renderer takes an atmosphere per planet,
    not one tuning for the selected planet:
    - A per-planet source of `AirSettings` (a resource keyed by planet ID),
      filled for now by the sliders for the selected planet, so stage 3
      only has to fill it from the simulation. `AtmosphereTuning` becomes the
      debug override of that source.
-   - Tables cached by air, built in the background, with a limit on
-     memory; a planet whose tables are not ready yet draws without air
-     until they are.
+   - Tables cached by air with a limit on memory.
    - Shells for every planet drawn as a disc in the visited system, sorted
      correctly with each other (one planet's air in front of another's
      disc) and with moons later.
@@ -220,24 +203,26 @@ Checkpoints, each checked live by the user and committed:
      from point to disc does not pop.
    - Check: several planets with different presets in one system; rerun
      the atmosphere test and a view with several shells on screen.
-6. **Docs:** the rendering guide's atmospheres section rewritten for the
-   tables (no longer "prototype"), benchmarks updated, the documentation
-   index's limits updated, and this plan's stage 3 written in detail with
-   the user.
+5. **Docs:** the rendering guide's atmospheres section no longer
+   "prototype", benchmarks updated, the documentation index's limits
+   updated, and this plan's stage 3 written in detail with the user.
+
+Later, only if wanted after the above: colour-dependent dimming of what lies
+behind through dual-source blending (a reddened terminator, no red leaking
+through thick air), and a per-frame sky-view table for views from inside the
+air if their cost is still high.
 
 ## Where to pick up
 
-Stage 1 is done (branch `atmospheres`). Next is stage 2, the lookup tables.
+Stage 1 is done (branch `atmospheres`). Stage 2's checkpoint 1 (jitter) is
+done; next is its checkpoint 2, the transmittance table.
 
-1. ✅ **GPU baseline** recorded in checkpoint 3. The lookup tables rerun
-   the atmosphere test on `gf008000017.2.23/5` for the comparison.
-2. **Stage 2:** start at its checkpoint 1, the transmittance table.
-3. **Default view steps:** 16 now; settled in stage 2's checkpoint 4.
-4. **Stage 3 · simulation:** to be planned in detail with the user. Set
-   so far: the scale height comes from $H = kT/\bar m g$ once temperature
-   and composition exist, with the slider kept as a debug override; the air's
-   top (12.5 scale heights) gives the extent that flight-sim standoffs wait
-   for; it fills the per-planet air source from stage 2's checkpoint 5.
+- **Default view steps:** 16 now; settled after the transmittance table.
+- **Stage 3 · simulation:** to be planned in detail with the user. Set
+  so far: the scale height comes from $H = kT/\bar m g$ once temperature
+  and composition exist, with the slider kept as a debug override; the air's
+  top (12.5 scale heights) gives the extent that flight-sim standoffs wait
+  for; it fills the per-planet air source from stage 2's checkpoint 4.
 
 Working notes for a fresh session:
 

@@ -79,7 +79,8 @@ The Bevy/egui client in `crates/client`:
 - [Native only](plans/native-only.md): why the browser/WASM build was dropped
   and what the removal covered.
 - [Planetary atmospheres](plans/atmospheres.md): the rendering prototype first,
-  then lookup tables and the simulated atmosphere and climate.
+  then cleaner, cheaper steps and many planets, then the simulated
+  atmosphere and climate.
 
 ## Current limitations
 
