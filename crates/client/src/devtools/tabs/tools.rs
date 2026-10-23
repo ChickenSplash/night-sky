@@ -1,5 +1,6 @@
-//! The `tools` tab: the GPU and core load tests and bug reports.
+//! The `tools` tab: the GPU, atmosphere and core load tests and bug reports.
 use crate::devtools::DevTools;
+use crate::devtools::atmosphere_test::{AtmosphereTest, preset_label};
 use crate::devtools::core_load::CoreLoad;
 use crate::devtools::gpu_test::GpuTest;
 use crate::format::grouped;
@@ -14,11 +15,12 @@ use bevy_egui::egui;
 pub fn tools_tab(
     ui: &mut egui::Ui,
     tools: &DevTools,
-    (core_load, gpu): (&mut CoreLoad, &mut GpuTest),
+    (core_load, gpu, air): (&mut CoreLoad, &mut GpuTest, &mut AtmosphereTest),
     field: &Starfield,
     metrics: &StreamMetrics,
 ) -> bool {
     gpu_test(ui, gpu, field, metrics);
+    atmosphere_test(ui, air);
     core_load_test(ui, core_load, field);
     terminal::heading(ui, "bug report");
     let report = terminal::button(ui, "save bug report");
@@ -138,6 +140,104 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
         }
     };
     terminal::facts_with_details(ui, "debug-gpu-test", &[("status", status, None)]);
+}
+
+fn atmosphere_test(ui: &mut egui::Ui, test: &mut AtmosphereTest) {
+    terminal::heading(ui, "atmosphere test");
+    if terminal::button(ui, "measure the selected planet's air")
+        && !matches!(test, AtmosphereTest::Running(_))
+    {
+        *test = AtmosphereTest::Requested;
+    }
+    terminal::note(
+        ui,
+        "From orbit, high in the air and 1 km up facing the horizon, with Earth's and Venus's air off and at 16 and 24 view steps: 18 views of 6.5 s, about 2 min. Pauses the clock; keep still with the window focused.",
+    );
+    let r = match test {
+        AtmosphereTest::Idle => return,
+        AtmosphereTest::Requested => {
+            terminal::facts_with_details(
+                ui,
+                "debug-atmosphere-test",
+                &[("status", "starting".to_string(), None)],
+            );
+            return;
+        }
+        AtmosphereTest::Running(run) => {
+            terminal::facts_with_details(
+                ui,
+                "debug-atmosphere-test",
+                &[("status", run.status(), None)],
+            );
+            return;
+        }
+        AtmosphereTest::Failed(error) => {
+            terminal::facts_with_details(
+                ui,
+                "debug-atmosphere-test",
+                &[("status", error.clone(), None)],
+            );
+            return;
+        }
+        AtmosphereTest::Done(r) => r,
+    };
+    // One row per view and preset: the GPU total with the air off, then
+    // what the air adds at each step count.
+    let mut rows: Vec<(String, String)> = Vec::new();
+    for off in r.cases.iter().filter(|m| m.case.view_steps.is_none()) {
+        let on = r
+            .cases
+            .iter()
+            .filter(|m| {
+                m.case.view == off.case.view
+                    && m.case.preset == off.case.preset
+                    && m.case.view_steps.is_some()
+            })
+            .map(|m| {
+                format!(
+                    "{} +{:.2}",
+                    m.case.view_steps.unwrap_or(0),
+                    m.gpu_total_ms - off.gpu_total_ms
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        rows.push((
+            format!(
+                "{} · {}",
+                off.case.view.label(),
+                preset_label(off.case.preset)
+            ),
+            format!("off {:.2} ms · {on}", off.gpu_total_ms),
+        ));
+    }
+    let detail = "GPU time of every pass with the air off, then what the air adds at 16 and 24 view steps, in ms.";
+    let mut facts: Vec<(&str, String, Option<&str>)> = vec![(
+        "commit",
+        r.commit.clone(),
+        Some("Build measured; +dirty means uncommitted changes."),
+    )];
+    facts.extend(
+        rows.iter()
+            .map(|(label, value)| (label.as_str(), value.clone(), Some(detail))),
+    );
+    facts.push((
+        "view",
+        format!(
+            "{} x {}, MSAA {}, FOV {:.0}°, {} light steps",
+            r.size[0],
+            r.size[1],
+            if r.msaa { "on" } else { "off" },
+            r.fov_deg,
+            r.light_steps
+        ),
+        Some("Window size in physical pixels, the 4x MSAA switch, the field of view and the steps towards each star."),
+    ));
+    terminal::facts_with_details(ui, "debug-atmosphere-test", &facts);
+    terminal::note(
+        ui,
+        "Each run is appended to data/logs/atmosphere-test.jsonl, with frame times and the transparent pass per view.",
+    );
 }
 
 fn core_load_test(ui: &mut egui::Ui, load: &mut CoreLoad, field: &Starfield) {

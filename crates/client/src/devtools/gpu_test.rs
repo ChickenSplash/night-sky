@@ -66,9 +66,12 @@ pub struct GpuResults {
     pub magnitude: f64,
 }
 
-/// This frame's star pass and total GPU times in ms, from the latest
-/// measurement of each main-view pass (as the perf tab's total).
-fn gpu_times(diagnostics: &DiagnosticsStore) -> (Option<f64>, Option<f64>) {
+/// This frame's GPU time in ms of `passes` together, and of every main-view
+/// pass (as the perf tab's total), from the latest measurement of each.
+pub(super) fn gpu_times(
+    diagnostics: &DiagnosticsStore,
+    passes: &[&str],
+) -> (Option<f64>, Option<f64>) {
     let (mut star, mut total) = (None, None);
     for diagnostic in diagnostics.iter() {
         let Some(pass) = diagnostic
@@ -85,7 +88,7 @@ fn gpu_times(diagnostics: &DiagnosticsStore) -> (Option<f64>, Option<f64>) {
         else {
             continue;
         };
-        if STAR_PASSES.contains(&pass) {
+        if passes.contains(&pass) {
             *star.get_or_insert(0.0) += latest.value;
         }
         if !pass.contains('/') {
@@ -95,11 +98,11 @@ fn gpu_times(diagnostics: &DiagnosticsStore) -> (Option<f64>, Option<f64>) {
     (star, total)
 }
 
-fn mean(values: &[f64]) -> f64 {
+pub(super) fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len().max(1) as f64
 }
 
-fn percentile(values: &[f64], p: f64) -> f64 {
+pub(super) fn percentile(values: &[f64], p: f64) -> f64 {
     let mut sorted = values.to_vec();
     sorted.sort_by(f64::total_cmp);
     sorted
@@ -109,7 +112,7 @@ fn percentile(values: &[f64], p: f64) -> f64 {
 }
 
 /// The short commit, marked `+dirty` with uncommitted changes to tracked files.
-fn commit() -> String {
+pub(super) fn commit() -> String {
     let git = |args: &[&str]| {
         std::process::Command::new("git")
             .args(args)
@@ -123,9 +126,10 @@ fn commit() -> String {
     format!("{head}{}", if dirty { "+dirty" } else { "" })
 }
 
-fn save(results: &GpuResults) {
+/// Appends `results` as one JSON line to `file` in `data/logs/`.
+pub(super) fn save(file: &str, results: &impl Serialize) {
     use std::io::Write;
-    let path = crate::devtools::diagnostics::logs_dir().join("gpu-test.jsonl");
+    let path = crate::devtools::diagnostics::logs_dir().join(file);
     let line = serde_json::to_string(results).unwrap_or_default();
     let written =
         std::fs::create_dir_all(crate::devtools::diagnostics::logs_dir()).and_then(|()| {
@@ -136,7 +140,7 @@ fn save(results: &GpuResults) {
                 .and_then(|mut file| writeln!(file, "{line}"))
         });
     if let Err(error) = written {
-        warn!("GPU test: could not write {}: {error}", path.display());
+        warn!("Could not write {}: {error}", path.display());
     }
 }
 
@@ -191,7 +195,9 @@ pub fn run(
             gpu,
         } => {
             frames.push(time.delta_secs_f64() * 1000.0);
-            let (star, total) = diagnostics.as_deref().map_or((None, None), gpu_times);
+            let (star, total) = diagnostics
+                .as_deref()
+                .map_or((None, None), |d| gpu_times(d, &STAR_PASSES));
             star_pass.extend(star);
             gpu.extend(total);
             let seconds = since.elapsed().as_secs_f64();
@@ -232,7 +238,7 @@ pub fn run(
                 results.gpu_total_ms,
                 results.drawn_stars
             );
-            save(&results);
+            save("gpu-test.jsonl", &results);
             *test = GpuTest::Done(Box::new(results));
         }
         _ => {}

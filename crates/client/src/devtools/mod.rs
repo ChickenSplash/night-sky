@@ -1,6 +1,7 @@
 //! The debug window, kept apart from the product UI: the client log, frame and
 //! star-stream timings, display settings, controls, internal state and tools.
 //! The cog, ` or F3 toggles it. Drawn in the terminal look.
+pub mod atmosphere_test;
 mod capture;
 pub mod core_load;
 pub mod diagnostics;
@@ -12,6 +13,7 @@ mod tabs;
 
 use crate::actions::UiCommand;
 use crate::command_line::{Source, Typed};
+use crate::devtools::atmosphere_test::AtmosphereTest;
 use crate::devtools::core_load::CoreLoad;
 use crate::devtools::gpu_test::GpuTest;
 use crate::render::debug::RenderDebug;
@@ -131,7 +133,7 @@ type Rendering<'w> = (
     Res<'w, RenderDebug>,
     Option<Res<'w, DiagnosticsStore>>,
     ResMut<'w, CoreLoad>,
-    ResMut<'w, GpuTest>,
+    (ResMut<'w, GpuTest>, ResMut<'w, AtmosphereTest>),
     Res<'w, crate::render::atmosphere::AtmosphereTuning>,
 );
 
@@ -151,8 +153,9 @@ pub fn draw(
     let (mut contexts, mut writer, mut typed, mut commands) = interaction;
     let (universe, nav, clock, time) = scene;
     let (rig, pose, velocity) = camera;
-    let (searches, starfield, mut metrics, debug, diagnostics, mut core_load, mut gpu_test, tuning) =
+    let (searches, starfield, mut metrics, debug, diagnostics, mut core_load, tests, tuning) =
         rendering;
+    let (mut gpu_test, mut atmosphere_test) = tests;
     metrics.instrumentation_latest.debug_window_ms = 0.0;
     if tools.frames.len() == FRAMES {
         tools.frames.pop_front();
@@ -231,7 +234,7 @@ pub fn draw(
                             report = tools_tab(
                                 ui,
                                 &tools,
-                                (&mut core_load, &mut gpu_test),
+                                (&mut core_load, &mut gpu_test, &mut atmosphere_test),
                                 &starfield,
                                 &metrics,
                             )

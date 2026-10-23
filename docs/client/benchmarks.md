@@ -29,6 +29,28 @@ Each run is logged (`GPU test (...)`) and appended as one JSON line to
 window size, MSAA state and magnitude limit. The star pass sums
 `main_transparent_pass_3d` and `star_points`, and records which rendering path ran.
 
+## Atmospheres
+
+The **atmosphere test** (`tools` tab, `crates/client/src/devtools/atmosphere_test.rs`)
+measures the [atmosphere shader](rendering.md#atmospheres-prototype) on the
+selected planet, for before-and-after comparisons such as the lookup tables
+against the direct march. It pauses the clock and places the camera at three
+views, with the star 30° above the ground below the camera:
+
+- **orbit:** three radii from the centre, facing the lit disc and its terminator;
+- **high:** at 90% of the top of the air, facing the horizon;
+- **low:** 1 km up, facing the horizon.
+
+Each view is measured with Earth's and Venus's air switched off, then at 16
+and 24 view steps: 18 views, each settled 1.5 s and measured 5 s. The air's
+cost is the GPU total with it on less the same view with it off, as the shell
+has no pass of its own. The test then restores the air, the switch and the
+clock, and frames the planet again. Each run is logged (`Atmosphere test (...)`)
+and appended as one JSON line to `data/logs/atmosphere-test.jsonl`, with the
+commit, planet, window size, MSAA, field of view and light steps, and per view
+the frame mean and 95th percentile, the GPU total and the transparent pass.
+Compare runs on the same planet, as the views scale with its radius.
+
 ## Search measurements
 
 The original [search implementation history](../plans/object-search.md#performance)

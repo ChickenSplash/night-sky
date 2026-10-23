@@ -122,8 +122,9 @@ Checkpoints, each checked live by the user and committed:
      precision from AU distances to the ground passed the user's live check.
      The rendering guide's atmospheres section covers the steps, the ground
      dimming and the limits.
-   - **Open:** the GPU baseline. The existing GPU test only measures star
-     rendering, so it does not see the air.
+   - **Open:** the GPU baseline, from the atmosphere test (`tools` tab):
+     fixed views from orbit, high in the air and low facing the horizon,
+     Earth and Venus at 16 and 24 view steps and with the air off.
 
 Known prototype limits: no multiple scattering, so thick atmospheres look too
 dark and Venus's surface is black; the ground is dimmed by its sunlight
@@ -136,14 +137,11 @@ Paused on 2026-10-23 with checkpoints 1 and 2 done and checkpoint 3 done
 except its GPU baseline (branch `atmospheres`, last commit is the rendering
 guide).
 
-1. **GPU baseline**, then mark checkpoint 3 ✅. To decide with the user:
-   - an **atmosphere test** in the `tools` tab (recommended), like the GPU
-     test: fixed views of the test planet (`g1e01000002.2.162/0`) from orbit,
-     at the top of the air and low down facing the horizon; Earth and Venus
-     presets at 16 and 24 view steps; air on and off; one JSON line per run
-     in `data/logs/atmosphere-test.jsonl`. The lookup tables then rerun the
-     same views for a fair comparison.
-   - or by hand: the atmosphere tab's GPU readout in a few views.
+1. **GPU baseline**, then mark checkpoint 3 ✅: the user runs the
+   **atmosphere test** (`tools` tab, see
+   [benchmarks](../client/benchmarks.md#atmospheres)) on the test planet
+   (`g1e01000002.2.162/0`); results land in `data/logs/atmosphere-test.jsonl`.
+   The lookup tables rerun it on the same planet for the comparison.
 2. **Default view steps:** 16 now; 24 is where the look stops changing in
    thick air. Decide after the baseline, or leave to the lookup tables.
 3. **Stage 2 · lookup tables:** needs its own checkpoints, written with the

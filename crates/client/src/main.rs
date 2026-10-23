@@ -100,6 +100,7 @@ fn main() {
     .init_resource::<devtools::DevTools>()
     .init_resource::<devtools::core_load::CoreLoad>()
     .init_resource::<devtools::gpu_test::GpuTest>()
+    .init_resource::<devtools::atmosphere_test::AtmosphereTest>()
     .insert_resource(initial_nav)
     .add_message::<actions::UiCommand>()
     .add_systems(Startup, scene::setup)
@@ -123,6 +124,7 @@ fn main() {
             scene::controls,
             devtools::core_load::run,
             devtools::gpu_test::run,
+            devtools::atmosphere_test::run,
             scene::locate,
             scene::place_camera,
             scene::locate_body,
