@@ -26,8 +26,9 @@ the same model as just another body.
 1. **Rendering prototype** (this plan's first stage): the look and its GPU
    cost, judged in the real app with values set by hand, before any
    simulation work.
-2. **Lookup tables:** transmittance and multiple scattering precomputed per
-   planet (Bruneton 2008, Hillaire 2020). The direct shader stays as a
+2. **Lookup tables and many planets** (see stage 2 below): transmittance
+   and multiple scattering precomputed per air (Bruneton 2008, Hillaire
+   2020), and the renderer opened to every planet with air. The direct shader stays as a
    reference toggle, to compare the look and frame time. Also colour-dependent
    dimming of what lies behind, through dual-source blending (wgpu's
    `DUAL_SOURCE_BLENDING` feature), so red light no longer leaks through
@@ -140,19 +141,116 @@ dark and Venus's surface is black; the ground is dimmed by its sunlight
 (checkpoint 3), but in grey, so the terminator is not reddened; grey
 transmittance over the ground (both fixed with the lookup tables).
 
+## Stage 2 · Lookup tables and many planets
+
+Agreed with the user on 2026-10-23. **End goal:** optimised, finished
+atmosphere rendering on any number of planets, so that all stage 3 has to do
+is supply each planet's air from the simulation. Nothing in this stage
+generates atmospheres: the selected planet keeps the hand-set air until
+checkpoint 5 opens the renderer to every planet.
+
+Baseline to beat: the atmosphere test in checkpoint 3 of stage 1 (the air
+adds 0.4 ms from orbit and 0.8 to 1.8 ms inside it). Rerun the atmosphere
+test on `gf008000017.2.23/5` after checkpoints 1, 4 and 5 and record the
+table here.
+
+Approach (Hillaire 2020, "A Scalable and Production Ready Sky and Atmosphere
+Rendering Technique"): the cost today is the march towards each star, 8
+samples at every view step. Tables computed once per air replace it.
+
+- **Built on the CPU**, in a background task when the air changes, and
+  uploaded as float textures (`Image` assets) bound to the atmosphere
+  material. No render-graph nodes or compute passes; move to GPU compute
+  only if generating many planets' tables stalls. A slider drag rebuilds at
+  most a few times a second.
+- **Keyed by the air**, not the planet: in units of the planet's radius,
+  so identical air on two planets shares tables.
+- The direct shader stays as a reference toggle (`set_debug
+  atmosphere_tables`, and the atmosphere tab), to compare look and cost.
+
+Checkpoints, each checked live by the user and committed:
+
+1. **Transmittance table.** 256 x 64, by height and the cosine of the
+   zenith angle (Bruneton's parametrisation, with the ground and top in
+   planet radii), RGB optical depth or transmittance in `Rgba16Float` or
+   `Rgba32Float`. Replaces `towards_star` in the view march and the ground
+   dimming. Expected 3 to 5 times cheaper per pixel. Check: the look
+   matches the direct shader with the toggle; rerun the atmosphere test.
+2. **Multiple scattering, and light on the ground under thick air.**
+   - A 32 x 32 multiple scattering table (Hillaire's isotropic
+     approximation, all orders summed as a geometric series), read at each
+     view step and added to the single scattering.
+   - **Venus's surface:** today it is black, as the cloud (optical depth
+     about 30) leaves no direct light low down. Real Venus gets 2 to 3% of
+     sunlight at the surface after many scatterings, a dim orange overcast
+     without sharp shadows. Venus's preset gets nearly non-absorbing cloud
+     (about 0.1% lost per scattering, against Earth haze's 10%).
+   - **Ground lit by the sky:** for ground pixels, add the sky's irradiance
+     at that point (from the same tables) times the ground's albedo, as the
+     surface shader lights the ground with direct starlight only. The
+     albedo comes from the planet's class tint, passed to the material.
+   - Check: Venus's surface a dim even overcast; Earth's twilight and Mars's
+     and Titan's skies brighter; nothing else darker.
+3. **Colour-dependent dimming** of what lies behind, through dual-source
+   blending (wgpu's `DUAL_SOURCE_BLENDING`, supported on the user's RTX
+   3080): the fragment writes the scattered light and a per-channel
+   transmittance, blended as `src0 + dst * src1`. The ground dimming by
+   its sunlight becomes per channel too, so the terminator reddens and red
+   light stops leaking through thick air. Falls back to grey where the
+   feature is missing. Check: sunsets and the terminator reddened.
+4. **Cost inside the air, if still needed.** After 1 to 3, if the high and
+   low views still cost well above the orbit view: a per-frame sky-view
+   table (about 192 x 108, by azimuth and elevation round the camera) for
+   sky pixels, and fewer view steps for ground pixels. Otherwise dropped.
+   Settle the default view steps (16 now; 24 is where the look stopped
+   changing in stage 1) with the user. Rerun the atmosphere test.
+5. **Every planet with air.** The renderer takes an atmosphere per planet,
+   not one tuning for the selected planet:
+   - A per-planet source of `AirSettings` (a resource keyed by planet ID),
+     filled for now by the sliders for the selected planet, so stage 3
+     only has to fill it from the simulation. `AtmosphereTuning` becomes the
+     debug override of that source.
+   - Tables cached by air, built in the background, with a limit on
+     memory; a planet whose tables are not ready yet draws without air
+     until they are.
+   - Shells for every planet drawn as a disc in the visited system, sorted
+     correctly with each other (one planet's air in front of another's
+     disc) and with moons later.
+   - Planets drawn as points stay without a shell; check the hand-over
+     from point to disc does not pop.
+   - Check: several planets with different presets in one system; rerun
+     the atmosphere test and a view with several shells on screen.
+6. **Docs:** the rendering guide's atmospheres section rewritten for the
+   tables (no longer "prototype"), benchmarks updated, the documentation
+   index's limits updated, and this plan's stage 3 written in detail with
+   the user.
+
 ## Where to pick up
 
 Stage 1 is done (branch `atmospheres`). Next is stage 2, the lookup tables.
 
 1. ✅ **GPU baseline** recorded in checkpoint 3. The lookup tables rerun
    the atmosphere test on `gf008000017.2.23/5` for the comparison.
-2. **Default view steps:** 16 now; 24 is where the look stops changing in
-   thick air. Decide after the baseline, or leave to the lookup tables.
-3. **Stage 2 · lookup tables:** needs its own checkpoints, written with the
-   user before starting. The direct shader stays as the reference toggle.
-4. **Stage 3 · simulation:** also to be planned in detail with the user. Set
+2. **Stage 2:** start at its checkpoint 1, the transmittance table.
+3. **Default view steps:** 16 now; settled in stage 2's checkpoint 4.
+4. **Stage 3 · simulation:** to be planned in detail with the user. Set
    so far: the scale height comes from $H = kT/\bar m g$ once temperature
    and composition exist, with the slider kept as a debug override; the air's
    top (12.5 scale heights) gives the extent that flight-sim standoffs wait
-   for; the shell is drawn on every planet with air, not just the selected
-   one.
+   for; it fills the per-planet air source from stage 2's checkpoint 5.
+
+Working notes for a fresh session:
+
+- **Code:** `render/atmosphere.rs` (settings, presets, tuning, shell
+  material and its sync), `render/atmosphere.wgsl` (the march),
+  `devtools/tabs/atmosphere.rs` (the tab), `devtools/atmosphere_test.rs`
+  (the benchmark), `scene/draw.rs` (`Canvas.air`), `ui/kit/slider.rs`.
+- **Live checks** are the user's. Test builds open on the secondary monitor
+  (workspace 8) without focus, with the developer API on its own port, and
+  are driven with `./scripts/ns --port <port>`: `cmd "fly_to_planet <id>"`,
+  `atmosphere <preset>`, `cmd "set_paused true"`. WGSL compiles only at
+  run time: after shader changes, start a build and check its log for
+  errors. The user runs the atmosphere test; read
+  `data/logs/atmosphere-test.jsonl`.
+- **Test planets:** `g1e01000002.2.162/0`, and the baseline's
+  `gf008000017.2.23/5`.
