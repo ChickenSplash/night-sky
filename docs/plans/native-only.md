@@ -11,8 +11,8 @@ version or a browser fallback.
   merged into `main` first, and `web-final` tags that merge (`956563f`),
   pushed to `origin`. `./scripts/check.sh` passes; local leftovers
   (`tools/wasm-bindgen*`, `tools/browser/`, `deploy/`, `web/dist/`) are deleted.
-- **Pending:** the user's live check, then the merge to `main`. The homelab
-  web demo is to be dealt with separately afterwards.
+- **Done and checked live:** merged to `main` (`3c9a8f7`). The plan is
+  complete. The homelab web demo is to be dealt with separately.
 
 ## Why
 
