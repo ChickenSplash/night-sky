@@ -98,7 +98,7 @@ Checkpoints, each checked live by the user and committed:
    and colour, and steps per pixel; presets for Earth, Venus, Mars, Titan
    and a hydrogen giant; a GPU frame time readout; `ns atmosphere ...` to
    do the same.
-3. **Polish:** the camera inside the atmosphere (sky colour, stars fading),
+3. ✅ **Polish:** the camera inside the atmosphere (sky colour, stars fading),
    precision from AU distances down to low orbit, two-star lighting and the
    rendering guide. The user runs a GPU benchmark for a baseline before the
    lookup tables. From inside thick air (Venus), the ground shows with a hard
@@ -122,9 +122,18 @@ Checkpoints, each checked live by the user and committed:
      precision from AU distances to the ground passed the user's live check.
      The rendering guide's atmospheres section covers the steps, the ground
      dimming and the limits.
-   - **Open:** the GPU baseline, from the atmosphere test (`tools` tab):
-     fixed views from orbit, high in the air and low facing the horizon,
-     Earth and Venus at 16 and 24 view steps and with the air off.
+   - ✅ **GPU baseline** (atmosphere test, commit `4081ec6`, planet
+     `gf008000017.2.23/5`, 1693 x 1177, MSAA on, 8 light steps). What the
+     air adds to the GPU total, in ms, at 16 and 24 view steps:
+
+     | View | Earth 16 | Earth 24 | Venus 16 | Venus 24 |
+     | --- | --- | --- | --- | --- |
+     | orbit | 0.43 | 0.74 | 0.43 | 0.76 |
+     | high | 1.07 | 1.70 | 1.16 | 1.82 |
+     | low | 0.94 | 1.34 | 0.82 | 1.34 |
+
+     With the air off the GPU total is about 0.8 ms; frames held at about
+     6.1 ms (the display's refresh) throughout.
 
 Known prototype limits: no multiple scattering, so thick atmospheres look too
 dark and Venus's surface is black; the ground is dimmed by its sunlight
@@ -133,15 +142,10 @@ transmittance over the ground (both fixed with the lookup tables).
 
 ## Where to pick up
 
-Paused on 2026-10-23 with checkpoints 1 and 2 done and checkpoint 3 done
-except its GPU baseline (branch `atmospheres`, last commit is the rendering
-guide).
+Stage 1 is done (branch `atmospheres`). Next is stage 2, the lookup tables.
 
-1. **GPU baseline**, then mark checkpoint 3 ✅: the user runs the
-   **atmosphere test** (`tools` tab, see
-   [benchmarks](../client/benchmarks.md#atmospheres)) on the test planet
-   (`g1e01000002.2.162/0`); results land in `data/logs/atmosphere-test.jsonl`.
-   The lookup tables rerun it on the same planet for the comparison.
+1. ✅ **GPU baseline** recorded in checkpoint 3. The lookup tables rerun
+   the atmosphere test on `gf008000017.2.23/5` for the comparison.
 2. **Default view steps:** 16 now; 24 is where the look stops changing in
    thick air. Decide after the baseline, or leave to the lookup tables.
 3. **Stage 2 · lookup tables:** needs its own checkpoints, written with the
