@@ -14,6 +14,12 @@ only on `127.0.0.1:4322`; `NIGHT_SKY_API_PORT` changes the port, never the bind
 address. API startup enables shared snapshots without requiring file export.
 The listener stops with its resource; bind failures leave the app usable.
 
+The transport keeps request security and limits in `devtools/http.rs`.
+Under `devtools/http/`, `bridge.rs` forwards bounded jobs to the main thread,
+`commands.rs` owns command discovery/submission, `search.rs` owns search routes,
+and `state.rs` selects cached snapshots and history. All routes pass the same
+central security checks before dispatch.
+
 `./scripts/ns` is the Python 3 standard-library CLI, with no extra packages.
 `ns help` works offline; start the app for other commands. Discover rather than
 guessing commands or fields:

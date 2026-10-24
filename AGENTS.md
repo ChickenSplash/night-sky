@@ -21,7 +21,7 @@ for implementation details.
 | Orbital motion, units and clock | Simulation `orbit/`, `units.rs`, `clock.rs` | [Orbits](docs/simulation/orbits.md) |
 | Craft model, gravity, integration and live craft | `crates/simulation/src/craft.rs`, client `craft.rs` | [Craft](docs/simulation/craft.md) |
 | Object registry, queries and search | `crates/simulation/src/search`, client `search/` | [Search](docs/simulation/search.md) |
-| Lists, pages, tasks and wire models | `crates/shared`, simulation and client | [Information overlay](docs/shared/information-overlay.md) |
+| Lists, pages, tasks and wire models | `crates/shared`, simulation `system/overlay.rs`, `system/demo.rs` and client | [Information overlay](docs/shared/information-overlay.md) |
 | Visits, selection, camera and presentation | Client `navigation/`, `scene/` | [Navigation](docs/client/navigation.md) |
 | Visible-star loading and spatial queries | Client `stars/stream/`, simulation `galaxy/` | [Streaming](docs/client/streaming.md) |
 | Bodies, lighting, star points and galaxy glow | Client `render/`, `stars/` | [Rendering](docs/client/rendering.md), [galactic rendering](docs/client/galactic-rendering.md) |

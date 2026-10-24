@@ -1,16 +1,21 @@
 //! Natural systems: planetary generation, wire models and body geometry.
 
+mod demo;
 mod generated;
 mod generation;
+mod overlay;
 pub mod shape;
 pub mod surface;
 
+pub use demo::demo_galaxy;
 pub use generated::generated_system;
 pub use generation::{
-    Body, Class, EARTH_MASS_SOLAR, EARTH_RADIUS_KM, JUPITER_MASS_EARTH, PageStarError,
-    assign_page_stars, bodies, demo_galaxy, galactic_bodies, galactic_planetary_system,
-    page_capacity, page_of_slot, place, planet_count, planetary_system, shape, shape_galaxy,
-    star_id, system_age_gyr, system_page_of_slot, system_stars,
+    Body, Class, EARTH_MASS_SOLAR, EARTH_RADIUS_KM, JUPITER_MASS_EARTH, bodies, galactic_bodies,
+    galactic_planetary_system, planet_count, planetary_system, system_age_gyr, system_stars,
 };
 pub(crate) use generation::{MAX_SYSTEM_APOAPSIS_AU, system_within};
+pub use overlay::{
+    PageStarError, assign_page_stars, page_capacity, page_of_slot, place, shape, shape_galaxy,
+    star_id, system_page_of_slot,
+};
 pub use shape::{Spheroid, planet_shape, star_shape};

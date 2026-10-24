@@ -8,7 +8,7 @@ below the visible magnitude limit. Both share the manual exposure described in
 
 ## GPU batches and points
 
-- `stars/starfield.rs` builds batches of up to `PACK` (65,536) uploaded stars,
+- `stars/starfield/batches.rs` builds batches of up to `PACK` (65,536) uploaded stars,
   filled from `SLICE`-sized steps of a cell's stars within the upload budget,
   so a large cell may take several frames; `stars/render.rs` draws them.
 - Each star is one 20-byte `StarInstance` (f32 position from its block's centre,
@@ -43,7 +43,7 @@ below the visible magnitude limit. Both share the manual exposure described in
 - A compute splat with atomics (`b6a078f`, reverted) was slower than triangles:
   17.3 vs 14.3 ms. The [GPU benchmark](benchmarks.md#native-gpu-rendering) records
   which path ran and sums both relevant passes.
-- `starfield::Sight` skips batches outside the view each frame (`cull_blocks`):
+- `starfield/view.rs` supplies `Sight`, which skips batches outside the view each frame (`cull_blocks`):
   a sphere around each block, in f64 against four side planes, widened by
   the point footprint.
 

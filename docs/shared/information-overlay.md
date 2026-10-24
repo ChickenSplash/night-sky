@@ -6,6 +6,11 @@ Future external integrations should be optional plugins, not dependencies of
 the simulator core. There is no live integration or implemented plugin system
 described here; this guide covers the existing demo overlay.
 
+Simulation `system/overlay.rs` owns slot/page mapping, task placement and
+page-star assignment. `system/demo.rs` supplies the fictional content, while
+`system/generation.rs` owns the natural planets they attach to. These operations
+remain available through the existing `space_simulation` and `system` exports.
+
 ## Planets are not tasks
 
 - A `Planet` is a generated body with a stable host/orbit ID and an optional

@@ -2,7 +2,7 @@
 
 The client loads the galaxy's visible cells around the camera, not a complete
 galaxy database. Generation and spatial indexing live in `crates/simulation`;
-native and web transports live in `crates/client/src/stars/stream/`.
+the native loader transport lives in `crates/client/src/stars/stream/`.
 See [galaxy cells](../simulation/galaxy.md),
 [galactic rendering](galactic-rendering.md) and
 [benchmarks](benchmarks.md) for the surrounding systems.
@@ -70,7 +70,8 @@ still uses `VISIBLE_MAGNITUDE`. See [galactic rendering](galactic-rendering.md).
 
 ## Spatial indexing
 
-- `StarCell::new` (simulation `galaxy/stream.rs`) sorts a cell's stars into a uniform
+- `StarCell::new` (simulation `galaxy/stream/index.rs`, re-exported through
+  `galaxy::stream`) sorts a cell's stars into a uniform
   grid of boxes (about 8 stars each, never under 0.1 pc, a power of two per
   axis, numbered in Morton order so aligned cubes are contiguous runs), on
   the loader's thread. `stars` is in grid order, not generation order.

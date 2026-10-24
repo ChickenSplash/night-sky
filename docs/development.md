@@ -27,6 +27,7 @@ crates/client/       Bevy client and egui interface
   src/search/        Object search requests, settings and the shared store
   src/scene/         Camera, controls, location, placement and wireframes
   src/stars/         Galactic star streaming, batching, drawing and shaders
+    starfield/       Budgeted batches, precise sprites, multiple-system resolution and culling
     stream/          Loader thread backend and streaming metrics
   src/render/        Bodies, exposure, glow, black hole and shaders
     atmosphere/      Air settings, scattering tables, reference tests and shell shader
@@ -35,14 +36,19 @@ crates/client/       Bevy client and egui interface
   src/ui/browser/    Object browser: query chips, filter picker, results
   src/ui/tasks/      Task-panel regression tests
   src/devtools/      Debug window, typed commands, tests, benchmarks and diagnostics
+    http/            Main-thread bridge, commands, searches and cached snapshot reads
     tabs/            One module per debug tab
 crates/server/       Axum demo galaxy API
 crates/shared/       Serializable models
 crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generation
   src/lib.rs         Module map and explicit exports of common operations and types
   src/galaxy/        Density model, populations, cells, streaming, neighbours and glow
+    stream/index.rs  Compact star cells and Morton-grid spatial queries
   src/star/          Stellar evolution and companion hierarchies
   src/system/        Planet generation, wire systems, shape and surface
+    generation.rs    Natural planetary formation, independent of list/task placement
+    overlay.rs       Optional task slots, pages and assigned-star placement
+    demo.rs          Reproducible fictional overlay content
   src/orbit/         Analytic orbits, states and nested barycentric motion
   src/clock.rs       Accumulated simulation time
   src/units.rs       Shared physical constants
@@ -77,6 +83,11 @@ companions, and `system/` owns planets and natural-body geometry (including
 stellar spheroids). Shared deterministic primitives live in `seed.rs`, rather
 than making every generator depend on planetary generation for its RNG.
 Photometry stays separate because it covers both emitted and reflected light.
+Within `galaxy/stream.rs`, the loader owns incremental work and scheduling;
+`galaxy/stream/index.rs` owns compact storage and spatial queries. The existing
+`galaxy::stream` API re-exports its index types. Likewise, `system` retains its
+public facade while natural generation, overlay placement and demo content
+have separate implementations.
 The crate root is a facade with explicit exports for common operations and
 types, not an implementation file; specialist APIs use their domain paths.
 
@@ -86,6 +97,13 @@ owns the displayed camera, physical location and drawing. Named key bindings
 and piloting live in `input/`; `scene/controls.rs` applies those named actions
 to the free camera. Typed command parsing lives in `devtools/command_line.rs`
 and still sends the same `UiCommand` messages as panels.
+
+`stars/starfield.rs` keeps the single render-sync system and its frame order.
+Its submodules own batch upload lifetime, nearby precise sprites, adaptive
+multiple-system resolution and conservative view tests. Splitting these
+operations does not add scheduling boundaries or change their frame budgets.
+`devtools/http.rs` keeps listener lifecycle, request security and transport
+limits central; its submodules own queued main-thread jobs and feature routes.
 
 The [UI kit guide](client/ui/kit.md) describes module ownership, shared interaction
 rules and how to add controls without duplicating theme or animation logic.
