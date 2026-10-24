@@ -16,6 +16,7 @@ pub fn generated_system(id: &str, position_ly: [f64; 3]) -> Option<StarSystem> {
             radius_km: hosted.body.radius_km,
             mass_earth: hosted.body.mass_earth,
             class: hosted.body.class.name().into(),
+            environment: hosted.environment,
             resonance: hosted.body.resonance,
             spin: hosted.body.spin,
             task: None,

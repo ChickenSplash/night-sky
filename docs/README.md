@@ -26,8 +26,8 @@ seed helpers, object identities and photometry stay at the crate root; see
   generation, evolved stars, companions, barycentres and stability zones.
 - [Planetary systems](simulation/planetary-systems.md): generation sequence,
   snow line, mass–radius fits, Hill spacing, resonances, spins and stable body IDs.
-- [Physical atmospheres](simulation/atmospheres.md): standalone gas mixtures,
-  reference pressure levels, isothermal columns and their limits, not yet generated.
+- [Physical atmospheres](simulation/atmospheres.md): initial retention/generation,
+  gas mixtures, reference pressure levels, isothermal columns and their limits.
 - [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
@@ -109,8 +109,8 @@ The Bevy/egui client in `crates/client`:
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 - Atmospheres are a rendering prototype: hand-set air (presets and sliders)
   on the selected planet only, with lookup tables, multiple scattering and
-  ground lighting from filtered sunlight and skylight. A standalone physical
-  atmosphere model exists, but no planet has a generated atmosphere yet.
+  ground lighting from filtered sunlight and skylight. Planets now have generated
+  atmospheric data in the inspector, but it is not connected to rendering yet.
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.

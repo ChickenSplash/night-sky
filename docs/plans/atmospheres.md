@@ -231,9 +231,9 @@ Keep physical state, optical conversion and rendering separate.
 
 Implemented foundation in `system/atmosphere.rs`; see the
 [physical atmosphere guide](../simulation/atmospheres.md) for current behaviour
-and limits. Not attached to generated planets or rendering. Seven focused
+and limits. Initially independent of generated planets and rendering. Seven focused
 tests and `./scripts/check.sh` passed (workspace tests, formatting and strict
-Clippy). Next: 5b, with generation rules agreed before implementation.
+Clippy).
 
 - Simulation-owned atmosphere or explicit absence; no Bevy or shader settings
   in the model. Gas mole fractions (N₂, CO₂, H₂, He, H₂O, CH₄, O₂, Ar),
@@ -252,7 +252,24 @@ Clippy). Next: 5b, with generation rules agreed before implementation.
   hydrogen-rich example columns. Use SI internally. Leave generated planets
   and rendering unchanged: this step builds only the tested foundation.
 
-### 5b · Retention and generation
+### 5b ✅ Retention and generation
+
+Implemented initial recipe and inspector data; automated checks and runnable
+workspace build passed, and the user accepted the inspector check. See
+the [generation assumptions](../simulation/atmospheres.md#initial-generation-recipe).
+All system stars contribute to phase-averaged bolometric heating; activity and
+loss are explicit heuristics. Class supplies only a replaceable envelope prior.
+Bulk composition, self-consistent radius/envelope mass and classification from
+physical properties are deferred to the later planet-composition work.
+
+Validation: full workspace tests and strict Clippy pass. The deterministic
+120-system sample contains 629 airless/trace worlds, 302 secondary atmospheres
+and 358 hydrogen envelopes; 33 columns carry an extended-atmosphere warning.
+These are regression/diversity checks, not calibrated occurrence rates.
+Existing masses, radii, orbits and spins remain unchanged. Restart and inspect
+several planets: gas percentages, pressure/reference level, estimated
+temperatures, scale height and extent should appear; visuals remain the debug
+prototype until 5c/5d. Inspector visually accepted before implementation commit.
 
 - Deterministic per-planet composition and pressure, informed by mass/radius,
   irradiation, stellar age/activity and available volatiles. Use smooth,
@@ -263,6 +280,9 @@ Clippy). Next: 5b, with generation rules agreed before implementation.
   envelopes. Ice giants also have hydrogen/helium outer atmospheres.
 - Start with approximate thermal/condensation rules, not a full climate model.
   Centralise uncertain prescriptions and seed air independently of orbits/spin.
+- Expose generated physical inputs and column estimates in the planet inspector,
+  including clear airless/unknown states and non-ground 1 bar reference levels.
+  Keep rendering unchanged until 5c/5d. No aerosols generated in this first recipe.
 
 ### 5c · Physical state to optics
 

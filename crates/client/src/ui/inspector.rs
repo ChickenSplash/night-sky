@@ -1,4 +1,5 @@
 //! One borderless readout shared by both breadcrumb trails.
+mod atmosphere;
 use crate::{
     Navigation,
     actions::{GalaxyReference, UiCommand},
@@ -214,6 +215,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                 if let Some([p, q]) = planet.resonance {
                     info.fact("Resonance", format!("{p}:{q} with inner neighbour"));
                 }
+                atmosphere::facts(&mut info, planet.environment.as_ref());
                 if let Some(task) = &planet.task {
                     info.fact("Task", task.name.clone());
                     info.fact("Status", task.status.clone());

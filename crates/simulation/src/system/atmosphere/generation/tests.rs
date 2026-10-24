@@ -1,0 +1,328 @@
+use super::*;
+use crate::system::{Body, atmosphere::ColumnValidity};
+use space_shared::{Barycentre, Orbit, Spin};
+
+fn orbit_at(au: f64) -> Orbit {
+    Orbit {
+        semi_major_au: au,
+        ..Default::default()
+    }
+}
+
+fn star(id: &str, mass: f64, luminosity: f64) -> Star {
+    Star {
+        id: id.into(),
+        page: 0,
+        spectral: "G2 V".into(),
+        kind: "Yellow dwarf".into(),
+        mass_solar: mass,
+        radius_solar: 1.0,
+        luminosity_solar: luminosity,
+        temperature_k: 5772.0,
+        colour: [255; 3],
+        spin: Spin::default(),
+        component: String::new(),
+    }
+}
+
+fn system(stars: Vec<Star>, pairs: Vec<Barycentre>) -> StarSystem {
+    StarSystem {
+        id: "test".into(),
+        name: "Test".into(),
+        position_ly: [0.0; 3],
+        stars,
+        barycentres: pairs,
+        planets: Vec::new(),
+        page_stars: Vec::new(),
+    }
+}
+
+fn body() -> Body {
+    Body {
+        orbit: orbit_at(1.0),
+        class: Class::Rocky,
+        mass_earth: 1.0,
+        radius_km: 6371.0,
+        resonance: None,
+        spin: Spin::default(),
+    }
+}
+
+fn close(got: f64, want: f64, relative: f64) {
+    assert!((got / want - 1.0).abs() < relative, "{got} vs {want}");
+}
+
+#[test]
+fn isolated_sun_at_earth_distance_and_inverse_square_heating() {
+    let system = system(vec![star("sun", 1.0, 1.0)], vec![]);
+    let samples = stellar_samples(&system);
+    let earth = heating(&system, &samples, "sun", orbit_at(1.0), 4.5);
+    let far = heating(&system, &samples, "sun", orbit_at(2.0), 4.5);
+    close(earth.flux, 1361.0, 0.001);
+    close(far.flux, earth.flux / 4.0, 1e-12);
+    close(earth.loss_flux, earth.flux, 0.01);
+    let temperature = (earth.flux * 0.7 / (4.0 * STEFAN_BOLTZMANN)).powf(0.25);
+    close(temperature, 254.6, 0.001);
+}
+
+#[test]
+fn eccentric_orbit_average_uses_mean_anomaly_not_uniform_true_anomaly() {
+    let system = system(vec![star("sun", 1.0, 1.0)], vec![]);
+    let mut orbit = orbit_at(1.0);
+    orbit.eccentricity = 0.3;
+    let got = heating(&system, &stellar_samples(&system), "sun", orbit, 4.5).flux;
+    let exact = light::flux(1.0, crate::AU_METRES) / (1.0 - 0.3f64.powi(2)).sqrt();
+    close(got, exact, 1e-6);
+}
+
+#[test]
+fn all_stars_contribute_for_both_stellar_and_circumbinary_hosts() {
+    let mut system = system(
+        vec![star("A", 1.0, 1.0), star("B", 1.0, 2.0)],
+        vec![Barycentre {
+            id: "AB".into(),
+            page: 0,
+            component: "AB".into(),
+            members: ["A".into(), "B".into()],
+            orbit: orbit_at(10.0),
+        }],
+    );
+    let samples = stellar_samples(&system);
+    let both = heating(&system, &samples, "A", orbit_at(1.0), 4.5);
+    system.stars[1].luminosity_solar = 0.0;
+    let samples = stellar_samples(&system);
+    let one = heating(&system, &samples, "A", orbit_at(1.0), 4.5);
+    assert!(both.flux > one.flux * 1.01);
+    assert!(both.loss_flux > one.loss_flux);
+    system.barycentres[0].orbit = orbit_at(0.05);
+    system.stars[1].luminosity_solar = 2.0;
+    let samples = stellar_samples(&system);
+    let circumbinary = heating(&system, &samples, "AB", orbit_at(1.0), 4.5);
+    close(
+        circumbinary.flux,
+        3.0 * light::flux(1.0, crate::AU_METRES),
+        0.03,
+    );
+}
+
+#[test]
+fn nested_companions_contribute_and_initial_phases_do_not_set_generated_climate() {
+    let mut system = system(
+        vec![
+            star("A", 1.0, 1.0),
+            star("B", 0.8, 0.5),
+            star("C", 0.6, 0.2),
+        ],
+        vec![
+            Barycentre {
+                id: "AB".into(),
+                page: 0,
+                component: "AB".into(),
+                members: ["A".into(), "B".into()],
+                orbit: orbit_at(0.1),
+            },
+            Barycentre {
+                id: "ABC".into(),
+                page: 0,
+                component: "ABC".into(),
+                members: ["AB".into(), "C".into()],
+                orbit: orbit_at(10.0),
+            },
+        ],
+    );
+    let first = heating(&system, &stellar_samples(&system), "AB", orbit_at(1.0), 4.5);
+    system.barycentres[0].orbit.phase_rad = 2.0;
+    system.barycentres[1].orbit.phase_rad = 4.0;
+    let mut orbit = orbit_at(1.0);
+    orbit.phase_rad = 3.0;
+    let changed = heating(&system, &stellar_samples(&system), "AB", orbit, 4.5);
+    assert_eq!(first.flux, changed.flux);
+    system.stars[2].luminosity_solar = 0.0;
+    let no_third = heating(&system, &stellar_samples(&system), "AB", orbit, 4.5);
+    assert!(first.flux > no_third.flux);
+}
+
+#[test]
+fn retention_is_smooth_and_responds_to_escape_speed_heating_and_activity() {
+    let base = secondary_retention(11_200.0, 1361.0);
+    assert!(secondary_retention(5000.0, 1361.0) < base);
+    assert!(secondary_retention(11_200.0, 13610.0) < base);
+    assert!(secondary_retention(15_000.0, 1361.0) > base);
+    let sun = star("sun", 1.0, 1.0);
+    let dwarf = star("dwarf", 0.2, 0.01);
+    assert!(activity_history(&dwarf, 4.5) > activity_history(&sun, 4.5));
+    assert!(activity_history(&sun, 4.5) > activity_history(&sun, 0.1));
+    for speed in [100.0, 1000.0, 10_000.0, 100_000.0] {
+        for flux in [0.0, 1e-3, 1361.0, 1e9] {
+            let got = secondary_retention(speed, flux);
+            assert!(got.is_finite() && (0.0..=1.0).contains(&got));
+        }
+    }
+}
+
+#[test]
+fn cold_condensation_reduces_partial_pressures_and_can_leave_airless_worlds() {
+    let warm = secondary(&mut Rng::new("supply"), 280.0, 1.0, 1.0)
+        .unwrap()
+        .unwrap();
+    let cold = secondary(&mut Rng::new("supply"), 90.0, 1.0, 1.0)
+        .unwrap()
+        .unwrap();
+    assert!(cold.pressure_pa() < warm.pressure_pa());
+    assert!(
+        cold.composition().fraction(Gas::CarbonDioxide)
+            < warm.composition().fraction(Gas::CarbonDioxide)
+    );
+    let frozen = secondary(&mut Rng::new("supply"), 20.0, 1.0, 1.0).unwrap();
+    assert!(frozen.is_none());
+    for gas in [Gas::CarbonDioxide, Gas::Nitrogen, Gas::Methane, Gas::Argon] {
+        assert!(vapour_pressure(gas, 40.0) < vapour_pressure(gas, 80.0));
+        assert!(vapour_pressure(gas, 80.0).is_finite());
+        assert!(vapour_pressure(gas, 1000.0).is_infinite());
+    }
+}
+
+#[test]
+fn classes_are_priors_not_physical_constraints() {
+    let mut rocky = body();
+    rocky.mass_earth = 10.0;
+    rocky.radius_km = 12_000.0;
+    let mut envelope = false;
+    let mut secondary_air = false;
+    for seed in 0..1000 {
+        let environment = generate(
+            &mut Rng::new(&format!("prior:{seed}")),
+            &rocky,
+            Heating {
+                flux: 1000.0,
+                loss_flux: 1000.0,
+            },
+            4.5,
+        )
+        .unwrap();
+        if let Some(air) = environment.atmosphere {
+            match air.reference_level {
+                space_shared::AtmosphereReference::OneBar => envelope = true,
+                space_shared::AtmosphereReference::Surface => secondary_air = true,
+            }
+        }
+    }
+    assert!(envelope && secondary_air);
+}
+
+#[test]
+fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
+    let mut absent = 0;
+    let mut surface = 0;
+    let mut envelope = 0;
+    let mut extended = 0;
+    for index in 0..120 {
+        let key = format!("atmosphere-population:{index}");
+        let first = crate::bodies(&key);
+        let again = crate::bodies(&key);
+        assert_eq!(first.planets.len(), again.planets.len());
+        let expected_age = crate::system_age_gyr(&key);
+        for (planet, repeated) in first.planets.iter().zip(&again.planets) {
+            assert_eq!(planet.id(), repeated.id());
+            assert_eq!(planet.body.orbit, repeated.body.orbit);
+            assert_eq!(planet.environment, repeated.environment);
+            let environment = planet.environment.as_ref().unwrap();
+            assert_eq!(environment.age_gyr, expected_age);
+            assert!(environment.irradiation_w_m2.is_finite() && environment.irradiation_w_m2 > 0.0);
+            assert!(environment.equilibrium_temperature_k.is_finite());
+            let Some(data) = &environment.atmosphere else {
+                absent += 1;
+                continue;
+            };
+            let air = GasAtmosphere::try_from(data).unwrap();
+            let column = air
+                .column(
+                    planet.body.mass_earth * EARTH_SOLAR * SUN_GM,
+                    planet.body.radius_km * 1000.0,
+                )
+                .unwrap();
+            assert_eq!(data.extended, column.validity == ColumnValidity::Extended);
+            assert!(air.composition().fraction(Gas::Oxygen) == 0.0);
+            assert!(data.pressure_pa >= MIN_PRESSURE_PA);
+            if data.extended {
+                extended += 1;
+            }
+            match air.reference_level() {
+                ReferenceLevel::Surface => surface += 1,
+                ReferenceLevel::OneBar => envelope += 1,
+            }
+            let encoded = serde_json::to_string(environment).unwrap();
+            let decoded: PlanetEnvironment = serde_json::from_str(&encoded).unwrap();
+            close(
+                decoded.irradiation_w_m2,
+                environment.irradiation_w_m2,
+                1e-14,
+            );
+        }
+    }
+    println!(
+        "120 systems: {absent} airless, {surface} secondary, {envelope} envelopes, {extended} extended columns"
+    );
+    assert!(absent > 0 && surface > 0 && envelope > 0);
+}
+
+#[test]
+fn repopulating_with_different_loss_history_preserves_all_existing_body_properties() {
+    let original = crate::bodies("atmosphere-independent-streams");
+    let mut changed = original.clone();
+    populate(&mut changed, 0.01);
+    assert_eq!(changed.stars, original.stars);
+    assert_eq!(changed.barycentres, original.barycentres);
+    for (before, after) in original.planets.iter().zip(&changed.planets) {
+        assert_eq!(before.id(), after.id());
+        assert_eq!(before.body.orbit, after.body.orbit);
+        assert_eq!(before.body.mass_earth, after.body.mass_earth);
+        assert_eq!(before.body.radius_km, after.body.radius_km);
+        assert_eq!(before.body.class, after.body.class);
+        assert_eq!(before.body.spin, after.body.spin);
+        assert_eq!(before.body.resonance, after.body.resonance);
+        assert_eq!(after.environment.as_ref().unwrap().age_gyr, 0.01);
+    }
+}
+
+#[test]
+fn wire_inputs_are_revalidated_and_derived_values_are_not_trusted() {
+    let physical = GasAtmosphere::new(
+        Composition::new(&[(Gas::Nitrogen, 1.0)]).unwrap(),
+        ReferenceLevel::Surface,
+        ONE_BAR_PA,
+        280.0,
+        Some(AerosolLayer::new(AerosolMaterial::MineralDust, 1e-8, 1000.0, 1e-6).unwrap()),
+    )
+    .unwrap();
+    let mut data = physical.to_data(4e14, 6e6).unwrap();
+    assert_eq!(GasAtmosphere::try_from(&data).unwrap(), physical);
+    data.extent_m = -1.0;
+    data.scale_height_m = f64::NAN;
+    assert_eq!(GasAtmosphere::try_from(&data).unwrap(), physical);
+    data.gases[0].gas = "unknown".into();
+    assert!(GasAtmosphere::try_from(&data).is_err());
+    data.gases[0].gas = "N2".into();
+    data.gases[0].mole_fraction = 0.5;
+    assert!(GasAtmosphere::try_from(&data).is_err());
+}
+
+#[test]
+fn legacy_planet_records_remain_readable_and_airless_is_not_unknown() {
+    let planet = space_shared::Planet::default();
+    let mut json = serde_json::to_value(&planet).unwrap();
+    json.as_object_mut().unwrap().remove("environment");
+    let old: space_shared::Planet = serde_json::from_value(json).unwrap();
+    assert!(old.environment.is_none());
+    let mut populated = old;
+    populated.environment = Some(PlanetEnvironment {
+        irradiation_w_m2: 1361.0,
+        assumed_bond_albedo: 0.3,
+        equilibrium_temperature_k: 255.0,
+        age_gyr: 4.5,
+        atmosphere: None,
+    });
+    let json = serde_json::to_value(&populated).unwrap();
+    assert!(json["environment"].is_object());
+    assert!(json["environment"]["atmosphere"].is_null());
+}

@@ -63,6 +63,13 @@ to `crates/client/src/`.
 
 ## Inspector actions
 
+Planet facts include generated all-star mean heating, equilibrium temperature
+with assumed albedo, atmospheric composition, reference pressure, column
+temperature/density, scale height and operational extent. Estimates and
+extended-column warnings are labelled. A giant's 1 bar reference level is
+not ground. These are simulation data, independent of debug atmosphere sliders;
+they do not yet drive rendering. See [physical atmospheres](../../simulation/atmospheres.md).
+
 Below facts, `inspector::actions` shows clickable halo text separated by `·`,
 hover blue, `CURRENT` when already showing the view:
 

@@ -6,6 +6,9 @@
 use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K};
 use std::fmt;
 
+pub mod generation;
+mod wire;
+
 /// One bar in SI pascals.
 pub const ONE_BAR_PA: f64 = 100_000.0;
 /// Match the renderer's current exponential-column cutoff.
@@ -28,6 +31,22 @@ pub enum Gas {
 }
 
 impl Gas {
+    pub fn formula(self) -> &'static str {
+        match self {
+            Self::Nitrogen => "N2",
+            Self::CarbonDioxide => "CO2",
+            Self::Hydrogen => "H2",
+            Self::Helium => "He",
+            Self::Water => "H2O",
+            Self::Methane => "CH4",
+            Self::Oxygen => "O2",
+            Self::Argon => "Ar",
+        }
+    }
+
+    pub fn from_formula(formula: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|gas| gas.formula() == formula)
+    }
     pub const ALL: [Self; 8] = [
         Self::Nitrogen,
         Self::CarbonDioxide,

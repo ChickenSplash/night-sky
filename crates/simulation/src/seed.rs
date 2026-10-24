@@ -42,6 +42,7 @@ pub fn plane_tilt(key: &str) -> [f64; 3] {
 }
 
 /// SplitMix64: small, fast and identical on every platform.
+#[derive(Clone)]
 pub(crate) struct Rng(u64);
 
 impl Rng {

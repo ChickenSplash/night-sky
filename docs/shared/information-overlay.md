@@ -23,6 +23,10 @@ remain available through the existing `space_simulation` and `system` exports.
   never change orbital elements. Orbital identity survives reordering and edits.
 - Task deadlines use wall-clock time independently of the simulation clock.
   This is overlay behaviour, not part of orbital mechanics.
+- `Planet::environment` carries the same generated atmospheric data for tasked
+  and bare worlds; tasks never seed or alter it. Older records may omit it.
+  See [physical atmospheres](../simulation/atmospheres.md) for the distinction
+  between missing data and a generated airless world.
 - Task slots are append-only per list, including when tasks disappear from a
   snapshot. Tasks fill stable generated planets, not the other way around.
 

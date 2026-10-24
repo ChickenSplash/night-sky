@@ -197,10 +197,13 @@ pull on orbits ($J_2$).
 
 ## Atmospheric foundation
 
-The simulation has a standalone, validated [physical atmosphere model](atmospheres.md)
-for gas mixtures, reference levels and approximate isothermal columns. It is
-not yet populated by generation or attached to planets; their class still
-does not resolve atmospheric chemistry.
+After the full stellar hierarchy and stable planetary orbits are known,
+the [physical atmosphere model](atmospheres.md) assigns each planet an approximate
+environment: all-star mean heating, atmospheric retention, gas mixtures,
+reference pressure and isothermal column estimates. Separate seeds preserve
+orbital generation. Class is only a provisional envelope-inventory prior;
+the later bulk-composition refactor will replace that assumption. The inspector
+shows generated air, but rendering still uses the selected planet's debug air.
 
 ## Presentation and limitations
 
@@ -221,7 +224,7 @@ Solar System examples and the trends discussed by Gladman et al. (1996).
 These are simplified fits/heuristics implemented in `crates/simulation/src/system/generation.rs`,
 not exact reproductions of the cited models.
 
-The model does not compute atmospheric chemistry, surface climate, habitability,
+The model does not solve atmospheric chemistry, surface climate, habitability,
 formation histories, migration, tidal evolution or secular orbital perturbations.
 A class such as "rocky" describes the generated model, not a prediction that
 the world is Earth-like or habitable.

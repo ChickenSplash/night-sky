@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+mod atmosphere;
+pub use atmosphere::{
+    AerosolData, AerosolKind, AtmosphereData, AtmosphereReference, GasFraction, PlanetEnvironment,
+};
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Galaxy {
     pub source: String,
@@ -103,6 +108,9 @@ pub struct Planet {
     pub radius_km: f64,
     pub mass_earth: f64,
     pub class: String,
+    /// Generated physical environment; absent in older or hand-built records.
+    #[serde(default)]
+    pub environment: Option<PlanetEnvironment>,
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,

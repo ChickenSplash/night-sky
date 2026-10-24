@@ -761,6 +761,8 @@ pub struct Hosted {
     /// Orbit index around the host.
     pub index: usize,
     pub body: Body,
+    /// Assigned after all stars and stable orbits are known, on separate seeds.
+    pub environment: Option<space_shared::PlanetEnvironment>,
 }
 
 impl Hosted {
@@ -809,6 +811,11 @@ pub(crate) fn assemble(
     stars: Option<&mut Rng>,
 ) -> Bodies {
     let primary = Primary::of(&formed, origin);
+    let age = system_age(
+        &mut draws.clone(),
+        &primary,
+        &mut Rng::new(&format!("{key}:age")),
+    );
     let companions = companions(draws, &primary);
     let mut streams = Streams { draws, stars };
     let system = hierarchy(key, &mut streams, formed, &origin, &companions);
@@ -845,14 +852,17 @@ pub(crate) fn assemble(
             host_letters: letters.clone(),
             index,
             body,
+            environment: None,
         }));
     }
     let barycentres = system.barycentres(key);
-    Bodies {
+    let mut bodies = Bodies {
         stars: system.stars.into_iter().map(|f| f.star).collect(),
         barycentres,
         planets,
-    }
+    };
+    crate::system::atmosphere::generation::populate(&mut bodies, age);
+    bodies
 }
 
 /// The stars and pairs alone of the system `assemble` makes, without its
