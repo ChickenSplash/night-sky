@@ -32,7 +32,7 @@ window size, MSAA state and magnitude limit. The star pass sums
 ## Atmospheres
 
 The **atmosphere test** (`tools` tab, `crates/client/src/devtools/atmosphere_test.rs`)
-measures the [atmosphere shader](rendering.md#atmospheres-prototype) on the
+measures the [atmosphere shader](rendering.md#atmospheres) on the
 selected planet, for before-and-after comparisons such as the lookup tables
 against the direct march. It pauses the clock and places the camera at three
 views, with the star 30° above the ground below the camera:
@@ -51,6 +51,17 @@ commit, planet, window size, MSAA, field of view, light steps and whether the
 steps were jittered and the transmittance table used, and per view
 the frame mean and 95th percentile, the GPU total and the transparent pass.
 Compare runs on the same planet, as the views scale with its radius.
+
+This is a **debug-preset shader benchmark**, not a generated-atmosphere
+population test: it enables the selected planet's override for each preset,
+then restores the previous override settings and enabled state. The atmosphere
+switch is global, so other resolved planets' generated shells can also affect
+the on/off difference if visible. Keep framing and surrounding bodies comparable.
+The fixed 1.5 s settling period does not guarantee the multiple-scattering tables
+have finished; check readiness before interpreting differences as steady-state
+cost. The [completed atmosphere plan](../plans/atmospheres.md) records historical
+measurements and the user's visual acceptance. Closing it establishes no new
+GPU performance baseline.
 
 ## Search measurements
 

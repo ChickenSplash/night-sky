@@ -1,15 +1,21 @@
-# Planetary atmospheres · plan
+# Planetary atmospheres · completed
 
-A proposal, not a description of the current application. The rendering
-guide's atmospheres section ([rendering](../client/rendering.md)) describes
-what is built.
+**Status: closed.** Checkpoints 4, 5a–5e and 6 are complete; the user signed
+off the broader 5e visual review. This file retains implementation history,
+not a current-behaviour specification. See [rendering](../client/rendering.md#atmospheres)
+and [physical atmospheres](../simulation/atmospheres.md) for what is built.
+
+Closure covers generated physical atmospheres, inspector data, optical conversion
+and per-planet rendering. The original goals below also included climate,
+flight clearances and search integration; these remain deferred, not completed
+by closing this plan. Follow-ups are listed under checkpoint 6.
 
 Atmospheres come before moons and the galactic dust work: flight-sim phase
 11's autopilot standoffs and assists wait for each body's atmosphere extent
 (see [flight sim](flight-sim.md#paused-until-atmospheres)), and moons later
 reuse the same model as just another body.
 
-## Goal
+## Original goals
 
 - Every planet gets a generated atmosphere, or none: whether it keeps one,
   its composition, surface pressure, scale height and extent.
@@ -22,14 +28,15 @@ reuse the same model as just another body.
 ## Order
 
 1. ✅ **Rendering prototype** (stage 1).
-2. **Rendering, finished** (stage 2, below): multiple scattering, then every
-   planet with air. **4c done, checked live and accepted by the user.** It
+2. ✅ **Rendering integration** (stage 2, below): multiple scattering, then every
+   planet with air. **Checkpoints 4–6 complete and accepted.** It
    builds on the shape and ground chunks from [planet surfaces](planet-surfaces.md).
-3. **Simulation** (stage 3, now planned together with integration in
+3. ✅ **Initial simulation** (stage 3, implemented together with integration in
    checkpoint 5): physical data model first, then retention and generation,
    optical conversion and per-planet rendering. More detailed climate follows
    later. The sliders stay as a debug override.
-4. **Search and the information overlay:** the new fields.
+4. **Deferred:** atmosphere search predicates. Generated data is already carried
+   by ordinary and task-overlay planets and shown in the inspector.
 
 Not planned yet: clouds, gas giant banding, aurorae, rings.
 
@@ -40,7 +47,10 @@ Not planned yet: clouds, gas giant banding, aurorae, rings.
 - A change meant to be faster must look the same with its switch flipped.
 - Measure against the Monte Carlo reference before judging by eye.
 
-## Built so far (branch `atmospheres`)
+## Historical rendering-prototype snapshot
+
+The following records the prototype before checkpoint 5. Generated air now
+applies to every resolved planet; presets are optional selected-planet overrides.
 
 - A shell sphere picks pixels; `render/atmosphere/atmosphere.wgsl` marches single
   scattering (Rayleigh, Cornette-Shanks Mie, a tent absorbing layer) in
@@ -86,7 +96,7 @@ table. A fast test checks scattering once matches a fine march. Measurements
 
 ### 4b ✅ Multiple scattering table (commit `e0d024d`)
 
-**Pick up here (2026-10-24):**
+**Historical checkpoint notes (2026-10-24):**
 
 - 4b checked live by the user and accepted. Stage 2 paused here for
   [planet surfaces](planet-surfaces.md); the shape and chunked ground are now
@@ -222,6 +232,8 @@ with `cargo test --locked --workspace measure_ground_lighting -- --ignored --noc
 
 ## Checkpoint 5 · Every planet with air
 
+**Complete:** automated checks passed and the user accepted 5a–5e.
+
 Agreed direction: scientifically grounded, simple first, with explicit
 approximations that can be improved independently. Generate a plausible
 present-day state, not a full formation or atmospheric-evolution simulation.
@@ -319,7 +331,7 @@ documented limitations, not solved spectral/point integration.
   pop at the point/disc hand-over. Table-build pop-in remains a separate,
   previously deferred issue to agree before changing its behaviour.
 
-### 5e · Validation
+### 5e ✅ Validation
 
 Automated 5c/5d regression checks cover clear-gas reference worlds, pressure/
 temperature/mixture scaling, methane's exponential absorption, prescribed aerosol
@@ -329,21 +341,36 @@ keys/bounds and headless WGSL validation. Workspace tests, strict Clippy and the
 runnable build pass. Logs: `data/logs/atmosphere-optics-{check,build}.log`.
 
 The user accepted the 5c/5d visuals, including a visit to the generated rocky
-world `g13b7db6.4.24/6` (8.39 bar). Broader 5e validation remains: several
-atmospheres together, airless worlds and one-bar envelopes, orbit/low altitude,
-twilight, changing selection and the point/disc switch. Compare debug presets
-and restore with `set_atmosphere enabled=false`; let tables finish before
-judging settled lighting. No GPU benchmark was run by the agent.
+world `g13b7db6.4.24/6` (8.39 bar), then explored further and explicitly signed
+off 5e. This records user visual acceptance, not a claim that every suggested
+view was individually measured. No new GPU benchmark result is claimed and no
+GPU benchmark was run by the agent. Existing automated checks and historical
+measurements remain the recorded evidence.
 
 - Inspect population distributions and physical invariants across many systems,
   not only hand-picked worlds. Check several different atmospheres together,
   airless worlds and giants; rerun the atmosphere test and user visual checks.
 
-## Checkpoint 6 · Docs
+## Checkpoint 6 ✅ Docs
 
-The rendering guide's atmospheres section no longer "prototype", benchmarks
-updated, and the documentation index's limits updated. Document implemented
-generation and approximations; leave richer climate as later work.
+Complete: the rendering guide describes generated per-planet air, debug
+overrides, table caching, lower-envelope boundaries and renderer limits. The
+physical atmosphere guide documents generation, reference conventions, optics
+and approximation limits. Inspector/API documentation and the documentation
+index reflect the implementation. Benchmark documentation links to the current
+renderer and distinguishes preset shader measurements from generated-population
+validation, without inventing a fresh performance baseline.
+
+### Deferred follow-ups, outside this closed plan
+
+- [Planet composition](planet-composition.md): physical inventories, consistent
+  radius/envelope mass and classification derived from properties.
+- Richer climate, greenhouse heating, internal heat and resolved hydrospheres.
+- Generated clouds/aerosols, chemistry and improved spectral/dense-gas optics.
+- Flight standoffs/clearances using atmosphere extent, and deep-envelope descent:
+  continue in [flight sim](flight-sim.md) and [planet surfaces](planet-surfaces.md).
+- Atmosphere search predicates; physical facts already appear in the inspector.
+- Table-readiness pop-in and atmosphere-aware point/rim photometry.
 
 Later, only if wanted: colour-dependent dimming of what lies behind
 (dual-source blending), a sky-view table if views from inside cost too much.

@@ -28,7 +28,7 @@ are navigation aids, not physical spacecraft (see [navigation](../client/navigat
   manual control are optional depth.
 - **Time warp is optional.** The loop must never need fast-forward.
 - Existing invariants still apply: f64 physics, deterministic generation,
-  stable body identities and both client targets.
+  stable body identities and the native Linux client target.
 
 ## Warp drive rules
 
@@ -649,6 +649,9 @@ Deferred with phase 6's turn limit and phase 7, until planetary atmospheres
 
 ### 9 · Plotted warp autopilot ✅ Done
 
+Original implementation accepted. Shape/atmosphere clearance corrections remain
+open under [the follow-up checkpoint](#shape-and-atmosphere-clearance-follow-up).
+
 - Plot and fly a route with the same drive and explicitly enabled assists as
   manual flight. Autopilot only adds steering and route management.
 - In-system first, then interstellar. Allows for moving destinations and
@@ -707,7 +710,9 @@ Decisions agreed with the user on 2026-10-22:
 - **Bodies in the way: wrap round them,** like a string pulled tight from the
   ship to the target.
   - Every step the pilot checks the straight line to the target against a
-    keep-clear sphere round each body, a margin larger than its surface. If
+     keep-clear sphere round each body, a margin larger than its surface. The
+     original implementation uses a radius-only boundary; the follow-up below
+     replaces this with shape- and atmosphere-aware clearance. If
     the line is clear it aims at the target. If not, it aims at the edge of
     the first sphere in the way, on the shorter side, so the ship curves
     round the body and turns back to the target once it is in view.
@@ -757,6 +762,9 @@ than its keep-clear distance and never further than its orbit reach, so
 `--orbit` always works on arrival. When no such distance exists (a star in a
 tight binary, whose reach is barely beyond its surface), the order is refused
 when given, with the reason, not on arrival.
+Planetary keep-clear distances must include oblateness and generated atmosphere
+extent, as specified in the follow-up below; the current radius-only calculation
+does not yet satisfy that requirement.
 
 | Target | Size | Orbit reach | Standoff |
 | --- | --- | --- | --- |
@@ -890,6 +898,54 @@ Checkpoints:
      targets; and the inspector's attitude pilot row shows a raw vector
      during routes.
 
+#### Shape and atmosphere clearance follow-up
+
+**Open, next flight-sim correction.** Atmosphere generation is now
+[complete](atmospheres.md). Update the existing route pilot before resuming
+in-app autopilot and the deferred assists. This does not reopen the accepted
+route foundation or add mandatory protection to unsafe manual warp.
+
+1. **One simulation-owned clearance policy.** Separate the physical exclusion
+   boundary from the pilot's preferred routing margin. Use it for obstacle
+   wrapping, bend/closing-speed limits, route timing and destination standoffs;
+   future collision/approach assists reuse it. No renderer or debug-preset input.
+2. **Oblateness and atmosphere together.** Use the generated spheroid, not its
+   volume-equivalent mean radius as a bounding radius. Keep the existing spherical
+   routing algorithm initially: conservatively enclose the planet and its modelled
+   atmosphere with `equatorial_radius + atmosphere_extent`, then add explicit
+   ship-hull clearance and a tunable safety margin. Airless worlds use zero
+   atmosphere extent. This safely covers equatorial, polar and tilted passes,
+   at the cost of extra clearance near the poles. Direction-dependent spheroid
+   routing can come later. Check consistency with the rendered shell geometry.
+3. **Physical inputs and validity.** Recompute extent from validated generated
+   atmosphere state using its mean reference radius and GM, following the
+   [column conventions](../simulation/atmospheres.md#derived-column). A one-bar
+   envelope level is not solid ground, but its atmosphere still needs clearance.
+   The operational cutoff is a navigation policy, not a physical end of air.
+   Preserve extended-column warnings and their unclamped estimates; report that
+   approximation in route diagnostics. Unknown/invalid atmosphere data must not
+   silently become airless: refuse or hold safe routing with an explicit reason.
+4. **No safety-boundary bypass.** The existing low-orbit-target rule may relax
+   a preferred margin, never shrink the physical exclusion boundary. Refuse a
+   target/arrival region that cannot be reached safely, including a craft inside
+   that boundary or an atmosphere leaving no valid orbital standoff. Check the
+   whole arrival region, not only the target point. Starting inside the boundary
+   needs a defined outward-only escape policy or an explicit refusal, not a
+   teleport or a route through the planet. Recheck moving targets each step.
+5. **Verify and accept.** Regressions: spherical/airless baseline; highly oblate
+   equatorial, polar and tilted flybys; thick and extended atmospheres; envelope
+   worlds; moving blockers; unsafe low-orbit craft targets; starts inside the
+   boundary; and no safe standoff within orbit reach. Cover route plotting,
+   per-step avoidance and dropout, deterministic replay and unchanged unsafe
+   manual warp. Run workspace checks, then user-watched CLI flights before
+   committing implementation. Update the craft guide and readouts with the
+   implemented policy and limits.
+
+**Done when:** plotted avoidance and arrivals stay outside the combined
+shape/atmosphere boundary, or explicitly report why a safe route is unavailable.
+Atmospheric drag, climate, exact spheroid routing and general collision response
+are not prerequisites for this correction.
+
 ### 10 · Orbit autopilot (deferred)
 
 Deferred with the assists, until planetary atmospheres. Phase 5's rough-orbit
@@ -1008,17 +1064,19 @@ Checkpoints, each checked live by the user and committed:
 
 #### Paused until atmospheres
 
-What phase 11 still lacks, to be replanned once planets have atmospheres:
+Atmospheres are now generated; the pause is not lifted automatically. Complete
+the [clearance follow-up](#shape-and-atmosphere-clearance-follow-up), then replan
+the remaining controls with the user. What phase 11 still lacks:
 
 - **In-app autopilot:** pick a target and `warp to` it, and cancel, without
   the CLI; the route's target, distance, ETA and any slowdown in the pilot
-  readout. Route standoffs should clear the atmosphere, not just the body.
+   readout. Route standoffs must clear the oblate body and its atmosphere.
 - **The layers:** how Autopilot, Assisted and Manual are chosen. Assisted
   brings `point` (prograde and so on), matched dropout, circularise, hold
   orbit and the sublight rate hold to the app.
 - **The assists:** turn limit (phase 6), collision (7), approach (8) and
   orbit (10). Collision and approach clearances and speed limits take each
-  body's atmosphere extent into account, not only its radius.
+   body's atmosphere extent and oblateness into account, not only its mean radius.
 - **The assist readout:** assist switches, requested against actual speed
   and the reason for any limit. A separate checkpoint was dropped, as there
   is nothing to show until the assists exist.
@@ -1054,10 +1112,9 @@ What phase 11 still lacks, to be replanned once planets have atmospheres:
 - Warp between galaxies, once there is more than one.
 - The warp arrival burst as a hazard, scaling with faster-than-light trip
   length.
-- **Planetary atmospheres,** before phase 11 resumes: density by altitude
-  above each planet's surface, drag on ships flying through it (relative to
-  the air, which turns with the planet), and how far each atmosphere
-  reaches, for the assists' and autopilot's clearances and speed limits.
+- **Atmospheric flight:** generated column density and extent now exist.
+  Integrating extent with warp clearance is the follow-up above; drag on ships
+  relative to rotating air remains later work, not a prerequisite for safe routes.
 - Moving stars over limited time spans (galaxy rotation stage 2): cells loaded
   by rotating back to stars' birth cells, with padding for wobble.
 

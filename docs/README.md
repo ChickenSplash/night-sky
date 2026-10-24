@@ -83,11 +83,12 @@ The Bevy/egui client in `crates/client`:
   state, generating `ns ship` and the TUI's Ship tab.
 - [Native only](plans/native-only.md): why the browser/WASM build was dropped
   and what the removal covered.
-- [Planetary atmospheres](plans/atmospheres.md): the rendering prototype first,
-  then cleaner, cheaper steps and many planets, then the simulated
-  atmosphere and climate.
+- [Planetary atmospheres](plans/atmospheres.md): completed generation, optics and
+  per-planet rendering work, validation history and explicitly deferred follow-ups.
 - [Planet surfaces](plans/planet-surfaces.md): bodies flattened by their spin,
   landing on the ground, then geology, water and giants' depths.
+- [Planet composition](plans/planet-composition.md): starter proposal for physical
+  inventories, consistent properties and classifications derived afterwards.
 
 ## Current limitations
 
@@ -108,9 +109,12 @@ The Bevy/egui client in `crates/client`:
   predicted impacts outside warp are shown but not enforced.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 - Atmospheres use approximate generated columns and visible optics,
-  with lookup tables, multiple scattering and
-  ground lighting from filtered sunlight and skylight. Generated atmospheric
-  data drives each resolved planet's air, with an optional selected-planet override.
+  not solved climate or atmospheric evolution. No generated clouds/aerosols or
+  greenhouse solution yet; extended columns retain constant-gravity estimates.
+  Table-readiness pop-in, grey view-path transmission and airless point/rim
+  photometry remain. Envelope lower boundaries are opaque proxies, not solid
+  ground or simulated deep descent. See [physical assumptions](simulation/atmospheres.md)
+  and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.
