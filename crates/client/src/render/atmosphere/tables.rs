@@ -4,8 +4,8 @@
 //! each star. Built on the CPU in the background when the air changes and
 //! cached by air, in units of the planet's radius, so identical air on two
 //! planets shares a table. The multiple scattering's tables
-//! (`atmosphere_multiple.rs`) take longer, so are built after it.
-use super::atmosphere::Air;
+//! (`multiple.rs`) take longer, so are built after it.
+use super::Air;
 use bevy::{
     asset::RenderAssetUsages,
     image::ImageSampler,
@@ -231,7 +231,7 @@ impl AtmosphereTables {
                 .iter()
                 .find(|w| self.ready.get(&w.0).is_some_and(|t| t.multiple.is_none()))
         {
-            let task = pool.spawn(async move { super::atmosphere_multiple::images(air) });
+            let task = pool.spawn(async move { super::multiple::images(air) });
             self.building_multiple = Some((key, task));
         }
         self.wanted.clear();

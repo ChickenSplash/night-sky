@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Selection, Visit, presentation::PresentationMode};
+use crate::{Selection, Visit, navigation::presentation::PresentationMode};
 
 #[test]
 fn selection_trail_is_remote_and_inspector_falls_back_when_a_location_disappears() {
@@ -151,13 +151,16 @@ fn a_generated_star_follows_the_galaxy_and_a_star_elsewhere_is_left_out() {
     let home = GalaxyModel::milky_way().home_pc;
     let cell = Cell::containing(10, home).unwrap();
     let id = Sky::default().cell_star_at(cell, 0).unwrap().id;
-    let system = crate::galaxy_nav::generated(&id, bevy::math::DVec3::ZERO).unwrap();
+    let system = crate::navigation::galaxy_nav::generated(&id, bevy::math::DVec3::ZERO).unwrap();
     let name = system.name.clone();
     let nav = Navigation {
         visit: Some(Visit::Generated(Box::new(system))),
         arrived: true,
-        selection: crate::galaxy_nav::page_pick(&galaxy.systems[1], galaxy.systems[1].first_page())
-            .map(Selection::Star),
+        selection: crate::navigation::galaxy_nav::page_pick(
+            &galaxy.systems[1],
+            galaxy.systems[1].first_page(),
+        )
+        .map(Selection::Star),
         ..Navigation::default()
     };
     assert_eq!(labels(&nav, &galaxy), ["Milky Way".to_owned(), name]);
@@ -287,7 +290,7 @@ fn a_selected_member_star_or_pair_hangs_below_the_whole_system() {
     let root = system.barycentres_on(nav.page).last().unwrap();
     let whole = format!("System 2 {}", root.component);
     let star = system.stars_on(nav.page).last().unwrap();
-    let pick = |id: &str| crate::galaxy_nav::PickedStar {
+    let pick = |id: &str| crate::navigation::galaxy_nav::PickedStar {
         id: id.to_owned(),
         position_ly: bevy::math::DVec3::ZERO,
     };

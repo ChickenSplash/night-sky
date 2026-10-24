@@ -4,7 +4,7 @@ use super::{
     camera::{CameraPose, CameraRig},
     frames::{page_frame, page_origin_ly},
 };
-use crate::presentation::PresentationMode;
+use crate::navigation::presentation::PresentationMode;
 use crate::{Clock, Navigation, Universe};
 use bevy::{
     math::{DQuat, DVec3},
@@ -152,13 +152,14 @@ pub fn locate(
     let position_ly = (DVec3::from_array(position_pc)
         - DVec3::from_array(GalaxyModel::milky_way().home_pc))
         * (PC_METRES / LY_METRES);
-    let (visit, page) = if let Some((list, page)) = crate::galaxy_nav::mapped(&lists.0, &id) {
-        (crate::Visit::List(list), page)
-    } else if let Some(system) = crate::galaxy_nav::generated(&id, position_ly) {
-        (crate::Visit::Generated(Box::new(system)), 0)
-    } else {
-        return;
-    };
+    let (visit, page) =
+        if let Some((list, page)) = crate::navigation::galaxy_nav::mapped(&lists.0, &id) {
+            (crate::Visit::List(list), page)
+        } else if let Some(system) = crate::navigation::galaxy_nav::generated(&id, position_ly) {
+            (crate::Visit::Generated(Box::new(system)), 0)
+        } else {
+            return;
+        };
     rebase(
         &mut nav,
         &rig,

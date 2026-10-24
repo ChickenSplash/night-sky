@@ -1,6 +1,6 @@
 //! The `state` tab: camera, navigation, anchor star and clock.
 use crate::format::speed_label;
-use crate::presentation::PresentationMode;
+use crate::navigation::presentation::PresentationMode;
 use crate::scene::{CameraPose, CameraRig, CameraVelocity};
 use crate::ui::terminal;
 use crate::{Clock, Navigation, Selection, Universe, Visit};
@@ -51,7 +51,7 @@ pub fn state(
     let star = |system: Option<&space_shared::StarSystem>| {
         system
             .and_then(|s| s.page_star(nav.page))
-            .map(|star| crate::galaxy_nav::label(galaxy, &star.id))
+            .map(|star| crate::navigation::galaxy_nav::label(galaxy, &star.id))
     };
     terminal::facts(
         ui,

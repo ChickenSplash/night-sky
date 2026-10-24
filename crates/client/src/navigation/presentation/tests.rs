@@ -37,7 +37,7 @@ fn constellation_pages_share_one_frame_without_reframing() {
         assert_eq!(nav.presentation_mode, PresentationMode::Constellation);
         assert_eq!(
             nav.selected_star(),
-            crate::galaxy_nav::page_pick(system, page).as_ref()
+            crate::navigation::galaxy_nav::page_pick(system, page).as_ref()
         );
         assert_eq!(nav.frame_page(system), frame);
         assert_eq!((nav.target, nav.distance), (target, distance));
@@ -207,7 +207,9 @@ fn one_selection_replaces_the_other_and_following_stays_with_planets() {
     nav.following = true;
     nav.select(Some(Selection::planet(&galaxy.systems[0], 1)));
     assert!(nav.following);
-    nav.select(crate::galaxy_nav::page_pick(&galaxy.systems[0], 0).map(Selection::Star));
+    nav.select(
+        crate::navigation::galaxy_nav::page_pick(&galaxy.systems[0], 0).map(Selection::Star),
+    );
     assert_eq!(nav.selected_planet(&galaxy), None);
     assert!(!nav.following);
 }

@@ -12,10 +12,6 @@
 //!   raw radiance.
 
 pub mod atmosphere;
-mod atmosphere_multiple;
-#[cfg(test)]
-mod atmosphere_reference;
-pub mod atmosphere_tables;
 pub mod black_hole;
 pub mod debug;
 pub mod exposure;
@@ -64,7 +60,12 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(app, BODY_SHADER, "body.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, POINT_SHADER, "point.wgsl", Shader::from_wgsl);
-        load_internal_asset!(app, ATMOSPHERE_SHADER, "atmosphere.wgsl", Shader::from_wgsl);
+        load_internal_asset!(
+            app,
+            ATMOSPHERE_SHADER,
+            "atmosphere/atmosphere.wgsl",
+            Shader::from_wgsl
+        );
         load_internal_asset!(app, GROUND_SHADER, "ground.wgsl", Shader::from_wgsl);
         app.add_plugins((
             MaterialPlugin::<BodyMaterial>::default(),
@@ -83,7 +84,7 @@ impl Plugin for RenderPlugin {
         .init_resource::<atmosphere::AtmosphereTuning>()
         .init_resource::<ground::Grounds>()
         .init_resource::<ground::GroundStats>()
-        .init_resource::<atmosphere_tables::AtmosphereTables>()
+        .init_resource::<atmosphere::tables::AtmosphereTables>()
         .add_systems(Startup, setup)
         .add_systems(Update, switch_camera)
         .add_systems(

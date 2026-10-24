@@ -43,7 +43,7 @@ Not planned yet: clouds, gas giant banding, aurorae, rings.
 
 ## Built so far (branch `atmospheres`)
 
-- A shell sphere picks pixels; `render/atmosphere.wgsl` marches single
+- A shell sphere picks pixels; `render/atmosphere/atmosphere.wgsl` marches single
   scattering (Rayleigh, Cornette-Shanks Mie, a tent absorbing layer) in
   planet radii, energy-conserving steps (Hillaire 2015), bunched near a
   camera low in the air. Premultiplied output, grey dimming of what lies
@@ -52,7 +52,7 @@ Not planned yet: clouds, gas giant banding, aurorae, rings.
   `ns atmosphere`, with Earth, Venus, Mars, Titan and hydrogen giant presets.
 - **Jitter** (`atmosphere_jitter`, on by default; the user checks with it
   off and may want it off by default).
-- **Transmittance table** (`atmosphere_tables`, `render/atmosphere_tables.rs`):
+- **Transmittance table** (`atmosphere::tables`, `render/atmosphere/tables.rs`):
   256 x 64 optical depth, Bruneton's parametrisation, built on the CPU in
   the background per air. Looks identical; 5.6 → 2.4 ms in one view.
 - **Stop where opaque** (`atmosphere_stop_opaque`): each ray ends where the
@@ -70,7 +70,7 @@ Venus's surface is black and Titan far too dark: single scattering only.
 
 ### 4a ✅ Reference (commit `499c367`)
 
-`render/atmosphere_reference.rs`, tests only: Monte Carlo with delta
+`render/atmosphere/reference.rs`, tests only: Monte Carlo with delta
 tracking through the same air, any number of scatterings off the air and a
 grey ground (albedo 0.3), starlight at each event from the transmittance
 table. A fast test checks scattering once matches a fine march. Measurements
@@ -121,7 +121,7 @@ Built:
   Earth and others 0.1 (unchanged look); Venus preset 0.005.
 - `Air.ground`: the ground's albedo per channel (planet surface tint times
   albedo, set in `render/resolve.rs`; 0.3 default), part of the table key.
-- `render/atmosphere_multiple.rs`: the table. 32 x 32 sky texels (the
+- `render/atmosphere/multiple.rs`: the table. 32 x 32 sky texels (the
   star's cosine, -1 to 1, by height, rows evenly in $1 - e^{-h/2H}$) plus 32
   ground texels, per unit starlight: the mean radiance of light scattered
   at least once, and its net upward flow. Every order is solved at once as
@@ -213,9 +213,9 @@ Later, only if wanted: colour-dependent dimming of what lies behind
 
 ## Working notes
 
-- **Code:** `render/atmosphere.rs` (settings, presets, material, sync),
-  `render/atmosphere.wgsl`, `render/atmosphere_tables.rs`,
-  `render/atmosphere_multiple.rs`, `render/atmosphere_reference.rs`,
+- **Code:** `render/atmosphere/mod.rs` (settings, presets, material, sync),
+  `render/atmosphere/atmosphere.wgsl`, `render/atmosphere/tables.rs`,
+  `render/atmosphere/multiple.rs`, `render/atmosphere/reference.rs`,
   `render/debug.rs` (switches), `devtools/tabs/atmosphere.rs`,
   `devtools/atmosphere_test.rs` (benchmark), `scene/draw.rs`.
 - **Live checks are the user's.** Test builds open on workspace 8 without

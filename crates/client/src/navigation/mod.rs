@@ -1,6 +1,11 @@
 //! Where the camera is going and what is selected: the destination that
 //! `scene::CameraRig` flies the displayed camera towards.
-use crate::{galaxy_nav, objects, presentation, render, scene, ui};
+pub mod flight;
+pub mod galaxy_nav;
+pub mod objects;
+pub mod presentation;
+
+use crate::{render, scene, ui};
 use bevy::{math::DVec3, prelude::*};
 use space_shared::{Galaxy, StarSystem};
 use space_simulation::LY_METRES;

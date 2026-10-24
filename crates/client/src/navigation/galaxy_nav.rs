@@ -229,7 +229,7 @@ enum Route {
 
 /// Resolves a route without generating a system, so the UI can ask every frame.
 fn route(nav: &Navigation, lists: &Galaxy, field: &Starfield, id: &str) -> Option<Route> {
-    if let Some((system, page)) = crate::objects::known_system(lists, id) {
+    if let Some((system, page)) = crate::navigation::objects::known_system(lists, id) {
         let list = lists.systems.iter().position(|list| list.id == system.id)?;
         return Some(Route::List(list, page));
     }

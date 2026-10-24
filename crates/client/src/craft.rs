@@ -1,7 +1,7 @@
 //! Live craft: ships the player places, stepped with the simulation clock.
 //! Their physics is `space_simulation::craft`; this keeps them, steps them in
 //! fixed steps each frame, and blends between steps for drawing.
-use crate::{Clock, Navigation, objects};
+use crate::{Clock, Navigation, navigation::objects};
 use bevy::prelude::*;
 use space_shared::{Galaxy, StarSystem};
 use space_simulation::search::{SearchResult, live::LiveObject};
@@ -394,7 +394,7 @@ pub fn locate_body(
     id: &str,
 ) -> Result<(StarSystem, u32, String), String> {
     let key = space_simulation::star::multiple::system_key(id);
-    if !crate::galaxy_nav::reachable(nav, galaxy, field, key) {
+    if !crate::navigation::galaxy_nav::reachable(nav, galaxy, field, key) {
         return Err(format!(
             "`{id}` is not in a loaded, visited or charted system"
         ));
@@ -404,8 +404,10 @@ pub fn locate_body(
         _ => objects::known_system(galaxy, key)
             .map(|(system, page)| (system.clone(), page))
             .or_else(|| {
-                let picked = crate::galaxy_nav::selectable_star(nav, galaxy, field, key)?;
-                crate::galaxy_nav::generated(key, picked.position_ly).map(|system| (system, 0))
+                let picked =
+                    crate::navigation::galaxy_nav::selectable_star(nav, galaxy, field, key)?;
+                crate::navigation::galaxy_nav::generated(key, picked.position_ly)
+                    .map(|system| (system, 0))
             })
             .ok_or_else(|| format!("No system for `{id}`"))?,
     };
@@ -728,7 +730,7 @@ pub fn body_label(live: &Live, galaxy: &Galaxy, id: &str) -> String {
     }
     let key = space_simulation::star::multiple::system_key(id);
     objects::member_label(
-        &crate::galaxy_nav::label(galaxy, key),
+        &crate::navigation::galaxy_nav::label(galaxy, key),
         space_simulation::star::multiple::member_letters(id),
     )
 }
@@ -757,7 +759,7 @@ pub fn live_objects(fleet: &Fleet, galaxy: &Galaxy, seconds: f64) -> Vec<LiveObj
                     kind: live.craft.kind.name().into(),
                     name: live.craft.name.clone(),
                     class: live.craft.kind.label().into(),
-                    system: crate::galaxy_nav::label(galaxy, &key),
+                    system: crate::navigation::galaxy_nav::label(galaxy, &key),
                     distance_ly: 0.0,
                     position_pc: live.position_pc(seconds),
                 },

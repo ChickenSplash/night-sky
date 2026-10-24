@@ -164,7 +164,8 @@ shaded by `body.wgsl`); stars keep the sphere mesh.
 
 A planet drawn as a disc may have an atmosphere: a shell mesh slightly larger
 than the air's top, whose pixels march single scattering along the line of
-sight (`render/atmosphere.rs`, `atmosphere.wgsl`). The shader finds the ground
+sight (`render/atmosphere/mod.rs`, with `atmosphere.wgsl` beside it). The shader
+finds the ground
 and the top analytically, in planet radii and measured from the ray's closest
 approach to the centre, so the limb holds in f32 at real distances; the mesh
 only chooses which pixels run. A flattened planet is first made round: the
@@ -231,7 +232,7 @@ static grain. `set_debug atmosphere_jitter false` samples at the midpoints
 again, to compare.
 
 **Transmittance table.** The light lost on the way in from each star is
-read from a table rather than marched (`render/atmosphere_tables.rs`): the
+read from a table rather than marched (`render/atmosphere/tables.rs`): the
 optical depth from any height, in any direction, to the top of the air,
 256 x 64 texels in Bruneton's parametrisation (by the distance to the top
 of the air between its shortest and the horizon's, and by height as
@@ -248,7 +249,7 @@ march: within 1% of the light that gets through, for every preset, from the
 ground to the top.
 
 **Multiple scattering.** Light scattered more than once is read from a
-second table (`render/atmosphere_multiple.rs`), built after the
+second table (`render/atmosphere/multiple.rs`), built after the
 transmittance table in the background (a few seconds) and cached with it;
 `set_debug atmosphere_multiple false` leaves it out. Per unit starlight, by
 height and the star's angle from the zenith (32 x 32 texels, rows evenly in
@@ -266,7 +267,7 @@ downwards and the haze sends it on down, so the sky from below is up to
 twice as bright as the mean alone. For consistency, the starlight in single
 scattering is then dimmed by the thinned air's transmittance table: light
 scattered slightly forwards still counts as starlight. Measured against the
-Monte Carlo reference (`render/atmosphere_reference.rs`, tests only) the
+Monte Carlo reference (`render/atmosphere/reference.rs`, tests only) the
 result is within about 15% for every preset, Earth within 5%; Mars's dust
 is the worst (0.76 to 1.35), as light flowing sideways away from the star
 is not kept.

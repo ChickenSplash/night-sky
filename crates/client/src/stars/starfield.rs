@@ -1217,7 +1217,7 @@ mod tests {
         let (system, plane) = split_system(id);
         assert_eq!(system.stars.len(), 3);
         // The same plane as the system's page when it is visited.
-        let visited = crate::galaxy_nav::generated(id, DVec3::ZERO).unwrap();
+        let visited = crate::navigation::galaxy_nav::generated(id, DVec3::ZERO).unwrap();
         assert_eq!(plane, crate::scene::page_frame(&visited, 0));
         let at = DVec3::new(30.0, -2.0, 5.0);
         let seconds = 1.5e10;

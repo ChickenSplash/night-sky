@@ -41,7 +41,7 @@ impl<M: Material> Default for Pool<M> {
 pub(super) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     commands.insert_resource(Meshes {
         // Fine enough that the facets stay within 0.06% of the sphere, which
-        // an atmosphere's limb assumes (`atmosphere.wgsl`).
+        // an atmosphere's limb assumes (`atmosphere/atmosphere.wgsl`).
         sphere: meshes.add(Sphere::new(1.0).mesh().uv(192, 96)),
         square: meshes.add(Rectangle::new(2.0, 2.0)),
     });

@@ -116,8 +116,11 @@ fn search_controls_precede_a_separate_chip_row_with_optional_system_scope() {
             let nav = Navigation {
                 arrived: at_system,
                 visit: Some(crate::Visit::Generated(Box::new(
-                    crate::galaxy_nav::generated("g78040000.2.854", bevy::math::DVec3::ZERO)
-                        .unwrap(),
+                    crate::navigation::galaxy_nav::generated(
+                        "g78040000.2.854",
+                        bevy::math::DVec3::ZERO,
+                    )
+                    .unwrap(),
                 ))),
                 ..Default::default()
             };
@@ -761,7 +764,7 @@ fn results_scrollbar_only_appears_when_rows_overflow() {
 
 #[test]
 fn result_rows_follow_scene_selection_and_emit_selection_commands() {
-    use crate::{Selection, objects::ObjectRef};
+    use crate::{Selection, navigation::objects::ObjectRef};
     let results = run(Query::parse("kind=planet within_ly=20 limit=2").unwrap());
     assert_eq!(results.len(), 2);
     let ctx = egui::Context::default();
@@ -866,7 +869,7 @@ fn result_rows_follow_scene_selection_and_emit_selection_commands() {
 #[test]
 #[allow(clippy::field_reassign_with_default)] // Searches has private service fields.
 fn animated_result_panes_never_expand_their_parent_viewport() {
-    use crate::{Selection, objects::ObjectRef};
+    use crate::{Selection, navigation::objects::ObjectRef};
     let query = Query::parse("kind=planet within_ly=20 limit=1").unwrap();
     let hits = run(query.clone());
     let ObjectRef::Planet { id } = &hits[0].object else {

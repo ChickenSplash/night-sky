@@ -177,8 +177,8 @@ pub(super) fn pilot_readout(ctx: &egui::Context, rect: egui::Rect, lines: &[Stri
 
 /// The virtual joystick: its ring and dead zone round where it was pressed,
 /// and the stick out to its deflection.
-pub(super) fn stick_reticle(ctx: &egui::Context, stick: &crate::pilot::Stick) {
-    use crate::pilot::{STICK_DEAD_ZONE, STICK_RING};
+pub(super) fn stick_reticle(ctx: &egui::Context, stick: &crate::input::pilot::Stick) {
+    use crate::input::pilot::{STICK_DEAD_ZONE, STICK_RING};
     // Window logical pixels to egui points, as for the canvas markers.
     let scale = ctx.zoom_factor();
     let centre = egui::pos2(stick.origin.x, stick.origin.y) / scale;

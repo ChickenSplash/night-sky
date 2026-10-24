@@ -1,7 +1,7 @@
 //! Opt-in, loopback-only native developer transport. Never touches the ECS
 //! from its listener thread; commands and captures are queued to PreUpdate.
+use super::command_line::{Source, Typed};
 use super::snapshot::{Published, Snapshot};
-use crate::command_line::{Source, Typed};
 use crate::scene::{CameraPose, CameraRig};
 use crate::search::{Asker, Hub};
 use crate::stars::stream::Starfield;
@@ -264,8 +264,8 @@ fn handle(
             };
             // Syntax and ranges are checked here, so they fail fast even if
             // the main thread is busy; the current state is checked there.
-            if let Err(error) = crate::command_line::parse(body.trim()) {
-                warn!(target: crate::command_line::TARGET, "cli> {}: {error}", body.trim());
+            if let Err(error) = crate::devtools::command_line::parse(body.trim()) {
+                warn!(target: crate::devtools::command_line::TARGET, "cli> {}: {error}", body.trim());
                 respond(request, 400, json!({"error": error}));
                 return;
             }
@@ -505,19 +505,22 @@ fn command_catalogue(url: &str) -> Result<Value, (u16, &'static str)> {
     if !query.is_empty() {
         return Err((400, "Command catalogue takes no query parameters"));
     }
-    let entry = |usage: &crate::command_line::Usage| {
+    let entry = |usage: &crate::devtools::command_line::Usage| {
         json!({
             "name": usage.name, "fields": usage.fields,
-            "synopsis": crate::command_line::synopsis(usage), "about": usage.about,
+            "synopsis": crate::devtools::command_line::synopsis(usage), "about": usage.about,
         })
     };
     if path == "/commands" {
         return Ok(Value::Array(
-            crate::command_line::USAGE.iter().map(entry).collect(),
+            crate::devtools::command_line::USAGE
+                .iter()
+                .map(entry)
+                .collect(),
         ));
     }
     let name = decode_path(path.strip_prefix("/commands/").unwrap_or(""))?;
-    crate::command_line::USAGE
+    crate::devtools::command_line::USAGE
         .iter()
         .find(|usage| usage.name == name)
         .map(entry)
@@ -846,12 +849,15 @@ mod tests {
         let catalogue = command_catalogue("/commands").unwrap();
         assert_eq!(
             catalogue.as_array().unwrap().len(),
-            crate::command_line::USAGE.len()
+            crate::devtools::command_line::USAGE.len()
         );
-        for usage in &crate::command_line::USAGE {
+        for usage in &crate::devtools::command_line::USAGE {
             let entry = command_catalogue(&format!("/commands/{}", usage.name)).unwrap();
             assert_eq!(entry["fields"], json!(usage.fields));
-            assert_eq!(entry["synopsis"], crate::command_line::synopsis(usage));
+            assert_eq!(
+                entry["synopsis"],
+                crate::devtools::command_line::synopsis(usage)
+            );
             assert_eq!(entry["about"], usage.about);
         }
         assert_eq!(command_catalogue("/commands/missing").unwrap_err().0, 404);

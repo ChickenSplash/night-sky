@@ -11,7 +11,7 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own until their
   system is loaded (see Selection and picking).
-- `Navigation::visit` (`navigation.rs`) is the system the camera is anchored to
+- `Navigation::visit` (`navigation/mod.rs`) is the system the camera is anchored to
   (at, flying to, or showing as a constellation): `Visit::List` (a list index,
   at `Navigation::page`) or `Visit::Generated` (task-free planets built from
   the star's ID, never added to the lists' `Universe`). `None` is open space,
@@ -24,7 +24,7 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   system just left, moved onto the eye whenever the eye is 10⁹ m from it
   (`REANCHOR_METRES`). Commands that place the camera relative to home
   reset it with `Navigation::leave_for_home_frame`.
-- `presentation.rs` owns `PresentationMode`: `Simulation` (simulated orbital
+- `navigation/presentation.rs` owns `PresentationMode`: `Simulation` (simulated orbital
   positions), `Table` (comparison row), and `Constellation` (connected stars).
   They work on any visited system. `Navigation::presentation_mode` describes
   presentation, not tracking or free flight. Switching presets also sets framing.
@@ -173,7 +173,7 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   system keeps either selection and stops tracking. Moving or looking stops
   following but not moving with the object
   ([moving with objects](#moving-with-objects)).
-- `galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a
+- `navigation/galaxy_nav.rs` picks and visits the selected star (`visit_selected`): a
   mapped list page (`galaxy_nav::mapped`) opens that page, any other opens its
   generated system. A new snapshot moves the visit with its star
   (`navigation::follow_visited_star`).

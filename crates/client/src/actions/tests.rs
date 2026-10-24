@@ -1,5 +1,5 @@
 use super::*;
-use crate::galaxy_nav::page_pick;
+use crate::navigation::galaxy_nav::page_pick;
 use space_simulation::{
     galaxy::cells::{Sky, parse_cell_star},
     galaxy::stream::{StarCell, StarPoint},
@@ -8,7 +8,7 @@ use space_simulation::{
 #[test]
 fn remote_planet_selection_and_inspection_never_move_the_camera() {
     use crate::{
-        objects::ObjectRef,
+        navigation::objects::ObjectRef,
         ui::breadcrumb::{Inspection, TrailSource},
     };
     let galaxy = space_simulation::demo_galaxy();
@@ -31,7 +31,9 @@ fn remote_planet_selection_and_inspection_never_move_the_camera() {
         nav(&app).inspection.as_ref().unwrap().object,
         ObjectRef::Planet { id: id.clone() }
     );
-    let star = crate::objects::parent_star(&id).unwrap().to_owned();
+    let star = crate::navigation::objects::parent_star(&id)
+        .unwrap()
+        .to_owned();
     for inspection in [
         Inspection {
             source: TrailSource::Location,
@@ -72,7 +74,7 @@ fn an_unstreamed_generated_planet_can_be_selected_by_id() {
     use space_simulation::{galaxy::GalaxyModel, galaxy::cells::Cell};
     let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
     let star = Sky::default().cell_star_at(cell, 0).unwrap().id;
-    let system = crate::galaxy_nav::generated(&star, bevy::math::DVec3::ZERO).unwrap();
+    let system = crate::navigation::galaxy_nav::generated(&star, bevy::math::DVec3::ZERO).unwrap();
     let id = system.planets[0].id.clone();
     let app = run(
         space_simulation::demo_galaxy(),
@@ -85,7 +87,7 @@ fn an_unstreamed_generated_planet_can_be_selected_by_id() {
         crate::ui::breadcrumb::selection_trail(nav(&app), galaxy, crate::craft::Now::none());
     assert_eq!(trail.last().unwrap().label, system.planets[0].designation);
     let info = crate::ui::inspector::describe(
-        &crate::objects::ObjectRef::Planet { id },
+        &crate::navigation::objects::ObjectRef::Planet { id },
         galaxy,
         None,
         crate::craft::Now::none(),
@@ -119,13 +121,13 @@ fn selecting_a_search_star_never_travels_even_when_selected_again() {
         );
         assert_eq!(
             nav(&app).selection.as_ref().unwrap().object(),
-            crate::objects::ObjectRef::Star {
+            crate::navigation::objects::ObjectRef::Star {
                 id: point.id.clone()
             }
         );
         assert_eq!(
             nav(&app).inspection.as_ref().unwrap().object,
-            crate::objects::ObjectRef::Star {
+            crate::navigation::objects::ObjectRef::Star {
                 id: point.id.clone()
             }
         );
@@ -147,7 +149,7 @@ fn selecting_a_search_star_never_travels_even_when_selected_again() {
 #[test]
 fn inspector_tabs_preserve_tracking_and_reject_absent_crumbs() {
     use crate::{
-        objects::ObjectRef,
+        navigation::objects::ObjectRef,
         ui::breadcrumb::{Inspection, TrailSource},
     };
     let galaxy = space_simulation::demo_galaxy();
@@ -417,7 +419,7 @@ fn clicking_a_streamed_star_selects_then_visits_its_generated_system() {
     let mut sky = Sky::default();
     let id = (0..)
         .map(|ordinal| sky.cell_star_at(cell, ordinal).unwrap().id)
-        .find(|id| crate::galaxy_nav::mapped(&galaxy, id).is_none())
+        .find(|id| crate::navigation::galaxy_nav::mapped(&galaxy, id).is_none())
         .unwrap();
     let mut app = run(
         galaxy,
@@ -521,7 +523,7 @@ fn inspector_actions_reach_remote_stars_and_planets_like_a_second_click() {
 #[test]
 fn list_systems_select_like_a_star_click_and_keep_the_list_tab() {
     use crate::{
-        objects::ObjectRef,
+        navigation::objects::ObjectRef,
         ui::breadcrumb::{Inspection, TrailSource},
     };
     let galaxy = space_simulation::demo_galaxy();
@@ -565,7 +567,7 @@ fn unstreamed_generated_stars_are_not_visited_by_id() {
     let cell = Cell::containing(10, home).unwrap();
     let id = (0..)
         .map(|ordinal| Sky::default().cell_star_at(cell, ordinal).unwrap().id)
-        .find(|id| crate::galaxy_nav::mapped(&galaxy, id).is_none())
+        .find(|id| crate::navigation::galaxy_nav::mapped(&galaxy, id).is_none())
         .unwrap();
     let mut app = run(
         galaxy,
@@ -793,7 +795,8 @@ fn up_from_a_tracked_planet_frames_its_system_then_climbs_to_its_parent() {
     let galaxy = space_simulation::demo_galaxy();
     let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
     let star = Sky::default().cell_star_at(cell, 0).unwrap();
-    let generated = crate::galaxy_nav::generated(&star.id, bevy::math::DVec3::ZERO).unwrap();
+    let generated =
+        crate::navigation::galaxy_nav::generated(&star.id, bevy::math::DVec3::ZERO).unwrap();
     for visit in [
         crate::Visit::List(0),
         crate::Visit::Generated(Box::new(generated)),
@@ -811,7 +814,7 @@ fn up_from_a_tracked_planet_frames_its_system_then_climbs_to_its_parent() {
             (
                 page,
                 system.on_page(page).next().unwrap().id.clone(),
-                crate::presentation::fit_distance(system, page),
+                crate::navigation::presentation::fit_distance(system, page),
             )
         };
         send(
@@ -926,7 +929,7 @@ fn a_loaded_systems_barycentre_can_be_selected_by_id_only_there() {
     );
     assert_eq!(
         nav(&app).selection.as_ref().map(Selection::object),
-        Some(crate::objects::ObjectRef::Barycentre { id: root })
+        Some(crate::navigation::objects::ObjectRef::Barycentre { id: root })
     );
     // A second command does not follow it.
     send(&mut app, vec![UiCommand::Follow]);

@@ -403,7 +403,7 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
         if key.is_empty() {
             "Galactic space".into()
         } else {
-            crate::galaxy_nav::label(galaxy, key)
+            crate::navigation::galaxy_nav::label(galaxy, key)
         },
     ));
     if let Some(body) = reference {

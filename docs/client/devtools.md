@@ -74,7 +74,7 @@ the label via `terminal::facts_with_details` (`label +` to show below,
 
 ## Typed commands
 
-`command_line.rs` handles terminal/stdin/developer API input as `Typed` messages.
+`devtools/command_line.rs` handles terminal/stdin/developer API input as `Typed` messages.
 `command_line::run` parses text (`set_presentation_mode table`,
 `set_display option=orbits on=false`) or `UiCommand` JSON into the same commands
 as panels, before `actions::apply`. New input sources should send `Typed` too.

@@ -1,7 +1,7 @@
 //! Copies every tracing event into an in-memory buffer for the log and
 //! terminal tabs.
 use super::DevTools;
-use crate::command_line::{self};
+use super::command_line;
 use bevy::log::tracing::{
     Event, Subscriber,
     field::{Field, Visit as Fields},

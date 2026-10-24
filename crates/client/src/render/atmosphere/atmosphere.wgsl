@@ -37,10 +37,10 @@ struct Air {
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> air: Air;
-// With TABLES, optical depth to the top of the air (`atmosphere_tables.rs`).
+// With TABLES, optical depth to the top of the air (`tables.rs`).
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var transmittance: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var transmittance_sampler: sampler;
-// With MULTIPLE (`atmosphere_multiple.rs`): the transmittance of the air with
+// With MULTIPLE (`multiple.rs`): the transmittance of the air with
 // the haze's forward peak taken as no scattering, for the starlight; the
 // mean radiance of light scattered more than once per unit starlight, the
 // ground's in its last row; and that light's net upward flow.
@@ -49,9 +49,9 @@ struct Air {
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var flow: texture_2d<f32>;
 
 const PI: f32 = 3.14159265;
-// The table's size, as `atmosphere_tables.rs`.
+// The table's size, as `tables.rs`.
 const TABLE: vec2<f32> = vec2(256.0, 64.0);
-// The multiple scattering table's size, as `atmosphere_multiple.rs`.
+// The multiple scattering table's size, as `multiple.rs`.
 const MULTIPLE_SIZE: f32 = 32.0;
 // Optical depth beyond which nothing more is seen: e^-10 lets through less
 // than 1/20,000 of the light.

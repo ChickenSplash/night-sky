@@ -1,7 +1,7 @@
 //! Independent location and selection trails. Crumbs inspect, never navigate.
 use crate::Navigation;
 use crate::actions::{GalaxyReference, UiCommand};
-use crate::objects::{self, ObjectRef};
+use crate::navigation::objects::{self, ObjectRef};
 use crate::ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_text};
 use bevy_egui::egui;
 use space_shared::{Galaxy, StarSystem};
@@ -240,7 +240,7 @@ fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Cru
     } else {
         // A remote system, never generated whole here: its host is in the
         // planet's ID, though not a triple's pair above it.
-        let name = crate::galaxy_nav::label(galaxy, star);
+        let name = crate::navigation::galaxy_nav::label(galaxy, star);
         trail.push(Crumb {
             level: Level::Star,
             label: objects::member_label(&name, &objects::system_letters(star)),

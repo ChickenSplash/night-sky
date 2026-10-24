@@ -28,8 +28,9 @@ Compression balances individual bodies, not the galaxy. Neither is persisted.
 See [realistic rendering](rendering.md) for the physical model.
 
 Keys and mouse buttons are read as named actions through one binding table
-(`input.rs`), shared by the free camera and piloting, so a later controls menu
-can rebind both. The debug console's `controls` tab labels keys from it.
+(`input/mod.rs`), shared by the free camera and piloting (`input/pilot.rs`), so
+a later controls menu can rebind both. The debug console's `controls` tab
+labels keys from it.
 
 ## Piloting
 

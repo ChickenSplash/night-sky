@@ -4,7 +4,7 @@ use super::{
     frames::page_frame,
 };
 use crate::input::{Action, Actions};
-use crate::presentation::PresentationMode;
+use crate::navigation::presentation::PresentationMode;
 use crate::{Clock, Navigation, Universe};
 use bevy::{
     input::mouse::AccumulatedMouseMotion,
@@ -56,7 +56,7 @@ pub(super) fn ease_thrust(thrust: Vec4, wanted: Vec4, dt: f32) -> Vec4 {
 pub fn controls(
     time: Res<Time>,
     actions: Res<Actions>,
-    pilot: Res<crate::pilot::Pilot>,
+    pilot: Res<crate::input::pilot::Pilot>,
     motion: Res<AccumulatedMouseMotion>,
     rig: Res<CameraRig>,
     pose: Res<CameraPose>,
@@ -124,7 +124,7 @@ pub fn controls(
     }
     let mut wanted = Vec4::ZERO;
     if actions.just_pressed(Action::Visit) {
-        crate::galaxy_nav::visit_selected(&mut nav, &universe.0);
+        crate::navigation::galaxy_nav::visit_selected(&mut nav, &universe.0);
     }
     if actions.just_pressed(Action::Pause) {
         clock.0.paused = !clock.0.paused;

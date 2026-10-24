@@ -5,7 +5,7 @@ use super::{
     frames::{page_frame, page_offsets, spin_basis},
     location::{LEAVE_FACTOR, WIDE_METRES, body_range},
 };
-use crate::presentation::{PresentationMode, TableLayout};
+use crate::navigation::presentation::{PresentationMode, TableLayout};
 use crate::render::{self, Illumination, Lights, MAX_LIGHTS, Photometry, PlanetLight, StarLight};
 use crate::{Clock, Navigation, Universe};
 use bevy::{
@@ -432,7 +432,12 @@ impl Canvas<'_> {
                 point,
                 depth: self.depth(centre),
                 radius: star.and_then(|(_, pixels)| *pixels).unwrap_or(0.0).max(5.0),
-                label: crate::objects::page_member_label(self.galaxy, system, pose.page, id),
+                label: crate::navigation::objects::page_member_label(
+                    self.galaxy,
+                    system,
+                    pose.page,
+                    id,
+                ),
                 colour: star.map_or(BARYCENTRE_COLOUR, |(body, _)| body.colour),
                 object,
             });
@@ -676,7 +681,7 @@ impl Canvas<'_> {
             }
             if self.nav.overlay(self.nav.predicted_paths)
                 && self.nav.selection == Some(crate::Selection::Craft(live.craft.id.clone()))
-                && live.star() == crate::objects::star_id(self.system, self.pose.page)
+                && live.star() == crate::navigation::objects::star_id(self.system, self.pose.page)
             {
                 self.trajectory(gizmos, live);
             }

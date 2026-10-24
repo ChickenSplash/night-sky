@@ -3,7 +3,7 @@
 //! camera.
 //! - A chunk splits where its flat facets would stray more than
 //!   `SPLIT_PIXELS` on screen from the ground they stand for, so the drawn
-//!   ground meets the air's (`atmosphere.wgsl`) on any planet, at any zoom.
+//!   ground meets the air's (`atmosphere/atmosphere.wgsl`) on any planet, at any zoom.
 //! - Each vertex blends towards its parent level's surface as that level's
 //!   split distance nears, so chunks neither pop as they split nor crack
 //!   against coarser neighbours. Skirts hang under chunk edges for what

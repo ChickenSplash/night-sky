@@ -3,8 +3,8 @@ use crate::{
     Navigation,
     actions::{GalaxyReference, UiCommand},
     craft::Now,
-    objects::{self, ObjectRef},
-    presentation::PresentationMode,
+    navigation::objects::{self, ObjectRef},
+    navigation::presentation::PresentationMode,
     stars::stream::Starfield,
     ui::breadcrumb::Inspection,
     ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, LINK, halo_text, halo_wrapped_text},
@@ -73,7 +73,8 @@ pub(crate) fn position_ly(
 ) -> Option<DVec3> {
     match object {
         ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
-            crate::galaxy_nav::selectable_star(nav, galaxy, field, id).map(|star| star.position_ly)
+            crate::navigation::galaxy_nav::selectable_star(nav, galaxy, field, id)
+                .map(|star| star.position_ly)
         }
         _ => None,
     }
@@ -116,7 +117,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
         ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
             let key = space_simulation::star::multiple::system_key(id);
             if let Some((system, page)) = objects::system(galaxy, key) {
-                let name = crate::galaxy_nav::label(galaxy, key);
+                let name = crate::navigation::galaxy_nav::label(galaxy, key);
                 let velocity = position_ly.map(|at| velocity_kms(key, at));
                 // The system as a whole is its outermost barycentre.
                 let member = if id == key {
@@ -372,7 +373,7 @@ pub fn actions(
         ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
             // Any member acts for its whole system.
             let id = &space_simulation::star::multiple::system_key(id).to_owned();
-            if !crate::galaxy_nav::reachable(nav, galaxy, field, id) {
+            if !crate::navigation::galaxy_nav::reachable(nav, galaxy, field, id) {
                 return Vec::new();
             }
             let here = visited_star.as_deref() == Some(id.as_str());
@@ -412,8 +413,9 @@ pub fn actions(
                 .system(galaxy)
                 .is_some_and(|system| system.planets.iter().any(|planet| planet.id == *id));
             let reachable = local
-                || objects::parent_star(id)
-                    .is_some_and(|star| crate::galaxy_nav::reachable(nav, galaxy, field, star));
+                || objects::parent_star(id).is_some_and(|star| {
+                    crate::navigation::galaxy_nav::reachable(nav, galaxy, field, star)
+                });
             if !reachable {
                 return Vec::new();
             }
@@ -447,7 +449,7 @@ fn list_pages(id: &str, nav: &Navigation, galaxy: &Galaxy) -> Option<(Vec<Action
     let pages = system.pages();
     let current_page = nav
         .selected_star()
-        .and_then(|star| crate::galaxy_nav::mapped(galaxy, &star.id))
+        .and_then(|star| crate::navigation::galaxy_nav::mapped(galaxy, &star.id))
         .filter(|(list, _)| *list == index)
         .map(|(_, page)| page)
         .or_else(|| (nav.list() == Some(index)).then_some(nav.page));
@@ -712,7 +714,8 @@ mod tests {
                 assert_eq!(button["current"], action.current);
                 assert_eq!(button["available"], true);
                 let parsed =
-                    crate::command_line::parse(&button["commands"][0].to_string()).unwrap();
+                    crate::devtools::command_line::parse(&button["commands"][0].to_string())
+                        .unwrap();
                 assert_eq!(parsed, action.command);
             }
             assert_eq!(

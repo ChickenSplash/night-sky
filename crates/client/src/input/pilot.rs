@@ -3,7 +3,7 @@
 //! by hand takes the same orders, keyed by step, as the CLI and autopilot give.
 use crate::craft::{Fleet, Live, Order};
 use crate::input::{Action, Actions, Bindings};
-use crate::{Clock, Navigation, presentation::PresentationMode};
+use crate::{Clock, Navigation, navigation::presentation::PresentationMode};
 use bevy::{
     input::mouse::AccumulatedMouseMotion,
     prelude::*,

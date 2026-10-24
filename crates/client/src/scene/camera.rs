@@ -1,7 +1,7 @@
 //! The displayed camera: its pose, the rig that flies it towards
 //! `Navigation`, and its measured velocity.
 use super::controls::CameraMotion;
-use crate::flight::{Flight, Pose};
+use crate::navigation::flight::{Flight, Pose};
 use bevy::{math::DVec3, prelude::*};
 use space_simulation::LY_METRES;
 

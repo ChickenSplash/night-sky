@@ -1,5 +1,8 @@
 //! An opt-in graphical integration smoke test, also useful for visual regression review.
-use crate::{Clock, Navigation, Universe, Visit, presentation::PresentationMode, scene::CameraRig};
+use crate::{
+    Clock, Navigation, Universe, Visit, navigation::presentation::PresentationMode,
+    scene::CameraRig,
+};
 use bevy::{
     app::AppExit,
     prelude::*,

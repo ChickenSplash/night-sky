@@ -56,7 +56,7 @@ to `crates/client/src/`.
 - Remote crumbs use `objects::system_letters` (stars only, cached) and the
   host encoded in the planet ID, never a whole generated system per frame.
   New object kinds extend `ObjectRef` (`space_simulation::objects`, re-exported
-  by client `objects`), search registry, hierarchy builders and inspector
+  by client `navigation::objects`), search registry, hierarchy builders and inspector
   resolution. Moons do not yet exist.
 - `UiCommand::Up` is separate keyboard navigation: reframe tracking, else
   clear selection, else move up physically; crumbs contain no travel code.

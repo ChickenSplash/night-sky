@@ -22,13 +22,13 @@ for implementation details.
 | Craft model, gravity, integration and live craft | `crates/simulation/src/craft.rs`, client `craft.rs` | [Craft](docs/simulation/craft.md) |
 | Object registry, queries and search | `crates/simulation/src/search`, client `search/` | [Search](docs/simulation/search.md) |
 | Lists, pages, tasks and wire models | `crates/shared`, simulation and client | [Information overlay](docs/shared/information-overlay.md) |
-| Visits, selection, camera and presentation | Client `navigation.rs`, `scene/`, `galaxy_nav.rs`, `presentation.rs` | [Navigation](docs/client/navigation.md) |
+| Visits, selection, camera and presentation | Client `navigation/`, `scene/` | [Navigation](docs/client/navigation.md) |
 | Visible-star loading and spatial queries | Client `stars/stream/`, simulation `galaxy/` | [Streaming](docs/client/streaming.md) |
 | Bodies, lighting, star points and galaxy glow | Client `render/`, `stars/` | [Rendering](docs/client/rendering.md), [galactic rendering](docs/client/galactic-rendering.md) |
-| Key bindings and piloting | Client `input.rs`, `pilot.rs` | [Controls](docs/client/controls.md) |
+| Key bindings and piloting | Client `input/` | [Controls](docs/client/controls.md) |
 | HUD, breadcrumbs, inspector and panels | Client `ui/` | [Interface](docs/client/ui/interface.md), [controls](docs/client/controls.md), [browser](docs/client/ui/browser.md) |
 | Reusable widgets, themes and interaction | Client `ui/kit/`, `ui/terminal.rs` | [UI kit](docs/client/ui/kit.md) |
-| Debug console, snapshots, API and CLI | Client `devtools/`, `command_line.rs`, `scripts/ns`, `scripts/ns-tui` | [Diagnostics](docs/client/devtools.md), [developer API](docs/client/developer-api.md), [benchmarks](docs/client/benchmarks.md) |
+| Debug console, snapshots, API and CLI | Client `devtools/`, `scripts/ns`, `scripts/ns-tui` | [Diagnostics](docs/client/devtools.md), [developer API](docs/client/developer-api.md), [benchmarks](docs/client/benchmarks.md) |
 | Demo backend and web serving | `crates/server` | [Backend](docs/server/backend.md) |
 | Builds, tests, logs and file moves | Workspace and `scripts/` | [Development](docs/development.md) |
 

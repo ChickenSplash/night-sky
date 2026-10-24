@@ -261,7 +261,7 @@ scale.
 - **Code today:** `render/bodies.rs` (pooled body meshes, the UV sphere for
   stars), `render/ground.rs` and `render/ground.wgsl` (planet ground),
   `crates/simulation/src/system/surface.rs` (`height`, `ground`),
-  `render/body.wgsl`, `render/atmosphere.wgsl`, `scene/controls.rs` (free
+  `render/body.wgsl`, `render/atmosphere/atmosphere.wgsl`, `scene/controls.rs` (free
   flight), `scene/placement.rs` (anchor carry, near plane, render scale),
   `scene/camera.rs`, `crates/simulation/src/system/generation.rs` (`planet_spin`),
   `crates/simulation/src/star/mod.rs` (star spins), `space_shared::Spin`.

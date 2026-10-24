@@ -100,7 +100,7 @@ Keep the native side of every branch and drop the `cfg`. Files:
   tooltip without "native only").
 - devtools: `mod.rs`, `snapshot.rs`, `capture.rs`, `gpu_test.rs`,
   `core_load.rs`, `tabs/tools.rs`, `tabs/perf.rs` (threads row and buttons,
-  GPU pass timings), `command_line.rs`.
+  GPU pass timings), `devtools/command_line.rs`.
 - Remove every `cfg_attr(target_arch = "wasm32", allow(dead_code))` and
   `cfg_attr(not(...), allow(dead_code))`; fix any real dead code they hid.
 - `crates/simulation`: `craft/voyage.rs` `threads()`,

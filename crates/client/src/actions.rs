@@ -1,7 +1,7 @@
 //! Every panel action goes through `UiCommand`, whether it comes from egui or a
 //! browser test script (`automation.rs`). Lists and tasks are named by ID, so a
 //! data refresh that reorders them cannot redirect a click.
-use crate::{Clock, Navigation, Selection, Universe, presentation::PresentationMode};
+use crate::{Clock, Navigation, Selection, Universe, navigation::presentation::PresentationMode};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -146,7 +146,7 @@ pub enum UiCommand {
         switch: crate::render::debug::DebugSwitch,
         on: bool,
     },
-    /// The prototype atmosphere's preset, values and steps (`render/atmosphere.rs`).
+    /// The prototype atmosphere's preset, values and steps (`render/atmosphere/mod.rs`).
     SetAtmosphere(crate::render::atmosphere::AtmosphereChange),
     /// Search from the camera and show the request in the object browser,
     /// replacing the one it shows (`search.rs`). In `ns search` text.
@@ -294,12 +294,12 @@ impl UiCommand {
                 .ok_or_else(|| format!("Unknown list `{id}`. Lists are under `state lists`."))
         };
         let planet = |id: &str| {
-            crate::objects::planet(galaxy, id)
+            crate::navigation::objects::planet(galaxy, id)
                 .map(|_| ())
                 .ok_or_else(|| format!("Unknown planet `{id}`. Planet IDs are `<star>/<n>`."))
         };
         let star = |id: &str| {
-            if crate::galaxy_nav::reachable(nav, galaxy, field, id) {
+            if crate::navigation::galaxy_nav::reachable(nav, galaxy, field, id) {
                 Ok(())
             } else {
                 Err(format!(
@@ -319,8 +319,8 @@ impl UiCommand {
         match self {
             UiCommand::PickStar { id } => {
                 if nav.selected_star().is_some_and(|star| star.id == *id)
-                    || crate::galaxy_nav::picked_id(field, id).is_some()
-                    || crate::galaxy_nav::mapped(galaxy, id).is_some()
+                    || crate::navigation::galaxy_nav::picked_id(field, id).is_some()
+                    || crate::navigation::galaxy_nav::mapped(galaxy, id).is_some()
                 {
                     Ok(())
                 } else {
@@ -328,7 +328,7 @@ impl UiCommand {
                 }
             }
             UiCommand::SelectStar { id } => {
-                crate::galaxy_nav::selectable_star(nav, galaxy, field, id)
+                crate::navigation::galaxy_nav::selectable_star(nav, galaxy, field, id)
                     .map(|_| ())
                     .ok_or_else(|| {
                         format!("Star `{id}` is not loaded, visited, mapped or found by search")
@@ -376,7 +376,7 @@ impl UiCommand {
                 let local = nav
                     .system(galaxy)
                     .is_some_and(|system| system.planets.iter().any(|body| body.id == *id));
-                match crate::objects::parent_star(id) {
+                match crate::navigation::objects::parent_star(id) {
                     _ if local => Ok(()),
                     Some(parent) => star(parent),
                     None => Err(format!("Planet `{id}` names no star")),
@@ -469,7 +469,7 @@ fn spawn_body(
     }
     nav.location_body.clone().or_else(|| {
         nav.system(galaxy)
-            .map(|system| crate::objects::star_id(system, nav.page))
+            .map(|system| crate::navigation::objects::star_id(system, nav.page))
     })
 }
 
@@ -544,18 +544,27 @@ pub fn apply(
         match &command {
             UiCommand::PickStar { id } => {
                 if nav.selected_star().is_some_and(|star| star.id == *id) {
-                    crate::galaxy_nav::visit_selected(&mut nav, galaxy);
-                } else if let Some(star) = crate::galaxy_nav::picked_id(&field, id).or_else(|| {
-                    // A list's stars are known without streaming them.
-                    crate::galaxy_nav::mapped(galaxy, id).and_then(|(list, page)| {
-                        crate::galaxy_nav::page_pick(&galaxy.systems[list], page)
+                    crate::navigation::galaxy_nav::visit_selected(&mut nav, galaxy);
+                } else if let Some(star) = crate::navigation::galaxy_nav::picked_id(&field, id)
+                    .or_else(|| {
+                        // A list's stars are known without streaming them.
+                        crate::navigation::galaxy_nav::mapped(galaxy, id).and_then(
+                            |(list, page)| {
+                                crate::navigation::galaxy_nav::page_pick(
+                                    &galaxy.systems[list],
+                                    page,
+                                )
+                            },
+                        )
                     })
-                }) {
+                {
                     nav.select(Some(Selection::Star(star)));
                 }
             }
             UiCommand::SelectStar { id } => {
-                if let Some(star) = crate::galaxy_nav::selectable_star(&nav, galaxy, &field, id) {
+                if let Some(star) =
+                    crate::navigation::galaxy_nav::selectable_star(&nav, galaxy, &field, id)
+                {
                     nav.select(Some(Selection::Star(star)));
                 }
             }
@@ -580,7 +589,7 @@ pub fn apply(
                 }
             }
             UiCommand::Inspect { planet } => {
-                if crate::objects::planet(galaxy, planet).is_some() {
+                if crate::navigation::objects::planet(galaxy, planet).is_some() {
                     let local = nav.system(galaxy).is_some_and(|system| {
                         system
                             .planets
@@ -609,14 +618,14 @@ pub fn apply(
                 id,
                 presentation_mode,
             } => {
-                if crate::galaxy_nav::visit_star(&mut nav, galaxy, &field, id)
+                if crate::navigation::galaxy_nav::visit_star(&mut nav, galaxy, &field, id)
                     && *presentation_mode != PresentationMode::Simulation
                 {
                     nav.preset(*presentation_mode, galaxy);
                     if *presentation_mode == PresentationMode::Constellation {
-                        let star = nav
-                            .system(galaxy)
-                            .and_then(|system| crate::galaxy_nav::page_pick(system, nav.page));
+                        let star = nav.system(galaxy).and_then(|system| {
+                            crate::navigation::galaxy_nav::page_pick(system, nav.page)
+                        });
                         nav.select(star.map(Selection::Star));
                     }
                 }
@@ -625,9 +634,12 @@ pub fn apply(
                 let local = nav
                     .system(galaxy)
                     .is_some_and(|system| system.planets.iter().any(|body| body.id == *planet));
-                if crate::objects::planet(galaxy, planet).is_some()
-                    && let Some(star) = crate::objects::parent_star(planet)
-                    && (local || crate::galaxy_nav::visit_star(&mut nav, galaxy, &field, star))
+                if crate::navigation::objects::planet(galaxy, planet).is_some()
+                    && let Some(star) = crate::navigation::objects::parent_star(planet)
+                    && (local
+                        || crate::navigation::galaxy_nav::visit_star(
+                            &mut nav, galaxy, &field, star,
+                        ))
                 {
                     nav.select(Some(Selection::Planet(planet.clone())));
                     nav.focus_selected(galaxy);

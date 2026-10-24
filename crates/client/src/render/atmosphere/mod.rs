@@ -1,9 +1,15 @@
 //! Planetary atmospheres: a scattering shell around a planet's disc
 //! (`atmosphere.wgsl`). The shell mesh only chooses which pixels run the
 //! shader; the shader finds the ground and the top of the air itself.
+mod multiple;
+#[cfg(test)]
+mod reference;
+pub mod tables;
+
+use tables::{AtmosphereTables, Tables};
+
 use super::{
     MAX_LIGHTS,
-    atmosphere_tables::{AtmosphereTables, Tables},
     bodies::{Meshes, Pool, SpaceCameraCell, grow, hide, place},
     resolve::Frame,
 };
@@ -156,7 +162,7 @@ impl AirSettings {
                 haze_asymmetry: 0.7,
                 // Sulphuric acid droplets barely absorb: this lets about 3%
                 // of the starlight reach the ground, averaged over the
-                // planet, as measured on Venus (`atmosphere_reference.rs`).
+                // planet, as measured on Venus (`reference.rs`).
                 haze_absorbed: 0.005,
                 ..clear
             },
@@ -428,12 +434,12 @@ pub struct AtmosphereMaterial {
     lights: [Vec4; MAX_LIGHTS],
     #[uniform(0)]
     suns: [Vec4; MAX_LIGHTS],
-    /// Optical depth to the top of the air (`atmosphere_tables.rs`); without
+    /// Optical depth to the top of the air (`tables.rs`); without
     /// it the shader marches towards each star instead.
     #[texture(1)]
     #[sampler(2)]
     transmittance: Option<Handle<Image>>,
-    /// The multiple scattering's tables (`atmosphere_multiple.rs`), read
+    /// The multiple scattering's tables (`multiple.rs`), read
     /// with the transmittance's sampler: the thinned air's transmittance for
     /// the starlight, the light scattered more than once and its flow.
     #[texture(3)]

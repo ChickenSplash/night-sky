@@ -350,7 +350,7 @@ mod tests {
             nav.selection = Some(crate::Selection::Planet(planet));
             nav.inspection = Some(crate::ui::breadcrumb::Inspection {
                 source: crate::ui::breadcrumb::TrailSource::Location,
-                object: crate::objects::ObjectRef::Galaxy,
+                object: crate::navigation::objects::ObjectRef::Galaxy,
             });
         }
         {

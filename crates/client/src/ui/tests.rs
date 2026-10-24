@@ -698,7 +698,7 @@ fn star_and_barycentre_markers_show_the_selection() {
     };
     let root = system.barycentres_on(page).last().unwrap().id.clone();
     let star = system.stars_on(page).last().unwrap().id.clone();
-    let pick = |id: String| crate::galaxy_nav::PickedStar {
+    let pick = |id: String| crate::navigation::galaxy_nav::PickedStar {
         id,
         position_ly: bevy::math::DVec3::ZERO,
     };
@@ -715,7 +715,7 @@ fn star_and_barycentre_markers_show_the_selection() {
     assert!(!selected(&nav, Marked::Star(star.clone())));
 
     // Selecting the system as a whole is selecting its outermost pair.
-    let whole = crate::objects::star_id(system, page);
+    let whole = crate::navigation::objects::star_id(system, page);
     nav.select(Some(Selection::Star(pick(whole))));
     assert!(selected(&nav, Marked::Barycentre(root)));
     assert!(!selected(&nav, Marked::Star(star)));
@@ -733,7 +733,7 @@ fn marker(object: crate::scene::Marked, x: f32, depth: f32) -> crate::scene::Mar
 }
 
 fn shown(markers: &[crate::scene::Marker], selected: &[bool]) -> Vec<bool> {
-    use crate::presentation::PresentationMode;
+    use crate::navigation::presentation::PresentationMode;
     super::canvas::shown(markers, selected, PresentationMode::Simulation, 1.0)
 }
 
@@ -791,7 +791,7 @@ fn crowded_markers_give_way_by_rank() {
 
 #[test]
 fn the_selection_is_never_hidden_and_tables_hide_nothing() {
-    use crate::{presentation::PresentationMode, scene::Marked};
+    use crate::{navigation::presentation::PresentationMode, scene::Marked};
     let markers = [
         marker(Marked::Star("s".into()), 100.0, 1.0),
         marker(Marked::Planet(0), 105.0, 1.0),

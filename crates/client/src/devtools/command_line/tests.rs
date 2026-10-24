@@ -1,6 +1,6 @@
 use super::*;
 use crate::actions::{Display, GalaxyReference};
-use crate::presentation::PresentationMode;
+use crate::navigation::presentation::PresentationMode;
 
 #[test]
 fn removed_readable_sizes_option_is_rejected() {

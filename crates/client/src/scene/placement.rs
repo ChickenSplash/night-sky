@@ -3,8 +3,8 @@ use super::{
     camera::{CameraPose, CameraRig, SpaceCamera},
     frames::{page_frame, page_origin_ly},
 };
-use crate::flight::{Flight, Pose, STAR_JUMP_SECONDS};
-use crate::presentation::PresentationMode;
+use crate::navigation::flight::{Flight, Pose, STAR_JUMP_SECONDS};
+use crate::navigation::presentation::PresentationMode;
 use crate::{Clock, Navigation, Universe};
 use bevy::{
     math::{DQuat, DVec3},
@@ -58,7 +58,7 @@ pub fn place_camera(
             .map_or(DQuat::IDENTITY, |s| page_frame(s, nav.page));
         let same = nav
             .system(&universe.0)
-            .is_some_and(|s| crate::objects::star_id(s, nav.page) == live.star());
+            .is_some_and(|s| crate::navigation::objects::star_id(s, nav.page) == live.star());
         if !same {
             nav.rotation =
                 ((live.basis().inverse() * old_basis).as_quat() * nav.rotation).normalize();

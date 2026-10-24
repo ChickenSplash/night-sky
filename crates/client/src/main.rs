@@ -1,16 +1,10 @@
 mod actions;
-mod command_line;
 mod craft;
 mod devtools;
-mod flight;
 mod format;
-mod galaxy_nav;
 mod input;
 mod navigation;
 mod network;
-mod objects;
-mod pilot;
-mod presentation;
 mod render;
 mod scene;
 mod search;
@@ -80,7 +74,7 @@ fn main() {
         stars::starfield::StarfieldRenderPlugin,
         render::glow::GlowPlugin,
         render::black_hole::BlackHolePlugin,
-        command_line::CommandLinePlugin,
+        devtools::command_line::CommandLinePlugin,
         search::SearchPlugin,
         ui::browser::BrowserPlugin,
     ))
@@ -96,7 +90,7 @@ fn main() {
     .init_resource::<craft::Fleet>()
     .init_resource::<input::Bindings>()
     .init_resource::<input::Actions>()
-    .init_resource::<pilot::Pilot>()
+    .init_resource::<input::pilot::Pilot>()
     .init_resource::<devtools::DevTools>()
     .init_resource::<devtools::core_load::CoreLoad>()
     .init_resource::<devtools::gpu_test::GpuTest>()
@@ -116,8 +110,8 @@ fn main() {
             receive_galaxy,
             actions::apply,
             input::read,
-            pilot::steer,
-            pilot::fly,
+            input::pilot::steer,
+            input::pilot::fly,
             tick,
             craft::step,
             craft::forecast,

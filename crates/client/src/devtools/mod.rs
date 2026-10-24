@@ -3,6 +3,7 @@
 //! The cog, ` or F3 toggles it. Drawn in the terminal look.
 pub mod atmosphere_test;
 mod capture;
+pub mod command_line;
 pub mod core_load;
 pub mod diagnostics;
 pub mod gpu_test;
@@ -11,8 +12,8 @@ pub mod smoke;
 pub mod snapshot;
 mod tabs;
 
+use self::command_line::{Source, Typed};
 use crate::actions::UiCommand;
-use crate::command_line::{Source, Typed};
 use crate::devtools::atmosphere_test::AtmosphereTest;
 use crate::devtools::core_load::CoreLoad;
 use crate::devtools::gpu_test::GpuTest;

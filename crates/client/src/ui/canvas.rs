@@ -3,7 +3,7 @@
 use super::kit::ACCENT;
 use super::pointer_captured;
 use crate::actions::UiCommand;
-use crate::presentation::PresentationMode;
+use crate::navigation::presentation::PresentationMode;
 use crate::{
     Navigation,
     scene::{CameraPose, CameraRig, CameraVelocity, Marked, Marker, Markers},
@@ -79,7 +79,7 @@ pub(super) fn canvas_overlay(
             painter.text(
                 point + egui::vec2(16.0, -8.0),
                 egui::Align2::LEFT_CENTER,
-                crate::galaxy_nav::label(galaxy, &star.id),
+                crate::navigation::galaxy_nav::label(galaxy, &star.id),
                 egui::FontId::proportional(12.0),
                 ACCENT,
             );
@@ -202,7 +202,7 @@ pub(super) fn canvas_overlay(
     // Any other click picks from the streamed galaxy, list pages included.
     if click
         && let Some(pointer) = pointer.filter(|p| rect.contains(*p))
-        && let Some(star) = crate::galaxy_nav::pick_pointer(
+        && let Some(star) = crate::navigation::galaxy_nav::pick_pointer(
             field,
             rig,
             pose,
@@ -311,7 +311,8 @@ pub(super) fn selected(
             nav.selected_barycentre() == Some(id.as_str())
                 || system.is_some_and(|system| {
                     system.root(nav.page) == Some(id.as_str())
-                        && star == Some(crate::objects::star_id(system, nav.page).as_str())
+                        && star
+                            == Some(crate::navigation::objects::star_id(system, nav.page).as_str())
                 })
         }
     }

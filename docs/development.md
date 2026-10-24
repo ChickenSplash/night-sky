@@ -21,18 +21,20 @@ by default; `NIGHT_SKY_API=0 ./scripts/run.sh` disables it for that run.
 ```text
 crates/client/       Bevy client and egui interface
   src/main.rs        Entry point and system scheduling
-  src/navigation.rs  Destination, visits and selection
+  src/navigation/    Destination, visits, picking, camera flights, presentation and identities
+  src/input/         Named bindings, input capture and ship piloting
   src/format.rs      Shared text formatting
   src/search/        Object search requests, settings and the shared store
   src/scene/         Camera, controls, location, placement and wireframes
   src/stars/         Galactic star streaming, batching, drawing and shaders
     stream/          Loader thread backend and streaming metrics
   src/render/        Bodies, exposure, glow, black hole and shaders
+    atmosphere/      Air settings, scattering tables, reference tests and shell shader
   src/ui/            HUD, breadcrumbs, inspector, tasks and the debug console's skin
   src/ui/kit/        Shared themes, controls, windows, scrolling, animation and halo text
   src/ui/browser/    Object browser: query chips, filter picker, results
   src/ui/tasks/      Task-panel regression tests
-  src/devtools/      Debug window, tests, benchmarks and diagnostics
+  src/devtools/      Debug window, typed commands, tests, benchmarks and diagnostics
     tabs/            One module per debug tab
 crates/server/       Axum demo galaxy API
 crates/shared/       Serializable models
@@ -74,6 +76,13 @@ than making every generator depend on planetary generation for its RNG.
 Photometry stays separate because it covers both emitted and reflected light.
 The crate root is a facade with explicit exports for common operations and
 types, not an implementation file; specialist APIs use their domain paths.
+
+Client `navigation/` owns destinations and selection plus star picking, camera
+flight paths, presentation layouts and inspection identity helpers. `scene/`
+owns the displayed camera, physical location and drawing. Named key bindings
+and piloting live in `input/`; `scene/controls.rs` applies those named actions
+to the free camera. Typed command parsing lives in `devtools/command_line.rs`
+and still sends the same `UiCommand` messages as panels.
 
 The [UI kit guide](client/ui/kit.md) describes module ownership, shared interaction
 rules and how to add controls without duplicating theme or animation logic.

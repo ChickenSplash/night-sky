@@ -6,7 +6,7 @@
 //! `data/logs/atmosphere-test.jsonl`.
 
 use super::gpu_test::{commit, gpu_times, mean, percentile, save};
-use crate::presentation::PresentationMode;
+use crate::navigation::presentation::PresentationMode;
 use crate::render::atmosphere::{AtmosphereChange, AtmosphereTuning, Preset};
 use crate::render::debug::RenderDebug;
 use crate::scene::CameraRig;

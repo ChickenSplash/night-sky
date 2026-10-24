@@ -2,6 +2,8 @@
 //! Systems ask whether an action is held, never which key it is on, so the
 //! table can later be saved and edited by a controls menu. The free camera
 //! and piloting share the table: most actions mean the same in both.
+pub mod pilot;
+
 use bevy::{
     input::mouse::{MouseScrollUnit, MouseWheel},
     prelude::*,

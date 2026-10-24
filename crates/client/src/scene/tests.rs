@@ -1,7 +1,7 @@
 use super::*;
-use crate::flight::Pose;
 use crate::format::speed_label;
-use crate::presentation::PresentationMode;
+use crate::navigation::flight::Pose;
+use crate::navigation::presentation::PresentationMode;
 use crate::{Clock, Navigation, Universe};
 use bevy::math::{DQuat, DVec3};
 use space_shared::{Orbit, Spin, StarSystem};

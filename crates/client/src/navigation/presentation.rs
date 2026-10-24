@@ -138,7 +138,9 @@ impl Navigation {
             return;
         };
         if self.presentation_mode == PresentationMode::Constellation {
-            self.select(crate::galaxy_nav::page_pick(system, page).map(Selection::Star));
+            self.select(
+                crate::navigation::galaxy_nav::page_pick(system, page).map(Selection::Star),
+            );
             self.page = page;
             return;
         }

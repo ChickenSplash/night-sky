@@ -41,7 +41,7 @@ fn uncharted_star() -> CellStar {
         .flat_map(|cell| (0..4).map(move |i| (cell, i)))
         .find_map(|(cell, i)| {
             let star = sky.cell_star_at(cell, i)?;
-            crate::objects::known_system(&galaxy, &star.id)
+            crate::navigation::objects::known_system(&galaxy, &star.id)
                 .is_none()
                 .then_some(star)
         })

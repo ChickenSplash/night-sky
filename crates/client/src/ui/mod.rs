@@ -29,7 +29,7 @@ type CameraState<'w> = (
     Res<'w, CameraPose>,
     Res<'w, crate::stars::stream::Starfield>,
     Res<'w, crate::craft::Fleet>,
-    Res<'w, crate::pilot::Pilot>,
+    Res<'w, crate::input::pilot::Pilot>,
     Res<'w, crate::input::Bindings>,
 );
 
@@ -131,7 +131,7 @@ pub fn draw_ui(
         &mut out,
     );
     if let Some(live) = pilot.ship.as_deref().and_then(|id| fleet.get(id)) {
-        hud::pilot_readout(ctx, rect, &crate::pilot::readout(live, &bindings));
+        hud::pilot_readout(ctx, rect, &crate::input::pilot::readout(live, &bindings));
     }
     if let Some(stick) = &pilot.stick {
         hud::stick_reticle(ctx, stick);

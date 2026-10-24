@@ -7,9 +7,9 @@
 //! today. One colour channel at a time, positions in planet radii, starlight
 //! of 1 across its beam at the top of the air, a grey Lambertian ground.
 use super::{
-    atmosphere::{Air, AirSettings, Preset},
-    atmosphere_multiple::{multiple, seen, starlight, thinned},
-    atmosphere_tables::{depths, extinction, sample},
+    Air, AirSettings, Preset,
+    multiple::{multiple, seen, starlight, thinned},
+    tables::{depths, extinction, sample},
 };
 use bevy::math::DVec3;
 use std::f64::consts::PI;
@@ -112,7 +112,7 @@ struct Reference {
     /// The most extinction anywhere in the air, for delta tracking.
     majorant: f64,
     /// Optical depth to the top of the air, for the starlight reaching each
-    /// event (`atmosphere_tables.rs`, tested against a fine march).
+    /// event (`tables.rs`, tested against a fine march).
     table: Vec<DVec3>,
     ground_albedo: f64,
 }
@@ -341,7 +341,7 @@ fn scattering_once_matches_the_march() {
 /// The measurement multiple scattering is built against: for each preset,
 /// the light reaching the ground and the sky's brightness, by scattering
 /// order. Minutes; run with
-/// `cargo test --release -p space-client atmosphere_reference -- --ignored --nocapture`.
+/// `cargo test --release -p space-client atmosphere::reference -- --ignored --nocapture`.
 #[test]
 #[ignore = "measurement, minutes in release"]
 fn measure_multiple_scattering() {

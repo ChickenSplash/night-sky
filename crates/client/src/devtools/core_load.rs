@@ -3,7 +3,7 @@
 //! every cell in reach, for before-and-after comparisons of star generation.
 
 use crate::Navigation;
-use crate::presentation::PresentationMode;
+use crate::navigation::presentation::PresentationMode;
 use crate::scene::CameraRig;
 use crate::stars::stream::{Starfield, StreamRestart};
 use bevy::{math::DVec3, platform::time::Instant, prelude::*};

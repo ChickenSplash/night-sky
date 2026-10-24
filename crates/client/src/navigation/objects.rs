@@ -92,7 +92,8 @@ pub fn system<'a>(galaxy: &'a Galaxy, star: &str) -> Option<(Cow<'a, StarSystem>
     }
     // Inspection needs properties, not a spatial position. This placeholder
     // origin must never be used for travel; visits resolve the real star position.
-    crate::galaxy_nav::generated(star, DVec3::ZERO).map(|system| (Cow::Owned(system), 0))
+    crate::navigation::galaxy_nav::generated(star, DVec3::ZERO)
+        .map(|system| (Cow::Owned(system), 0))
 }
 
 pub fn planet(galaxy: &Galaxy, id: &str) -> Option<Planet> {

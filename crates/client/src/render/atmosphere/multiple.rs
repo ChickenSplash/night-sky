@@ -8,8 +8,8 @@
 //! the grid's linear system, so light diffusing down through thick cloud
 //! (Venus, Titan) is kept. The ground is part of the system: it reflects
 //! the starlight and sky light reaching it, evenly, by its albedo.
-use super::atmosphere::Air;
-use super::atmosphere_tables::{depths, extinction, image, sample};
+use super::Air;
+use super::tables::{depths, extinction, image, sample};
 use bevy::{math::DVec3, prelude::*};
 use std::f64::consts::PI;
 
@@ -134,7 +134,7 @@ pub(super) fn images(air: Air) -> [Image; 3] {
     let mut sky = table.sky;
     sky.extend(table.ground);
     [
-        image(super::atmosphere_tables::SIZE, &thin),
+        image(super::tables::SIZE, &thin),
         image([SIZE, SIZE + 1], &sky),
         image([SIZE, SIZE], &table.up),
     ]
