@@ -195,6 +195,13 @@ pull on orbits ($J_2$).
 - Each system has its own orbital-plane tilt (`plane_tilt`), including pages
   belonging to one constellation.
 
+## Atmospheric foundation
+
+The simulation has a standalone, validated [physical atmosphere model](atmospheres.md)
+for gas mixtures, reference levels and approximate isothermal columns. It is
+not yet populated by generation or attached to planets; their class still
+does not resolve atmospheric chemistry.
+
 ## Presentation and limitations
 
 Planets retain physical radii in every presentation mode. Table layout is

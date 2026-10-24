@@ -46,8 +46,8 @@ Not planned yet: clouds, gas giant banding, aurorae, rings.
   scattering (Rayleigh, Cornette-Shanks Mie, a tent absorbing layer) in
   planet radii, energy-conserving steps (Hillaire 2015), bunched near a
   camera low in the air. Premultiplied output, grey dimming of what lies
-  behind, ground dimmed by its own lost sunlight. Air is on the selected
-  planet only, set by the `atmosphere` debug tab, `set_atmosphere` or
+  behind; ground lighting now includes filtered sunlight and skylight (4c).
+  Air is on the selected planet only, set by the `atmosphere` debug tab, `set_atmosphere` or
   `ns atmosphere`, with Earth, Venus, Mars, Titan and hydrogen giant presets.
 - **Jitter** (`atmosphere_jitter`, on by default; the user checks with it
   off and may want it off by default).
@@ -63,9 +63,10 @@ Not planned yet: clouds, gas giant banding, aurorae, rings.
 - GPU baseline (before the table, 16 / 24 view steps): the air adds 0.4 /
   0.75 ms from orbit and 0.8 to 1.8 ms from inside.
 
-## Checkpoint 4 · Multiple scattering (in progress)
+## Checkpoint 4 · Multiple scattering (complete)
 
-Venus's surface is black and Titan far too dark: single scattering only.
+Original problem: Venus's surface was black and Titan far too dark with
+single scattering only. Addressed by 4a to 4c below.
 
 ### 4a ✅ Reference (commit `499c367`)
 
@@ -226,7 +227,13 @@ approximations that can be improved independently. Generate a plausible
 present-day state, not a full formation or atmospheric-evolution simulation.
 Keep physical state, optical conversion and rendering separate.
 
-### 5a · Physical data model (start here)
+### 5a ✅ Physical data model
+
+Implemented foundation in `system/atmosphere.rs`; see the
+[physical atmosphere guide](../simulation/atmospheres.md) for current behaviour
+and limits. Not attached to generated planets or rendering. Seven focused
+tests and `./scripts/check.sh` passed (workspace tests, formatting and strict
+Clippy). Next: 5b, with generation rules agreed before implementation.
 
 - Simulation-owned atmosphere or explicit absence; no Bevy or shader settings
   in the model. Gas mole fractions (N₂, CO₂, H₂, He, H₂O, CH₄, O₂, Ar),

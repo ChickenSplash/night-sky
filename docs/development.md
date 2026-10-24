@@ -46,6 +46,7 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     stream/index.rs  Compact star cells and Morton-grid spatial queries
   src/star/          Stellar evolution and companion hierarchies
   src/system/        Planet generation, wire systems, shape and surface
+    atmosphere.rs    Physical air states and isothermal columns, not yet generated
     generation.rs    Natural planetary formation, independent of list/task placement
     overlay.rs       Optional task slots, pages and assigned-star placement
     demo.rs          Reproducible fictional overlay content

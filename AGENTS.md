@@ -18,6 +18,7 @@ for implementation details.
 | Galaxy populations and procedural cells | `crates/simulation/src/galaxy/` | [Galaxy](docs/simulation/galaxy.md) |
 | Star types, evolution and companions | `crates/simulation/src/star/` | [Stars](docs/simulation/stars.md) |
 | Planet generation, shape and ground | `crates/simulation/src/system/` | [Planetary systems](docs/simulation/planetary-systems.md) |
+| Physical atmosphere model | Simulation `system/atmosphere.rs` | [Atmospheres](docs/simulation/atmospheres.md) |
 | Orbital motion, units and clock | Simulation `orbit/`, `units.rs`, `clock.rs` | [Orbits](docs/simulation/orbits.md) |
 | Craft model, gravity, integration and live craft | `crates/simulation/src/craft.rs`, client `craft.rs` | [Craft](docs/simulation/craft.md) |
 | Object registry, queries and search | `crates/simulation/src/search`, client `search/` | [Search](docs/simulation/search.md) |

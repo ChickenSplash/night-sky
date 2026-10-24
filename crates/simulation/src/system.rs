@@ -1,5 +1,6 @@
 //! Natural systems: planetary generation, wire models and body geometry.
 
+pub mod atmosphere;
 mod demo;
 mod generated;
 mod generation;
