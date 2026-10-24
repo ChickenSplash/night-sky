@@ -5,7 +5,10 @@ use super::{
     atmosphere::{Air, Shell},
     lights::{Lights, MAX_LIGHTS, Photometry, granulation_contrast, phase},
 };
-use bevy::{math::DVec3, prelude::*};
+use bevy::{
+    math::{DVec2, DVec3},
+    prelude::*,
+};
 use space_simulation::light::{self};
 
 /// Arithmetic safety for f32 uniforms only, not an HDR cap: the shaders store
@@ -111,6 +114,8 @@ pub struct Shaded {
     /// the colour each gives a surface facing it; zero when unused.
     pub lights: [Vec4; MAX_LIGHTS],
     pub tints: [Vec4; MAX_LIGHTS],
+    /// A planet whose ground is drawn as chunks: its `GroundSource::key`.
+    pub ground: Option<u64>,
 }
 
 /// A camera-facing sprite ready for the GPU (`point.wgsl`): a point, or the
@@ -134,10 +139,98 @@ pub struct Point {
     pub axis: Vec3,
     /// A star's whole limb shines; a planet's only on its lit side.
     pub star: bool,
-    /// A disc's pole, in world axes, and its flattening: the limb is the
-    /// outline of that spheroid. Zero for a sphere.
-    pub pole: Vec3,
-    pub flattening: f32,
+    /// A disc's outline (`Outline`): its centre from the sprite's in pixels,
+    /// its short axis on the sprite, and that axis over the long one.
+    pub offset: Vec2,
+    pub outline: Vec4,
+}
+
+/// A disc's exact outline on its sprite, which faces the screen through the
+/// body's centre. The cone from the eye grazing the spheroid cuts that plane
+/// in an ellipse, off the centre when the body is off the view's axis and
+/// larger than the body close up; a plane facing the screen shows on it at
+/// one scale, so pixels on the sprite are pixels on screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Outline {
+    /// Radius across the long axis, in pixels.
+    pub pixels: f32,
+    /// Render units per pixel in the sprite's plane.
+    pub per_pixel: f32,
+    /// The ellipse's centre from the body's, in pixels on the sprite (+y down).
+    pub offset: Vec2,
+    /// The short axis on the sprite, and its length over the long one.
+    pub across: Vec2,
+    pub ratio: f32,
+}
+
+impl Outline {
+    /// `from_eye` and `radius` (equatorial) in render units, `per_pixel` at
+    /// the body's distance straight ahead, `facing` the camera's rotation.
+    /// `None` when the outline is not an ellipse in front of the camera:
+    /// from inside the body, or so close that it reaches beside the camera.
+    pub(super) fn of(
+        from_eye: Vec3,
+        radius: f32,
+        (pole, flattening): (Vec3, f32),
+        per_pixel: f32,
+        facing: Quat,
+    ) -> Option<Self> {
+        let centre = from_eye.as_dvec3();
+        let right = (facing * Vec3::X).as_dvec3();
+        let up = (facing * Vec3::Y).as_dvec3();
+        let depth = centre.dot((facing * Vec3::NEG_Z).as_dvec3());
+        if depth <= 0.0 {
+            return None;
+        }
+        let equatorial = f64::from(radius);
+        let polar = equatorial * f64::from(1.0 - flattening);
+        let pole = pole.as_dvec3().normalize_or_zero();
+        // The spheroid is the points `v` from its centre with `v·shape(v) = 1`.
+        let shape = |v: DVec3| {
+            let along = pole * v.dot(pole);
+            (v - along) / (equatorial * equatorial) + along / (polar * polar)
+        };
+        // Points `w` of the plane, on its axes, whose line of sight grazes
+        // the spheroid: `wᵀMw + 2g·w = k + 1`.
+        let eye = -centre;
+        let q = shape(eye);
+        let k = eye.dot(q) - 1.0;
+        if k <= 1e-9 {
+            return None;
+        }
+        let g = DVec2::new(right.dot(q), up.dot(q));
+        let m = [
+            k * right.dot(shape(right)) - g.x * g.x,
+            k * right.dot(shape(up)) - g.x * g.y,
+            k * up.dot(shape(up)) - g.y * g.y,
+        ];
+        let det = m[0] * m[2] - m[1] * m[1];
+        if det <= 0.0 || m[0] <= 0.0 {
+            return None;
+        }
+        let towards = DVec2::new(m[2] * g.x - m[1] * g.y, m[0] * g.y - m[1] * g.x) / det;
+        let middle = -towards;
+        let scale = k + 1.0 + g.dot(towards);
+        let mean = (m[0] + m[2]) / 2.0;
+        let spread = (((m[0] - m[2]) / 2.0).powi(2) + m[1] * m[1]).sqrt();
+        let (long, short) = (mean - spread, mean + spread);
+        let across = if m[1].abs() > 1e-12 * mean {
+            DVec2::new(m[1], short - m[0]).normalize()
+        } else if m[0] >= m[2] {
+            DVec2::X
+        } else {
+            DVec2::Y
+        };
+        let per_pixel = f64::from(per_pixel) * depth / centre.length();
+        let on_sprite = |v: DVec2| DVec2::new(v.x, -v.y);
+        Some(Self {
+            pixels: ((scale / long).sqrt() / per_pixel) as f32,
+            per_pixel: per_pixel as f32,
+            offset: (on_sprite(middle) / per_pixel).as_vec2(),
+            across: on_sprite(across).as_vec2(),
+            ratio: (long / short).sqrt() as f32,
+        })
+    }
 }
 
 /// Streaks for light peaking at `peak` (display value), tinted towards white
@@ -217,8 +310,8 @@ impl Point {
             streaks,
             axis: Vec3::ZERO,
             star: false,
-            pole: Vec3::ZERO,
-            flattening: 0.0,
+            offset: Vec2::ZERO,
+            outline: Vec4::new(0.0, 0.0, 1.0, 0.0),
         }
     }
 
@@ -258,16 +351,41 @@ impl Point {
             streaks,
             axis,
             star,
-            pole: Vec3::ZERO,
-            flattening: 0.0,
+            offset: Vec2::ZERO,
+            outline: Vec4::new(0.0, 0.0, 1.0, 0.0),
         }
     }
 
-    /// The rim of a spheroid's disc rather than a sphere's.
-    pub(super) fn flattened(self, pole: Vec3, flattening: f32) -> Self {
+    /// A rim with no light, holding a body's place among the rims while it has
+    /// no outline. Rims come and go with the view, and every sprite after one
+    /// would move to another pooled entity and show its old material for a
+    /// frame: a point's, stretched over a disc's whole sprite.
+    pub(super) fn dark(centre: Vec3) -> Self {
         Self {
-            pole,
-            flattening,
+            centre,
+            half: 1e-6,
+            colour: Vec3::ZERO,
+            shape: Vec4::new(1.0, 0.0, 1.0, 0.0),
+            edge: Vec4::ZERO,
+            streaks: Vec4::ZERO,
+            axis: Vec3::ZERO,
+            star: false,
+            offset: Vec2::ZERO,
+            outline: Vec4::new(0.0, 0.0, 1.0, 0.0),
+        }
+    }
+
+    /// A rim made for `outline.pixels` and `outline.per_pixel`, drawn on the
+    /// outline rather than a circle round the sprite's centre, and grown to
+    /// hold it.
+    pub(super) fn outlined(self, outline: &Outline) -> Self {
+        let half =
+            (self.shape.x + outline.offset.length() / 0.6).min(SPRITE_MAX_PIXELS.max(self.shape.x));
+        Self {
+            half: self.half * half / self.shape.x,
+            shape: self.shape.with_x(half),
+            offset: outline.offset,
+            outline: outline.across.extend(outline.ratio).extend(0.0),
             ..self
         }
     }
@@ -277,18 +395,6 @@ impl Point {
     pub(super) fn material(&self, facing: Quat) -> PointMaterial {
         let right = facing * Vec3::X;
         let up = facing * Vec3::Y;
-        // A spheroid's outline is an ellipse: its full radius across the
-        // pole's projection, and along it shorter the more the pole faces
-        // the sprite's side.
-        let pole = Vec2::new(self.pole.dot(right), -self.pole.dot(up));
-        let side = pole.length_squared().min(1.0);
-        let squash = 1.0 - self.flattening;
-        let outline = Vec4::new(
-            pole.normalize_or_zero().x,
-            pole.normalize_or_zero().y,
-            (1.0 - side + squash * squash * side).sqrt(),
-            0.0,
-        );
         PointMaterial {
             colour: self.colour.extend(1.0),
             shape: self.shape,
@@ -300,7 +406,8 @@ impl Point {
                 if self.star { 1.0 } else { 0.0 },
                 0.0,
             ),
-            outline,
+            outline: self.outline,
+            offset: self.offset.extend(0.0).extend(0.0),
         }
     }
 }
@@ -365,15 +472,26 @@ pub fn resolve(
             ),
             lights: [Vec4::ZERO; MAX_LIGHTS],
             tints: [Vec4::ZERO; MAX_LIGHTS],
+            ground: None,
         });
         // The corona grows in from a point, and is whiter than the surface.
         let fade = f64::from(((star.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0));
         let pearl = (colour + DVec3::splat(colour.max_element())) * 0.5;
+        let Some(outline) = Outline::of(
+            star.centre - lights.eye,
+            star.radius,
+            (star.spin * Vec3::Y, star.flattening),
+            star.per_pixel,
+            lights.facing,
+        ) else {
+            frame.rims.push(Point::dark(star.centre));
+            continue;
+        };
         frame.rims.push(
             Point::rim(
                 star.centre,
-                star.pixels,
-                star.per_pixel,
+                outline.pixels,
+                outline.per_pixel,
                 psf,
                 colour * LIMB_EDGE * value,
                 pearl * value * CORONA_SHARE * fade,
@@ -382,7 +500,7 @@ pub fn resolve(
                 true,
                 (star.kelvin * 0.618_034).fract() as f32,
             )
-            .flattened(star.spin * Vec3::Y, star.flattening),
+            .outlined(&outline),
         );
     }
     for planet in &lights.planets {
@@ -464,10 +582,22 @@ pub fn resolve(
             surface: Vec4::ZERO,
             lights: directions,
             tints,
+            ground: planet.ground,
         });
         // A blurred limb on the side facing each star; streaks only from the
         // brightest.
+        let outline = Outline::of(
+            planet.centre - lights.eye,
+            planet.radius,
+            (planet.spin * Vec3::Y, planet.flattening),
+            planet.per_pixel,
+            lights.facing,
+        );
         for (i, (towards, tint, radiance)) in shine.iter().enumerate() {
+            let Some(outline) = &outline else {
+                frame.rims.push(Point::dark(planet.centre));
+                continue;
+            };
             let colour = *tint * (exposure.value(*radiance) * balance);
             let streaks = if i == 0 {
                 streaks(colour, colour.max_element(), lights.streaks)
@@ -477,8 +607,8 @@ pub fn resolve(
             frame.rims.push(
                 Point::rim(
                     planet.centre,
-                    planet.pixels,
-                    planet.per_pixel,
+                    outline.pixels,
+                    outline.per_pixel,
                     psf,
                     colour,
                     DVec3::ZERO,
@@ -487,7 +617,7 @@ pub fn resolve(
                     false,
                     0.0,
                 )
-                .flattened(planet.spin * Vec3::Y, planet.flattening),
+                .outlined(outline),
             );
         }
     }

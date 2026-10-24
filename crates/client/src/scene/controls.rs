@@ -18,6 +18,7 @@ pub const MAX_SPEED: f64 = space_simulation::craft::warp::MAX_SPEED;
 /// Closest camera zoom (Shift + scroll), in metres, whatever is in view. The
 /// render scale comes down with it (`scale_floor`).
 pub const MIN_DISTANCE: f64 = 1.0;
+pub const MAX_DISTANCE: f64 = 40_000.0 * LY_METRES;
 
 pub(super) fn scroll_speed(speed: f64, scroll: f32) -> f64 {
     (speed * (f64::from(scroll) * 0.35).exp()).clamp(MIN_SPEED, MAX_SPEED)
@@ -83,7 +84,7 @@ pub fn controls(
         }
         if free && scroll != 0.0 {
             nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
-                .clamp(MIN_DISTANCE, 40_000.0 * LY_METRES);
+                .clamp(MIN_DISTANCE, MAX_DISTANCE);
         }
         if actions.just_pressed(Action::Pause) {
             clock.0.paused = !clock.0.paused;
@@ -114,7 +115,7 @@ pub fn controls(
             let old_eye = nav.eye.unwrap_or_else(|| tilt.inverse() * pose.eye);
             let old_distance = nav.distance;
             nav.distance = (nav.distance * (-f64::from(scroll) * 0.12).exp())
-                .clamp(MIN_DISTANCE, 40_000.0 * LY_METRES);
+                .clamp(MIN_DISTANCE, MAX_DISTANCE);
             let eye = old_eye + (nav.rotation * Vec3::Z).as_dvec3() * (nav.distance - old_distance);
             camera_motion.travel_metres += tilt * (eye - old_eye);
             nav.eye = Some(eye);

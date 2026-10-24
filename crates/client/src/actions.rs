@@ -118,6 +118,10 @@ pub enum UiCommand {
         option: Display,
         on: bool,
     },
+    /// Camera distance from what it looks at or follows, in metres.
+    SetZoom {
+        metres: f64,
+    },
     /// Vertical field of view, clamped to `FOV_DEG`.
     SetFov {
         degrees: f32,
@@ -207,6 +211,11 @@ impl UiCommand {
                 "speed",
                 *speed,
                 crate::scene::MIN_SPEED..=crate::scene::MAX_SPEED,
+            ),
+            UiCommand::SetZoom { metres } => within(
+                "metres",
+                *metres,
+                crate::scene::MIN_DISTANCE..=crate::scene::MAX_DISTANCE,
             ),
             UiCommand::SetFov { degrees } => {
                 within("degrees", *degrees, crate::navigation::FOV_DEG)
@@ -744,6 +753,7 @@ pub fn apply(
                 Display::GalaxyGlow => nav.galaxy_glow = *on,
                 Display::Wireframe => nav.wireframe = *on,
             },
+            UiCommand::SetZoom { metres } => nav.distance = *metres,
             UiCommand::SetFov { degrees } => nav.set_fov(*degrees),
             UiCommand::SetMagnitude { magnitude } => nav.set_magnitude(*magnitude),
             UiCommand::SetExposure { stops } => nav.set_exposure(*stops),

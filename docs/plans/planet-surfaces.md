@@ -40,7 +40,8 @@ and heights as well as the air's extent.
 1. **Shape** (checkpoint 1, done):
    oblateness in the simulation, bodies and air drawn as spheroids.
 2. **Landing** (checkpoints 2 to 5): a smooth spheroid ground that matches the
-   shape exactly, the surface frame, the near plane by height, and the floor.
+   shape exactly (checkpoint 2, done), the
+   surface frame, the near plane by height, and the floor.
 3. **Light on the ground:** [atmospheres 4c](atmospheres.md#4c-light-on-the-ground),
    written into the new ground shader. Then atmospheres checkpoint 5 (every
    planet with air).
@@ -142,6 +143,76 @@ Rendering:
 
 ## Checkpoint 2 · Ground that matches the shape
 
+**Done (2026-10-24):** checked live by the user, with the three fixes below.
+The canonical
+description is in [rendering](../client/rendering.md#planet-ground). What it
+does, against the proposal below:
+
+- Cube-sphere quadtree of 32 × 32-cell chunks (equi-angular), split by screen
+  error at half a logical pixel, CDLOD-style blending towards the parent
+  level in the vertex shader, skirts, horizon culling, worker-thread builds
+  with budgets and a least-recently-used cache. `/perf/ground` reports it.
+- The six roots draw the whole planet from far away: the sphere mesh is gone
+  for planets, not kept for the distant disc. Stars keep it.
+- Distance for splitting is to a chunk's bounding sphere, never less than the
+  camera's height; without that floor the chunk underfoot split to level 22.
+  On an Earth-sized planet at 1.7 m: level 12 underfoot, 84 chunks drawn.
+- Normals are the spheroid's own, not taken from the facets, so lighting has
+  no seams between levels.
+- `set_debug ground false` brings back the sphere mesh, `set_debug
+  ground_levels true` tints chunks by level, and a new `set_zoom <metres>`
+  command sets the camera's distance from what it follows, to reach the ground
+  from the developer API.
+- **Differs from the recommendation below:** chunk geometry is a vertex buffer
+  per chunk, built in f64 on the CPU. That keeps precision beside the camera
+  while heights are zero; per-chunk height and normal textures arrive with the
+  GPU generator, when there is terrain to generate.
+- **Fixed during the live check:**
+  - *Ground flicker:* chunks spawned this frame can't be placed until the
+    next, so `ready()` only counts chunks born before it (`Chunk.born`), and
+    the planet keeps its sphere until its roots can draw (`Grounds::shows`).
+  - *Brownish band and arc at the limb:* the rim sprite's pixel size was
+    measured at the centre's distance, not its own plane's, and its outline
+    was the far-away flattened ellipse. `resolve::Outline` now gives the
+    exact silhouette (the grazing cone cut by the sprite's plane, an
+    off-centre ellipse), or no rim when that is not an ellipse in front of
+    the camera.
+  - *One-frame white flash (rays at 0% compression) turning towards a
+    planet:* a side effect of the outline fix. A rim dropped while its body
+    had no outline shifted every pooled sprite after it, and a moved sprite
+    shows its old material for a frame, so a star point was stretched over
+    the planet's rim sprite. A dark placeholder rim (`Point::dark`) keeps the
+    places.
+- Not yet verified: `set_zoom 78500000` on the 73,619 km test planet only
+  reached level 2; whether the camera was really that close was not checked.
+- Live check: a planet from orbit to low altitude with `set_zoom`, with
+  `ground_levels` on to watch chunks split; no cracks or popping; the air's
+  limb and the drawn limb together; `ground false` to compare.
+
+### Recommendations for terrain (agreed 2026-10-24)
+
+Compared with SpaceEngine, which uses the same kind of cube-sphere quadtree
+and builds each node's elevation, normal and colour maps with GPU shaders:
+
+- **One generator interface.** A chunk asks a generator for its heights and
+  normals; whether the CPU or the GPU made them is hidden behind it.
+- **Terrain heights on the GPU.** Realistic terrain needs dozens of noise
+  octaves at every point of every chunk, orders of magnitude faster in a
+  WGSL compute shader. Its results go into a texture array, one layer per
+  chunk, read by the vertex shader; that also allows one instanced draw for
+  every chunk if draw calls ever limit.
+- **Collision from the same function in f64** on the CPU, for the few points
+  it needs (under the camera, under a craft). GPU f32 and CPU f64 disagree by
+  millimetres, too small to see; reading the GPU result back is the exact
+  fallback.
+- **Fine detail in the shader,** below the grid (rocks, surface texture), as
+  normals rather than geometry, as SpaceEngine's detail textures.
+- **Keep what SpaceEngine lacks:** blending between levels so nothing pops,
+  and collision that matches the drawn ground.
+- **Later layers** (water depth, rock, climate) become more layers of the same
+  per-chunk textures. Water is a second surface at sea level on the same tree.
+- Measure chunk counts and build times as terrain arrives (`/perf/ground`).
+
 The UV sphere gives way, near the camera, to a cube-sphere of chunks refined by
 distance (a quadtree per cube face), each chunk placed relative to the camera
 so vertices keep metre precision at any distance. A point on a chunk is the
@@ -187,7 +258,9 @@ scale.
 
 ## Working notes
 
-- **Code today:** `render/bodies.rs` (pooled body meshes, the UV sphere),
+- **Code today:** `render/bodies.rs` (pooled body meshes, the UV sphere for
+  stars), `render/ground.rs` and `render/ground.wgsl` (planet ground),
+  `crates/simulation/src/surface.rs` (`height`, `ground`),
   `render/body.wgsl`, `render/atmosphere.wgsl`, `scene/controls.rs` (free
   flight), `scene/placement.rs` (anchor carry, near plane, render scale),
   `scene/camera.rs`, `crates/simulation/src/system.rs` (`planet_spin`),

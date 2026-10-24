@@ -42,6 +42,11 @@ pub enum DebugSwitch {
     AtmosphereMultiple,
     /// Draw bodies flattened by their spin, rather than as spheres.
     Oblateness,
+    /// Draw planets' ground as chunks refined near the camera, rather than as
+    /// one sphere mesh.
+    Ground,
+    /// Tint ground chunks by their level of detail.
+    GroundLevels,
 }
 
 impl DebugSwitch {
@@ -89,6 +94,12 @@ impl DebugSwitch {
             Self::Oblateness => {
                 "Draw stars and planets flattened at the poles by their spin, with their air following the same shape. Turn off to draw every body as a sphere of its mean radius."
             }
+            Self::Ground => {
+                "Draw each planet's ground as a cube-sphere of chunks, refined near the camera so its facets stay under half a pixel from the true surface, where the air's ground lies. Turn off to draw the old single sphere mesh, whose facets sit up to 0.06% of the radius inside it."
+            }
+            Self::GroundLevels => {
+                "Tint each ground chunk by its level of detail, cycling through six colours, to see where chunks split and that neighbours meet without cracks. Does nothing with the ground off."
+            }
         }
     }
 }
@@ -109,6 +120,8 @@ pub struct RenderDebug {
     pub atmosphere_stop_opaque: bool,
     pub atmosphere_multiple: bool,
     pub oblateness: bool,
+    pub ground: bool,
+    pub ground_levels: bool,
 }
 
 impl Default for RenderDebug {
@@ -128,12 +141,14 @@ impl Default for RenderDebug {
             atmosphere_stop_opaque: true,
             atmosphere_multiple: true,
             oblateness: true,
+            ground: true,
+            ground_levels: false,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 14] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 16] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -154,6 +169,8 @@ impl RenderDebug {
             "Atmosphere multiple scattering",
         ),
         (DebugSwitch::Oblateness, "Flattened bodies"),
+        (DebugSwitch::Ground, "Ground chunks"),
+        (DebugSwitch::GroundLevels, "Ground chunk levels"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -172,6 +189,8 @@ impl RenderDebug {
             DebugSwitch::AtmosphereStopOpaque => self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => self.atmosphere_multiple,
             DebugSwitch::Oblateness => self.oblateness,
+            DebugSwitch::Ground => self.ground,
+            DebugSwitch::GroundLevels => self.ground_levels,
         }
     }
 
@@ -191,6 +210,8 @@ impl RenderDebug {
             DebugSwitch::AtmosphereStopOpaque => &mut self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => &mut self.atmosphere_multiple,
             DebugSwitch::Oblateness => &mut self.oblateness,
+            DebugSwitch::Ground => &mut self.ground,
+            DebugSwitch::GroundLevels => &mut self.ground_levels,
         } = on;
     }
 }

@@ -144,8 +144,10 @@ A body round under its own gravity and spinning settles into an oblate
 spheroid, its equatorial radius $a$ longer than its polar radius $c$; the
 flattening is $f = (a - c)/a$. Its surface is one of equal gravity plus spin
 potential, so it is also sea level: water at height zero lies flat on it, and
-later heights are measured from it along its normal. `space_simulation::shape`
-computes it from mass, radius, class and spin period (`planet_shape`,
+later heights are measured from it along its normal: `space_simulation::surface`
+gives the ground as the spheroid plus `height(planet, direction)`, zero until
+there is terrain, for drawing and collision alike. `space_simulation::shape`
+computes the spheroid from mass, radius, class and spin period (`planet_shape`,
 `star_shape`), deterministically, for every crate that needs it.
 
 - **Planets, Darwin-Radau.** With spin parameter $m = \omega^2 a^3 / GM$

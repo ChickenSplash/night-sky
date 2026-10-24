@@ -105,12 +105,60 @@ Stars and planets are drawn as the spheroids their spin makes them
 ([shape](../simulation/planetary-systems.md#shape-flattening-by-spin)): the
 sphere mesh scaled to the equatorial radius across and the polar along the
 spin axis, so normals and lighting follow the shape. The wireframe rings
-squash the same way. A disc's rim sprite (`point.wgsl`) stretches its
-coordinates along the pole's projection on screen until the outline, an
-ellipse, is a circle, so the blurred limb and a star's corona follow the
-outline at any angle. Sizes on screen, labels and the point switch use the
+squash the same way. A disc's rim sprite (`point.wgsl`) draws its blurred
+limb and a star's corona on the body's exact outline (`resolve::Outline`):
+the cone from the eye grazing the spheroid cuts the sprite's plane, which
+faces the screen through the body's centre, in an ellipse. Off the view's
+axis that ellipse sits off the centre, and close up it is wider than the
+body. Pixels in that plane are measured at its own depth, so the blur stays
+one point spread wide on screen. Once the outline stops being an ellipse in
+front of the camera (very close, with the body reaching beside it), there is
+no rim; the disc's own edge is all that shows. Sizes on screen, labels and the point switch use the
 equatorial radius; a point's light ignores the shape. `set_debug oblateness
 false` draws every body as the sphere of its mean radius, to compare.
+
+### Planet ground
+
+A planet's disc is drawn as its ground (`render/ground.rs`, `ground.wgsl`,
+shaded by `body.wgsl`); stars keep the sphere mesh.
+
+- **Cube-sphere quadtree.** The six faces of a cube bent onto the spheroid,
+  each a quadtree of chunks of 32 × 32 cells. The map is equi-angular (equal
+  steps in face coordinates are equal angles), so cells stay near one size.
+  Every vertex is `space_simulation::surface::ground`: the spheroid plus
+  `height` along its normal, zero until there is terrain, the same function
+  collision will ask.
+- **Split by screen error.** A chunk's error is how far its flat facets lie
+  inside the ground, the sag of a cell's diagonal under the flattest
+  curvature. A chunk splits while that error would span more than
+  `SPLIT_PIXELS` (half a logical pixel) at its distance, so the drawn ground
+  stays where the air's analytic ground is on any planet, at any zoom and
+  field of view. The distance is to the chunk's bounding sphere, never less
+  than the camera's height. Standing on an Earth-sized planet: level 12
+  underfoot, about 80 chunks drawn. From far away the six roots do.
+- **No popping, no cracks.** Each vertex carries the offset to its parent
+  level's surface (edge midpoints, and cell centres on the diagonal the
+  parent's cells use). The vertex shader blends towards it from 0.7 of the
+  distance where the parent takes over, measured from that parent surface, so
+  a chunk is exactly its parent's shape at the switch and an edge meets its
+  coarser neighbour's. Skirts hanging under every edge cover what rounding
+  leaves.
+- **Culling and budgets.** Chunks wholly behind the horizon (tested against
+  the inscribed sphere of polar radius) are neither drawn nor refined; Bevy
+  culls those out of view from each chunk's box. Chunks build on worker
+  threads, at most 32 at once and 8 started per frame, nearest first; a chunk
+  stays drawn until all four children are ready and spawned (a frame after
+  they finish), and a new planet keeps its sphere until its roots are. 3,000 built chunks are kept,
+  the least recently used dropped first, and a planet out of sight for 600
+  frames loses all of them.
+- **Precision.** Chunks are built in f64 as f32 offsets from their own centre,
+  placed each frame from the planet's f64 position relative to the camera, so
+  a chunk beside the camera keeps millimetres where the planet's centre is a
+  radius away.
+- `set_debug ground false` draws the old sphere mesh instead, whose facets sit
+  up to 0.06% of the radius inside the true surface; `set_debug ground_levels
+  true` tints chunks by level. `/perf/ground` counts planets, chunks drawn,
+  hidden, cached, building and built this frame, and the deepest level.
 
 ### Atmospheres (prototype)
 

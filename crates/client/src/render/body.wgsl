@@ -96,5 +96,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var i = 0u; i < 4u; i++) {
         shade += body.tints[i].rgb * max(dot(normal, body.lights[i].xyz), 0.0);
     }
+#ifdef LEVELS
+    // Ground chunks tinted by level (`ground.wgsl`), faintly on the night side.
+    let day = body.tints[0].rgb;
+    let lit = max(max(shade.r, shade.g), shade.b) + 0.1 * max(max(day.r, day.g), day.b);
+    shade = in.color.rgb * lit;
+#endif
     return vec4(encode(shade), 1.0);
 }

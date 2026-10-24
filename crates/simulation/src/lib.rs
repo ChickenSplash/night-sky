@@ -15,6 +15,7 @@ mod search_probe;
 pub mod shape;
 mod star;
 pub mod stream;
+pub mod surface;
 mod system;
 
 pub use shape::{Spheroid, planet_shape, star_shape};

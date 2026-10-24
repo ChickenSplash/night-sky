@@ -33,6 +33,7 @@ use bevy::{
 };
 
 mod bodies;
+pub mod ground;
 mod lights;
 mod resolve;
 
@@ -43,6 +44,7 @@ pub use resolve::*;
 const BODY_SHADER: Handle<Shader> = uuid_handle!("6f1f3c47-2a8e-4d61-9b53-4f8e0d7a91c2");
 const POINT_SHADER: Handle<Shader> = uuid_handle!("0c9b5d2e-7a41-4e8f-a3d6-5b2f81c4e970");
 const ATMOSPHERE_SHADER: Handle<Shader> = uuid_handle!("b4e2a9d1-58c3-4f7e-9a06-3d1c7e5f2b84");
+const GROUND_SHADER: Handle<Shader> = uuid_handle!("3a7c9e15-d24b-4f60-8e1a-c95b07f3d2e6");
 
 /// Deep navy behind the wireframes; realistic space is black.
 pub const SPACE_BLUE: Color = Color::srgb(0.015, 0.035, 0.09);
@@ -63,10 +65,12 @@ impl Plugin for RenderPlugin {
         load_internal_asset!(app, BODY_SHADER, "body.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, POINT_SHADER, "point.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, ATMOSPHERE_SHADER, "atmosphere.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, GROUND_SHADER, "ground.wgsl", Shader::from_wgsl);
         app.add_plugins((
             MaterialPlugin::<BodyMaterial>::default(),
             MaterialPlugin::<PointMaterial>::default(),
             MaterialPlugin::<atmosphere::AtmosphereMaterial>::default(),
+            MaterialPlugin::<ground::GroundMaterial>::default(),
             crate::render::exposure::ExposurePlugin,
             window_blur::WindowBlurPlugin,
         ))
@@ -77,6 +81,8 @@ impl Plugin for RenderPlugin {
         .init_resource::<Pool<PointMaterial>>()
         .init_resource::<Pool<atmosphere::AtmosphereMaterial>>()
         .init_resource::<atmosphere::AtmosphereTuning>()
+        .init_resource::<ground::Grounds>()
+        .init_resource::<ground::GroundStats>()
         .init_resource::<atmosphere_tables::AtmosphereTables>()
         .add_systems(Startup, setup)
         .add_systems(Update, switch_camera)
@@ -85,6 +91,7 @@ impl Plugin for RenderPlugin {
             (
                 shade,
                 sync_bodies,
+                ground::sync_ground,
                 sync_points,
                 atmosphere::sync_atmospheres,
             )
@@ -139,6 +146,9 @@ pub struct PointMaterial {
     /// radius along it over its radius across it.
     #[uniform(0)]
     outline: Vec4,
+    /// The outline's centre from the sprite's, in pixels.
+    #[uniform(0)]
+    offset: Vec4,
 }
 
 impl Material for PointMaterial {

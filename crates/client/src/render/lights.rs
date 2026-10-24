@@ -1,6 +1,9 @@
 //! Each realistic body's light before exposure, gathered by `scene::draw`,
 //! and cached star photometry.
-use bevy::prelude::*;
+use bevy::{
+    math::{DQuat, DVec3},
+    prelude::*,
+};
 use space_shared::Star;
 use space_simulation::light::{self, Surface};
 use std::{collections::HashMap, f32::consts::PI, sync::Mutex};
@@ -51,6 +54,21 @@ pub struct PlanetLight {
     pub light: Vec<Illumination>,
     pub surface: Surface,
     pub air: Option<super::atmosphere::Air>,
+    /// Its ground's key in `Lights::grounds`, when drawn as chunks.
+    pub ground: Option<u64>,
+}
+
+/// What a planet's ground chunks need, in f64 so they keep their precision
+/// near the camera (`ground.rs`).
+pub struct GroundSource {
+    /// Stable for the planet and its shape.
+    pub key: u64,
+    pub planet: space_shared::Planet,
+    pub shape: space_simulation::Spheroid,
+    /// The planet's centre from the camera, in metres, in world axes.
+    pub from_eye: DVec3,
+    /// From the planet's axes (pole +Y) into world axes.
+    pub basis: DQuat,
 }
 
 /// One frame's realistic bodies, gathered while drawing the wireframes.
@@ -58,8 +76,13 @@ pub struct PlanetLight {
 pub struct Lights {
     pub stars: Vec<StarLight>,
     pub planets: Vec<PlanetLight>,
+    pub grounds: Vec<GroundSource>,
     /// Render position of the camera.
     pub eye: Vec3,
+    /// Metres per render unit.
+    pub scale: f64,
+    /// The camera's rotation, which sprites share.
+    pub facing: Quat,
     /// Streak visibility, from zero at the edge of the body range to one well
     /// inside it, so streaks never appear suddenly as bodies take over.
     pub streaks: f32,
@@ -69,6 +92,7 @@ impl Lights {
     pub fn clear(&mut self) {
         self.stars.clear();
         self.planets.clear();
+        self.grounds.clear();
         self.streaks = 0.0;
     }
 }

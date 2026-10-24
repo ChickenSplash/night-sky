@@ -79,7 +79,7 @@ fn every_usage_parses() {
             .iter()
             .map(|field| match *field {
                 "page" => "1",
-                "rate" | "degrees" | "speed" => "60",
+                "rate" | "degrees" | "speed" | "metres" => "60",
                 "magnitude" => "5.5",
                 "stops" => "-2",
                 "amount" => "0.5",
@@ -137,6 +137,12 @@ fn arguments_fill_fields_in_order_or_by_name() {
         parse("galaxy_reference face_on").unwrap(),
         UiCommand::GalaxyReference {
             view: GalaxyReference::FaceOn
+        }
+    );
+    assert_eq!(
+        parse("set_zoom 6371000").unwrap(),
+        UiCommand::SetZoom {
+            metres: 6_371_000.0
         }
     );
     assert_eq!(

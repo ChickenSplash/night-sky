@@ -5,12 +5,16 @@ use space_simulation::AU_METRES;
 use space_simulation::light;
 use std::f32::consts::PI;
 
+/// Where test bodies sit: straight ahead of the camera, far enough that a
+/// disc's outline is its size in pixels, with 1,000 pixels per radian.
+const AHEAD: Vec3 = Vec3::new(0.0, 0.0, -1e6);
+
 fn star(radiance: f64, pixels: f32) -> StarLight {
     StarLight {
-        centre: Vec3::ZERO,
-        radius: 1.0,
+        centre: AHEAD,
+        radius: pixels * AHEAD.length() / 1000.0,
         pixels,
-        per_pixel: 1.0,
+        per_pixel: AHEAD.length() / 1000.0,
         radiance,
         kelvin: 5772.0,
         spin: Quat::IDENTITY,
@@ -21,12 +25,12 @@ fn star(radiance: f64, pixels: f32) -> StarLight {
 
 fn planet(flux: f64, pixels: f32) -> PlanetLight {
     PlanetLight {
-        centre: Vec3::X * 10.0,
-        radius: 1.0,
+        centre: AHEAD + Vec3::X * 10.0,
+        radius: pixels * AHEAD.length() / 1000.0,
         spin: Quat::IDENTITY,
         flattening: 0.0,
         pixels,
-        per_pixel: 1.0,
+        per_pixel: AHEAD.length() / 1000.0,
         light: vec![Illumination {
             towards: -Vec3::X,
             flux,
@@ -34,6 +38,7 @@ fn planet(flux: f64, pixels: f32) -> PlanetLight {
         }],
         surface: light::surface("Rocky planet"),
         air: None,
+        ground: None,
     }
 }
 
@@ -49,7 +54,10 @@ fn lights() -> Lights {
             planet(10.0 * sun, 1.4),
             planet(sun / 10.0, 1.4),
         ],
+        grounds: Vec::new(),
         eye: Vec3::ZERO,
+        scale: 1.0,
+        facing: Quat::IDENTITY,
         streaks: 1.0,
     }
 }
@@ -428,4 +436,121 @@ fn atmosphere_presets_and_changes() {
         assert!(atmosphere::HAZE.contains(&air.haze));
         assert!(atmosphere::HAZE_ABSORBED.contains(&air.haze_absorbed));
     }
+}
+
+/// Each point of `outline`, seen from the eye, as a line of sight in world
+/// axes, for a sprite through `from_eye` facing `facing`.
+fn outline_sights(outline: &resolve::Outline, from_eye: Vec3, facing: Quat) -> Vec<DVec3> {
+    let (right, up) = (facing * Vec3::X, facing * Vec3::Y);
+    let long = Vec2::new(-outline.across.y, outline.across.x);
+    (0..16)
+        .map(|i| {
+            let a = i as f32 / 16.0 * 2.0 * PI;
+            let p = outline.offset
+                + long * outline.pixels * a.cos()
+                + outline.across * outline.pixels * outline.ratio * a.sin();
+            let w = Vec2::new(p.x, -p.y) * outline.per_pixel;
+            (from_eye + right * w.x + up * w.y).as_dvec3()
+        })
+        .collect()
+}
+
+#[test]
+fn a_rim_follows_the_outline_seen_from_any_angle() {
+    let radius = 100.0;
+    // Pixels straight ahead at a distance, for a 1,000-pixel-high 60 degree view.
+    let per_pixel = |distance: f32| distance * 2.0 * (PI / 6.0).tan() / 1000.0;
+    for (distance, flattening, pole, facing) in [
+        (300.0, 0.0, Vec3::Y, Quat::IDENTITY),
+        (300.0, 0.0, Vec3::Y, Quat::from_rotation_y(0.4)),
+        (
+            130.0,
+            0.176,
+            Vec3::new(0.2, 1.0, 0.5),
+            Quat::from_rotation_x(0.3),
+        ),
+        (
+            150.0,
+            0.2,
+            Vec3::new(1.0, 0.3, 0.0),
+            Quat::from_euler(EulerRot::YXZ, -0.35, 0.2, 0.1),
+        ),
+        (5_000.0, 0.1, Vec3::Z, Quat::from_rotation_y(0.05)),
+    ] {
+        let from_eye = Vec3::NEG_Z * distance;
+        let outline = resolve::Outline::of(
+            from_eye,
+            radius,
+            (pole, flattening),
+            per_pixel(distance),
+            facing,
+        )
+        .unwrap();
+        let pole = pole.normalize().as_dvec3();
+        let (a, c) = (f64::from(radius), f64::from(radius * (1.0 - flattening)));
+        let shape = |v: DVec3| {
+            let along = pole * v.dot(pole);
+            (v - along) / (a * a) + along / (c * c)
+        };
+        let centre = from_eye.as_dvec3();
+        for sight in outline_sights(&outline, from_eye, facing) {
+            // The line of sight meets the spheroid in one point: it grazes.
+            let (dd, dc, cc) = (
+                sight.dot(shape(sight)),
+                sight.dot(shape(centre)),
+                centre.dot(shape(centre)),
+            );
+            let grazing = dc * dc / (dd * (cc - 1.0));
+            assert!(
+                (grazing - 1.0).abs() < 1e-4,
+                "{distance} {flattening}: {grazing}"
+            );
+        }
+    }
+    // Straight at a sphere: round, centred, and wider than the radius by
+    // the grazing cone.
+    let outline = resolve::Outline::of(
+        Vec3::NEG_Z * 200.0,
+        radius,
+        (Vec3::Y, 0.0),
+        0.5,
+        Quat::IDENTITY,
+    )
+    .unwrap();
+    assert!(outline.offset.length() < 1e-3);
+    assert!((outline.ratio - 1.0).abs() < 1e-5);
+    let expected = radius * 200.0 / (200.0f32.powi(2) - radius * radius).sqrt() / 0.5;
+    assert!((outline.pixels - expected).abs() < 1e-3 * expected);
+    // From inside, behind the camera, or so close it reaches beside it: none.
+    let none = |from_eye: Vec3, facing: Quat| {
+        resolve::Outline::of(from_eye, radius, (Vec3::Y, 0.1), 1.0, facing).is_none()
+    };
+    assert!(none(Vec3::NEG_Z * 50.0, Quat::IDENTITY));
+    assert!(none(Vec3::Z * 300.0, Quat::IDENTITY));
+    assert!(none(Vec3::NEG_Y * 101.0, Quat::IDENTITY));
+}
+
+#[test]
+fn rims_keep_their_places_when_a_disc_turns_out_of_view() {
+    // Sprites are pooled by index, rims before points: a rim dropped while
+    // its body is behind the camera would hand every point after it another
+    // sprite's material for a frame.
+    let photometry = Photometry::default();
+    let ahead = resolve(&lights(), &photometry, -30.0, 0.0, PSF_SIGMA_PX);
+    let mut turned = lights();
+    turned.facing = Quat::from_rotation_y(PI);
+    let behind = resolve(&turned, &photometry, -30.0, 0.0, PSF_SIGMA_PX);
+    assert_eq!(ahead.rims.len(), behind.rims.len());
+    assert!(
+        behind
+            .rims
+            .iter()
+            .all(|r| r.colour == Vec3::ZERO && r.edge == Vec4::ZERO)
+    );
+    assert!(
+        behind
+            .rims
+            .iter()
+            .all(|r| r.streaks.truncate() == Vec3::ZERO)
+    );
 }

@@ -20,10 +20,11 @@ struct Point {
     // xy: a star's pole, or a planet's direction to its star, projected onto
     // the sprite (+y down); z: one for a star, whose whole limb shines.
     axis: vec4<f32>,
-    // A disc's outline, an ellipse for a flattened body: xy the pole's
-    // direction on the sprite, z the outline's radius along it over its
-    // radius across it.
+    // A disc's outline, an ellipse (`resolve::Outline`): xy its short axis
+    // on the sprite, z that axis over the long one.
     outline: vec4<f32>,
+    // The outline's centre from the sprite's, in pixels (+y down).
+    offset: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> point: Point;
@@ -131,11 +132,11 @@ fn streaks(r: f32, n: vec2<f32>, start: f32) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    var p = (in.uv * 2.0 - 1.0) * point.shape.x;
+    var p = (in.uv * 2.0 - 1.0) * point.shape.x - point.offset.xy;
     let limb = point.shape.z;
-    // Stretched along the pole, a flattened disc's outline is a circle of
-    // its full radius. The limb's blur and the corona narrow there by the
-    // same share, at most the flattening.
+    // Stretched along its short axis, a disc's outline is a circle of its
+    // long radius. The limb's blur and the corona narrow there by the same
+    // share.
     if limb > 0.0 && point.outline.z > 0.0 && point.outline.z < 1.0 {
         p += point.outline.xy * dot(p, point.outline.xy) * (1.0 / point.outline.z - 1.0);
     }

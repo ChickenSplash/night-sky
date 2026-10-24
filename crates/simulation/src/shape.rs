@@ -12,6 +12,7 @@
 //!   (`fastest_planet_hours`, `fastest_star_hours`).
 
 use crate::{Class, EARTH_SOLAR, SUN_GM, SUN_RADIUS_METRES};
+use glam::DVec3;
 use space_shared::{Planet, Spin, Star};
 use std::f64::consts::TAU;
 
@@ -31,6 +32,20 @@ impl Spheroid {
     /// `(equatorial - polar) / equatorial`: zero for a sphere.
     pub fn flattening(&self) -> f64 {
         1.0 - self.polar / self.equatorial
+    }
+
+    /// The point of the surface in a unit `direction` from the centre, in the
+    /// body's axes: the pole is +Y.
+    pub fn along(&self, direction: DVec3) -> DVec3 {
+        let (a, c) = (self.equatorial, self.polar);
+        let across = direction.x * direction.x + direction.z * direction.z;
+        direction / (across / (a * a) + direction.y * direction.y / (c * c)).sqrt()
+    }
+
+    /// The outward normal at a point of the surface: "up" there.
+    pub fn normal(&self, point: DVec3) -> DVec3 {
+        let (a2, c2) = (self.equatorial.powi(2), self.polar.powi(2));
+        DVec3::new(point.x / a2, point.y / c2, point.z / a2).normalize()
     }
 
     /// The spheroid of this mean radius and flattening.
@@ -205,6 +220,27 @@ mod tests {
         }
         let hours = fastest_star_hours(3.0, 2.5);
         close(star_flattening(3.0, 2.5, hours), MAX_FLATTENING, 1e-9);
+    }
+
+    #[test]
+    fn surface_points_lie_on_the_spheroid() {
+        let shape = Spheroid::of(6_371_000.0, 1.0 / 298.0);
+        let (a, c) = (shape.equatorial, shape.polar);
+        for direction in [DVec3::X, DVec3::Y, DVec3::new(1.0, 2.0, -3.0).normalize()] {
+            let p = shape.along(direction);
+            close(
+                (p.x * p.x + p.z * p.z) / (a * a) + p.y * p.y / (c * c),
+                1.0,
+                1e-12,
+            );
+            assert!(p.normalize().dot(direction) > 1.0 - 1e-12);
+        }
+        close(shape.along(DVec3::Y).y, c, 1e-12);
+        close(shape.along(DVec3::Z).z, a, 1e-12);
+        // At 45 degrees of latitude the normal leans poleward of the
+        // direction from the centre, as geodetic latitude does on Earth.
+        let p = shape.along(DVec3::new(1.0, 1.0, 0.0).normalize());
+        assert!(shape.normal(p).y > p.normalize().y);
     }
 
     #[test]

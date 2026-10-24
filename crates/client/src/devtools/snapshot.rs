@@ -53,6 +53,7 @@ type Rendering<'w> = (
     Res<'w, crate::search::Searches>,
     Res<'w, crate::ui::browser::Browser>,
     Res<'w, crate::render::atmosphere::AtmosphereTuning>,
+    Option<Res<'w, crate::render::ground::GroundStats>>,
 );
 
 pub(super) fn publish(
@@ -92,7 +93,7 @@ pub(super) fn publish(
     let (universe, nav, clock, fleet) = scene;
     let now = fleet.at(clock.0.seconds);
     let (pose, rig) = camera;
-    let (debug, diagnostics, searches, browser, tuning) = render;
+    let (debug, diagnostics, searches, browser, tuning, ground) = render;
     let trail = crate::ui::breadcrumb::trail(&nav, &universe.0);
     let selection_trail = crate::ui::breadcrumb::selection_trail(&nav, &universe.0, now);
     let inspection =
@@ -179,6 +180,7 @@ pub(super) fn publish(
             "atmosphere_stop_opaque": debug.atmosphere_stop_opaque,
             "atmosphere_multiple": debug.atmosphere_multiple,
             "oblateness": debug.oblateness,
+            "ground": debug.ground, "ground_levels": debug.ground_levels,
         },
         "performance": {
             "averages": metrics.live(&field),
@@ -202,6 +204,8 @@ pub(super) fn publish(
         state["process_id"] = json!(std::process::id());
         // The prototype air on the selected planet, for `ns atmosphere`.
         state["atmosphere"] = json!(*tuning);
+        // Ground chunks (`render::ground`); null without the renderer.
+        state["performance"]["ground"] = json!(ground.map(|g| *g));
         state["sampled_unix_ms"] = json!(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

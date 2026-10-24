@@ -192,7 +192,11 @@ pub(super) fn hide(mut visibility: Mut<Visibility>) {
 
 pub(super) fn sync_bodies(
     mut commands: Commands,
-    frame: Res<Frame>,
+    (frame, debug, grounds): (
+        Res<Frame>,
+        Res<crate::render::debug::RenderDebug>,
+        Res<super::ground::Grounds>,
+    ),
     meshes: Res<Meshes>,
     mut pool: ResMut<Pool<BodyMaterial>>,
     mut materials: ResMut<Assets<BodyMaterial>>,
@@ -220,6 +224,11 @@ pub(super) fn sync_bodies(
             hide(visibility);
             continue;
         };
+        // Its ground's chunks stand in for the sphere (`ground.rs`).
+        if debug.ground && body.ground.is_some_and(|key| grounds.shows(key)) {
+            hide(visibility);
+            continue;
+        }
         place(
             (transform, global, body_cell, visibility),
             *cell,

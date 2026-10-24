@@ -140,7 +140,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 33] = [
+pub const USAGE: [Usage; 34] = [
     Usage {
         name: "steer_craft",
         fields: &["order", "id", "tick", "in_s", "for_s"],
@@ -257,6 +257,11 @@ pub const USAGE: [Usage; 33] = [
         about: "overlays, orbits, labels, markers, velocity_marker, predicted_paths, wireframe, realistic or galaxy_glow; true or false",
     },
     Usage {
+        name: "set_zoom",
+        fields: &["metres"],
+        about: "Camera distance from what it looks at or follows, 1 m to 40,000 ly",
+    },
+    Usage {
         name: "set_fov",
         fields: &["degrees"],
         about: "Vertical field of view, 30 to 130",
@@ -284,7 +289,7 @@ pub const USAGE: [Usage; 33] = [
     Usage {
         name: "set_debug",
         fields: &["switch", "on"],
-        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres, atmosphere_jitter, atmosphere_tables, atmosphere_stop_opaque, atmosphere_multiple or oblateness; true or false",
+        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres, atmosphere_jitter, atmosphere_tables, atmosphere_stop_opaque, atmosphere_multiple, oblateness, ground or ground_levels; true or false",
     },
     Usage {
         name: "set_atmosphere",

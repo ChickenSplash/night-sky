@@ -145,6 +145,14 @@ pub(super) fn clip_strip(
     strips
 }
 
+/// A planet's ground is rebuilt whenever its shape changes.
+fn ground_key(id: &str, shape: &Spheroid) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (id, shape.equatorial.to_bits(), shape.polar.to_bits()).hash(&mut hasher);
+    hasher.finish()
+}
+
 /// One frame's projection from f64 metres relative to the current star into render
 /// units around the floating-origin camera.
 struct Canvas<'a> {
@@ -596,6 +604,14 @@ impl Canvas<'_> {
                     light: self.illumination(orbital, local),
                     surface: space_simulation::light::surface(&planet.class),
                     air: selected.then(|| self.air.scaled(radius)),
+                    ground: Some(ground_key(&planet.id, &shape)),
+                });
+                lights.grounds.push(render::GroundSource {
+                    key: ground_key(&planet.id, &shape),
+                    planet: planet.clone(),
+                    shape,
+                    from_eye: galactic - self.pose.eye,
+                    basis,
                 });
             }
             let pixels = self.outline(
@@ -731,6 +747,8 @@ pub fn draw(
         return;
     };
     lights.eye = view.translation();
+    lights.scale = pose.render_scale();
+    lights.facing = view.rotation();
     let visited = nav.system(&universe.0);
     let Some(system) = visited.or_else(|| fleet.craft.first().map(|live| live.field.system()))
     else {
