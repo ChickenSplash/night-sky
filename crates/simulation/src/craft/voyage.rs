@@ -5,7 +5,7 @@
 //! carrying on without it.
 use super::{Craft, Field, Frame, Gravity, Order, Target};
 use crate::galaxy::PC_METRES;
-use crate::neighbourhood::{Candidate, Region};
+use crate::galaxy::neighbourhood::{Candidate, Region};
 use crate::{LY_METRES, State};
 use glam::{DQuat, DVec3};
 use std::collections::BTreeMap;
@@ -43,7 +43,7 @@ pub fn steps(seconds: f64) -> Result<i64, String> {
 /// query's temporary working set is additional to this.
 pub const SKY_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
-fn trim_sky(sky: &mut crate::cells::Sky) {
+fn trim_sky(sky: &mut crate::galaxy::cells::Sky) {
     if sky.cache_bytes() > SKY_CACHE_BYTES {
         // Keep the expensive coarse integration warm, but release fine cells
         // accumulated on long voyages. Rebuilding them changes no seeds.
@@ -75,7 +75,7 @@ pub fn page_star_id(system: &space_shared::StarSystem, page: u32) -> String {
 /// and one flying into it agree to the metre. A legacy page with no cell
 /// star sits where its list puts it.
 pub fn frame_origin_pc(
-    sky: &mut crate::cells::Sky,
+    sky: &mut crate::galaxy::cells::Sky,
     system: &space_shared::StarSystem,
     page: u32,
 ) -> [f64; 3] {
@@ -117,7 +117,7 @@ impl Arrival {
 
 /// A system's entry range, in metres.
 pub fn range_m(field: &Field) -> f64 {
-    crate::neighbourhood::range_m(crate::system_extent_au(field.system(), field.page()))
+    crate::galaxy::neighbourhood::range_m(crate::system_extent_au(field.system(), field.page()))
 }
 
 /// Threads a lookup may use.
@@ -197,16 +197,16 @@ impl Request {
     }
 
     /// Work it out here and now, with a warm `sky` for speed.
-    pub fn answer(&self, sky: &mut crate::cells::Sky, threads: usize) -> Reply {
+    pub fn answer(&self, sky: &mut crate::galaxy::cells::Sky, threads: usize) -> Reply {
         let reply = match self {
             Self::Region { region } => Reply::Region {
-                candidates: crate::neighbourhood::candidates(sky, *region, threads),
+                candidates: crate::galaxy::neighbourhood::candidates(sky, *region, threads),
             },
             Self::System { id, position_ly } => Reply::System {
                 system: crate::generated_system(id, *position_ly),
             },
             Self::Star { id } => Reply::Star {
-                candidate: crate::neighbourhood::candidate(sky, id),
+                candidate: crate::galaxy::neighbourhood::candidate(sky, id),
             },
         };
         trim_sky(sky);
@@ -810,7 +810,9 @@ pub fn frame_velocity(frame: &Frame, origin_pc: [f64; 3]) -> DVec3 {
     match frame {
         Frame::Galaxy { .. } => DVec3::ZERO,
         Frame::System { star } => {
-            DVec3::from_array(crate::kinematics::system_velocity_kms(star, origin_pc)) * 1_000.0
+            DVec3::from_array(crate::galaxy::kinematics::system_velocity_kms(
+                star, origin_pc,
+            )) * 1_000.0
         }
     }
 }

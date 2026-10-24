@@ -17,8 +17,8 @@ use space_simulation::{
 /// in parsecs from the galactic centre.
 fn streamed_star() -> (crate::stars::stream::Starfield, String, [f64; 3]) {
     use space_simulation::{
-        cells::{Cell, Sky, parse_cell_star},
-        stream::{StarCell, StarPoint},
+        galaxy::cells::{Cell, Sky, parse_cell_star},
+        galaxy::stream::{StarCell, StarPoint},
     };
     let home = GalaxyModel::milky_way().home_pc;
     let cell = Cell::containing(10, home).unwrap();
@@ -388,9 +388,9 @@ fn star_sizes_are_physical_except_in_wide_views() {
 #[test]
 fn streamed_star_tightens_render_scale_before_system_handoff_at_max_range() {
     use space_simulation::{
-        cells::Cell,
         galaxy::Component,
-        stream::{StarCell, StarPoint},
+        galaxy::cells::Cell,
+        galaxy::stream::{StarCell, StarPoint},
     };
     let star_pc = DVec3::from_array(GalaxyModel::milky_way().home_pc);
     let cell = Cell::containing(10, star_pc.to_array()).unwrap();

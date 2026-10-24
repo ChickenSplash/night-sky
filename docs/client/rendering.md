@@ -125,7 +125,7 @@ shaded by `body.wgsl`); stars keep the sphere mesh.
 - **Cube-sphere quadtree.** The six faces of a cube bent onto the spheroid,
   each a quadtree of chunks of 32 × 32 cells. The map is equi-angular (equal
   steps in face coordinates are equal angles), so cells stay near one size.
-  Every vertex is `space_simulation::surface::ground`: the spheroid plus
+  Every vertex is `space_simulation::system::surface::ground`: the spheroid plus
   `height` along its normal, zero until there is terrain, the same function
   collision will ask.
 - **Split by screen error.** A chunk's error is how far its flat facets lie

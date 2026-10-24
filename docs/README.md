@@ -15,7 +15,10 @@ and documentation conventions.
 
 ## Simulation
 
-Engine-independent models in `crates/simulation`:
+Engine-independent models in `crates/simulation`, grouped into `galaxy/`,
+`star/`, `system/`, `orbit/`, `craft/` and `search/`. Shared clock, units,
+seed helpers, object identities and photometry stay at the crate root; see
+[project structure](development.md#project-structure) for ownership.
 
 - [Galaxy](simulation/galaxy.md): component shapes and ages, regional density,
   exact populations, cells, brightness tiers and deterministic identity.

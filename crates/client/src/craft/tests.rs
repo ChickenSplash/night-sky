@@ -627,7 +627,7 @@ fn a_plotted_route_reaches_its_target_and_the_readout_shows_it() {
 
 #[test]
 fn a_route_to_another_system_flies_through_the_command_path() {
-    use space_simulation::{craft::voyage, neighbourhood};
+    use space_simulation::{craft::voyage, galaxy::neighbourhood};
     let mut app = app();
     let (system, page, planet) = planet_system();
     send(
@@ -640,7 +640,7 @@ fn a_route_to_another_system_flies_through_the_command_path() {
         },
     );
     // A generated neighbour's planet, a light year or more away.
-    let mut sky = space_simulation::cells::Sky::default();
+    let mut sky = space_simulation::galaxy::cells::Sky::default();
     let origin = voyage::frame_origin_pc(&mut sky, &system, page);
     let mut near = neighbourhood::stars_within(&mut sky, origin, 2.0, 1);
     near.sort_by(|a, b| a.id.cmp(&b.id));
@@ -680,7 +680,7 @@ fn a_route_to_another_system_flies_through_the_command_path() {
     let live = &app.world().resource::<Fleet>().craft[0];
     assert_eq!(
         live.craft.frame.star(),
-        space_simulation::multiple::system_key(&target)
+        space_simulation::star::multiple::system_key(&target)
     );
 }
 

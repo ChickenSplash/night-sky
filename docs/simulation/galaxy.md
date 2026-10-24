@@ -98,7 +98,7 @@ positions, cells and streaming are unchanged. The disc turns clockwise seen
 from the north pole (+Y), as the Milky Way does, so home moves toward +Z.
 
 A system's velocity is a shared mean rotation plus random scatter sized by
-its component (`crates/simulation/src/kinematics.rs`):
+its component (`crates/simulation/src/galaxy/kinematics.rs`):
 
 - **Rotation curve.** The circular speed $v_c(R)$ at distance $R$ from the
   axis comes from a spherical mass model: the black hole, Plummer spheres for
@@ -136,7 +136,7 @@ its component (`crates/simulation/src/kinematics.rs`):
 
 ## Cells and brightness tiers
 
-- Galactic stars are generated from cells (`space_simulation::cells`), never
+- Galactic stars are generated from cells (`space_simulation::galaxy::cells`), never
   stored. `Cell` is a locational code (a leading 1, then octant bits x, y, z per
   level); the root is `ROOT_PC` (131,072 pc) across, centred on the black hole.
 - `population` sorts stars into `TIERS` brightness bands, four times dimmer per
@@ -169,7 +169,7 @@ mixture draws on the burst history discussed by Nogueras-Lara et al. (2020).
 Kinematics follow the same review, with asymmetric drift after Dehnen & Binney
 (1998) and thin-disc heating after Aumer & Binney (2009).
 Parameters and simplified profiles are implemented in
-`crates/simulation/src/galaxy.rs`.
+`crates/simulation/src/galaxy/mod.rs`.
 
 This is a statistical synthetic galaxy, not a reconstruction of observed stars,
 a galactic gravitational simulation or an evolving star-formation calculation.

@@ -206,7 +206,7 @@ impl Field {
     /// system's key names its star or outermost barycentre.
     pub fn target(&self, id: &str, seconds: f64) -> Option<Target> {
         let root = self.system.root(self.page)?;
-        let id = if crate::multiple::system_key(root) == id
+        let id = if crate::star::multiple::system_key(root) == id
             && self.reference_by_id(id, seconds).is_none()
         {
             root
@@ -391,13 +391,13 @@ impl Craft {
         if is_craft_id(id) {
             return Err(format!("No craft `{id}`"));
         }
-        let system = crate::multiple::system_key(id);
+        let system = crate::star::multiple::system_key(id);
         if let Some(field) = field {
             if let Some(target) = field.target(id, self.seconds()) {
                 return self.plot(field, target, arrival, requested_s);
             }
             let own = field.system().root(field.page());
-            if own.map(crate::multiple::system_key) == Some(system) {
+            if own.map(crate::star::multiple::system_key) == Some(system) {
                 return Err(format!("No body `{id}` in this ship's system"));
             }
         }

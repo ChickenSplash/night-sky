@@ -1,7 +1,7 @@
 //! Bounded, nonblocking preparation of voyage data. A round collects all ships'
 //! demands before dispatch, so speculative work never jumps queued demands.
 use super::{Atlas, Cache, Refused, Reply, Request, Voyage, Wait};
-use crate::{galaxy::PC_METRES, neighbourhood::Region};
+use crate::galaxy::{PC_METRES, neighbourhood::Region};
 use glam::DVec3;
 use space_shared::Galaxy;
 

@@ -9,15 +9,15 @@
 //!   birth mass, age and shape are sampled from the same distributions as
 //!   `galactic_star`, restricted to the tier. The mix over all tiers matches it.
 
-use crate::cells::StarKey;
+use crate::galaxy::cells::StarKey;
 use crate::galaxy::{COMPONENTS, Component};
-use crate::multiple::{self, Bodies};
+use crate::seed::Rng;
+use crate::star::multiple::{self, Bodies};
 use crate::star::{
     self, Branch, Formation, GIANT_SHARE, IMF_RANGE, Origin, SUN_TEMPERATURE_K, Stage,
     WHITE_DWARF_LIGHTEST, WHITE_DWARF_LIMIT, imf_cumulative, imf_density, imf_inverse,
     lifetime_gyr,
 };
-use crate::system::Rng;
 use space_shared::{Barycentre, Star};
 use std::sync::OnceLock;
 

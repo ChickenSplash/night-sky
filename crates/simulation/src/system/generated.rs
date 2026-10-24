@@ -2,13 +2,13 @@
 use space_shared::{PageStar, Planet, StarSystem};
 
 pub fn generated_system(id: &str, position_ly: [f64; 3]) -> Option<StarSystem> {
-    let bodies = crate::cells::cell_bodies(id)?;
+    let bodies = crate::galaxy::cells::cell_bodies(id)?;
     let planets = bodies
         .planets
         .into_iter()
         .map(|hosted| Planet {
             id: hosted.id(),
-            designation: crate::cells::planet_designation(&hosted.host, hosted.index),
+            designation: crate::galaxy::cells::planet_designation(&hosted.host, hosted.index),
             page: 0,
             orbit_index: hosted.index as u32,
             host: hosted.host,
@@ -23,7 +23,7 @@ pub fn generated_system(id: &str, position_ly: [f64; 3]) -> Option<StarSystem> {
         .collect();
     Some(StarSystem {
         id: id.to_owned(),
-        name: crate::cells::catalogue_name(id),
+        name: crate::galaxy::cells::catalogue_name(id),
         position_ly,
         planets,
         stars: bodies.stars,

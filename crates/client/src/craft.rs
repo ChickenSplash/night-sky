@@ -393,7 +393,7 @@ pub fn locate_body(
     field: &crate::stars::stream::Starfield,
     id: &str,
 ) -> Result<(StarSystem, u32, String), String> {
-    let key = space_simulation::multiple::system_key(id);
+    let key = space_simulation::star::multiple::system_key(id);
     if !crate::galaxy_nav::reachable(nav, galaxy, field, key) {
         return Err(format!(
             "`{id}` is not in a loaded, visited or charted system"
@@ -726,10 +726,10 @@ pub fn body_label(live: &Live, galaxy: &Galaxy, id: &str) -> String {
     if let Some(planet) = system.planets.iter().find(|p| p.id == id) {
         return planet.designation.clone();
     }
-    let key = space_simulation::multiple::system_key(id);
+    let key = space_simulation::star::multiple::system_key(id);
     objects::member_label(
         &crate::galaxy_nav::label(galaxy, key),
-        space_simulation::multiple::member_letters(id),
+        space_simulation::star::multiple::member_letters(id),
     )
 }
 
@@ -740,7 +740,7 @@ pub fn live_objects(fleet: &Fleet, galaxy: &Galaxy, seconds: f64) -> Vec<LiveObj
         .iter()
         .map(|live| {
             let (state, reference) = live.surroundings(seconds);
-            let key = space_simulation::multiple::system_key(live.star()).to_owned();
+            let key = space_simulation::star::multiple::system_key(live.star()).to_owned();
             let (altitude, speed) = reference.as_ref().map_or((f64::NAN, f64::NAN), |body| {
                 let relative = relative(state, body.state);
                 let r = distance(relative.position, [0.0; 3]);

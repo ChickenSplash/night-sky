@@ -144,9 +144,9 @@ A body round under its own gravity and spinning settles into an oblate
 spheroid, its equatorial radius $a$ longer than its polar radius $c$; the
 flattening is $f = (a - c)/a$. Its surface is one of equal gravity plus spin
 potential, so it is also sea level: water at height zero lies flat on it, and
-later heights are measured from it along its normal: `space_simulation::surface`
+later heights are measured from it along its normal: `space_simulation::system::surface`
 gives the ground as the spheroid plus `height(planet, direction)`, zero until
-there is terrain, for drawing and collision alike. `space_simulation::shape`
+there is terrain, for drawing and collision alike. `space_simulation::system::shape`
 computes the spheroid from mass, radius, class and spin period (`planet_shape`,
 `star_shape`), deterministically, for every crate that needs it.
 
@@ -211,7 +211,7 @@ Mass–radius fits are inspired by Chen & Kipping (2017), giant occurrence by
 the host-mass trend in Johnson et al. (2010), and neighbour-spacing choices by
 Chambers et al. (1996) and Pu & Wu (2015). Tidal-spin prescriptions draw on
 Solar System examples and the trends discussed by Gladman et al. (1996).
-These are simplified fits/heuristics implemented in `crates/simulation/src/system.rs`,
+These are simplified fits/heuristics implemented in `crates/simulation/src/system/generation.rs`,
 not exact reproductions of the cited models.
 
 The model does not compute atmospheric chemistry, surface climate, habitability,

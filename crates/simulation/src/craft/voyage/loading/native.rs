@@ -19,7 +19,7 @@ impl Native {
             std::thread::Builder::new()
                 .name(format!("craft generation {index}"))
                 .spawn(move || {
-                    let mut sky = crate::cells::Sky::default();
+                    let mut sky = crate::galaxy::cells::Sky::default();
                     loop {
                         let job = receive
                             .lock()

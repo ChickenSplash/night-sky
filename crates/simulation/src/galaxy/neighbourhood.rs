@@ -5,11 +5,11 @@
 //! bright tiers hold millions of stars per cell, so a query costs from about
 //! ten milliseconds in the solar neighbourhood to hundreds in the bulge. It is
 //! asked once per `Region`, never per step.
-use crate::cells::{Cell, Sky, StarKey, cell_star_id};
+use crate::galaxy::cells::{Cell, Sky, StarKey, cell_star_id};
+use crate::galaxy::population::{TIERS, tiered_light};
+use crate::galaxy::stream::{in_parallel, near};
 use crate::galaxy::{Component, PC_METRES};
-use crate::population::{TIERS, tiered_light};
 use crate::search::engine::{distance, gap_sq};
-use crate::stream::{in_parallel, near};
 use serde::{Deserialize, Serialize};
 
 /// Furthest a planet's apoapsis is from its host, as generation bounds it.
@@ -35,7 +35,7 @@ pub fn reach_pc(separation_au: f64) -> f64 {
 
 /// Most any generated system's entry range can be, in parsecs.
 pub fn max_reach_pc() -> f64 {
-    reach_pc(crate::multiple::MAX_STELLAR_SEPARATION_AU)
+    reach_pc(crate::star::multiple::MAX_STELLAR_SEPARATION_AU)
 }
 
 /// A cube of space whose candidate systems are found together.
@@ -85,7 +85,7 @@ pub fn candidates(sky: &mut Sky, region: Region, threads: usize) -> Vec<Candidat
 /// One generated system by its page star's ID, as `candidates` lists it, or
 /// `None` for an ID no cell holds.
 pub fn candidate(sky: &mut Sky, id: &str) -> Option<Candidate> {
-    let (cell, component, index) = crate::cells::parse_cell_star(id)?;
+    let (cell, component, index) = crate::galaxy::cells::parse_cell_star(id)?;
     let star = sky.star(id)?;
     let key = StarKey::new(cell, component, index);
     Some(Candidate {
@@ -140,7 +140,7 @@ pub fn stars_within(sky: &mut Sky, p: [f64; 3], radius_pc: f64, threads: usize) 
     found
 }
 
-type Waiting = Vec<(Component, u64, crate::cells::Need)>;
+type Waiting = Vec<(Component, u64, crate::galaxy::cells::Need)>;
 
 fn batch(
     sky: &Sky,

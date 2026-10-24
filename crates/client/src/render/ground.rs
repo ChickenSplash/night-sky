@@ -9,7 +9,7 @@
 //!   against coarser neighbours. Skirts hang under chunk edges for what
 //!   rounding leaves.
 //! - Chunks behind the horizon are skipped, and Bevy culls those out of view.
-//! - Chunks are built from `space_simulation::surface` in f64 on worker
+//! - Chunks are built from `space_simulation::system::surface` in f64 on worker
 //!   threads, as offsets from their own centre, so they keep their precision
 //!   beside the camera. A chunk stays drawn until its four children are ready.
 use super::{
@@ -38,7 +38,7 @@ use bevy::{
 use big_space::prelude::*;
 use serde::Serialize;
 use space_shared::Planet;
-use space_simulation::{Spheroid, surface};
+use space_simulation::{Spheroid, system::surface};
 use std::{
     collections::HashMap,
     f64::consts::{FRAC_PI_2, FRAC_PI_4},

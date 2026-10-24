@@ -37,6 +37,15 @@ crates/client/       Bevy client and egui interface
 crates/server/       Axum demo galaxy API
 crates/shared/       Serializable models
 crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generation
+  src/lib.rs         Module map and explicit exports of common operations and types
+  src/galaxy/        Density model, populations, cells, streaming, neighbours and glow
+  src/star/          Stellar evolution and companion hierarchies
+  src/system/        Planet generation, wire systems, shape and surface
+  src/orbit/         Analytic orbits, states and nested barycentric motion
+  src/clock.rs       Accumulated simulation time
+  src/units.rs       Shared physical constants
+  src/seed.rs        Stable hashing, random draws and seeded placement
+  src/light.rs       Star and planet photometry
   src/objects.rs     ObjectRef: stable identities for inspection and search
   src/search/        Object registry, query model, search engine, runner and thread
 docs/               Explanations grouped by simulation, client, shared and server
@@ -56,6 +65,15 @@ vendor/             Documented Bevy renderer patch
 
 Large test blocks live in sibling `tests.rs` files. Shaders are beside their Rust
 modules; internal asset paths are relative to the loading `.rs` file.
+
+Simulation modules are grouped by domain, not by technical layer. `galaxy/`
+owns spatial populations and their loading, `star/` owns stellar properties and
+companions, and `system/` owns planets and natural-body geometry (including
+stellar spheroids). Shared deterministic primitives live in `seed.rs`, rather
+than making every generator depend on planetary generation for its RNG.
+Photometry stays separate because it covers both emitted and reflected light.
+The crate root is a facade with explicit exports for common operations and
+types, not an implementation file; specialist APIs use their domain paths.
 
 The [UI kit guide](client/ui/kit.md) describes module ownership, shared interaction
 rules and how to add controls without duplicating theme or animation logic.

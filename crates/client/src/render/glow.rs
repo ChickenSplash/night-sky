@@ -31,8 +31,8 @@ use bevy::{
     shader::ShaderRef,
 };
 use space_simulation::{
+    galaxy::glow::{DISTANCES, patches, unresolved_table},
     galaxy::{COMPONENTS, GalaxyModel, PC_METRES},
-    glow::{DISTANCES, patches, unresolved_table},
 };
 use std::sync::{
     Arc,

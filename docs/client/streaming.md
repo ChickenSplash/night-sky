@@ -32,7 +32,7 @@ See [galaxy cells](../simulation/galaxy.md),
   next cell's stars are made (`Loader::gridding`, at most `GRIDDING` at once,
   delivered in order). Moving away from a cell whose grid is building discards
   it without a `Dropped` event, as it was never delivered.
-- `space_simulation::stream::wanted(camera, magnitude)` lists, per tier, the
+- `space_simulation::galaxy::stream::wanted(camera, magnitude)` lists, per tier, the
   level-t cells within `reach_pc`, most visible first. `Loader` builds them one
   unit at a time (one child box integrated, via `Sky::integrate`, or one star)
   and stops when the caller's `more()` says so, so no step blocks for long.
@@ -70,7 +70,7 @@ still uses `VISIBLE_MAGNITUDE`. See [galactic rendering](galactic-rendering.md).
 
 ## Spatial indexing
 
-- `StarCell::new` (simulation `stream.rs`) sorts a cell's stars into a uniform
+- `StarCell::new` (simulation `galaxy/stream.rs`) sorts a cell's stars into a uniform
   grid of boxes (about 8 stars each, never under 0.1 pc, a power of two per
   axis, numbered in Morton order so aligned cubes are contiguous runs), on
   the loader's thread. `stars` is in grid order, not generation order.

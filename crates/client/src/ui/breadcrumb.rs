@@ -22,7 +22,10 @@ fn members(system: &StarSystem, page: u32, host: &str, name: &str) -> Vec<Crumb>
             },
             None => Crumb {
                 level: Level::Star,
-                label: objects::member_label(name, space_simulation::multiple::member_letters(&id)),
+                label: objects::member_label(
+                    name,
+                    space_simulation::star::multiple::member_letters(&id),
+                ),
                 object: ObjectRef::Star { id },
             },
         })
@@ -179,7 +182,7 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy, now: crate::craft::Now
 fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Crumb> {
     let star = match &object {
         ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
-            space_simulation::multiple::system_key(id)
+            space_simulation::star::multiple::system_key(id)
         }
         ObjectRef::Planet { id } => match objects::parent_star(id) {
             Some(id) => id,
@@ -248,7 +251,7 @@ fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Cru
             && let Some((_, index)) = id.rsplit_once('/')
             && let Ok(index) = index.parse::<usize>()
         {
-            let letters = space_simulation::multiple::member_letters(host);
+            let letters = space_simulation::star::multiple::member_letters(host);
             if !letters.is_empty() && letters != objects::system_letters(star) {
                 trail.push(Crumb {
                     level: if letters.len() == 1 {
@@ -266,7 +269,7 @@ fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Cru
             }
             trail.push(Crumb {
                 level: Level::Planet,
-                label: space_simulation::cells::planet_designation(host, index),
+                label: space_simulation::galaxy::cells::planet_designation(host, index),
                 object,
             });
         }

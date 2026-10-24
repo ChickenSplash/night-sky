@@ -397,7 +397,7 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
     if let Some(reason) = &live.craft.warp.stop_reason {
         rows.push(("Warp stopped".into(), reason.clone()));
     }
-    let key = space_simulation::multiple::system_key(live.star());
+    let key = space_simulation::star::multiple::system_key(live.star());
     rows.push((
         "System".into(),
         if key.is_empty() {

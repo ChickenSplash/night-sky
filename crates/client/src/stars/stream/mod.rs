@@ -9,9 +9,9 @@ use bevy::{
 };
 use space_simulation::{
     LY_METRES,
-    cells::{Cell, Sky},
+    galaxy::cells::{Cell, Sky},
+    galaxy::stream::{Event, Loader, StarCell, StarPoint, gap_pc},
     galaxy::{GalaxyModel, PC_METRES},
-    stream::{Event, Loader, StarCell, StarPoint, gap_pc},
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -96,7 +96,7 @@ impl Starfield {
                 .get_mut()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if cached.as_ref().is_some_and(|(id, _)| {
-                space_simulation::cells::parse_cell_star(id)
+                space_simulation::galaxy::cells::parse_cell_star(id)
                     .is_some_and(|(cell, ..)| cell == changed_cell)
             }) {
                 *cached = None;
@@ -162,7 +162,7 @@ impl Plugin for StreamPlugin {
             .init_resource::<StreamMetrics>()
             .init_resource::<StreamRestart>()
             .insert_resource(Backend::start(
-                space_simulation::population::VISIBLE_MAGNITUDE,
+                space_simulation::galaxy::population::VISIBLE_MAGNITUDE,
             ))
             .add_systems(Update, stream.after(crate::scene::place_camera));
     }

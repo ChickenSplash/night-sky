@@ -104,7 +104,7 @@ not time-integrated mass loss or a replay of actual planet formation.
   systems come from `galactic_bodies(id, component)`.
 - Legacy page stars (`star(id)`) use a fixed solar-neighbourhood census: mostly
   red dwarfs, a few giants and white dwarfs. Galactic and page stars share the
-  builders in `crates/simulation/src/star.rs`; census draws must keep their
+  builders in `crates/simulation/src/star/mod.rs`; census draws must keep their
   order, or every page star changes.
 - Host mass sets orbital periods (`StarSystem::host_mass`); radius and
   temperature determine the drawn size and `spectral_colour`, and stellar
@@ -117,7 +117,7 @@ not time-integrated mass loss or a replay of actual planet formation.
 
 ## Companions and hierarchy
 
-- Multiple stars (`crates/simulation/src/multiple.rs`): every drawn star is a
+- Multiple stars (`crates/simulation/src/star/multiple.rs`): every drawn star is a
   system's primary, its brightest star, and draws its companions from the same
   sequence (no separate seed): `{id}:star` for page and galactic stars, and
   for tiered stars `{id}:tier` for what sets their light, `{id}:star` for
@@ -183,5 +183,5 @@ calculations or dynamical stability proofs. Metallicity, interacting binaries,
 mass transfer, brown dwarfs and stellar neutron-star/black-hole populations are
 not modelled here. The rendered central black hole is a separate galactic object.
 The authoritative fits and sampling assumptions live in
-`crates/simulation/src/star.rs` and `multiple.rs`; cited models are inspirations,
+`crates/simulation/src/star/`; cited models are inspirations,
 not claims that every detail of those studies is reproduced.

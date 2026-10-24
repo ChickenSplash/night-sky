@@ -18,7 +18,7 @@ fn ids(stars: &[NearbyStar]) -> Vec<String> {
 }
 
 /// A star from the finest populated cell around a point.
-fn star_near(sky: &mut Sky, p: [f64; 3]) -> crate::cells::CellStar {
+fn star_near(sky: &mut Sky, p: [f64; 3]) -> crate::galaxy::cells::CellStar {
     (0..TIERS)
         .rev()
         .find_map(|level| {
@@ -61,7 +61,7 @@ fn region_candidates_cover_every_system_that_can_reach_it() {
     assert!(own.reach_pc >= reach_pc(0.0));
     assert!(candidates.windows(2).all(|w| w[0].id < w[1].id));
     // Generation bounds every system inside its reach.
-    let bodies = crate::cells::cell_bodies(&star.id).unwrap();
+    let bodies = crate::galaxy::cells::cell_bodies(&star.id).unwrap();
     let system = crate::generated_system(&star.id, [0.0; 3]).unwrap();
     let extent = crate::system_extent_au(&system, 0);
     assert!(

@@ -2,9 +2,9 @@
 //! No dust or spiral modulation yet. Each component is normalised to its model
 //! population, so tessellation changes do not change the represented light.
 use crate::{
+    galaxy::population,
     galaxy::{COMPONENTS, Component, GalaxyModel},
     light::{blackbody_colour, visual_efficiency},
-    population,
 };
 
 pub const DISTANCES: usize = 32;

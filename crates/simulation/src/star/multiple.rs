@@ -20,11 +20,12 @@
 //!   its zone (Holman & Wiegert 1999). Pairs closer than 50 AU suppress planet
 //!   formation to about a third (Kraus et al. 2016).
 
+use crate::seed::Rng;
 use crate::star::{
     self, Formation, GIANT_SHARE, Origin, Stage, WHITE_DWARF_LIMIT, imf_cumulative, imf_inverse,
     lifetime_gyr,
 };
-use crate::system::{Body, Rng, system_within};
+use crate::system::{Body, system_within};
 use space_shared::{Barycentre, Orbit, Star};
 use std::f64::consts::TAU;
 

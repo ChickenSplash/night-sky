@@ -174,7 +174,7 @@ fn prefetch_tracks_boundaries_slowdown_and_turns_without_scanning_ftl_routes() {
 
 #[test]
 fn only_approached_systems_are_prefetched() {
-    use crate::neighbourhood::Candidate;
+    use crate::galaxy::neighbourhood::Candidate;
     let lists = Galaxy::default();
     let ship = voyage();
     let mut cache = Cache::default();

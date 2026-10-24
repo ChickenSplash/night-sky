@@ -16,11 +16,13 @@
 //!   threaded.
 use super::query::{Plan, Query, RelationPlan, Scope, Test};
 use super::registry::{Attr, KINDS, KindSet, Link, PROPERTIES, RELATIONS, Source, Values};
-use crate::cells::{Cell, Need, Sky, StarKey, catalogue_name, cell_star_id, parse_cell_star};
+use crate::galaxy::cells::{
+    Cell, Need, Sky, StarKey, catalogue_name, cell_star_id, parse_cell_star,
+};
+use crate::galaxy::population::{TIERS, tiered_bodies, tiered_stars};
 use crate::galaxy::{COMPONENTS, Component, PC_METRES};
-use crate::multiple::{Bodies, Hosted, member_id, system_key};
 use crate::objects::ObjectRef;
-use crate::population::{TIERS, tiered_bodies, tiered_stars};
+use crate::star::multiple::{Bodies, Hosted, member_id, system_key};
 use crate::system::Class;
 use serde::{Deserialize, Serialize};
 use space_shared::Star;
@@ -454,7 +456,7 @@ impl Search {
         let (origin, r2) = (self.origin, self.radius_pc * self.radius_pc);
         while !pending.is_empty() {
             let (sky, plan, kth) = (&self.sky, &self.plan, self.kth_pc());
-            let (batches, _) = crate::stream::in_parallel(
+            let (batches, _) = crate::galaxy::stream::in_parallel(
                 if pending.len() > PART { threads } else { 1 },
                 pending.chunks(PART),
                 |part| batch(sky, plan, cell, part, origin, r2, kth),
@@ -846,7 +848,7 @@ pub(crate) fn evaluate(
                 hits.push(hit(
                     ObjectRef::Planet { id: planet.id() },
                     "planet",
-                    crate::cells::planet_designation(&planet.host, planet.index),
+                    crate::galaxy::cells::planet_designation(&planet.host, planet.index),
                     planet.body.class.name(),
                     facts,
                 ));

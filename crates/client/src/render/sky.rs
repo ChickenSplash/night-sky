@@ -1,7 +1,7 @@
 //! Fixed unit conversions for galactic light. No view meter or adaptation.
 use crate::Navigation;
 use space_simulation::{
-    galaxy::PC_METRES, light::SUN_LUMINOSITY_W, population::flux_per_luminosity,
+    galaxy::PC_METRES, galaxy::population::flux_per_luminosity, light::SUN_LUMINOSITY_W,
 };
 use std::f64::consts::PI;
 

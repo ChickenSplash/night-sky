@@ -1,12 +1,12 @@
 use super::*;
 use crate::Selection;
 use space_shared::PageStar;
-use space_simulation::cells::planet_designation;
-use space_simulation::population::VISIBLE_MAGNITUDE;
+use space_simulation::galaxy::cells::planet_designation;
+use space_simulation::galaxy::population::VISIBLE_MAGNITUDE;
 use space_simulation::{
-    cells::{Cell, Sky},
     galaxy::Component,
-    stream::{Loader, StarCell, StarPoint},
+    galaxy::cells::{Cell, Sky},
+    galaxy::stream::{Loader, StarCell, StarPoint},
 };
 
 fn lists(systems: Vec<StarSystem>) -> Galaxy {
@@ -163,7 +163,7 @@ fn generated_system_is_stable_and_has_no_tasks() {
     let (cell, star) = events
         .into_iter()
         .find_map(|event| match event {
-            space_simulation::stream::Event::Loaded(c) => {
+            space_simulation::galaxy::stream::Event::Loaded(c) => {
                 c.stars.first().copied().map(|s| (c.cell, s))
             }
             _ => None,
@@ -225,7 +225,7 @@ fn visiting_an_assigned_star_shows_its_tasks_without_changing_orbits() {
     assert!(shown.task_planet(&task_id).is_some());
     assert_eq!(
         shown.planets[0].orbit,
-        space_simulation::cells::cell_planetary_system(&star.id).unwrap()[0].orbit
+        space_simulation::galaxy::cells::cell_planetary_system(&star.id).unwrap()[0].orbit
     );
 }
 

@@ -55,8 +55,8 @@ Lives in `crates/simulation`, shared by native, WASM and the CLI.
 - Kinds without a generator are registered but hidden.
 - Types within a kind are properties, not kinds: an "icy moon" is
   `kind=moon composition=ice`, a red dwarf is `kind=star star_class=m`
-  (O, B, A, F, G, K, M, giant, white dwarf, as `star.rs` draws them), a
-  sub-Neptune is `kind=planet planet_class=sub_neptune` (`system.rs`
+  (O, B, A, F, G, K, M, giant, white dwarf, as `star/` draws them), a
+  sub-Neptune is `kind=planet planet_class=sub_neptune` (`system/generation.rs`
   `Class`). The UI may still label choices plainly ("M · red dwarf").
 - `ObjectRef` moves from `crates/client/src/objects.rs` into the simulation
   crate, so the engine can return it; the client keeps its hierarchy and
@@ -208,7 +208,7 @@ stars, and a scope there overlaps the same large bright-tier cells.
 
 Measured on the engine with
 `cargo test -p space-simulation --release search_probe -- --ignored --nocapture`
-(`crates/simulation/src/search_probe.rs`): release, no work cap, 1 thread
+(`crates/simulation/src/search/probe.rs`): release, no work cap, 1 thread
 and 20. "Nothing" has a filter no star passes, so the whole sphere is
 searched; "sub-Neptunes" is `kind=planet planet_class=sub_neptune`, limit 50.
 

@@ -13,11 +13,11 @@
 //! - Everything follows from cell codes, so any cell gives the same stars in any
 //!   order, on any machine. `Sky` only caches what it has worked out.
 
+use crate::galaxy::population::{TIERS, tiered_bodies, tiered_formation, tiered_light};
+use crate::galaxy::stream::StarPoint;
 use crate::galaxy::{COMPONENTS, Component, GalaxyModel};
-use crate::population::{TIERS, tiered_bodies, tiered_formation, tiered_light};
-use crate::stream::StarPoint;
-use crate::system::{Body, Rng};
-use crate::{HASH_START, finish_hash, hash_bytes};
+use crate::seed::{HASH_START, Rng, finish_hash, hash_bytes};
+use crate::system::Body;
 use space_shared::Star;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -212,10 +212,10 @@ pub fn catalogue_name(id: &str) -> String {
 /// A planet's catalogue name, from its host's ID: a cell star, or a star or
 /// barycentre of its system.
 pub fn planet_designation(host: &str, index: usize) -> String {
-    crate::multiple::designation(
-        &catalogue_name(crate::multiple::system_key(host)),
+    crate::star::multiple::designation(
+        &catalogue_name(crate::star::multiple::system_key(host)),
         " ",
-        crate::multiple::member_letters(host),
+        crate::star::multiple::member_letters(host),
         index,
     )
 }
@@ -251,7 +251,7 @@ pub fn cell_planetary_system(id: &str) -> Option<Vec<Body>> {
 }
 
 /// Everything a cell star's ID generates: its stars, pairs and planets.
-pub fn cell_bodies(id: &str) -> Option<crate::multiple::Bodies> {
+pub fn cell_bodies(id: &str) -> Option<crate::star::multiple::Bodies> {
     let (cell, component, _) = parse_cell_star(id)?;
     Some(tiered_bodies(id, component, cell.level()))
 }
@@ -314,7 +314,7 @@ fn multinomial(rng: &mut Rng, n: u64, weights: &[f64; 8]) -> [u64; 8] {
 
 fn seeded(parts: [u64; 3]) -> Rng {
     Rng::seeded(parts.iter().fold(0x5eed_ce11_u64, |h, &p| {
-        crate::system::mix(h ^ p.wrapping_mul(0x9e37_79b9_7f4a_7c15))
+        crate::seed::mix(h ^ p.wrapping_mul(0x9e37_79b9_7f4a_7c15))
     }))
 }
 
@@ -458,7 +458,7 @@ impl Sky {
         let mut counts = [[0; TIERS]; COMPONENTS];
         for component in Component::ALL {
             let total = self.model.stars_in(component).round() as u64;
-            let shares = crate::population::tier_shares(component);
+            let shares = crate::galaxy::population::tier_shares(component);
             let exact = shares.map(|s| s * total as f64);
             let row = &mut counts[component.index()];
             for (t, e) in exact.iter().enumerate() {
@@ -877,7 +877,7 @@ fn within(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::population::{reach_pc, tier_limit};
+    use crate::galaxy::population::{reach_pc, tier_limit};
 
     #[test]
     fn star_keys_seed_as_their_id_strings_do() {
@@ -924,7 +924,8 @@ mod tests {
                         assert!(error < 1e-6, "{}: {point:?} {light}", full.id);
                         assert_eq!(bodies.stars[0].luminosity_solar, full.star.luminosity_solar);
                         // And as wide as its widest pair, worked out the same way.
-                        let widest = crate::multiple::widest_separation_au(&bodies.barycentres);
+                        let widest =
+                            crate::star::multiple::widest_separation_au(&bodies.barycentres);
                         let error = (f64::from(point.separation_au) - widest).abs();
                         assert!(
                             error <= 1e-6 * widest.max(1.0),

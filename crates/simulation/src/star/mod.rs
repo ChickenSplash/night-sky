@@ -15,8 +15,10 @@
 //! - Rotation follows each class's observed range, including the fast rotation of
 //!   stars hotter than the Kraft break (about 6,250 K).
 
+pub mod multiple;
+
 use crate::galaxy::Component;
-use crate::system::Rng;
+use crate::seed::Rng;
 use space_shared::{Spin, Star};
 use std::f64::consts::{PI, TAU};
 
@@ -484,7 +486,7 @@ pub(crate) fn evolved(
         luminosity_solar: light,
         temperature_k: kelvin,
         colour: spectral_colour(kelvin),
-        spin: crate::shape::star_spin(
+        spin: crate::system::shape::star_spin(
             Spin {
                 period_hours,
                 tilt_rad: rng.rayleigh(0.15),
@@ -552,7 +554,7 @@ pub(crate) fn white_dwarf_of_mass(
         luminosity_solar: light,
         temperature_k: kelvin,
         colour: spectral_colour(kelvin),
-        spin: crate::shape::star_spin(
+        spin: crate::system::shape::star_spin(
             Spin {
                 period_hours: hours(rng, 0.05, 3.0),
                 // The spin axis keeps its progenitor's direction.
@@ -612,7 +614,7 @@ pub(crate) fn main_sequence(id: &str, rng: &mut Rng, kelvin: f64, mass: f64) -> 
         luminosity_solar: light,
         temperature_k: kelvin,
         colour: spectral_colour(kelvin),
-        spin: crate::shape::star_spin(
+        spin: crate::system::shape::star_spin(
             Spin {
                 period_hours: period_days * 24.0,
                 tilt_rad: tilt.min(PI),
@@ -707,7 +709,7 @@ mod tests {
 
     #[test]
     fn spins_keep_stars_round_enough() {
-        use crate::shape::{MAX_FLATTENING, fastest_star_hours, star_flattening};
+        use crate::system::shape::{MAX_FLATTENING, fastest_star_hours, star_flattening};
         let stars = stars();
         let mut slowed = std::collections::BTreeMap::<&str, usize>::new();
         for star in &stars {

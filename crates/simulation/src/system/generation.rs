@@ -13,7 +13,8 @@
 //!   conjunctions away from the outer planet's periapsis, as for Neptune and Pluto.
 
 use crate::galaxy::Component;
-use crate::multiple::{Bodies, assemble, designation};
+use crate::seed::Rng;
+use crate::star::multiple::{Bodies, assemble, designation};
 use crate::star::{Formation, census, galactic};
 use crate::{period_seconds, stable_hash};
 use space_shared::{Galaxy, MAX_PLANETS, MIN_PLANETS, Orbit, Planet, Spin, StarSystem, Task};
@@ -68,57 +69,6 @@ pub struct Body {
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,
-}
-
-/// SplitMix64: small, fast and identical on every platform.
-pub(crate) struct Rng(u64);
-
-impl Rng {
-    pub(crate) fn new(key: &str) -> Self {
-        Self(stable_hash(key))
-    }
-
-    pub(crate) fn seeded(seed: u64) -> Self {
-        Self(seed)
-    }
-
-    pub(crate) fn unit(&mut self) -> f64 {
-        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
-    }
-
-    pub(crate) fn range(&mut self, low: f64, high: f64) -> f64 {
-        low + (high - low) * self.unit()
-    }
-
-    pub(crate) fn log_range(&mut self, low: f64, high: f64) -> f64 {
-        (low.ln() + (high.ln() - low.ln()) * self.unit()).exp()
-    }
-
-    pub(crate) fn chance(&mut self, p: f64) -> bool {
-        self.unit() < p
-    }
-
-    /// Eccentricities and inclinations of real systems are close to Rayleigh.
-    pub(crate) fn rayleigh(&mut self, sigma: f64) -> f64 {
-        sigma * (-2.0 * (1.0 - self.unit()).ln()).sqrt()
-    }
-
-    /// A standard normal draw (Box–Muller), using two uniforms.
-    pub(crate) fn normal(&mut self) -> f64 {
-        let radius = (-2.0 * (1.0 - self.unit()).ln()).sqrt();
-        radius * (std::f64::consts::TAU * self.unit()).cos()
-    }
-}
-
-/// The SplitMix64 finaliser: spreads every input bit over the output.
-pub(crate) fn mix(mut z: u64) -> u64 {
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-    z ^ (z >> 31)
 }
 
 /// ID of a list page's star, which seeds the star and its planets.
@@ -268,7 +218,7 @@ fn stable(inner: &Body, outer_au: f64, outer_e: f64, outer_mass: f64, star: f64)
 /// Everything a star's key generates, for a galactic cell star or a legacy
 /// page star.
 pub fn bodies(key: &str) -> Bodies {
-    crate::cells::cell_bodies(key).unwrap_or_else(|| {
+    crate::galaxy::cells::cell_bodies(key).unwrap_or_else(|| {
         let (formed, origin, mut rng) = census(key);
         assemble(key, formed, origin, &mut rng, None)
     })
@@ -277,12 +227,14 @@ pub fn bodies(key: &str) -> Bodies {
 /// The stars of a star's system, primary first, and its pairs, without its
 /// planets.
 pub fn system_stars(key: &str) -> (Vec<space_shared::Star>, Vec<space_shared::Barycentre>) {
-    crate::cells::parse_cell_star(key).map_or_else(
+    crate::galaxy::cells::parse_cell_star(key).map_or_else(
         || {
             let (formed, origin, mut rng) = census(key);
-            crate::multiple::stars_only(key, formed, origin, &mut rng, None)
+            crate::star::multiple::stars_only(key, formed, origin, &mut rng, None)
         },
-        |(cell, component, _)| crate::population::tiered_stars(key, component, cell.level()),
+        |(cell, component, _)| {
+            crate::galaxy::population::tiered_stars(key, component, cell.level())
+        },
     )
 }
 
@@ -290,16 +242,16 @@ pub fn system_stars(key: &str) -> (Vec<space_shared::Star>, Vec<space_shared::Ba
 /// multiple, otherwise drawn from its own `{key}:age` seed when its star was
 /// drawn without one.
 pub fn system_age_gyr(key: &str) -> f64 {
-    let (formed, origin, mut draws) = match crate::cells::parse_cell_star(key) {
+    let (formed, origin, mut draws) = match crate::galaxy::cells::parse_cell_star(key) {
         Some((cell, component, _)) => {
             let (formed, origin, draws, _) =
-                crate::population::tiered(key, component, cell.level());
+                crate::galaxy::population::tiered(key, component, cell.level());
             (formed, origin, draws)
         }
         None => census(key),
     };
-    let primary = crate::multiple::Primary::of(&formed, origin);
-    crate::multiple::system_age(&mut draws, &primary, &mut Rng::new(&format!("{key}:age")))
+    let primary = crate::star::multiple::Primary::of(&formed, origin);
+    crate::star::multiple::system_age(&mut draws, &primary, &mut Rng::new(&format!("{key}:age")))
 }
 
 /// Every planet of one page star's system, by host and innermost first.
@@ -493,7 +445,7 @@ fn planet_spin(
             }
             _ => isotropic(rng),
         };
-        let fastest = crate::shape::fastest_planet_hours(class, mass_earth, radius_km);
+        let fastest = crate::system::shape::fastest_planet_hours(class, mass_earth, radius_km);
         (hours.max(fastest), tilt, false)
     };
     Spin {
@@ -545,7 +497,7 @@ pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
         for (hosted, task) in generated.planets.into_iter().zip(tasks) {
             // Exoplanet style: the innermost planet is b.
             let designation = if cell {
-                crate::cells::planet_designation(&hosted.host, hosted.index)
+                crate::galaxy::cells::planet_designation(&hosted.host, hosted.index)
             } else {
                 let name = format!("{} {}", system.name, page + 1);
                 designation(&name, "", &hosted.host_letters, hosted.index)
@@ -741,7 +693,7 @@ pub fn demo_galaxy() -> Galaxy {
     // Demo tasks are overlays on the same generated population as task-free stars.
     // Assign without a database: iteration order and the immutable IDs make
     // every placement repeatable, even on an offline first launch.
-    let mut sky = crate::cells::Sky::default();
+    let mut sky = crate::galaxy::cells::Sky::default();
     let mut occupied = std::collections::HashSet::new();
     for system in &mut galaxy.systems {
         let tasks: Vec<_> = system.tasks().map(|(_, task)| task.clone()).collect();
@@ -785,14 +737,16 @@ impl std::error::Error for PageStarError {}
 pub fn assign_page_stars<E: From<PageStarError>>(
     system: &mut StarSystem,
     highest_slot: Option<u32>,
-    sky: &mut crate::cells::Sky,
+    sky: &mut crate::galaxy::cells::Sky,
     mut assigned: impl FnMut(u32) -> Result<Option<String>, E>,
     mut claim: impl FnMut(u32, &str) -> Result<bool, E>,
 ) -> Result<(), E> {
     let home = crate::galaxy::GalaxyModel::milky_way().home_pc;
-    let cell = crate::cells::Cell::containing(10, home).expect("galactic home");
+    let cell = crate::galaxy::cells::Cell::containing(10, home).expect("galactic home");
     let count = sky.tier_counts(cell)[cell.level()];
-    let reach = crate::population::reach_sq_per_luminosity(crate::population::VISIBLE_MAGNITUDE);
+    let reach = crate::galaxy::population::reach_sq_per_luminosity(
+        crate::galaxy::population::VISIBLE_MAGNITUDE,
+    );
     let offset = |position_pc: [f64; 3]| -> [f64; 3] {
         std::array::from_fn(|axis| position_pc[axis] - home[axis])
     };
@@ -876,9 +830,12 @@ mod tests {
                 assert!(task.url.is_none());
             }
             for assigned in &system.page_stars {
-                let cell_star = crate::cells::cell_star(&assigned.id).unwrap();
+                let cell_star = crate::galaxy::cells::cell_star(&assigned.id).unwrap();
                 let primary = system.star(assigned.page).unwrap();
-                assert_eq!(crate::multiple::system_key(&primary.id), cell_star.1.id);
+                assert_eq!(
+                    crate::star::multiple::system_key(&primary.id),
+                    cell_star.1.id
+                );
                 assert_eq!(primary.mass_solar, cell_star.1.mass_solar);
                 assert!(ids.insert(&assigned.id));
             }
@@ -890,7 +847,7 @@ mod tests {
         let mut system = demo_galaxy().systems.remove(0);
         for page in system.pages() {
             let star = &system.page_star(page).unwrap().id;
-            let bodies = crate::cells::cell_bodies(star).unwrap();
+            let bodies = crate::galaxy::cells::cell_bodies(star).unwrap();
             let planets: Vec<_> = system.on_page(page).collect();
             assert_eq!(planets.len(), bodies.planets.len());
             for (planet, hosted) in planets.iter().zip(&bodies.planets) {
@@ -1179,7 +1136,7 @@ mod tests {
 
     #[test]
     fn spins_keep_bodies_round_enough() {
-        use crate::shape::{MAX_FLATTENING, fastest_planet_hours, planet_flattening};
+        use crate::system::shape::{MAX_FLATTENING, fastest_planet_hours, planet_flattening};
         let (mut slowed, mut total) = (0, 0);
         let (mut flat, mut slowed_by) = (
             BTreeMap::<&str, usize>::new(),

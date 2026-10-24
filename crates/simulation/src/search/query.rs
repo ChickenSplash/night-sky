@@ -222,7 +222,7 @@ impl Query {
                 }
             }
             Scope::System { id } => {
-                if crate::cells::parse_cell_star(id).is_none() {
+                if crate::galaxy::cells::parse_cell_star(id).is_none() {
                     return Err(format!("`{id}` is not a system ID such as g1abc.2.34"));
                 }
             }

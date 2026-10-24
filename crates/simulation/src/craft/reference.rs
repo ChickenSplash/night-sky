@@ -4,7 +4,7 @@
 //! an extra gravitating body. It is a label for readouts, prediction and
 //! pointing, and does not certify a stable orbit.
 use super::*;
-use crate::multiple::s_type_limit;
+use crate::star::multiple::s_type_limit;
 
 /// How far past its region a craft keeps its current reference, as a share
 /// of the region's radius, so it does not flicker on a boundary.
@@ -150,14 +150,14 @@ impl Field {
         if let Some((id, _)) = planet {
             return self.reference_by_id(id, seconds);
         }
-        let members = crate::member_positions(&self.system, self.page, seconds);
+        let members = crate::orbit::member_positions(&self.system, self.page, seconds);
         let mut node = self.system.root(self.page)?;
         while let Some(pair) = self.system.barycentre(node) {
             let inner = pair
                 .members
                 .iter()
                 .filter_map(|m| {
-                    let d = distance(crate::find(&members, m)?, position);
+                    let d = distance(crate::orbit::find(&members, m)?, position);
                     (d < limit(m, self.zone(m)?)).then_some((m, d))
                 })
                 .min_by(|a, b| a.1.total_cmp(&b.1));

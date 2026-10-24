@@ -4,7 +4,7 @@
 //! legacy pages with no cell star added as candidates of their own.
 use super::{Arrival, Field, Reply, Request, Wait, listed_origin_pc, page_star_id, seeded_arrival};
 use crate::galaxy::PC_METRES;
-use crate::neighbourhood::{Candidate, REGION_PC, Region};
+use crate::galaxy::neighbourhood::{Candidate, REGION_PC, Region};
 use space_shared::{Galaxy, StarSystem};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -236,7 +236,7 @@ fn evict<K: Clone + Ord + Eq + std::hash::Hash, T>(
 /// lists and cache rules as a live host. Never use its blocking `step` in a
 /// live server tick: use `loading::Loader` and independent per-ship catch-up.
 pub struct Library {
-    sky: crate::cells::Sky,
+    sky: crate::galaxy::cells::Sky,
     cache: Cache,
     lists: Galaxy,
     threads: usize,
@@ -252,7 +252,7 @@ impl Library {
     /// A library whose list pages take the place of generated systems.
     pub fn new(lists: Galaxy) -> Self {
         Self {
-            sky: crate::cells::Sky::default(),
+            sky: crate::galaxy::cells::Sky::default(),
             cache: Cache::default(),
             lists,
             threads: super::threads(),

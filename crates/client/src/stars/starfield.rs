@@ -15,11 +15,11 @@ use crate::{
 };
 use bevy::{asset::load_internal_asset, math::DVec3, prelude::*};
 use space_simulation::{
-    cells::Cell,
     galaxy::PC_METRES,
+    galaxy::cells::Cell,
+    galaxy::population::{reach_pc, reach_sq_per_luminosity},
+    galaxy::stream::{Block, StarPoint, gap_pc},
     light::visual_efficiency,
-    population::{reach_pc, reach_sq_per_luminosity},
-    stream::{Block, StarPoint, gap_pc},
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -535,7 +535,7 @@ fn sync(
         crate::scene::body_range(&nav, system, &pose)?;
         Some(system.page_star(pose.page)?.id.as_str())
     });
-    let body = visited.and_then(space_simulation::cells::parse_cell_star);
+    let body = visited.and_then(space_simulation::galaxy::cells::parse_cell_star);
     let origin = rig.galactic_ly(&pose) * (space_simulation::LY_METRES / PC_METRES);
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
     let eye = origin + DVec3::from_array(home);
@@ -791,8 +791,8 @@ fn sync(
     for (id, star) in &split.candidates {
         let position = DVec3::from_array(star.position_pc);
         let distance = position.distance(eye);
-        let separation =
-            instance(star, eye.to_array()).separation_au() * space_simulation::stream::AU_PC;
+        let separation = instance(star, eye.to_array()).separation_au()
+            * space_simulation::galaxy::stream::AU_PC;
         if !debug.galactic_points
             || !debug.split_multiples
             || distance >= split.reach_pc
@@ -887,7 +887,7 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use space_simulation::population::VISIBLE_MAGNITUDE;
+    use space_simulation::galaxy::population::VISIBLE_MAGNITUDE;
 
     #[test]
     fn blocks_outside_the_view_are_culled() {
@@ -980,7 +980,10 @@ mod tests {
         let mut field = Starfield::default();
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell::new(cell, vec![point(star, 0), point(centre, 1)]),
+            space_simulation::galaxy::stream::StarCell::new(
+                cell,
+                vec![point(star, 0), point(centre, 1)],
+            ),
         );
         let magnitude = VISIBLE_MAGNITUDE;
         let near = candidates(&field, star + DVec3::new(0.0, 0.05, 0.0), magnitude);
@@ -997,7 +1000,7 @@ mod tests {
         };
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell::new(cell, vec![faint]),
+            space_simulation::galaxy::stream::StarCell::new(cell, vec![faint]),
         );
         let eye = star + DVec3::new(0.0, RESCAN_PC + 0.05, 0.0);
         assert!(candidates(&field, eye, magnitude).is_empty());
@@ -1024,7 +1027,7 @@ mod tests {
         let mut field = Starfield::default();
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell::new(cell, vec![visited, neighbour]),
+            space_simulation::galaxy::stream::StarCell::new(cell, vec![visited, neighbour]),
         );
         let key = (cell, visited.component, 0);
         let at = star_position(&field, key).unwrap();
@@ -1062,7 +1065,7 @@ mod tests {
         let mut field = Starfield::default();
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell::new(cell, vec![point]),
+            space_simulation::galaxy::stream::StarCell::new(cell, vec![point]),
         );
         let eye = position + DVec3::Z * (6.0 * space_simulation::LY_METRES / PC_METRES);
         let candidate = candidates(&field, eye, VISIBLE_MAGNITUDE);
@@ -1116,7 +1119,7 @@ mod tests {
         let mut field = Starfield::default();
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell::new(cell, vec![point; 20_000]),
+            space_simulation::galaxy::stream::StarCell::new(cell, vec![point; 20_000]),
         );
         let mut split = Split {
             next_reach_pc: 0.001,
@@ -1145,7 +1148,7 @@ mod tests {
         let mut field = Starfield::default();
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell::new(cell, vec![point; SPLIT_BUDGET + 1]),
+            space_simulation::galaxy::stream::StarCell::new(cell, vec![point; SPLIT_BUDGET + 1]),
         );
         let mut split = Split::default();
         assert_eq!(
@@ -1160,7 +1163,7 @@ mod tests {
         // A cheaper neighbourhood, without a camera or view change, recovers.
         field.cells.insert(
             cell,
-            space_simulation::stream::StarCell::new(cell, vec![point]),
+            space_simulation::galaxy::stream::StarCell::new(cell, vec![point]),
         );
         assert_eq!(split.gather(&field, eye, 1e-4), 1);
         assert!(split.reach_pc > 0.0);
@@ -1193,9 +1196,10 @@ mod tests {
         let mut points = vec![distant; SPLIT_BUDGET + 1];
         points.push(nearby);
         let mut field = Starfield::default();
-        field
-            .cells
-            .insert(cell, space_simulation::stream::StarCell::new(cell, points));
+        field.cells.insert(
+            cell,
+            space_simulation::galaxy::stream::StarCell::new(cell, points),
+        );
         let mut split = Split::default();
         for _ in 0..4 {
             split.gather(&field, eye, 1e-4);
@@ -1231,7 +1235,8 @@ mod tests {
         let point: f64 = visited.stars.iter().map(|s| s.luminosity_solar).sum();
         assert!((light / point - 1.0).abs() < 1e-6);
         // C is over a thousand AU from the close pair.
-        let separation = space_simulation::multiple::widest_separation_au(&system.barycentres);
+        let separation =
+            space_simulation::star::multiple::widest_separation_au(&system.barycentres);
         assert!(separation > 1_000.0);
         let packed = StarInstance::new([0.0; 3], 1.0, 5772.0, separation as f32);
         assert!((packed.separation_au() / separation - 1.0).abs() < 2e-3);

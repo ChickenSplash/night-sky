@@ -7,9 +7,9 @@
 //!   whenever its caller, a worker thread, runs out of time. Loaded cells are dropped once the camera is well
 //!   beyond their reach.
 
-use crate::cells::{Cell, ROOT_PC, Sky, cell_star_id};
+use crate::galaxy::cells::{Cell, ROOT_PC, Sky, cell_star_id};
+use crate::galaxy::population::{TIERS, reach_pc};
 use crate::galaxy::{COMPONENTS, Component};
-use crate::population::{TIERS, reach_pc};
 use std::collections::{HashSet, VecDeque};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -948,7 +948,7 @@ impl Loader {
 mod tests {
     use super::*;
     use crate::galaxy::GalaxyModel;
-    use crate::system::Rng;
+    use crate::seed::Rng;
     use std::collections::HashMap;
 
     /// A few bright tiers only, so the tests stay quick.

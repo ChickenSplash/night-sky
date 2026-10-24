@@ -114,7 +114,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
             }
         }
         ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
-            let key = space_simulation::multiple::system_key(id);
+            let key = space_simulation::star::multiple::system_key(id);
             if let Some((system, page)) = objects::system(galaxy, key) {
                 let name = crate::galaxy_nav::label(galaxy, key);
                 let velocity = position_ly.map(|at| velocity_kms(key, at));
@@ -251,7 +251,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
 fn velocity_kms(key: &str, position_ly: DVec3) -> [f64; 3] {
     let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
     let position_pc = home + position_ly * (LY_METRES / PC_METRES);
-    space_simulation::kinematics::system_velocity_kms(key, position_pc.to_array())
+    space_simulation::galaxy::kinematics::system_velocity_kms(key, position_pc.to_array())
 }
 
 fn motion_facts(info: &mut Info, velocity: [f64; 3]) {
@@ -265,7 +265,7 @@ fn motion_facts(info: &mut Info, velocity: [f64; 3]) {
 /// Letters of a star or barycentre within its system.
 fn member_component<'a>(system: &'a space_shared::StarSystem, id: &'a str) -> &'a str {
     system.barycentre(id).map_or_else(
-        || space_simulation::multiple::member_letters(id),
+        || space_simulation::star::multiple::member_letters(id),
         |pair| pair.component.as_str(),
     )
 }
@@ -371,7 +371,7 @@ pub fn actions(
         }
         ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
             // Any member acts for its whole system.
-            let id = &space_simulation::multiple::system_key(id).to_owned();
+            let id = &space_simulation::star::multiple::system_key(id).to_owned();
             if !crate::galaxy_nav::reachable(nav, galaxy, field, id) {
                 return Vec::new();
             }

@@ -12,9 +12,16 @@
 //! - Every profile has a closed-form integral, so each component holds exactly
 //!   its share of `GalaxyModel::stars`. Arms only move stars around their circle.
 
-use crate::kinematics::RotationCurve;
+pub mod cells;
+pub mod glow;
+pub mod kinematics;
+pub mod neighbourhood;
+pub mod population;
+pub mod stream;
+
+use self::kinematics::RotationCurve;
+use crate::seed::Rng;
 use crate::star::galactic_star;
-use crate::system::Rng;
 use space_shared::Star;
 use std::f64::consts::{PI, TAU};
 

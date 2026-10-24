@@ -9,9 +9,9 @@ use bevy::{math::DVec3, prelude::*};
 use space_shared::{Galaxy, StarSystem};
 use space_simulation::{
     LY_METRES,
-    cells::catalogue_name,
+    galaxy::cells::catalogue_name,
+    galaxy::population::reach_sq_per_luminosity,
     galaxy::{GalaxyModel, PC_METRES},
-    population::reach_sq_per_luminosity,
 };
 
 /// A picked star, identified by its stable cell ID, never a mesh index.
@@ -129,7 +129,7 @@ fn pick_ray(
 
 /// Find a picked point by stable ID, never by its batch or vertex number.
 pub fn picked_id(field: &Starfield, id: &str) -> Option<PickedStar> {
-    let (cell, component, index) = space_simulation::cells::parse_cell_star(id)?;
+    let (cell, component, index) = space_simulation::galaxy::cells::parse_cell_star(id)?;
     let mut cached = field
         .picked
         .lock()
@@ -257,7 +257,7 @@ pub fn selectable_star(
     field: &Starfield,
     id: &str,
 ) -> Option<PickedStar> {
-    let key = space_simulation::multiple::system_key(id);
+    let key = space_simulation::star::multiple::system_key(id);
     let mut star = match route(nav, lists, field, key)? {
         Route::Located(star) => star,
         Route::List(index, page) => {

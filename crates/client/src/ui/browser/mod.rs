@@ -263,8 +263,8 @@ impl Browser {
             .nav
             .location(&view.universe.0)
             .map(|system| crate::objects::star_id(system, view.nav.page))
-            .map(|id| space_simulation::multiple::system_key(&id).to_owned())
-            .filter(|key| space_simulation::cells::parse_cell_star(key).is_some());
+            .map(|id| space_simulation::star::multiple::system_key(&id).to_owned())
+            .filter(|key| space_simulation::galaxy::cells::parse_cell_star(key).is_some());
         ui.horizontal_wrapped(|ui| {
             let mut radius = match self.query.scope {
                 Scope::Within { radius_ly } => radius_ly,

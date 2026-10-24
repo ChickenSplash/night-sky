@@ -1,8 +1,8 @@
 use super::*;
-use crate::cells::{Cell, CellStar, Sky};
 use crate::craft::{CraftKind, route::Stage, warp::GravityPolicy};
 use crate::galaxy::GalaxyModel;
-use crate::population::TIERS;
+use crate::galaxy::cells::{Cell, CellStar, Sky};
+use crate::galaxy::population::TIERS;
 
 /// A real generated star near home, from the finest populated cell there.
 fn star() -> CellStar {
@@ -615,9 +615,15 @@ fn frames_are_anchored_from_seeds_else_from_the_list() {
 }
 
 /// A generated neighbour of `star` with planets, a few light years off.
-fn neighbour(star: &CellStar) -> (crate::neighbourhood::Candidate, space_shared::StarSystem) {
+fn neighbour(
+    star: &CellStar,
+) -> (
+    crate::galaxy::neighbourhood::Candidate,
+    space_shared::StarSystem,
+) {
     let mut sky = Sky::default();
-    let mut near = crate::neighbourhood::stars_within(&mut sky, star.position_pc, 2.0, threads());
+    let mut near =
+        crate::galaxy::neighbourhood::stars_within(&mut sky, star.position_pc, 2.0, threads());
     near.sort_by(|a, b| a.id.cmp(&b.id));
     near.into_iter()
         .filter(|other| {
@@ -628,7 +634,7 @@ fn neighbour(star: &CellStar) -> (crate::neighbourhood::Candidate, space_shared:
             (1.0..6.0).contains(&ly)
         })
         .find_map(|other| {
-            let candidate = crate::neighbourhood::candidate(&mut sky, &other.id)?;
+            let candidate = crate::galaxy::neighbourhood::candidate(&mut sky, &other.id)?;
             let system = crate::generated_system(&candidate.id, candidate_ly(&candidate))?;
             (system.planets.len() >= 2).then_some((candidate, system))
         })

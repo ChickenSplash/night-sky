@@ -2,10 +2,10 @@ use super::engine::{Hit, PC_PER_LY, distance, evaluate};
 use super::query::{DEFAULT_LIMIT, Filter, Query, Scope, Sort, Test};
 use super::registry::{FAMILIES, KINDS, PROPERTIES, Values};
 use super::*;
-use crate::cells::{Cell, ROOT_PC, Sky};
+use crate::galaxy::cells::{Cell, ROOT_PC, Sky};
+use crate::galaxy::population::TIERS;
 use crate::galaxy::{Component, GalaxyModel};
 use crate::objects::ObjectRef;
-use crate::population::TIERS;
 use std::sync::OnceLock;
 
 const RADIUS_LY: f64 = 15.0;
@@ -383,7 +383,7 @@ fn designations_and_ids_find_their_object() {
 #[test]
 fn one_system_sorts_by_a_property() {
     let (_, results) = run(request("kind=planet within_ly=15 limit=1000"), u64::MAX, 1);
-    let key = crate::multiple::system_key(match &results[0].object {
+    let key = crate::star::multiple::system_key(match &results[0].object {
         ObjectRef::Planet { id } => id,
         other => panic!("{other:?}"),
     })
@@ -393,7 +393,7 @@ fn one_system_sorts_by_a_property() {
         id: "radius_km".into(),
         descending: true,
     };
-    let planets = crate::cells::cell_bodies(&key).unwrap().planets;
+    let planets = crate::galaxy::cells::cell_bodies(&key).unwrap().planets;
     let (progress, found) = run(
         SearchRequest {
             query,
@@ -539,7 +539,7 @@ fn designations_resolve_to_ids() {
     }
 }
 
-/// Star class as `star.rs` names its stars, independently of the engine.
+/// Star class as `star/mod.rs` names its stars, independently of the engine.
 fn class_of(star: &space_shared::Star) -> &'static str {
     match star.kind.as_str() {
         "Red dwarf" => "m",
@@ -554,7 +554,9 @@ fn class_of(star: &space_shared::Star) -> &'static str {
 
 #[test]
 fn relationships_match_their_systems() {
-    let bodies = |id: &str| crate::cells::cell_bodies(crate::multiple::system_key(id)).unwrap();
+    let bodies = |id: &str| {
+        crate::galaxy::cells::cell_bodies(crate::star::multiple::system_key(id)).unwrap()
+    };
     // Planets orbiting a red dwarf, a pair of stars counting when either is.
     let (_, planets) = run(request("kind=planet within_ly=15 limit=1000"), u64::MAX, 1);
     let (_, found) = run(
@@ -677,11 +679,11 @@ fn red_dwarf_sub_neptunes_match_a_brute_force_at_50_ly() {
 }
 
 /// A ship around the first planet near home with one, and that planet.
-fn live_ship() -> (live::LiveObject, crate::multiple::Hosted) {
+fn live_ship() -> (live::LiveObject, crate::star::multiple::Hosted) {
     let (key, cell, component, position_pc, planet) = near_home()
         .iter()
         .find_map(|(key, cell, component, at)| {
-            let bodies = crate::population::tiered_bodies(key, *component, cell.level());
+            let bodies = crate::galaxy::population::tiered_bodies(key, *component, cell.level());
             let planet = bodies.planets.first()?.clone();
             Some((key.clone(), *cell, *component, *at, planet))
         })
@@ -748,7 +750,7 @@ fn live_ships_match_kinds_filters_scopes_text_and_what_they_orbit() {
     assert!(refused.unwrap_err().contains("not planets"));
     // Around a pair, a ship orbits each of its stars, as planets do.
     let pair = near_home().iter().find_map(|(key, cell, component, at)| {
-        let bodies = crate::population::tiered_bodies(key, *component, cell.level());
+        let bodies = crate::galaxy::population::tiered_bodies(key, *component, cell.level());
         let pair = bodies.barycentres.first()?.clone();
         Some((key.clone(), *at, pair, bodies.stars))
     });

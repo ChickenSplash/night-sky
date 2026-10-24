@@ -1,7 +1,7 @@
 //! One-second log reports and continuously refreshed trailing-second UI measurements.
 use super::Starfield;
 use bevy::{platform::time::Instant, prelude::*};
-use space_simulation::cells::Cell;
+use space_simulation::galaxy::cells::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 

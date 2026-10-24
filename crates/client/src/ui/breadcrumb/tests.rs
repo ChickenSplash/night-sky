@@ -144,8 +144,8 @@ fn physical_planet_location_is_independent_of_selection() {
 #[test]
 fn a_generated_star_follows_the_galaxy_and_a_star_elsewhere_is_left_out() {
     use space_simulation::{
-        cells::{Cell, Sky},
         galaxy::GalaxyModel,
+        galaxy::cells::{Cell, Sky},
     };
     let galaxy = space_simulation::demo_galaxy();
     let home = GalaxyModel::milky_way().home_pc;
@@ -188,7 +188,7 @@ fn a_star_of_a_multiple_system_is_a_location_below_the_whole_system() {
                 .is_some_and(|pair| pair.id == root.id)
         })
         .unwrap();
-    let letter = space_simulation::multiple::member_letters(&star.id);
+    let letter = space_simulation::star::multiple::member_letters(&star.id);
     nav.location_body = Some(star.id.clone());
     let location = trail(&nav, &galaxy);
     assert_eq!(
@@ -226,7 +226,7 @@ fn a_companions_planet_is_reached_through_the_barycentre_and_its_star() {
         .on_page(nav.page)
         .find(|p| p.host != *primary && system.barycentre(&p.host).is_none())
         .expect("a planet of a companion");
-    let letter = space_simulation::multiple::member_letters(&planet.host);
+    let letter = space_simulation::star::multiple::member_letters(&planet.host);
     let expected = [
         "Milky Way".to_owned(),
         system.name.clone(),
@@ -301,7 +301,7 @@ fn a_selected_member_star_or_pair_hangs_below_the_whole_system() {
         last.label,
         format!(
             "System 2 {}",
-            space_simulation::multiple::member_letters(&star.id)
+            space_simulation::star::multiple::member_letters(&star.id)
         )
     );
     assert_eq!(

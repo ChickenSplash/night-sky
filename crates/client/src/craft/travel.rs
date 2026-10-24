@@ -8,8 +8,8 @@ use bevy::math::DVec3;
 use space_simulation::{
     LY_METRES,
     craft::voyage::{Arrival, Atlas, Rebase, Request, Wait, loading::Loader},
+    galaxy::neighbourhood::{Candidate, Region},
     galaxy::{GalaxyModel, PC_METRES},
-    neighbourhood::{Candidate, Region},
 };
 
 pub struct Charts {
@@ -17,7 +17,7 @@ pub struct Charts {
     /// Frames polled, each one cache round.
     frames: i64,
     /// Works out a spawned craft's seeded origin, and synchronous test waits.
-    sky: Option<space_simulation::cells::Sky>,
+    sky: Option<space_simulation::galaxy::cells::Sky>,
     /// Off only in the synchronous test harness, never a failure fallback.
     pub background: bool,
 }
@@ -98,7 +98,7 @@ impl Charts {
     }
 
     /// The sky this frame works seeded positions out on, kept warm.
-    pub fn sky(&mut self) -> &mut space_simulation::cells::Sky {
+    pub fn sky(&mut self) -> &mut space_simulation::galaxy::cells::Sky {
         self.sky.get_or_insert_with(Default::default)
     }
 

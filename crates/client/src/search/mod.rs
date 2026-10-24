@@ -169,7 +169,7 @@ fn chart(nav: &mut crate::Navigation, entry: &Entry) {
         if let ObjectRef::Star { id } | ObjectRef::Barycentre { id } | ObjectRef::Planet { id } =
             &result.object
         {
-            let key = space_simulation::multiple::system_key(id);
+            let key = space_simulation::star::multiple::system_key(id);
             nav.charted.insert(key.to_owned(), result.position_pc);
         }
     }

@@ -1,9 +1,9 @@
 use super::*;
 use space_simulation::craft::{Order, WarpOrder};
 use space_simulation::{
-    cells::{Cell, CellStar, Sky},
     craft::warp::{GravityPolicy, MAX_SPEED},
-    population::TIERS,
+    galaxy::cells::{Cell, CellStar, Sky},
+    galaxy::population::TIERS,
 };
 
 fn galaxy() -> Galaxy {

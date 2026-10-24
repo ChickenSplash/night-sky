@@ -121,7 +121,8 @@ see [stars](stars.md#from-birth-mass-and-age-to-a-star).
 Calculations use `f64` and return positions in SI metres; the interface uses
 AU and light years. Never multiply lifetime elapsed time by a mutable rate:
 changing the rate or pausing must not jump orbit phase. The equations and
-clock are implemented in `crates/simulation/src/lib.rs`; these are standard
+clock are implemented in `crates/simulation/src/orbit/` and `clock.rs`, with
+shared physical constants in `units.rs`; these are standard
 Keplerian two-body relations, subject to the fixed-orbit assumptions above.
 
 - Orbital positions use the system's plane axes. The client's

@@ -3,7 +3,7 @@
 //! is sea level. Drawing, collision and later water and air all ask here, so
 //! the ground that is seen is the ground that is stood on.
 
-use crate::shape::Spheroid;
+use crate::system::shape::Spheroid;
 use glam::DVec3;
 use space_shared::Planet;
 

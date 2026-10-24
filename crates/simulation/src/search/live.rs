@@ -4,9 +4,9 @@
 use super::engine::{Facts, PC_PER_LY, SearchResult, all_pass, sort_value};
 use super::query::{Query, Scope};
 use super::registry::{Link, PROPERTIES, RELATIONS};
-use crate::cells::parse_cell_star;
-use crate::multiple::system_key;
-use crate::population::tiered_bodies;
+use crate::galaxy::cells::parse_cell_star;
+use crate::galaxy::population::tiered_bodies;
+use crate::star::multiple::system_key;
 
 /// One live object as search sees it.
 #[derive(Clone, Debug, PartialEq)]

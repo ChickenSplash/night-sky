@@ -502,7 +502,7 @@ impl Field {
     /// Every star and planet with its state at this instant.
     pub fn bodies(&self, seconds: f64) -> Vec<Body> {
         let members = crate::member_states(&self.system, self.page, seconds);
-        let at = |id: &str| crate::find(&members, id).unwrap_or_default();
+        let at = |id: &str| crate::orbit::find(&members, id).unwrap_or_default();
         let stars = self.stars.iter().map(|(id, gm, radius)| Body {
             id: id.clone(),
             gm: *gm,
@@ -573,8 +573,8 @@ impl Gravity for Field {
 
     fn acceleration(&self, position: [f64; 3], seconds: f64) -> [f64; 3] {
         let mut sum = [0.0; 3];
-        let members = crate::member_positions(&self.system, self.page, seconds);
-        let at = |id: &str| crate::find(&members, id).unwrap_or([0.0; 3]);
+        let members = crate::orbit::member_positions(&self.system, self.page, seconds);
+        let at = |id: &str| crate::orbit::find(&members, id).unwrap_or([0.0; 3]);
         for (id, gm, radius) in &self.stars {
             pull(&mut sum, position, at(id), *gm, *radius);
         }

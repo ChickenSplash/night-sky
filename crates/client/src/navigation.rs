@@ -151,7 +151,7 @@ impl Default for Navigation {
             move_speed: 42.0 * LY_METRES,
             rotation: Quat::from_rotation_y(0.3) * Quat::from_rotation_x(-0.85),
             fov_deg: 50.0,
-            magnitude: space_simulation::population::VISIBLE_MAGNITUDE,
+            magnitude: space_simulation::galaxy::population::VISIBLE_MAGNITUDE,
             overlays: true,
             labels: true,
             orbits: true,

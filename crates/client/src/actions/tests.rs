@@ -1,8 +1,8 @@
 use super::*;
 use crate::galaxy_nav::page_pick;
 use space_simulation::{
-    cells::{Sky, parse_cell_star},
-    stream::{StarCell, StarPoint},
+    galaxy::cells::{Sky, parse_cell_star},
+    galaxy::stream::{StarCell, StarPoint},
 };
 
 #[test]
@@ -69,7 +69,7 @@ fn remote_planet_selection_and_inspection_never_move_the_camera() {
 
 #[test]
 fn an_unstreamed_generated_planet_can_be_selected_by_id() {
-    use space_simulation::{cells::Cell, galaxy::GalaxyModel};
+    use space_simulation::{galaxy::GalaxyModel, galaxy::cells::Cell};
     let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
     let star = Sky::default().cell_star_at(cell, 0).unwrap().id;
     let system = crate::galaxy_nav::generated(&star, bevy::math::DVec3::ZERO).unwrap();
@@ -96,7 +96,7 @@ fn an_unstreamed_generated_planet_can_be_selected_by_id() {
 
 #[test]
 fn selecting_a_search_star_never_travels_even_when_selected_again() {
-    use space_simulation::{cells::Cell, galaxy::GalaxyModel};
+    use space_simulation::{galaxy::GalaxyModel, galaxy::cells::Cell};
     let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
     let point = Sky::default().cell_star_at(cell, 0).unwrap();
     let mut app = run(space_simulation::demo_galaxy(), vec![]);
@@ -409,8 +409,8 @@ fn movement_speed_is_clamped_and_rejects_non_finite_values() {
 
 #[test]
 fn clicking_a_streamed_star_selects_then_visits_its_generated_system() {
-    use space_simulation::cells::Cell;
     use space_simulation::galaxy::GalaxyModel;
+    use space_simulation::galaxy::cells::Cell;
     let home = GalaxyModel::milky_way().home_pc;
     let cell = Cell::containing(10, home).unwrap();
     let galaxy = space_simulation::demo_galaxy();
@@ -560,7 +560,7 @@ fn list_systems_select_like_a_star_click_and_keep_the_list_tab() {
 #[test]
 fn unstreamed_generated_stars_are_not_visited_by_id() {
     let galaxy = space_simulation::demo_galaxy();
-    use space_simulation::cells::Cell;
+    use space_simulation::galaxy::cells::Cell;
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
     let cell = Cell::containing(10, home).unwrap();
     let id = (0..)
@@ -789,7 +789,7 @@ fn up_clears_the_selection_first_then_climbs_the_trail() {
 
 #[test]
 fn up_from_a_tracked_planet_frames_its_system_then_climbs_to_its_parent() {
-    use space_simulation::{cells::Cell, galaxy::GalaxyModel};
+    use space_simulation::{galaxy::GalaxyModel, galaxy::cells::Cell};
     let galaxy = space_simulation::demo_galaxy();
     let cell = Cell::containing(10, GalaxyModel::milky_way().home_pc).unwrap();
     let star = Sky::default().cell_star_at(cell, 0).unwrap();

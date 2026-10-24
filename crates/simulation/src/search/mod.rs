@@ -3,6 +3,8 @@
 //! navigator). See `docs/simulation/search.md`.
 pub(crate) mod engine;
 pub mod live;
+#[cfg(test)]
+mod probe;
 pub mod query;
 pub mod registry;
 mod runner;

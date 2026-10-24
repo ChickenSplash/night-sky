@@ -8,7 +8,7 @@
 //!   `{key}:velocity` seed and never shift a position or another draw.
 
 use crate::galaxy::{Component, GalaxyModel};
-use crate::system::Rng;
+use crate::seed::Rng;
 
 /// G in pc (km/s)² per solar mass.
 const G: f64 = 4.300_917e-3;
@@ -146,7 +146,7 @@ fn compose(p: [f64; 3], radial: f64, along: f64, vertical: f64) -> [f64; 3] {
 /// in parsecs. Legacy page stars, which have no component, move as thin-disc
 /// stars.
 pub fn system_velocity_kms(key: &str, position_pc: [f64; 3]) -> [f64; 3] {
-    let component = crate::cells::parse_cell_star(key).map_or(Component::ThinDisc, |c| c.1);
+    let component = crate::galaxy::cells::parse_cell_star(key).map_or(Component::ThinDisc, |c| c.1);
     let age = crate::system_age_gyr(key);
     GalaxyModel::milky_way().star_velocity_kms(key, component, position_pc, age)
 }

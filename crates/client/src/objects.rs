@@ -9,7 +9,9 @@ pub use space_simulation::objects::ObjectRef;
 /// Planet IDs encode their host, and so their system's key, including for
 /// planets on list pages.
 pub fn parent_star(id: &str) -> Option<&str> {
-    Some(space_simulation::multiple::system_key(planet_host(id)?))
+    Some(space_simulation::star::multiple::system_key(planet_host(
+        id,
+    )?))
 }
 
 /// The star or barycentre a planet ID orbits.
@@ -70,7 +72,7 @@ pub fn system_name(galaxy: &Galaxy, system: &StarSystem, page: u32) -> String {
 pub fn page_member_label(galaxy: &Galaxy, system: &StarSystem, page: u32, id: &str) -> String {
     let letters = match system.barycentre(id) {
         Some(pair) => pair.component.as_str(),
-        None => space_simulation::multiple::member_letters(id),
+        None => space_simulation::star::multiple::member_letters(id),
     };
     member_label(&system_name(galaxy, system, page), letters)
 }

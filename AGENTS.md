@@ -15,14 +15,15 @@ for implementation details.
 
 | Working area | Code ownership | Read |
 | --- | --- | --- |
-| Galaxy populations and procedural cells | `crates/simulation` | [Galaxy](docs/simulation/galaxy.md) |
-| Star types, evolution and companions | `crates/simulation` | [Stars](docs/simulation/stars.md) |
-| Planet generation and motion | `crates/simulation` | [Planetary systems](docs/simulation/planetary-systems.md), [orbits](docs/simulation/orbits.md) |
+| Galaxy populations and procedural cells | `crates/simulation/src/galaxy/` | [Galaxy](docs/simulation/galaxy.md) |
+| Star types, evolution and companions | `crates/simulation/src/star/` | [Stars](docs/simulation/stars.md) |
+| Planet generation, shape and ground | `crates/simulation/src/system/` | [Planetary systems](docs/simulation/planetary-systems.md) |
+| Orbital motion, units and clock | Simulation `orbit/`, `units.rs`, `clock.rs` | [Orbits](docs/simulation/orbits.md) |
 | Craft model, gravity, integration and live craft | `crates/simulation/src/craft.rs`, client `craft.rs` | [Craft](docs/simulation/craft.md) |
 | Object registry, queries and search | `crates/simulation/src/search`, client `search/` | [Search](docs/simulation/search.md) |
 | Lists, pages, tasks and wire models | `crates/shared`, simulation and client | [Information overlay](docs/shared/information-overlay.md) |
 | Visits, selection, camera and presentation | Client `navigation.rs`, `scene/`, `galaxy_nav.rs`, `presentation.rs` | [Navigation](docs/client/navigation.md) |
-| Visible-star loading and spatial queries | Client `stars/stream/`, `crates/simulation` | [Streaming](docs/client/streaming.md) |
+| Visible-star loading and spatial queries | Client `stars/stream/`, simulation `galaxy/` | [Streaming](docs/client/streaming.md) |
 | Bodies, lighting, star points and galaxy glow | Client `render/`, `stars/` | [Rendering](docs/client/rendering.md), [galactic rendering](docs/client/galactic-rendering.md) |
 | Key bindings and piloting | Client `input.rs`, `pilot.rs` | [Controls](docs/client/controls.md) |
 | HUD, breadcrumbs, inspector and panels | Client `ui/` | [Interface](docs/client/ui/interface.md), [controls](docs/client/controls.md), [browser](docs/client/ui/browser.md) |
