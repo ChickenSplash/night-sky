@@ -90,7 +90,7 @@ table. A fast test checks scattering once matches a fine march. Measurements
 - All of 4b is committed and pushed (`e0d024d`), waiting for the user to
   check it live (see step 1 below).
 - **Pop-in to fix:** the multiple scattering arrives seconds after the
-  rest, so the look changes suddenly. Agreed direction: build it in
+  rest, so the look changes suddenly. Proposed (not yet agreed): build it in
   parallel across cores (rows are independent; the solve is about 0.5 s),
   build tables before a planet is seen (on entering its system, nearest
   first, once air is per planet in checkpoint 5), and fade the extra light
