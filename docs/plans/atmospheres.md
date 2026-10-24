@@ -25,11 +25,10 @@ reuse the same model as just another body.
 2. **Rendering, finished** (stage 2, below): multiple scattering, then every
    planet with air. **4c done, checked live and accepted by the user.** It
    builds on the shape and ground chunks from [planet surfaces](planet-surfaces.md).
-3. **Simulation** (stage 3): retention (the cosmic shoreline, Zahnle &
-   Catling 2017, with stripping near flaring M dwarfs), composition,
-   pressure and scale height ($H = kT/\bar m g$), then climate. The sliders
-   stay as a debug override. The air's top (12.5 scale heights) is the
-   extent flight-sim waits for. To be planned in detail with the user.
+3. **Simulation** (stage 3, now planned together with integration in
+   checkpoint 5): physical data model first, then retention and generation,
+   optical conversion and per-planet rendering. More detailed climate follows
+   later. The sliders stay as a debug override.
 4. **Search and the information overlay:** the new fields.
 
 Not planned yet: clouds, gas giant banding, aurorae, rings.
@@ -222,20 +221,70 @@ with `cargo test --locked --workspace measure_ground_lighting -- --ignored --noc
 
 ## Checkpoint 5 · Every planet with air
 
-- A per-planet source of `AirSettings` keyed by planet ID, filled for now by
-  the sliders for the selected planet, so stage 3 only fills it from the
-  simulation; `AtmosphereTuning` becomes its debug override.
-- Tables cached by air with a memory limit.
-- Shells for every planet drawn as a disc, sorted with each other and later
-  moons; no pop at the hand-over from point to disc.
-- Check: several planets with different presets in one system; rerun the
-  atmosphere test.
+Agreed direction: scientifically grounded, simple first, with explicit
+approximations that can be improved independently. Generate a plausible
+present-day state, not a full formation or atmospheric-evolution simulation.
+Keep physical state, optical conversion and rendering separate.
+
+### 5a · Physical data model (start here)
+
+- Simulation-owned atmosphere or explicit absence; no Bevy or shader settings
+  in the model. Gas mole fractions (N₂, CO₂, H₂, He, H₂O, CH₄, O₂, Ar),
+  reference pressure and temperature, and a separate simple aerosol description.
+  Supporting oxygen does not imply generating Earth-like oxygen routinely.
+- Reference pressure means pressure at the planet's reference radius: the
+  reference ground surface on rocky/dwarf worlds, a chosen 1 bar level on
+  envelope worlds. The latter is not solid or landable ground.
+- Begin with an isothermal column. Distinguish its reference temperature from
+  equilibrium temperature and any later surface-climate estimate. Derive mean
+  molecular mass, density, gravity and scale height ($H = kT/\bar m g$).
+- Define an operational extent, initially 12.5 scale heights or the aerosol
+  extent if taller, not a physical edge/exobase. Flag columns outside the
+  thin-atmosphere approximation rather than silently treating them as valid.
+- Validate mixtures, pressure and temperature; check Earth-, Mars- and
+  hydrogen-rich example columns. Use SI internally. Leave generated planets
+  and rendering unchanged: this step builds only the tested foundation.
+
+### 5b · Retention and generation
+
+- Deterministic per-planet composition and pressure, informed by mass/radius,
+  irradiation, stellar age/activity and available volatiles. Use smooth,
+  tunable heuristics, with the cosmic shoreline as an empirical guide rather
+  than a universal law; account approximately for loss near active stars.
+- Correlated atmospheric families, not independently random sliders. Allow
+  airless worlds, heavy secondary air, cold volatile air and hydrogen-rich
+  envelopes. Ice giants also have hydrogen/helium outer atmospheres.
+- Start with approximate thermal/condensation rules, not a full climate model.
+  Centralise uncertain prescriptions and seed air independently of orbits/spin.
+
+### 5c · Physical state to optics
+
+- Derive gas scattering, density and vertical profiles from the physical state;
+  approximate visible absorbers and aerosols separately. CO₂ does not imply an
+  orange sky, and greenhouse absorption is not the shader's visible absorption.
+- Check against the existing reference worlds. Keep assumptions explicit and
+  the conversion replaceable without changing the renderer or generation.
+
+### 5d · Per-planet rendering
+
+- Feed generated air to every planet; `AtmosphereTuning` becomes a selected
+  planet's debug override. Define an opaque lower-cloud approximation for
+  giants without introducing landable ground.
+- Tables cached by air with a memory limit; shells sorted together, with no
+  pop at the point/disc hand-over. Table-build pop-in remains a separate,
+  previously deferred issue to agree before changing its behaviour.
+
+### 5e · Validation
+
+- Inspect population distributions and physical invariants across many systems,
+  not only hand-picked worlds. Check several different atmospheres together,
+  airless worlds and giants; rerun the atmosphere test and user visual checks.
 
 ## Checkpoint 6 · Docs
 
 The rendering guide's atmospheres section no longer "prototype", benchmarks
-updated, the documentation index's limits updated, stage 3 planned with the
-user.
+updated, and the documentation index's limits updated. Document implemented
+generation and approximations; leave richer climate as later work.
 
 Later, only if wanted: colour-dependent dimming of what lies behind
 (dual-source blending), a sky-view table if views from inside cost too much.
