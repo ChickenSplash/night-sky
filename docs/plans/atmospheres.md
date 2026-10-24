@@ -23,7 +23,8 @@ reuse the same model as just another body.
 
 1. ✅ **Rendering prototype** (stage 1).
 2. **Rendering, finished** (stage 2, below): multiple scattering, then every
-   planet with air.
+   planet with air. **Paused after 4b** for [planet surfaces](planet-surfaces.md)
+   (shape and landing), which 4c's ground lighting builds on.
 3. **Simulation** (stage 3): retention (the cosmic shoreline, Zahnle &
    Catling 2017, with stripping near flaring M dwarfs), composition,
    pressure and scale height ($H = kT/\bar m g$), then climate. The sliders
@@ -83,20 +84,24 @@ table. A fast test checks scattering once matches a fine march. Measurements
   0.01 → 1.3%, 0.82; **0.005 → 3.0%, 0.89**; 0.001 → 6.6%, 0.97. Real
   Venus: about 2.5 to 3% and 0.75.
 
-### 4b Multiple scattering table (built, waiting for the user's live check)
+### 4b ✅ Multiple scattering table (commit `e0d024d`)
 
 **Pick up here (2026-10-24):**
 
-- All of 4b is committed and pushed (`e0d024d`), waiting for the user to
-  check it live (see step 1 below).
-- **Pop-in to fix:** the multiple scattering arrives seconds after the
-  rest, so the look changes suddenly. Proposed (not yet agreed): build it in
-  parallel across cores (rows are independent; the solve is about 0.5 s),
-  build tables before a planet is seen (on entering its system, nearest
-  first, once air is per planet in checkpoint 5), and fade the extra light
-  in over a moment as a safety net.
-- GPU cost not measured yet: ask the user to run the atmosphere GPU test
-  with `atmosphere_multiple` on and off.
+- 4b checked live by the user and accepted. Stage 2 is paused here for
+  [planet surfaces](planet-surfaces.md); 4c follows its landing checkpoints,
+  in the new ground shader.
+- **Pop-in, deferred by the user:** the multiple scattering arrives seconds
+  after the rest, so the look changes suddenly. Proposed (not yet agreed):
+  build it in parallel across cores (rows are independent; the solve is
+  about 0.5 s), build tables before a planet is seen (on entering its
+  system, nearest first, once air is per planet in checkpoint 5), and fade
+  the extra light in over a moment as a safety net.
+- GPU run at `cbb6b17` (planet `g276dff.4.5146/7`, 2548 x 1388, every switch
+  on, multiple scattering on only, so no on/off comparison): from low down
+  the air adds 1.1 to 1.8 ms. The orbit and high views are noisy (the air-off
+  frame swings 1.1 to 3 ms, frames at 16.7 ms), probably tables building in
+  the background; rerun with the air settled if the cost matters.
 - Test build: `/tmp/ns-jitter-test.sh` (API port 4330, log
   `data/logs/jitter-test.log`; recreate it if `/tmp` was cleared: it runs
   `target/debug/space-client` with `NIGHT_SKY_API=1 NIGHT_SKY_API_PORT=4330`),
@@ -172,10 +177,7 @@ Next, in order:
    default: the thinned transmittance table for starlight, and the table
    (mean radiance and upward flow, one lookup each per view step, light per
    star, also in its shadow). Built after the transmittance table, in a dev
-   build 2.9 s for Earth and 6.6 s for Venus. **Waiting for the user's live
-   check:** Earth must not change visibly except slightly brighter
-   twilight; Venus's sky should glow orange, its ground still dark until
-   4c.
+   build 2.9 s for Earth and 6.6 s for Venus. ✅ Checked live by the user.
 2. Only if Mars looks wrong: store the flow's horizontal part towards the
    star as well (the remaining error there is light flowing away from the
    sun, scattered on forwards).

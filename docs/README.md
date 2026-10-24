@@ -81,6 +81,8 @@ The Bevy/egui client in `crates/client`:
 - [Planetary atmospheres](plans/atmospheres.md): the rendering prototype first,
   then cleaner, cheaper steps and many planets, then the simulated
   atmosphere and climate.
+- [Planet surfaces](plans/planet-surfaces.md): bodies flattened by their spin,
+  landing on the ground, then geology, water and giants' depths.
 
 ## Current limitations
 
@@ -101,8 +103,10 @@ The Bevy/egui client in `crates/client`:
   predicted impacts outside warp are shown but not enforced.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 - Atmospheres are a rendering prototype: hand-set air (presets and sliders)
-  on the selected planet only, single scattering without lookup tables. No planet has a simulated
-  atmosphere yet.
+  on the selected planet only, with lookup tables and multiple scattering but
+  no light from the sky on the ground. No planet has a simulated atmosphere yet.
+- Bodies are spheres with no terrain, drawn as a faceted mesh, and the camera
+  can pass through the ground.
 
 ## Organisation
 
