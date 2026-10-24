@@ -624,3 +624,44 @@ fn measure_the_multiple_scattering_table() {
         }
     }
 }
+
+/// The ground row now consumed by body.wgsl, against all-order path tracing
+/// of a surface viewed from immediately above it, with no view-path dimming.
+/// Run with `cargo test -p space-client measure_ground_lighting -- --ignored --nocapture`.
+#[test]
+#[ignore = "measurement, tens of seconds"]
+fn measure_ground_lighting() {
+    const PATHS: usize = 40_000;
+    for (preset, radius) in [
+        (Preset::Earth, 6.371e6),
+        (Preset::Venus, 6.0518e6),
+        (Preset::Mars, 3.3895e6),
+        (Preset::Titan, 2.5747e6),
+    ] {
+        let air = AirSettings::preset(preset).atmosphere().scaled(radius);
+        let thin = depths(&thinned(&air));
+        let table = multiple(&air, &thin);
+        for channel in 0..3 {
+            let reference = Reference::new(air, channel, f64::from(air.ground[channel]));
+            for zenith in [30.0, 85.0] {
+                let (p, sun) = place(radius, 0.0, zenith);
+                let (estimate, error) = mean(PATHS, 7, |rng| {
+                    reference.radiance(p * (1.0 + 1e-9), -DVec3::Z, sun, usize::MAX, rng)
+                });
+                let want = estimate.total();
+                let got = table.ground_at(sun.z)[channel];
+                println!(
+                    "{preset:?} channel {channel}, star {zenith}°: table {got:.5e}, reference {want:.5e} ± {error:.2e}, ratio {:.3}",
+                    got / want.max(1e-30),
+                );
+                // The transport approximation and isotropic later scattering
+                // are least accurate for forward dust at low sun. Also allow
+                // Monte Carlo uncertainty rather than asserting on noise.
+                assert!(
+                    (got - want).abs() <= 0.35 * want + 4.0 * error + 1e-9,
+                    "{preset:?} channel {channel}, star {zenith}°: {got} vs {want} ± {error}",
+                );
+            }
+        }
+    }
+}

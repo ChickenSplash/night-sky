@@ -23,8 +23,8 @@ reuse the same model as just another body.
 
 1. ✅ **Rendering prototype** (stage 1).
 2. **Rendering, finished** (stage 2, below): multiple scattering, then every
-   planet with air. **Paused after 4b** for [planet surfaces](planet-surfaces.md)
-   (shape and landing), which 4c's ground lighting builds on.
+   planet with air. **4c done, checked live and accepted by the user.** It
+   builds on the shape and ground chunks from [planet surfaces](planet-surfaces.md).
 3. **Simulation** (stage 3): retention (the cosmic shoreline, Zahnle &
    Catling 2017, with stripping near flaring M dwarfs), composition,
    pressure and scale height ($H = kT/\bar m g$), then climate. The sliders
@@ -88,9 +88,10 @@ table. A fast test checks scattering once matches a fine march. Measurements
 
 **Pick up here (2026-10-24):**
 
-- 4b checked live by the user and accepted. Stage 2 is paused here for
-  [planet surfaces](planet-surfaces.md); 4c follows its landing checkpoints,
-  in the new ground shader.
+- 4b checked live by the user and accepted. Stage 2 paused here for
+  [planet surfaces](planet-surfaces.md); the shape and chunked ground are now
+  built, and 4c uses their shared surface shader. Landing controls remain
+  separate work in that plan.
 - **Pop-in, deferred by the user:** the multiple scattering arrives seconds
   after the rest, so the look changes suddenly. Proposed (not yet agreed):
   build it in parallel across cores (rows are independent; the solve is
@@ -182,14 +183,42 @@ Next, in order:
    star as well (the remaining error there is light flowing away from the
    sun, scattered on forwards).
 
-### 4c Light on the ground
+### 4c ✅ Light on the ground
 
-The table's ground texels, read by the surface shader, so Venus's ground gets
-its dim orange overcast. Its own switch. They are already built: the last
-row (row 32) of the multiple scattering table's sky image, by the star's
-cosine. Unlike today's grey dimming, the ground would then be lit by the
-thinned starlight and the sky's light, so check how the atmosphere shader's
-dimming of the ground behind (`sunlit`) must change with it.
+Implemented, checked live and accepted by the user:
+
+- The surface shader reads row 32 of the multiple-scattering sky image, by
+  each star's cosine, and multiplies its reflected radiance by that star's
+  exposed flux. The table already includes surface albedo, thinned direct
+  sunlight and skylight, so these are not applied twice.
+- Both ground chunks and the fallback sphere share this lighting. A common
+  readiness decision keeps the old surface and shell behaviour until the
+  current air's table is available; then the shell skips its old `sunlit`
+  dimming, but still dims the view path.
+- `set_debug atmosphere_ground false` compares the old grey dimming. On by
+  default, needs atmospheres and tables, independent of sky multiple scattering.
+- Visual check: Earth, Venus and Titan from orbit and just above the ground,
+  towards and away from the star and around twilight. Let the tables settle
+  after each preset; compare the switch, then `ground false` for the sphere.
+  Check for double-darkening, a bright rim, seams and stale light on changing
+  planets. The point-spread rim sprites still use airless photometry.
+
+Automated checks passed: workspace tests, strict Clippy and headless shader
+validation (body, chunk-level tinting, and shell with/without tables and
+multiple scattering). The focused `measure_ground_lighting` measurement
+compares reflected surface radiance against all-order Monte Carlo paths,
+40,000 per channel at star zenith angles 30° and 85°, with grey albedo 0.3:
+
+| Preset | Table / reference, across RGB and both angles |
+| --- | --- |
+| Earth | 0.998 to 1.033 |
+| Venus | 0.869 to 0.967 |
+| Mars | 0.977 to 1.111 |
+| Titan | 0.823 to 0.983 |
+
+These check the existing table's ground row, not GPU screenshots. Titan's
+largest deficit is at low sun; the scattering solver is unchanged. Repeat
+with `cargo test --locked --workspace measure_ground_lighting -- --ignored --nocapture`.
 
 ## Checkpoint 5 · Every planet with air
 

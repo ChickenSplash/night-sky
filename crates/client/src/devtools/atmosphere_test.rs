@@ -111,6 +111,7 @@ pub struct AtmosphereResults {
     pub tables: bool,
     pub stop_opaque: bool,
     pub multiple: bool,
+    pub ground_lighting: bool,
     pub cases: Vec<Measured>,
 }
 
@@ -370,6 +371,7 @@ pub fn run(
                 tables: debug.atmosphere_tables,
                 stop_opaque: debug.atmosphere_stop_opaque,
                 multiple: debug.atmosphere_multiple,
+                ground_lighting: debug.atmosphere_ground,
                 cases: std::mem::take(&mut run.measured),
             };
             info!(

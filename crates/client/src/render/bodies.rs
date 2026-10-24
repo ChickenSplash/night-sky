@@ -197,7 +197,10 @@ pub(super) fn sync_bodies(
         Res<crate::render::debug::RenderDebug>,
         Res<super::ground::Grounds>,
     ),
-    meshes: Res<Meshes>,
+    (meshes, surface_lighting): (
+        Res<Meshes>,
+        Res<super::atmosphere::surface::SurfaceLighting>,
+    ),
     mut pool: ResMut<Pool<BodyMaterial>>,
     mut materials: ResMut<Assets<BodyMaterial>>,
     camera: Query<SpaceCameraCell, With<SpaceCamera>>,
@@ -239,6 +242,7 @@ pub(super) fn sync_bodies(
         // Only a star's surface shows its turning. Only touch changed
         // materials: every change re-uploads the bind group.
         let star = body.light.w < 0.0;
+        let surface_light = surface_lighting.for_body(body.atmosphere);
         let changed = BodyMaterial {
             colour: body.colour.extend(1.0),
             light: body.light,
@@ -246,11 +250,10 @@ pub(super) fn sync_bodies(
             surface: body.surface,
             lights: body.lights,
             tints: body.tints,
+            air: surface_light.uniform,
+            air_ground: surface_light.table,
         };
-        let key = |m: &BodyMaterial| (m.colour, m.light, m.spin, m.surface, m.lights, m.tints);
-        if materials
-            .get(material)
-            .is_some_and(|m| key(m) != key(&changed))
+        if materials.get(material).is_some_and(|m| *m != changed)
             && let Some(m) = materials.get_mut(material)
         {
             *m = changed;

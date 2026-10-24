@@ -398,6 +398,18 @@ fn an_atmosphere_is_lit_on_the_surface_exposure_and_only_around_discs() {
     // Only the two disc planets, not the points.
     assert_eq!(lit.shells.len(), 2);
     let (shell, body) = (&lit.shells[0], &lit.bodies[1]);
+    assert_eq!(body.atmosphere, Some(0));
+    assert_eq!(lit.bodies[0].atmosphere, None);
+    assert!(plain.bodies.iter().all(|body| body.atmosphere.is_none()));
+    for (index, shell) in lit.shells.iter().enumerate() {
+        let body = lit
+            .bodies
+            .iter()
+            .find(|body| body.atmosphere == Some(index))
+            .unwrap();
+        assert_eq!(body.centre, shell.centre);
+        assert_eq!(body.radius, shell.radius);
+    }
     assert_eq!(shell.lights, body.lights);
     // The flux against the surface's AF/π, both on one exposure.
     let surface = light::surface("Rocky planet");

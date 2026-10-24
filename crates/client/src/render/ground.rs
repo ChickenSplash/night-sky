@@ -14,6 +14,7 @@
 //!   beside the camera. A chunk stays drawn until its four children are ready.
 use super::{
     BODY_SHADER, GROUND_SHADER, MAX_LIGHTS,
+    atmosphere::surface::{SurfaceLight, SurfaceLighting, SurfaceUniform},
     bodies::{Placement, SpaceCameraCell, hide, place},
     debug::RenderDebug,
     lights::{GroundSource, Lights},
@@ -315,6 +316,11 @@ pub struct GroundMaterial {
     lights: [Vec4; MAX_LIGHTS],
     #[uniform(0)]
     tints: [Vec4; MAX_LIGHTS],
+    #[uniform(0)]
+    air: SurfaceUniform,
+    #[texture(2)]
+    #[sampler(3)]
+    air_ground: Option<Handle<Image>>,
     /// Metres per render unit, `MORPH_START`, the split distance per metre of
     /// error, and a root chunk's error.
     #[uniform(1)]
@@ -528,7 +534,7 @@ fn spawn_chunk(
     }
 }
 
-fn material(body: &Shaded, morph: Vec4, levels: bool) -> GroundMaterial {
+fn material(body: &Shaded, morph: Vec4, levels: bool, light: SurfaceLight) -> GroundMaterial {
     GroundMaterial {
         colour: body.colour.extend(1.0),
         light: body.light,
@@ -536,6 +542,8 @@ fn material(body: &Shaded, morph: Vec4, levels: bool) -> GroundMaterial {
         surface: body.surface,
         lights: body.lights,
         tints: body.tints,
+        air: light.uniform,
+        air_ground: light.table,
         morph,
         levels,
     }
@@ -547,6 +555,7 @@ pub(super) fn sync_ground(
     frame: Res<Frame>,
     lights: Res<Lights>,
     debug: Res<RenderDebug>,
+    surface_lighting: Res<SurfaceLighting>,
     mut grounds: ResMut<Grounds>,
     mut stats: ResMut<GroundStats>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -617,7 +626,12 @@ pub(super) fn sync_ground(
                 reach as f32,
                 error(&ground.shape, 0) as f32,
             );
-            let changed = material(body, morph, debug.ground_levels);
+            let changed = material(
+                body,
+                morph,
+                debug.ground_levels,
+                surface_lighting.for_body(body.atmosphere),
+            );
             if materials
                 .get(&ground.material)
                 .is_some_and(|m| *m != changed)

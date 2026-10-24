@@ -210,10 +210,11 @@ top of the air from the transmittance table, taken forwards along the ray,
 or backwards for a ray that reaches the ground, as its backward line never
 meets the ground; about ten halvings, one table read each, find the point
 (a test checks it lands between optical depths 9 and 13 on Venus). What lies
-behind is still dimmed by the whole ray's optical depth from the table, and
-ground behind by its own lost sunlight: it is drawn in full sunlight, so
-even 1/20,000 of it outshone Venus's scattered light and showed the distant
-ground, and the sun, through the haze.
+behind is still dimmed by the whole ray's optical depth from the table. The
+ground includes its own lost sunlight in its surface lighting; while that
+table is building, or with surface lighting off, the shell dims the ground's
+sunlight instead. Otherwise even 1/20,000 of an undimmed surface outshone
+Venus's scattered light and showed the distant ground through the haze.
 In thick air (Venus) rays either side of the horizon, or of the ground's
 limb from above, then end alike in the haze and meet without a seam, the
 ground is hidden where it should be, and all the steps go where light is
@@ -272,14 +273,31 @@ result is within about 15% for every preset, Earth within 5%; Mars's dust
 is the worst (0.76 to 1.35), as light flowing sideways away from the star
 is not kept.
 
+**Light on the ground.** The surface shader reads the last row (row 32) of
+the 32 x 33 multiple-scattering sky image, at the star's cosine from the
+zenith. It holds reflected ground radiance per unit stellar flux, including
+the surface's RGB albedo, thinned direct sunlight and diffuse skylight. Each
+star's exposed flux multiplies its own lookup, with no second albedo, cosine
+or $1/\pi$ factor. Thus thick air can light the ground diffusely and colour
+it, rather than merely darkening undimmed sunlight. The ground chunks and
+fallback sphere use the same shader and table. On spheroids the shader
+recovers the rounded radial direction from the surface normal and stretches
+the star direction along the pole, matching the shell's spherical tables
+and their flattening approximation.
+
+`set_debug atmosphere_ground false` restores the old ground lighting. The
+switch is on by default, requires atmospheres and lookup tables, and is
+independent of `atmosphere_multiple` (scattering in the sky). Until the
+multiple-scattering table for the current air is ready, both surface paths
+and the shell keep the old behaviour together. Switching planets, disabling
+the atmosphere or changing its air cannot reuse another air's ground light.
+
 **Output.** Output is premultiplied: $L$ is added and whatever lies behind is
-dimmed by the line of sight's transmittance, averaged to grey. The surface
-shader lights the ground with undimmed starlight, so where the ray reaches
-the ground the shader also dims it by the transmittance from that ground
-point to each star, weighted by each star's share of its light (flux times
-the cosine of its angle from the zenith); this reddens nothing yet, as the
-dimming is grey, but darkens the ground under thick air to match the sky
-beside it. From inside the air the sky is this same scattered light, and the
+dimmed by the line of sight's transmittance, averaged to grey. With ground
+table lighting active, the shell does not dim the surface's sunlight again.
+Otherwise it retains the old grey dimming by the transmittance from the
+ground point to each star, weighted by flux times the cosine of its zenith
+angle. From inside the air the sky is this same scattered light, and the
 stars and galactic glow behind it fade by its transmittance and under its
 brightness; there is no separate sky pass.
 
@@ -299,9 +317,12 @@ coloured per channel, and the top sits 12.5 scale heights up. The Venus, Mars,
 Titan and hydrogen giant presets use measured pressures and scale heights,
 with haze tuned by eye.
 
-**Limits.** The ground is not yet lit by the sky's light, so Venus's
-surface stays dark under its glowing air. Transmittance is grey, so colour
-does not shift through thick air; points have no atmosphere. See
+**Limits.** View-path transmittance remains grey, so colour does not shift
+along the line of sight through thick air, although incoming ground lighting
+is now coloured. Points and the disc's point-spread rim sprites retain the
+original airless photometry; points have no atmosphere. Ground tables assume
+a smooth, uniform Lambertian surface, not slopes, terrain shadows or local
+albedo variations. See
 [the plan](../plans/atmospheres.md).
 
 ### Physical model versus presentation

@@ -85,12 +85,14 @@ impl Plugin for RenderPlugin {
         .init_resource::<ground::Grounds>()
         .init_resource::<ground::GroundStats>()
         .init_resource::<atmosphere::tables::AtmosphereTables>()
+        .init_resource::<atmosphere::surface::SurfaceLighting>()
         .add_systems(Startup, setup)
         .add_systems(Update, switch_camera)
         .add_systems(
             PostUpdate,
             (
                 shade,
+                atmosphere::surface::prepare_surface_lighting,
                 sync_bodies,
                 ground::sync_ground,
                 sync_points,
@@ -103,7 +105,7 @@ impl Plugin for RenderPlugin {
     }
 }
 
-#[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
+#[derive(Asset, TypePath, AsBindGroup, Clone, Default, PartialEq)]
 pub struct BodyMaterial {
     #[uniform(0)]
     colour: Vec4,
@@ -122,6 +124,12 @@ pub struct BodyMaterial {
     lights: [Vec4; MAX_LIGHTS],
     #[uniform(0)]
     tints: [Vec4; MAX_LIGHTS],
+    #[uniform(0)]
+    air: atmosphere::surface::SurfaceUniform,
+    // Binding 1 belongs to the ground vertex shader's morph uniform.
+    #[texture(2)]
+    #[sampler(3)]
+    air_ground: Option<Handle<Image>>,
 }
 
 impl Material for BodyMaterial {

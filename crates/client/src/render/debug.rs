@@ -32,14 +32,17 @@ pub enum DebugSwitch {
     /// as fine grain rather than bands.
     AtmosphereJitter,
     /// Read the starlight reaching the air from a table built per air,
-    /// rather than marching towards each star (`atmosphere_tables.rs`).
+    /// rather than marching towards each star (`atmosphere/tables.rs`).
     AtmosphereTables,
     /// End each line of sight where the air in front turns opaque, whether
     /// or not ground lies beyond. Needs the tables.
     AtmosphereStopOpaque,
     /// Add the light scattered more than once, from a table built per air
-    /// (`atmosphere_multiple.rs`). Needs the tables.
+    /// (`atmosphere/multiple.rs`). Needs the tables.
     AtmosphereMultiple,
+    /// Light the surface with filtered sunlight and skylight from the ground
+    /// row of the scattering table. Needs the tables, independently of sky multiple scattering.
+    AtmosphereGround,
     /// Draw bodies flattened by their spin, rather than as spheres.
     Oblateness,
     /// Draw planets' ground as chunks refined near the camera, rather than as
@@ -91,6 +94,9 @@ impl DebugSwitch {
             Self::AtmosphereMultiple => {
                 "Add the light that scatters more than once in the air, read from a table built once per air, so thick air such as Venus's glows through instead of turning black, and twilight lasts longer. Uses the lookup tables, so does nothing with them off. Turn off to compare."
             }
+            Self::AtmosphereGround => {
+                "Light the ground with filtered sunlight and diffuse sky light, including its colour, from the atmosphere's scattering table. Applies to chunks and the sphere fallback once the table is ready. Needs atmospheres and lookup tables, independently of the sky's multiple-scattering switch. Turn off for the old grey surface dimming."
+            }
             Self::Oblateness => {
                 "Draw stars and planets flattened at the poles by their spin, with their air following the same shape. Turn off to draw every body as a sphere of its mean radius."
             }
@@ -119,6 +125,7 @@ pub struct RenderDebug {
     pub atmosphere_tables: bool,
     pub atmosphere_stop_opaque: bool,
     pub atmosphere_multiple: bool,
+    pub atmosphere_ground: bool,
     pub oblateness: bool,
     pub ground: bool,
     pub ground_levels: bool,
@@ -140,6 +147,7 @@ impl Default for RenderDebug {
             atmosphere_tables: true,
             atmosphere_stop_opaque: true,
             atmosphere_multiple: true,
+            atmosphere_ground: true,
             oblateness: true,
             ground: true,
             ground_levels: false,
@@ -148,7 +156,7 @@ impl Default for RenderDebug {
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 16] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 17] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -168,6 +176,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereMultiple,
             "Atmosphere multiple scattering",
         ),
+        (DebugSwitch::AtmosphereGround, "Atmosphere ground lighting"),
         (DebugSwitch::Oblateness, "Flattened bodies"),
         (DebugSwitch::Ground, "Ground chunks"),
         (DebugSwitch::GroundLevels, "Ground chunk levels"),
@@ -188,6 +197,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereTables => self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => self.atmosphere_multiple,
+            DebugSwitch::AtmosphereGround => self.atmosphere_ground,
             DebugSwitch::Oblateness => self.oblateness,
             DebugSwitch::Ground => self.ground,
             DebugSwitch::GroundLevels => self.ground_levels,
@@ -209,6 +219,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereTables => &mut self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => &mut self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => &mut self.atmosphere_multiple,
+            DebugSwitch::AtmosphereGround => &mut self.atmosphere_ground,
             DebugSwitch::Oblateness => &mut self.oblateness,
             DebugSwitch::Ground => &mut self.ground,
             DebugSwitch::GroundLevels => &mut self.ground_levels,

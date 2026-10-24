@@ -88,6 +88,18 @@ pub fn atmosphere(
             on: !debug.atmosphere_multiple,
         });
     }
+    if terminal::check(
+        ui,
+        debug.atmosphere_ground,
+        "Ground lighting",
+        true,
+        DebugSwitch::AtmosphereGround.detail(),
+    ) {
+        out.push(UiCommand::SetDebug {
+            switch: DebugSwitch::AtmosphereGround,
+            on: !debug.atmosphere_ground,
+        });
+    }
     gpu(ui, diagnostics);
     let mut change = |change: AtmosphereChange| out.push(UiCommand::SetAtmosphere(change));
 

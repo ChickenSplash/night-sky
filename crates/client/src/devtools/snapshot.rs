@@ -179,6 +179,7 @@ pub(super) fn publish(
             "atmosphere_tables": debug.atmosphere_tables,
             "atmosphere_stop_opaque": debug.atmosphere_stop_opaque,
             "atmosphere_multiple": debug.atmosphere_multiple,
+            "atmosphere_ground": debug.atmosphere_ground,
             "oblateness": debug.oblateness,
             "ground": debug.ground, "ground_levels": debug.ground_levels,
         },

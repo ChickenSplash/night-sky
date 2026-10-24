@@ -116,6 +116,8 @@ pub struct Shaded {
     pub tints: [Vec4; MAX_LIGHTS],
     /// A planet whose ground is drawn as chunks: its `GroundSource::key`.
     pub ground: Option<u64>,
+    /// The matching atmosphere shell, if this resolved planet has air.
+    pub atmosphere: Option<usize>,
 }
 
 /// A camera-facing sprite ready for the GPU (`point.wgsl`): a point, or the
@@ -473,6 +475,7 @@ pub fn resolve(
             lights: [Vec4::ZERO; MAX_LIGHTS],
             tints: [Vec4::ZERO; MAX_LIGHTS],
             ground: None,
+            atmosphere: None,
         });
         // The corona grows in from a point, and is whiter than the surface.
         let fade = f64::from(((star.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0));
@@ -554,7 +557,7 @@ pub fn resolve(
             directions[i] = towards.extend(0.0);
             tints[i] = hdr_colour(*tint, exposure.value(*radiance) * balance).extend(0.0);
         }
-        if let Some(air) = planet.air {
+        let atmosphere = planet.air.map(|air| {
             // Each star's flux in its own colour, on the surface's exposure.
             let mut suns = [Vec4::ZERO; MAX_LIGHTS];
             for (sun, l) in suns.iter_mut().zip(planet.light.iter()) {
@@ -562,6 +565,7 @@ pub fn resolve(
                 *sun = hdr_colour(colour, exposure.value(l.flux) * balance).extend(0.0);
             }
             let ground = (surface * planet.surface.albedo).min(DVec3::ONE).as_vec3();
+            let index = frame.shells.len();
             frame.shells.push(Shell {
                 centre: planet.centre,
                 radius: planet.radius,
@@ -571,7 +575,8 @@ pub fn resolve(
                 lights: directions,
                 suns,
             });
-        }
+            index
+        });
         frame.bodies.push(Shaded {
             centre: planet.centre,
             radius: planet.radius,
@@ -583,6 +588,7 @@ pub fn resolve(
             lights: directions,
             tints,
             ground: planet.ground,
+            atmosphere,
         });
         // A blurred limb on the side facing each star; streaks only from the
         // brightest.

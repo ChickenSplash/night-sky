@@ -30,7 +30,7 @@ crates/client/       Bevy client and egui interface
     starfield/       Budgeted batches, precise sprites, multiple-system resolution and culling
     stream/          Loader thread backend and streaming metrics
   src/render/        Bodies, exposure, glow, black hole and shaders
-    atmosphere/      Air settings, scattering tables, reference tests and shell shader
+    atmosphere/      Air settings, scattering tables, surface lighting, reference tests and shell shader
   src/ui/            HUD, breadcrumbs, inspector, tasks and the debug console's skin
   src/ui/kit/        Shared themes, controls, windows, scrolling, animation and halo text
   src/ui/browser/    Object browser: query chips, filter picker, results

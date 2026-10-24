@@ -27,7 +27,7 @@ struct Air {
     shape: vec4<f32>,
     absorption: vec4<f32>,
     // 1 to jitter the view steps; 1 to end each ray where the air turns
-    // opaque (with TABLES only).
+    // opaque (with TABLES only); 1 when the ground already includes its air lighting.
     switches: vec4<f32>,
     // The pole, and the stretch along it that makes the planet round.
     pole: vec4<f32>,
@@ -309,14 +309,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         depth += x;
     }
-    // The ground behind was lit with undimmed starlight, so dim it by the
+    // Without surface table lighting the ground was lit with undimmed starlight, so dim it by the
     // air between it and the stars as well, weighted by each star's share
     // of its light.
     if stopped {
         depth = whole;
     }
     var sunlit = 1.0;
-    if reaches {
+    if reaches && air.switches.z == 0.0 {
         let surface = normalize(nearest + dir * ground);
         var lit = 0.0;
         var total = 0.0;

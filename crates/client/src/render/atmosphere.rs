@@ -4,6 +4,7 @@
 mod multiple;
 #[cfg(test)]
 mod reference;
+pub mod surface;
 pub mod tables;
 
 use tables::{AtmosphereTables, Tables};
@@ -423,7 +424,8 @@ pub struct AtmosphereMaterial {
     #[uniform(0)]
     absorption: Vec4,
     /// 1 to jitter the view steps, and 1 to end each ray where the air turns
-    /// opaque (with the tables only).
+    /// opaque (with the tables only), and 1 when the surface already includes
+    /// its atmospheric lighting, so the shell must not dim its sunlight again.
     #[uniform(0)]
     switches: Vec4,
     /// The pole, and how far to stretch along it to make the planet round:
@@ -520,13 +522,14 @@ impl Shell {
 
     /// `near` is the camera's near plane, in render units; `switches` jitter
     /// the view steps, end each ray where the air turns opaque and add the
-    /// light scattered more than once.
+    /// light scattered more than once; the fourth switch marks ground that
+    /// already includes atmospheric lighting.
     fn material(
         &self,
         eye: Vec3,
         near: f32,
         steps: (u32, u32),
-        switches: [bool; 3],
+        switches: [bool; 4],
         tables: Option<Tables>,
     ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
@@ -542,7 +545,7 @@ impl Shell {
             mie: self.air.mie,
             shape: self.air.shape,
             absorption: self.air.absorption.extend(0.0),
-            switches: Vec4::new(jitter, opaque, 0.0, 0.0),
+            switches: Vec4::new(jitter, opaque, f32::from(u8::from(switches[3])), 0.0),
             pole: self.pole.extend(1.0 / (1.0 - self.flattening)),
             lights: self.lights,
             suns: self.suns,
@@ -557,7 +560,7 @@ impl Shell {
 
 pub(super) fn sync_atmospheres(
     mut commands: Commands,
-    (frame, meshes): (Res<Frame>, Res<Meshes>),
+    (frame, meshes, surface_lighting): (Res<Frame>, Res<Meshes>, Res<surface::SurfaceLighting>),
     (debug, tuning): (Res<super::debug::RenderDebug>, Res<AtmosphereTuning>),
     (mut pool, mut materials): (
         ResMut<Pool<AtmosphereMaterial>>,
@@ -610,6 +613,10 @@ pub(super) fn sync_atmospheres(
                 debug.atmosphere_jitter,
                 debug.atmosphere_stop_opaque,
                 debug.atmosphere_multiple,
+                surface_lighting
+                    .0
+                    .get(index)
+                    .is_some_and(|s| s.table.is_some()),
             ],
             debug
                 .atmosphere_tables
