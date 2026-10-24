@@ -2,7 +2,7 @@
 //! for the GPU (`resolve`).
 use super::{
     POINT_PIXELS, PointMaterial,
-    atmosphere::Shell,
+    atmosphere::{Air, Shell},
     lights::{Lights, MAX_LIGHTS, Photometry, granulation_contrast, phase},
 };
 use bevy::{math::DVec3, prelude::*};
@@ -405,10 +405,11 @@ pub fn resolve(
                 let colour = DVec3::from_array(photometry.colour(l.kelvin));
                 *sun = hdr_colour(colour, exposure.value(l.flux) * balance).extend(0.0);
             }
+            let ground = (surface * planet.surface.albedo).min(DVec3::ONE).as_vec3();
             frame.shells.push(Shell {
                 centre: planet.centre,
                 radius: planet.radius,
-                air,
+                air: Air { ground, ..air },
                 lights: directions,
                 suns,
             });

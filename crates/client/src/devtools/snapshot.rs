@@ -177,6 +177,7 @@ pub(super) fn publish(
             "atmosphere_jitter": debug.atmosphere_jitter,
             "atmosphere_tables": debug.atmosphere_tables,
             "atmosphere_stop_opaque": debug.atmosphere_stop_opaque,
+            "atmosphere_multiple": debug.atmosphere_multiple,
         },
         "performance": {
             "averages": metrics.live(&field),

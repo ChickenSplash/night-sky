@@ -4,8 +4,8 @@ use super::perf::{gpu_total, pass_times};
 use crate::Navigation;
 use crate::actions::UiCommand;
 use crate::render::atmosphere::{
-    self, AirSettings, AtmosphereChange, AtmosphereTuning, GAS, HAZE, HEIGHT_KM, PRESSURE_BAR,
-    Preset,
+    self, AirSettings, AtmosphereChange, AtmosphereTuning, GAS, HAZE, HAZE_ABSORBED, HEIGHT_KM,
+    PRESSURE_BAR, Preset,
 };
 use crate::render::debug::{DebugSwitch, RenderDebug};
 use crate::ui::kit::Slider;
@@ -74,6 +74,18 @@ pub fn atmosphere(
         out.push(UiCommand::SetDebug {
             switch: DebugSwitch::AtmosphereStopOpaque,
             on: !debug.atmosphere_stop_opaque,
+        });
+    }
+    if terminal::check(
+        ui,
+        debug.atmosphere_multiple,
+        "Multiple scattering",
+        true,
+        DebugSwitch::AtmosphereMultiple.detail(),
+    ) {
+        out.push(UiCommand::SetDebug {
+            switch: DebugSwitch::AtmosphereMultiple,
+            on: !debug.atmosphere_multiple,
         });
     }
     gpu(ui, diagnostics);
@@ -188,6 +200,22 @@ pub fn atmosphere(
     ) {
         change(AtmosphereChange {
             haze_height_km: Some(v),
+            ..default()
+        });
+    }
+    if let Some(v) = slider(
+        ui,
+        air.haze_absorbed,
+        row(
+            "Haze absorbs",
+            "The share of the light the haze stops that it absorbs rather than scatters: 0.1 for Earth's dust, about 0.001 for clouds of droplets. Under thick haze it sets how much light gets through by scattering many times.",
+            HAZE_ABSORBED,
+            "",
+            true,
+        ),
+    ) {
+        change(AtmosphereChange {
+            haze_absorbed: Some(v),
             ..default()
         });
     }

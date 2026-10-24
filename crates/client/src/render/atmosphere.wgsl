@@ -1,5 +1,6 @@
 // A planet's atmosphere: single scattering marched along each pixel's line of
-// sight, in units of the planet's radius. The shell mesh only picks pixels;
+// sight, in units of the planet's radius, and with MULTIPLE the light
+// scattered more than once read from a table. The shell mesh only picks pixels;
 // the ground and the top of the air are found here. Positions are taken from
 // the ray's closest approach to the centre, so the limb holds in f32 from far
 // away. Output is premultiplied: scattered light added, what lies behind
@@ -31,10 +32,19 @@ struct Air {
 // With TABLES, optical depth to the top of the air (`atmosphere_tables.rs`).
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var transmittance: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var transmittance_sampler: sampler;
+// With MULTIPLE (`atmosphere_multiple.rs`): the transmittance of the air with
+// the haze's forward peak taken as no scattering, for the starlight; the
+// mean radiance of light scattered more than once per unit starlight, the
+// ground's in its last row; and that light's net upward flow.
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var thinned: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var multiple: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var flow: texture_2d<f32>;
 
 const PI: f32 = 3.14159265;
 // The table's size, as `atmosphere_tables.rs`.
 const TABLE: vec2<f32> = vec2(256.0, 64.0);
+// The multiple scattering table's size, as `atmosphere_multiple.rs`.
+const MULTIPLE_SIZE: f32 = 32.0;
 // Optical depth beyond which nothing more is seen: e^-10 lets through less
 // than 1/20,000 of the light.
 const OPAQUE: f32 = 10.0;
@@ -85,8 +95,9 @@ fn transmittance_uv(r_in: f32, mu: f32, top: f32) -> vec2<f32> {
 }
 
 // Optical depth from `p` towards a star, or none at all when the planet
-// is in the way.
-fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
+// is in the way. With MULTIPLE, `thin` reads the thinned air's: starlight
+// scattered slightly forwards counts as starlight, as in the table.
+fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32, thin: bool) -> vec4<f32> {
     let b = dot(p, towards);
     let r2 = dot(p, p);
     if b < 0.0 && r2 - b * b < 1.0 {
@@ -95,6 +106,11 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32) -> vec4<f32> {
 #ifdef TABLES
     let r = sqrt(r2);
     let uv = transmittance_uv(r, b / r, top);
+#ifdef MULTIPLE
+    if thin {
+        return vec4(textureSampleLevel(thinned, transmittance_sampler, uv, 0.0).rgb, 1.0);
+    }
+#endif
     return vec4(textureSampleLevel(transmittance, transmittance_sampler, uv, 0.0).rgb, 1.0);
 #else
     let far = -b + sqrt(max(b * b - r2 + top * top, 0.0));
@@ -147,6 +163,21 @@ fn opaque_at(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32, base: vec
         }
     }
     return high;
+}
+#endif
+
+#ifdef MULTIPLE
+// Where the multiple scattering table holds radius `r` under a star at
+// cosine `mu` from the zenith: rows evenly in 1 - e^(-h / 2H), H the air's
+// tallest scale height, below the ground's row.
+fn multiple_uv(r: f32, mu: f32, top: f32) -> vec2<f32> {
+    let scale = 2.0 * max(air.rayleigh.w, air.shape.x);
+    let whole = 1.0 - exp(-(top - 1.0) / scale);
+    let height = clamp((1.0 - exp(-max(r - 1.0, 0.0) / scale)) / whole, 0.0, 1.0);
+    return vec2(
+        texel(0.5 + 0.5 * mu, MULTIPLE_SIZE),
+        (0.5 + height * (MULTIPLE_SIZE - 1.0)) / (MULTIPLE_SIZE + 1.0),
+    );
 }
 #endif
 
@@ -240,7 +271,20 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
                 continue;
             }
             let towards = air.lights[j].xyz;
-            let path = towards_star(p, towards, top);
+#ifdef MULTIPLE
+            // Light scattered more than once, the same from every direction,
+            // and the haze's forward scattering of its net flow up or down;
+            // in the planet's shadow too.
+            let r = length(p);
+            let uv = multiple_uv(r, dot(p, towards) / r, top);
+            let mean = textureSampleLevel(multiple, transmittance_sampler, uv, 0.0).rgb;
+            let up = textureSampleLevel(flow, transmittance_sampler, uv, 0.0).rgb;
+            let along = -dot(dir, p) / r;
+            let more = air.rayleigh.rgb * m.rayleigh * mean
+                + air.mie.rgb * m.mie * (mean + 3.0 * air.shape.y / (4.0 * PI) * up * along);
+            light += sun * seen * max(more, vec3(0.0));
+#endif
+            let path = towards_star(p, towards, top, true);
             if path.w == 0.0 {
                 continue;
             }
@@ -269,7 +313,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             if all(sun == vec3(0.0)) || facing <= 0.0 {
                 continue;
             }
-            let path = towards_star(surface, towards, top);
+            let path = towards_star(surface, towards, top, false);
             let weight = dot(sun, vec3(1.0 / 3.0)) * facing;
             lit += weight * dot(exp(-path.xyz), vec3(1.0 / 3.0));
             total += weight;

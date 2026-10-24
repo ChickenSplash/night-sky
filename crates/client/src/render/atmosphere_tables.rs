@@ -3,7 +3,8 @@
 //! march reads the starlight reaching each step instead of marching towards
 //! each star. Built on the CPU in the background when the air changes and
 //! cached by air, in units of the planet's radius, so identical air on two
-//! planets shares a table.
+//! planets shares a table. The multiple scattering's tables
+//! (`atmosphere_multiple.rs`) take longer, so are built after it.
 use super::atmosphere::Air;
 use bevy::{
     asset::RenderAssetUsages,
@@ -41,7 +42,6 @@ fn distance_to_top(top: f64, r: f64, mu: f64) -> f64 {
 /// Bruneton's coordinates, 0 to 1, of the ray from radius `r` at cosine `mu`
 /// from the zenith, as `transmittance_uv` in `atmosphere.wgsl` before its
 /// texel-centre mapping. Rays towards the ground read the horizon's.
-#[cfg(test)]
 fn unit(top: f64, r: f64, mu: f64) -> (f64, f64) {
     let horizon = (top * top - 1.0).sqrt();
     let rho = (r * r - 1.0).max(0.0).sqrt();
@@ -52,7 +52,6 @@ fn unit(top: f64, r: f64, mu: f64) -> (f64, f64) {
 
 /// The table's optical depth from radius `r` at cosine `mu`, bilinear, as
 /// the GPU samples it.
-#[cfg(test)]
 pub(super) fn sample(table: &[DVec3], top: f64, r: f64, mu: f64) -> DVec3 {
     let [w, h] = SIZE;
     let (along, height) = unit(top, r, mu);
@@ -103,16 +102,17 @@ pub(super) fn depths(air: &Air) -> Vec<DVec3> {
         .collect()
 }
 
-fn build(air: Air) -> Image {
-    let data = depths(&air)
-        .into_iter()
+/// A table of `size` texels, row by row, filtered.
+pub(super) fn image(size: [usize; 2], texels: &[DVec3]) -> Image {
+    let data = texels
+        .iter()
         .flat_map(|d| [d.x, d.y, d.z, 0.0])
-        .flat_map(|c| half::f16::from_f64(c.min(65_504.0)).to_le_bytes())
+        .flat_map(|c| half::f16::from_f64(c.clamp(-65_504.0, 65_504.0)).to_le_bytes())
         .collect();
     let mut image = Image::new(
         Extent3d {
-            width: SIZE[0] as u32,
-            height: SIZE[1] as u32,
+            width: size[0] as u32,
+            height: size[1] as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -126,17 +126,18 @@ fn build(air: Air) -> Image {
 
 /// An air, bit for bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Key([u32; 16]);
+struct Key([u32; 19]);
 
 impl Key {
     fn new(air: &Air) -> Self {
-        let mut bits = [0; 16];
+        let mut bits = [0; 19];
         let values = [air.top]
             .into_iter()
             .chain(air.rayleigh.to_array())
             .chain(air.mie.to_array())
             .chain(air.shape.to_array())
-            .chain(air.absorption.to_array());
+            .chain(air.absorption.to_array())
+            .chain(air.ground.to_array());
         for (bit, value) in bits.iter_mut().zip(values) {
             *bit = value.to_bits();
         }
@@ -144,20 +145,40 @@ impl Key {
     }
 }
 
-/// Built tables by air, and the one build in flight. Air asked for while
-/// another builds waits, so a slider drag rebuilds only as fast as builds
-/// finish, and only for its latest value.
+/// An air's tables: its transmittance, and once built, its multiple
+/// scattering's.
+#[derive(Clone)]
+pub struct Tables {
+    pub transmittance: Handle<Image>,
+    pub multiple: Option<MultipleTables>,
+}
+
+#[derive(Clone)]
+pub struct MultipleTables {
+    /// The transmittance of the air with the haze's forward peak taken as
+    /// no scattering, for the starlight.
+    pub thinned: Handle<Image>,
+    /// The light scattered more than once, its net upward flow, and the
+    /// ground's light.
+    pub sky: Handle<Image>,
+    pub flow: Handle<Image>,
+}
+
+/// Built tables by air, and the one build of each kind in flight. Air asked
+/// for while another builds waits, so a slider drag rebuilds only as fast
+/// as builds finish, and only for its latest value.
 #[derive(Resource, Default)]
 pub struct AtmosphereTables {
-    ready: HashMap<Key, Handle<Image>>,
+    ready: HashMap<Key, Tables>,
     building: Option<(Key, Task<Image>)>,
+    building_multiple: Option<(Key, Task<[Image; 3]>)>,
     wanted: Vec<(Key, Air)>,
     used: HashSet<Key>,
 }
 
 impl AtmosphereTables {
-    /// The table for this air, or `None` while it is built.
-    pub fn get(&mut self, air: &Air) -> Option<Handle<Image>> {
+    /// The tables for this air, or `None` while its transmittance is built.
+    pub fn get(&mut self, air: &Air) -> Option<Tables> {
         let key = Key::new(air);
         self.used.insert(key);
         if let Some(table) = self.ready.get(&key) {
@@ -169,20 +190,49 @@ impl AtmosphereTables {
         None
     }
 
-    /// Once a frame, after every `get`: takes a finished build, starts the
+    /// Once a frame, after every `get`: takes finished builds, starts the
     /// next and drops tables unused this frame beyond `CACHED`.
     pub fn update(&mut self, images: &mut Assets<Image>) {
         if let Some((key, task)) = self.building.as_mut()
             && let Some(image) = check_ready(task)
         {
-            self.ready.insert(*key, images.add(image));
+            let transmittance = images.add(image);
+            self.ready.insert(
+                *key,
+                Tables {
+                    transmittance,
+                    multiple: None,
+                },
+            );
             self.building = None;
         }
+        if let Some((key, task)) = self.building_multiple.as_mut()
+            && let Some([thinned, sky, flow]) = check_ready(task)
+        {
+            if let Some(tables) = self.ready.get_mut(key) {
+                tables.multiple = Some(MultipleTables {
+                    thinned: images.add(thinned),
+                    sky: images.add(sky),
+                    flow: images.add(flow),
+                });
+            }
+            self.building_multiple = None;
+        }
+        let pool = AsyncComputeTaskPool::get();
         if self.building.is_none()
             && let Some(&(key, air)) = self.wanted.iter().find(|w| !self.ready.contains_key(&w.0))
         {
-            let task = AsyncComputeTaskPool::get().spawn(async move { build(air) });
+            let task = pool.spawn(async move { image(SIZE, &depths(&air)) });
             self.building = Some((key, task));
+        }
+        if self.building_multiple.is_none()
+            && let Some(&(key, air)) = self
+                .wanted
+                .iter()
+                .find(|w| self.ready.get(&w.0).is_some_and(|t| t.multiple.is_none()))
+        {
+            let task = pool.spawn(async move { super::atmosphere_multiple::images(air) });
+            self.building_multiple = Some((key, task));
         }
         self.wanted.clear();
         let unused: Vec<Key> = self

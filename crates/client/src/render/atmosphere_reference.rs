@@ -8,6 +8,7 @@
 //! of 1 across its beam at the top of the air, a grey Lambertian ground.
 use super::{
     atmosphere::{Air, AirSettings, Preset},
+    atmosphere_multiple::{multiple, seen, starlight, thinned},
     atmosphere_tables::{depths, extinction, sample},
 };
 use bevy::math::DVec3;
@@ -465,5 +466,161 @@ fn measure_multiple_scattering() {
                 air,
             ),
         );
+    }
+}
+
+/// Venus's haze absorption, against the light reaching its ground averaged
+/// over the whole planet (real Venus about 2.5 to 3% of the mean starlight)
+/// and its reflectance from orbit under an overhead star. Run as
+/// `measure_multiple_scattering`.
+#[test]
+#[ignore = "measurement, a minute in release"]
+fn measure_venus_haze_absorption() {
+    const PATHS: usize = 20_000;
+    let radius = 6.0518e6;
+    for absorbed in [0.1, 0.01, 0.005, 0.003, 0.002, 0.001] {
+        let air = AirSettings {
+            haze_absorbed: absorbed,
+            ..AirSettings::preset(Preset::Venus)
+        }
+        .atmosphere()
+        .scaled(radius);
+        let measured = [0, 1, 2].map(|c| {
+            let reference = Reference::new(air, c, 0.3);
+            // The planet's mean over its mean starlight (a quarter): twice
+            // the integral of the ground's light over the star's cosine.
+            let cosines: [f64; 5] = [0.1, 0.3, 0.5, 0.7, 0.9];
+            let ground: f64 = cosines
+                .iter()
+                .map(|&mu| {
+                    let (p, sun) = place(radius, 0.0, mu.acos().to_degrees());
+                    let (o, _) = mean(PATHS, 4, |rng| {
+                        let d = turn(DVec3::Z, rng.next().sqrt(), rng);
+                        reference.radiance(p * (1.0 + 1e-9), d, sun, usize::MAX, rng)
+                    });
+                    PI * o.total() + reference.starlight(p, sun) * mu
+                })
+                .sum::<f64>()
+                / cosines.len() as f64
+                * 2.0;
+            let (o, _) = mean(PATHS, 5, |rng| {
+                reference.radiance(DVec3::Z * 3.0, -DVec3::Z, DVec3::Z, usize::MAX, rng)
+            });
+            (ground, PI * o.total())
+        });
+        println!(
+            "absorbed {absorbed}: ground {} of the mean starlight, reflectance {}",
+            measured.map(|m| format!("{:.2}%", 100.0 * m.0)).join(" "),
+            measured.map(|m| format!("{:.2}", m.1)).join(" "),
+        );
+    }
+}
+
+/// The multiple scattering table against the reference, for every preset:
+/// the sky's radiance from the ground, the planet's reflectance from orbit
+/// and the sky's light on the ground, all orders. Run as
+/// `measure_multiple_scattering`.
+#[test]
+#[ignore = "measurement, a minute in release"]
+fn measure_the_multiple_scattering_table() {
+    const PATHS: usize = 40_000;
+    let airs = [
+        ("Earth", Preset::Earth, 6.371e6),
+        ("Venus", Preset::Venus, 6.0518e6),
+        ("Mars", Preset::Mars, 3.3895e6),
+        ("Titan", Preset::Titan, 2.5747e6),
+        ("Hydrogen giant", Preset::HydrogenGiant, 6.9911e7),
+    ];
+    let ratio = |table: DVec3, reference: [f64; 3]| {
+        (0..3)
+            .map(|c| {
+                if reference[c] < 1e-9 {
+                    "-".to_owned()
+                } else {
+                    format!("{:.2}", table[c] / reference[c])
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    for (name, preset, radius) in airs {
+        let air = AirSettings::preset(preset).atmosphere().scaled(radius);
+        let (whole, thin) = (depths(&air), depths(&thinned(&air)));
+        let started = std::time::Instant::now();
+        let table = multiple(&air, &thin);
+        println!(
+            "{name}: table built in {:.2} s; table over reference (red green blue)",
+            started.elapsed().as_secs_f64()
+        );
+        let references = [0, 1, 2].map(|c| Reference::new(air, c, 0.3));
+        for (label, zenith, d) in [
+            ("sky overhead, star 60°", 60.0, DVec3::Z),
+            (
+                "sky at 5° up, towards the star at 60°",
+                60.0,
+                DVec3::new(0.996, 0.0, 0.087),
+            ),
+            (
+                "sky at 30° up, away from the star at 30°",
+                30.0,
+                DVec3::new(-0.866, 0.0, 0.5),
+            ),
+            ("sky overhead at twilight, star 95°", 95.0, DVec3::Z),
+        ] {
+            let (p, sun) = place(radius, 0.0, zenith);
+            let p = p * (1.0 + 1e-9);
+            let d = d.normalize();
+            let want = references.each_ref().map(|r| {
+                mean(PATHS, 2, |rng| r.radiance(p, d, sun, usize::MAX, rng))
+                    .0
+                    .total()
+            });
+            let got = seen(&air, &thin, &table, p, d, sun);
+            println!(
+                "  {label:<42} {}   (reference green {:.2e})",
+                ratio(got, want),
+                want[1]
+            );
+        }
+        for zenith in [0.0, 60.0] {
+            let (_, sun) = place(radius, 0.0, zenith);
+            let p = DVec3::Z * 3.0;
+            let want = references.each_ref().map(|r| {
+                mean(PATHS, 3, |rng| {
+                    r.radiance(p, -DVec3::Z, sun, usize::MAX, rng)
+                })
+                .0
+                .total()
+            });
+            let got = seen(&air, &thin, &table, p, -DVec3::Z, sun);
+            println!(
+                "  {:<42} {}   (reference green {:.2e})",
+                format!("from orbit, star {zenith}°"),
+                ratio(got, want),
+                want[1]
+            );
+        }
+        for zenith in [0.0, 60.0, 85.0] {
+            let (p, sun) = place(radius, 0.0, zenith);
+            let want = references.each_ref().map(|r| {
+                PI * mean(PATHS, 1, |rng| {
+                    let d = turn(DVec3::Z, rng.next().sqrt(), rng);
+                    r.radiance(p * (1.0 + 1e-9), d, sun, usize::MAX, rng)
+                })
+                .0
+                .total()
+            });
+            // The ground's radiance is its albedo over pi of all the light
+            // on it; less the starlight, that from the sky.
+            let direct =
+                starlight(&whole, f64::from(air.top), p * (1.0 + 1e-9), sun) * sun.z.max(0.0);
+            let got = table.ground_at(sun.z) * PI / 0.3 - direct;
+            println!(
+                "  {:<42} {}   (reference green {:.2e})",
+                format!("sky light on the ground, star {zenith}°"),
+                ratio(got, want),
+                want[1]
+            );
+        }
     }
 }

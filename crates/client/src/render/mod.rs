@@ -12,6 +12,7 @@
 //!   raw radiance.
 
 pub mod atmosphere;
+mod atmosphere_multiple;
 #[cfg(test)]
 mod atmosphere_reference;
 pub mod atmosphere_tables;

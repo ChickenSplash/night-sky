@@ -37,6 +37,9 @@ pub enum DebugSwitch {
     /// End each line of sight where the air in front turns opaque, whether
     /// or not ground lies beyond. Needs the tables.
     AtmosphereStopOpaque,
+    /// Add the light scattered more than once, from a table built per air
+    /// (`atmosphere_multiple.rs`). Needs the tables.
+    AtmosphereMultiple,
 }
 
 impl DebugSwitch {
@@ -78,6 +81,9 @@ impl DebugSwitch {
             Self::AtmosphereStopOpaque => {
                 "End each line of sight where the air in front of the camera turns opaque, so thick air such as Venus's hides its ground and all the steps go where light can be seen. Uses the lookup tables, so does nothing with them off. Turn off to compare."
             }
+            Self::AtmosphereMultiple => {
+                "Add the light that scatters more than once in the air, read from a table built once per air, so thick air such as Venus's glows through instead of turning black, and twilight lasts longer. Uses the lookup tables, so does nothing with them off. Turn off to compare."
+            }
         }
     }
 }
@@ -96,6 +102,7 @@ pub struct RenderDebug {
     pub atmosphere_jitter: bool,
     pub atmosphere_tables: bool,
     pub atmosphere_stop_opaque: bool,
+    pub atmosphere_multiple: bool,
 }
 
 impl Default for RenderDebug {
@@ -113,12 +120,13 @@ impl Default for RenderDebug {
             atmosphere_jitter: true,
             atmosphere_tables: true,
             atmosphere_stop_opaque: true,
+            atmosphere_multiple: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 12] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 13] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -133,6 +141,10 @@ impl RenderDebug {
         (
             DebugSwitch::AtmosphereStopOpaque,
             "Stop atmosphere at opaque",
+        ),
+        (
+            DebugSwitch::AtmosphereMultiple,
+            "Atmosphere multiple scattering",
         ),
     ];
 
@@ -150,6 +162,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereJitter => self.atmosphere_jitter,
             DebugSwitch::AtmosphereTables => self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => self.atmosphere_stop_opaque,
+            DebugSwitch::AtmosphereMultiple => self.atmosphere_multiple,
         }
     }
 
@@ -167,6 +180,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereJitter => &mut self.atmosphere_jitter,
             DebugSwitch::AtmosphereTables => &mut self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => &mut self.atmosphere_stop_opaque,
+            DebugSwitch::AtmosphereMultiple => &mut self.atmosphere_multiple,
         } = on;
     }
 }

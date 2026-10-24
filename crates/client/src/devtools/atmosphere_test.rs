@@ -110,6 +110,7 @@ pub struct AtmosphereResults {
     pub jitter: bool,
     pub tables: bool,
     pub stop_opaque: bool,
+    pub multiple: bool,
     pub cases: Vec<Measured>,
 }
 
@@ -368,6 +369,7 @@ pub fn run(
                 jitter: debug.atmosphere_jitter,
                 tables: debug.atmosphere_tables,
                 stop_opaque: debug.atmosphere_stop_opaque,
+                multiple: debug.atmosphere_multiple,
                 cases: std::mem::take(&mut run.measured),
             };
             info!(

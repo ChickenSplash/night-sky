@@ -423,5 +423,6 @@ fn atmosphere_presets_and_changes() {
         assert!(atmosphere::HEIGHT_KM.contains(&air.haze_height_km));
         assert!(atmosphere::GAS.contains(&air.gas));
         assert!(atmosphere::HAZE.contains(&air.haze));
+        assert!(atmosphere::HAZE_ABSORBED.contains(&air.haze_absorbed));
     }
 }

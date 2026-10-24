@@ -3,7 +3,7 @@
 //! shader; the shader finds the ground and the top of the air itself.
 use super::{
     MAX_LIGHTS,
-    atmosphere_tables::AtmosphereTables,
+    atmosphere_tables::{AtmosphereTables, Tables},
     bodies::{Meshes, Pool, SpaceCameraCell, grow, hide, place},
     resolve::Frame,
 };
@@ -40,9 +40,14 @@ const TOP_HEIGHTS: f64 = 12.5;
 /// Rayleigh scattering of Earth's air per bar at the ground, for 680, 550 and
 /// 440 nm (Hillaire 2020, at 1.01325 bar).
 const AIR_PER_BAR: DVec3 = DVec3::new(5.726e-6, 13.381e-6, 32.667e-6);
-/// Earth's continental haze at the ground: Mie scattering and absorption.
+/// Earth's continental haze at the ground: Mie scattering, and the share of
+/// the light it stops that it absorbs rather than scatters (0.444e-6 per
+/// metre of absorption).
 const HAZE_SCATTERING: f64 = 3.996e-6;
-const HAZE_ABSORPTION: f64 = 0.444e-6;
+const EARTH_HAZE_ABSORBED: f64 = 0.1;
+/// The ground's albedo where the planet gives none.
+const GROUND_ALBEDO: f32 = 0.3;
+pub const HAZE_ABSORBED: RangeInclusive<f64> = 1e-4..=0.5;
 
 /// A planet's air, physical: coefficients per metre, heights in metres.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,6 +86,7 @@ impl Atmosphere {
                 over(self.layer_width),
             ),
             absorption: per(self.absorption),
+            ground: Vec3::splat(GROUND_ALBEDO),
         }
     }
 }
@@ -105,6 +111,11 @@ pub struct AirSettings {
     pub haze_colour: [f64; 3],
     /// Cornette-Shanks `g`: how far forward the haze scatters.
     pub haze_asymmetry: f64,
+    /// The share of the light the haze stops that it absorbs rather than
+    /// scatters (one less its single scattering albedo): 0.1 for Earth's
+    /// dust, about 0.001 for clouds of droplets. Under thick haze it sets
+    /// how much light gets through by scattering many times.
+    pub haze_absorbed: f64,
     /// Absorption peaking in a layer, per metre, such as ozone or methane.
     pub absorption: [f64; 3],
     pub layer_km: f64,
@@ -121,6 +132,7 @@ impl AirSettings {
             haze_height_km: 1.2,
             haze_colour: [1.0; 3],
             haze_asymmetry: 0.8,
+            haze_absorbed: EARTH_HAZE_ABSORBED,
             absorption: [0.650e-6, 1.881e-6, 0.085e-6],
             layer_km: 25.0,
             layer_width_km: 15.0,
@@ -142,6 +154,10 @@ impl AirSettings {
                 haze_height_km: 15.0,
                 haze_colour: [1.0, 0.92, 0.65],
                 haze_asymmetry: 0.7,
+                // Sulphuric acid droplets barely absorb: this lets about 3%
+                // of the starlight reach the ground, averaged over the
+                // planet, as measured on Venus (`atmosphere_reference.rs`).
+                haze_absorbed: 0.005,
                 ..clear
             },
             // Thin carbon dioxide at 210 K, with reddish dust.
@@ -177,6 +193,7 @@ impl AirSettings {
                 haze_height_km: 27.0,
                 haze_colour: [1.0, 0.95, 0.85],
                 haze_asymmetry: 0.7,
+                haze_absorbed: EARTH_HAZE_ABSORBED,
                 absorption: [2e-6, 0.5e-6, 0.0],
                 layer_km: 0.0,
                 layer_width_km: 300.0,
@@ -193,7 +210,8 @@ impl AirSettings {
             rayleigh: AIR_PER_BAR * self.gas * self.pressure_bar,
             rayleigh_height: self.scale_height_km * 1e3,
             mie: colour * HAZE_SCATTERING * self.haze,
-            mie_absorption: HAZE_ABSORPTION * self.haze,
+            mie_absorption: HAZE_SCATTERING * self.haze * self.haze_absorbed
+                / (1.0 - self.haze_absorbed),
             mie_height: self.haze_height_km * 1e3,
             mie_asymmetry: self.haze_asymmetry,
             absorption: DVec3::from_array(self.absorption),
@@ -264,6 +282,8 @@ pub struct AtmosphereChange {
     #[serde(default)]
     pub haze_colour: Option<[f64; 3]>,
     #[serde(default)]
+    pub haze_absorbed: Option<f64>,
+    #[serde(default)]
     pub view_steps: Option<u32>,
     #[serde(default)]
     pub light_steps: Option<u32>,
@@ -294,6 +314,7 @@ impl AtmosphereChange {
         within("gas", self.gas, GAS)?;
         within("haze", self.haze, HAZE)?;
         within("haze_height_km", self.haze_height_km, HEIGHT_KM)?;
+        within("haze_absorbed", self.haze_absorbed, HAZE_ABSORBED)?;
         within("view_steps", self.view_steps, VIEW_STEPS)?;
         within("light_steps", self.light_steps, LIGHT_STEPS)?;
         if let Some(colour) = self.haze_colour
@@ -332,6 +353,7 @@ impl AtmosphereTuning {
         set(&mut air.gas, change.gas, GAS);
         set(&mut air.haze, change.haze, HAZE);
         set(&mut air.haze_height_km, change.haze_height_km, HEIGHT_KM);
+        set(&mut air.haze_absorbed, change.haze_absorbed, HAZE_ABSORBED);
         if let Some(colour) = change.haze_colour {
             air.haze_colour = colour.map(|c| clamped(c, 0.0..=1.0));
         }
@@ -352,6 +374,9 @@ pub struct Air {
     /// Mie scale height and asymmetry, absorbing layer height and half width.
     pub shape: Vec4,
     pub absorption: Vec3,
+    /// The ground's albedo per channel, for the light it reflects back up
+    /// into the air.
+    pub ground: Vec3,
 }
 
 /// A planet's atmosphere ready for the GPU.
@@ -400,6 +425,15 @@ pub struct AtmosphereMaterial {
     #[texture(1)]
     #[sampler(2)]
     transmittance: Option<Handle<Image>>,
+    /// The multiple scattering's tables (`atmosphere_multiple.rs`), read
+    /// with the transmittance's sampler: the thinned air's transmittance for
+    /// the starlight, the light scattered more than once and its flow.
+    #[texture(3)]
+    thinned: Option<Handle<Image>>,
+    #[texture(4)]
+    multiple: Option<Handle<Image>>,
+    #[texture(5)]
+    flow: Option<Handle<Image>>,
     /// The camera is inside the shell mesh, or so close that the near plane
     /// would cut its near side: its far side is drawn instead, over everything.
     inside: bool,
@@ -410,6 +444,7 @@ pub struct AtmosphereMaterial {
 pub struct AtmosphereKey {
     inside: bool,
     tables: bool,
+    multiple: bool,
 }
 
 impl From<&AtmosphereMaterial> for AtmosphereKey {
@@ -417,6 +452,7 @@ impl From<&AtmosphereMaterial> for AtmosphereKey {
         Self {
             inside: material.inside,
             tables: material.transmittance.is_some(),
+            multiple: material.multiple.is_some(),
         }
     }
 }
@@ -450,10 +486,13 @@ impl Material for AtmosphereMaterial {
                 depth.depth_compare = CompareFunction::Always;
             }
         }
-        if key.bind_group_data.tables
-            && let Some(fragment) = descriptor.fragment.as_mut()
-        {
-            fragment.shader_defs.push("TABLES".into());
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            if key.bind_group_data.tables {
+                fragment.shader_defs.push("TABLES".into());
+            }
+            if key.bind_group_data.tables && key.bind_group_data.multiple {
+                fragment.shader_defs.push("MULTIPLE".into());
+            }
         }
         Ok(())
     }
@@ -466,17 +505,22 @@ impl Shell {
     }
 
     /// `near` is the camera's near plane, in render units; `switches` jitter
-    /// the view steps and end each ray where the air turns opaque.
+    /// the view steps, end each ray where the air turns opaque and add the
+    /// light scattered more than once.
     fn material(
         &self,
         eye: Vec3,
         near: f32,
         steps: (u32, u32),
-        switches: [bool; 2],
-        transmittance: Option<Handle<Image>>,
+        switches: [bool; 3],
+        tables: Option<Tables>,
     ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
-        let [jitter, opaque] = switches.map(|on| f32::from(u8::from(on)));
+        let [jitter, opaque] = [switches[0], switches[1]].map(|on| f32::from(u8::from(on)));
+        let multiple = tables
+            .as_ref()
+            .and_then(|t| t.multiple.clone())
+            .filter(|_| switches[2]);
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
             steps: Vec4::new(self.air.top, steps.0 as f32, steps.1 as f32, 0.0),
@@ -487,7 +531,10 @@ impl Shell {
             switches: Vec4::new(jitter, opaque, 0.0, 0.0),
             lights: self.lights,
             suns: self.suns,
-            transmittance,
+            transmittance: tables.map(|t| t.transmittance),
+            thinned: multiple.as_ref().map(|m| m.thinned.clone()),
+            multiple: multiple.as_ref().map(|m| m.sky.clone()),
+            flow: multiple.map(|m| m.flow),
             inside: from_eye.length() < self.extent() + NEAR_MARGIN * near,
         }
     }
@@ -544,7 +591,11 @@ pub(super) fn sync_atmospheres(
             eye,
             near,
             (tuning.view_steps, tuning.light_steps),
-            [debug.atmosphere_jitter, debug.atmosphere_stop_opaque],
+            [
+                debug.atmosphere_jitter,
+                debug.atmosphere_stop_opaque,
+                debug.atmosphere_multiple,
+            ],
             debug
                 .atmosphere_tables
                 .then(|| tables.get(&shell.air))

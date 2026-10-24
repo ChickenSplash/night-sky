@@ -284,7 +284,7 @@ pub const USAGE: [Usage; 33] = [
     Usage {
         name: "set_debug",
         fields: &["switch", "on"],
-        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres, atmosphere_jitter, atmosphere_tables or atmosphere_stop_opaque; true or false",
+        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres, atmosphere_jitter, atmosphere_tables, atmosphere_stop_opaque or atmosphere_multiple; true or false",
     },
     Usage {
         name: "set_atmosphere",
@@ -296,6 +296,7 @@ pub const USAGE: [Usage; 33] = [
             "haze",
             "haze_height_km",
             "haze_colour",
+            "haze_absorbed",
             "view_steps",
             "light_steps",
         ],

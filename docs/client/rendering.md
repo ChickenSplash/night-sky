@@ -181,6 +181,30 @@ instead (the light steps). A test compares the table with a 20,000-step
 march: within 1% of the light that gets through, for every preset, from the
 ground to the top.
 
+**Multiple scattering.** Light scattered more than once is read from a
+second table (`render/atmosphere_multiple.rs`), built after the
+transmittance table in the background (a few seconds) and cached with it;
+`set_debug atmosphere_multiple false` leaves it out. Per unit starlight, by
+height and the star's angle from the zenith (32 x 32 texels, rows evenly in
+$1 - e^{-h/2H}$, $H$ the air's tallest scale height), it holds the mean
+radiance of light scattered at least once and its net upward flow, plus the
+ground's radiance in one more row. Light past its first scattering is taken
+as the same from every direction (Hillaire 2020), and the haze's forward
+peak as no scattering at all: its Mie scattering times $1 - g$. Rather than
+Hillaire's sum of one more order, every order is solved at once as one
+linear system with the ground in it, so light diffusing down through thick
+cloud is kept. Each view step adds the stars' light times the scattering
+times that mean radiance, plus the haze's forward scattering of the flow,
+$\sigma_M \frac{3g}{4\pi} F \cdot (-d)$: under thick cloud light flows
+downwards and the haze sends it on down, so the sky from below is up to
+twice as bright as the mean alone. For consistency, the starlight in single
+scattering is then dimmed by the thinned air's transmittance table: light
+scattered slightly forwards still counts as starlight. Measured against the
+Monte Carlo reference (`render/atmosphere_reference.rs`, tests only) the
+result is within about 15% for every preset, Earth within 5%; Mars's dust
+is the worst (0.76 to 1.35), as light flowing sideways away from the star
+is not kept.
+
 **Output.** Output is premultiplied: $L$ is added and whatever lies behind is
 dimmed by the line of sight's transmittance, averaged to grey. The surface
 shader lights the ground with undimmed starlight, so where the ray reaches
@@ -208,14 +232,9 @@ coloured per channel, and the top sits 12.5 scale heights up. The Venus, Mars,
 Titan and hydrogen giant presets use measured pressures and scale heights,
 with haze tuned by eye.
 
-**Limits.** There is no multiple scattering, so thick air is too dark and
-Venus's surface is nearly black. A Monte Carlo reference
-(`render/atmosphere_reference.rs`, tests only) measures what is missing: on
-Earth, all orders give 1.4 to 2 times the sky light of one, on Titan 10 to
-over 1000 times; see [the plan](../plans/atmospheres.md) for its findings.
-Also, transmittance is grey, so colour does not
-shift through thick air; points have no atmosphere. The lookup-table stage
-adds multiple scattering and per-channel dimming. See
+**Limits.** The ground is not yet lit by the sky's light, so Venus's
+surface stays dark under its glowing air. Transmittance is grey, so colour
+does not shift through thick air; points have no atmosphere. See
 [the plan](../plans/atmospheres.md).
 
 ### Physical model versus presentation
