@@ -1561,6 +1561,16 @@
       },
       {
         "group": "route",
+        "help": "Approximations behind the clearances this route keeps, such as an extended atmosphere's constant-gravity estimate.",
+        "key": [
+          "route",
+          "clearance_warning"
+        ],
+        "kind": "text",
+        "label": "clearance warning"
+      },
+      {
+        "group": "route",
         "help": "How the route ended.",
         "key": [
           "route",

@@ -458,6 +458,10 @@ pub struct Field {
     planets: Vec<(Planet, f64, f64, f64)>,
     /// Each pair member's stable zone radius, in metres.
     zones: Vec<(String, f64)>,
+    /// Physical geometry/column conversion is independent of time. Compute
+    /// once per field, not on every route step (or for ordinary gravity).
+    clearances:
+        std::collections::HashMap<String, Result<crate::system::clearance::Clearance, String>>,
 }
 
 impl Field {
@@ -482,12 +486,23 @@ impl Field {
             })
             .collect();
         let zones = Self::zones(&system, page);
+        let policy = crate::system::clearance::Policy::default();
+        let clearances = system
+            .stars_on(page)
+            .map(|s| (s.id.clone(), policy.star(s)))
+            .chain(
+                system
+                    .on_page(page)
+                    .map(|p| (p.id.clone(), policy.planet(p))),
+            )
+            .collect();
         Self {
             system,
             page,
             stars,
             planets,
             zones,
+            clearances,
         }
     }
 
@@ -546,11 +561,21 @@ impl Gravity for Field {
     fn obstacles(&self, seconds: f64) -> Vec<route::Obstacle> {
         self.bodies(seconds)
             .into_iter()
-            .map(|body| route::Obstacle {
-                id: body.id,
-                centre: DVec3::from_array(body.state.position),
-                velocity: DVec3::from_array(body.state.velocity),
-                clear_m: route::KEEP_CLEAR * body.radius_m,
+            .map(|body| {
+                let clearance = self.clearances.get(&body.id).expect("body clearance");
+                route::Obstacle {
+                    exclusion_m: clearance.as_ref().map_or(0.0, |c| c.exclusion_m),
+                    error: clearance.as_ref().err().cloned(),
+                    warning: clearance
+                        .as_ref()
+                        .ok()
+                        .filter(|c| c.extended_column)
+                        .map(|_| "Extended constant-gravity atmosphere estimate".into()),
+                    clear_m: clearance.as_ref().map_or(0.0, |c| c.preferred_m),
+                    id: body.id,
+                    centre: DVec3::from_array(body.state.position),
+                    velocity: DVec3::from_array(body.state.velocity),
+                }
             })
             .collect()
     }

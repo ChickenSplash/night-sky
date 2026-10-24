@@ -12,6 +12,10 @@ pub struct Obstacle {
     pub centre: DVec3,
     pub velocity: DVec3,
     pub clear_m: f64,
+    /// Hard navigation exclusion, never relaxed for low-orbit targets.
+    pub exclusion_m: f64,
+    pub error: Option<String>,
+    pub warning: Option<String>,
 }
 
 impl Obstacle {
@@ -171,6 +175,9 @@ mod tests {
             centre: DVec3::new(x, 0.0, 0.0),
             velocity: DVec3::ZERO,
             clear_m,
+            exclusion_m: clear_m * 0.5,
+            error: None,
+            warning: None,
         }
     }
 

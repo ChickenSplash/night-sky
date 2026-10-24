@@ -441,11 +441,15 @@ itself, so replays and servers run it from the same inputs.
   state, size, keep-clear distance, orbit reach, GM and system (`Target`),
   and never checks what kind of object it is. A body's size is its radius;
   a barycentre's is its pair's separation, and it keeps clear of its stars.
-- **Standoff:** four sizes from the centre, at least the keep-clear distance
-  (1.5 radii, or a barycentre's farthest star plus 1.5 of its radii) and at
-  most 90% of the orbit reach, so `--orbit` works on arrival. A star of a
-  tight pair whose stable zone barely clears its surface has none, and the
-  order is refused.
+- **Clearance:** every star and planet has a navigation
+  [clearance](#navigation-clearance): a hard exclusion radius and a larger
+  preferred keep-clear radius, both covering its equatorial bulge and, for a
+  planet, its atmosphere up to a maintenance-free orbit height.
+- **Standoff:** four sizes from the centre, at least the preferred keep-clear
+  distance (a barycentre's: its farthest star's) and at most 90% of the
+  orbit reach, so `--orbit` works on arrival. A star of a tight pair, or a
+  planet whose air reaches past its orbit reach, has none, and the order is
+  refused.
 - **Speed profile:** requested speed is the distance to the target's centre
   over a time constant τ, so every second covers the same share of what is
   left, reaching the standoff after τ × ln(distance ÷ standoff). The request
@@ -461,13 +465,14 @@ itself, so replays and servers run it from the same inputs.
   as `late_s`, with its cause in `slowed_by`: the first turn, the costliest
   bend, or the top warp speed.
 - **Bodies in the way:** every star and planet but the target has a
-  keep-clear sphere of 1.5 radii. Each step the pilot checks the line to
+  keep-clear sphere: its preferred clearance. Each step the pilot checks the line to
   the standoff against them; when one is in the way it aims along the
   tangent to the nearest such sphere, on the side the target lies, and
   checks that tangent against the others in turn. Worked out afresh every
   step, it curves the ship round like a string pulled tight, so moving
   bodies and several in a row need nothing more. A ship starting inside a
-  sphere, such as low over a planet, aims along its horizon and climbs out.
+  preferred sphere, but outside the exclusion, aims along its horizon and
+  climbs out.
   - **Bend speed:** rounding a body, speed is capped so the aim turns at no
     more than half the turn rate, leaving the rest for pointing to follow.
     The lead then uses the tangent's own turn rate, not the line of sight's.
@@ -526,20 +531,65 @@ itself, so replays and servers run it from the same inputs.
   matching its ordinary velocity only, never its bubble, and `--orbit` is
   refused. A target that despawns releases the route as cancelling does,
   with "`craft-2` is gone", warp left engaged.
-- **Targets in low orbit:** a body whose keep-clear sphere holds the target,
-  as a planet's does a ship 400 km up, shrinks to pass through it, so the
-  route skims round at the target's height and never lower.
+- **Targets in low orbit:** a body whose preferred sphere holds the arrival,
+  as a planet's may a ship in low orbit, shrinks towards it so the route
+  skims round at the arrival's height, but never below the exclusion.
+- **Safety stops:** every step the route checks again that no clearance is
+  unknown, the ship is outside every exclusion and the arrival sphere
+  crosses none, then sweeps the step's actual travel (bubble and ordinary
+  drift, against each body's motion) against the exclusions. A failure ends
+  the route with its reason and drops out of warp, keeping ordinary velocity.
+  Manual warp makes none of these checks.
 - **Refused when given, leaving the ship unchanged:** an unknown ID in the
   ship's own system, a craft ID with no craft, the ship itself, `--orbit` on
   a craft, no safe standoff, already within the standoff, sublight thrust
-  still on, or a trip time out of range.
+  still on, a trip time out of range, a body with unknown or invalid
+  atmosphere data, starting inside an exclusion (leave it by hand first),
+  or an arrival whose standoff sphere crosses another body's exclusion.
 - **Readout:** `route` in the ship state holds the target and its system
   (empty for a craft),
   arrival mode, stage (`plotting`, `align`, `cruise`, `approach`, `arrived`,
   `released`), trip time, τ,
   standoff, distance, ETA, lateness and its cause, the detour beyond the
   straight line, the body being steered round, whether the top speed
-  stretches it and how it ended. It is kept after the route ends.
+  stretches it, any clearance approximation (`clearance_warning`) and how it
+  ended. It is kept after the route ends.
+
+### Navigation clearance
+
+`system::clearance` gives each star and planet two radii from its centre,
+worked out once per loaded system. Route steering, standoffs and safety
+stops use them; future collision and approach assists should too.
+
+- **Exclusion:** equatorial radius + atmosphere clearance height + hull
+  (30 m) + 1 km safety. The routes never plot into it or past it. A sphere
+  round the equator covers polar and tilted passes too, at the cost of extra
+  room over the poles.
+- **Preferred:** the larger of 1.5 equatorial radii and the exclusion plus
+  another 1 km. Routes wrap round this, and may relax it towards an arrival,
+  never below the exclusion.
+- **Atmosphere clearance height:** the lowest height where a circular orbit
+  loses at most **1 m of radius per year** to drag, for a reference ship of
+  ballistic coefficient m/(Cd A) = 10 kg/m², flying retrograde against air
+  that turns with the planet (the worst case):
+
+  ```text
+  |dr/dt| = ρ(h)/B × sqrt(GM r) × (1 + ω r / v_circular)²
+  ```
+
+  ρ(h) extends the [atmosphere column](atmospheres.md#derived-column) past
+  its visible extent, with any aerosol mass counted as gas. The height is
+  never below the visible shell; found by bisection.
+- **Airless and unknown:** a generated airless planet has no atmosphere
+  height. A planet with no generated environment, or invalid air, has no
+  clearance, and routes near it are refused rather than treated as airless.
+- **Limits:** the clearance is only as good as the isothermal,
+  constant-gravity column, which has no hot thermosphere: an Earth-like
+  generated world clears at a few hundred km, below the real Earth's
+  maintenance-free heights. Extended columns are flagged in
+  `clearance_warning`, not clamped. The reference ship stands in until craft
+  have mass and drag properties; there is no drag force yet. Rings would
+  add another enclosing radius to the same bound.
 
 Below the gravity cutoff, active warp retains its final gravity sample for
 the next step, including ordinary flight after dropout. Samples use the

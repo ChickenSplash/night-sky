@@ -345,6 +345,13 @@ impl Craft {
             DVec3::ZERO
         };
         let half_velocity = DVec3::from_array(state.velocity) + a * (dt / 2.0);
+        if let Err(reason) = self.check_route_step(gravity, half_velocity * dt + bubble) {
+            self.orientation = start.to_array();
+            self.end_route(&reason);
+            self.disengage_warp(&reason);
+            self.step(gravity);
+            return;
+        }
         state.position =
             (DVec3::from_array(state.position) + half_velocity * dt + bubble).to_array();
         let end_a = if pulled {

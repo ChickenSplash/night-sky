@@ -65,6 +65,9 @@ Operational extent is **12.5 times the larger of gas and aerosol scale
 heights**, above the reference level. It matches the renderer's exponential
 cutoff convention and now sets the rendered extent, but not flight clearance.
 It is not an exobase, escape boundary or physical end of the atmosphere.
+`Column::density_at` extends the same exponential profile above it, which the
+[navigation clearance](craft.md#navigation-clearance) uses to find a
+maintenance-free orbit height, typically about three times the visible extent.
 
 An extent greater than 0.1 reference radii is flagged `Extended`, not clamped
 or rejected. This is an explicit engineering threshold: gravity has already

@@ -649,8 +649,8 @@ Deferred with phase 6's turn limit and phase 7, until planetary atmospheres
 
 ### 9 · Plotted warp autopilot ✅ Done
 
-Original implementation accepted. Shape/atmosphere clearance corrections remain
-open under [the follow-up checkpoint](#shape-and-atmosphere-clearance-follow-up).
+Original implementation accepted. Shape/atmosphere clearance corrections are
+done and signed off under [the follow-up checkpoint](#shape-and-atmosphere-clearance-follow-up).
 
 - Plot and fly a route with the same drive and explicitly enabled assists as
   manual flight. Autopilot only adds steering and route management.
@@ -711,8 +711,8 @@ Decisions agreed with the user on 2026-10-22:
   ship to the target.
   - Every step the pilot checks the straight line to the target against a
      keep-clear sphere round each body, a margin larger than its surface. The
-     original implementation uses a radius-only boundary; the follow-up below
-     replaces this with shape- and atmosphere-aware clearance. If
+     original radius-only boundary is replaced by the shape- and
+     atmosphere-aware clearance of the follow-up below. If
     the line is clear it aims at the target. If not, it aims at the edge of
     the first sphere in the way, on the shorter side, so the ship curves
     round the body and turns back to the target once it is in view.
@@ -762,9 +762,8 @@ than its keep-clear distance and never further than its orbit reach, so
 `--orbit` always works on arrival. When no such distance exists (a star in a
 tight binary, whose reach is barely beyond its surface), the order is refused
 when given, with the reason, not on arrival.
-Planetary keep-clear distances must include oblateness and generated atmosphere
-extent, as specified in the follow-up below; the current radius-only calculation
-does not yet satisfy that requirement.
+Keep-clear distances now include oblateness and, for planets, a
+maintenance-free atmosphere height; see the follow-up below.
 
 | Target | Size | Orbit reach | Standoff |
 | --- | --- | --- | --- |
@@ -900,10 +899,40 @@ Checkpoints:
 
 #### Shape and atmosphere clearance follow-up
 
-**Open, next flight-sim correction.** Atmosphere generation is now
-[complete](atmospheres.md). Update the existing route pilot before resuming
-in-app autopilot and the deferred assists. This does not reopen the accepted
-route foundation or add mandatory protection to unsafe manual warp.
+**✅ Done, signed off by the user 2026-10-25 after a CLI test flight.**
+Atmosphere generation is [complete](atmospheres.md). Update the
+existing route pilot before resuming in-app autopilot and the deferred
+assists. This does not reopen the accepted route foundation or add mandatory
+protection to unsafe manual warp. See
+[navigation clearance](../simulation/craft.md#navigation-clearance).
+
+Implementation, 2026-10-25:
+
+- `system::clearance` gives each body an exclusion and a preferred radius,
+  cached per loaded system. Agreed with the user: the atmosphere part is a
+  **maintenance-free orbit height** (at most 1 m of orbital radius lost per
+  year, reference ship B = 10 kg/m², retrograde against co-rotating air), not
+  the visible cutoff. `Column::density_at` extends density above that cutoff.
+- The low-orbit relaxation stops at the exclusion. Unknown or invalid air,
+  a start inside an exclusion and an arrival sphere crossing another
+  body's exclusion are refused at plotting and rechecked every step; each
+  warp step is also swept against the exclusions. A failure ends the route
+  and drops out, keeping ordinary velocity. Starting inside is refused, not
+  escaped: leave by hand first.
+- Extended columns are reported in the route's `clearance_warning`.
+- Tests: the helper (decay budget, density beyond the cutoff, oblate
+  enclosure, airless/unknown/invalid/extended envelopes), the bulge and air
+  widening a giant's clearance, a route round an atmosphere never entering
+  it, and the refusals. The existing route tests now use explicitly airless
+  planets. `./scripts/check.sh` passes.
+- CLI test flight in `g13b7db6.4.24`: a start 150 km over the 8.39 bar
+  rocky `/6` (clearance 284 km) was refused; from 400 km it flew to the
+  sub-Neptune `/5` and arrived on time, showing its extended-air warning; a
+  route from 200,000 km beyond `/5` to the star behind it steered round
+  `/5` and arrived.
+- Not covered: exact spheroid routing (the bound is a sphere round the
+  equator), a hot thermosphere (Earth-like worlds clear at a few hundred km,
+  lower than the real Earth needs), rings and drag itself.
 
 1. **One simulation-owned clearance policy.** Separate the physical exclusion
    boundary from the pilot's preferred routing margin. Use it for obstacle

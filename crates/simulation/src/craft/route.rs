@@ -26,7 +26,7 @@ pub const STANDOFF_SIZES: f64 = 4.0;
 /// Standoff from another craft: formation distance, well clear of its hull.
 pub const CRAFT_STANDOFF_M: f64 = 1_000.0;
 /// Keep-clear distance from a body's centre, in multiples of its radius.
-pub const KEEP_CLEAR: f64 = 1.5;
+pub use crate::system::clearance::KEEP_CLEAR;
 /// Share of a target's orbit reach the standoff stays within, so a rough
 /// orbit on arrival is still around it.
 pub const REACH_SHARE: f64 = 0.9;
@@ -133,6 +133,10 @@ pub struct Route {
     pub aligned: bool,
     /// How the route ended.
     pub end: Option<String>,
+    /// Approximations behind the clearances this route keeps, such as an
+    /// extended atmosphere's constant-gravity estimate.
+    #[serde(default)]
+    pub clearance_warning: Option<String>,
 }
 
 impl Route {
@@ -165,6 +169,7 @@ pub struct Target {
     pub system: String,
     /// What a warp bubble adds to its motion: tracked, never matched.
     pub warp_velocity: [f64; 3],
+    pub clearance_error: Option<String>,
 }
 
 impl Target {
@@ -181,12 +186,16 @@ impl Target {
             radius_m: SHIP_LENGTH_M / 2.0,
             system: String::new(),
             warp_velocity,
+            clearance_error: None,
         }
     }
 
     /// A comfortable multiple of its size, never closer than its keep-clear
     /// distance and never further than its orbit reach.
     pub fn standoff(&self) -> Result<f64, String> {
+        if let Some(error) = &self.clearance_error {
+            return Err(format!("Unsafe clearance for `{}`: {error}", self.id));
+        }
         let mut standoff = (STANDOFF_SIZES * self.size_m).max(self.clear_m);
         if let Some(reach) = self.reach_m {
             standoff = standoff.min(REACH_SHARE * reach);
@@ -214,10 +223,15 @@ impl Field {
             id
         };
         let reference = self.reference_by_id(id, seconds)?;
+        let clearance = self.clearances.get(&reference.id);
+        let clearance_error = clearance.and_then(|c| c.as_ref().err()).cloned();
         let (size_m, clear_m) = match reference.kind {
-            ReferenceKind::Planet | ReferenceKind::Star => {
-                (reference.radius_m, KEEP_CLEAR * reference.radius_m)
-            }
+            ReferenceKind::Planet | ReferenceKind::Star => (
+                reference.radius_m,
+                clearance
+                    .and_then(|c| c.as_ref().ok())
+                    .map_or(0.0, |c| c.preferred_m),
+            ),
             ReferenceKind::Barycentre => {
                 let pair = self.system.barycentre(id)?;
                 let at = |id: &str| crate::member_state(&self.system, self.page, id, seconds);
@@ -225,7 +239,12 @@ impl Field {
                 let clear = self
                     .stars_within(id)
                     .map(|(star, radius)| {
-                        distance(at(star).position, reference.state.position) + KEEP_CLEAR * radius
+                        distance(at(star).position, reference.state.position)
+                            + self
+                                .clearances
+                                .get(star)
+                                .and_then(|c| c.as_ref().ok())
+                                .map_or(KEEP_CLEAR * radius, |c| c.preferred_m)
                     })
                     .fold(0.0, f64::max);
                 (size, clear)
@@ -241,6 +260,7 @@ impl Field {
             radius_m: reference.radius_m,
             system: voyage::page_star_id(&self.system, self.page),
             warp_velocity: [0.0; 3],
+            clearance_error,
         })
     }
 
@@ -329,18 +349,64 @@ fn slowed_by(align_s: f64, bends: &[Bend], turn_rate: f64, capped: bool) -> Opti
     }
 }
 
-/// Every obstacle but the target, which the route ends outside of anyway.
-/// One whose keep-clear sphere holds the target, as a planet's does a ship
-/// in low orbit, shrinks to pass through it, so the route skims round at the
-/// target's own height and never lower.
-fn others(field: &impl Gravity, target: &Target, seconds: f64) -> Vec<Obstacle> {
+/// Every obstacle but the target, which the route ends outside of anyway,
+/// after refusing unknown clearances, a start inside an exclusion and an
+/// arrival that would cross one. A preferred keep-clear sphere reaching the
+/// arrival, as a planet's does a ship in low orbit, shrinks towards it, but
+/// never below the body's exclusion.
+fn others(
+    field: &impl Gravity,
+    target: &Target,
+    seconds: f64,
+    from: DVec3,
+    standoff: f64,
+) -> Result<Vec<Obstacle>, String> {
     let goal = DVec3::from_array(target.state.position);
     let mut obstacles = field.obstacles(seconds);
+    // Validate all bodies before excluding the arrival target. Unknown data
+    // must never quietly remove an obstacle from a certified route.
+    for obstacle in &obstacles {
+        if let Some(error) = &obstacle.error {
+            return Err(format!("Unsafe clearance for `{}`: {error}", obstacle.id));
+        }
+        if obstacle.centre.distance(from) < obstacle.exclusion_m {
+            return Err(format!(
+                "Ship is inside the navigation exclusion of `{}`; leave it manually before plotting",
+                obstacle.id
+            ));
+        }
+        // The ship stops on the standoff sphere, so only an exclusion that
+        // crosses that sphere is in the way: a barycentre's own stars lie
+        // well inside it.
+        if obstacle.id != target.id
+            && (obstacle.centre.distance(goal) - standoff).abs() < obstacle.exclusion_m
+        {
+            return Err(format!(
+                "Arrival region intersects the navigation exclusion of `{}`",
+                obstacle.id
+            ));
+        }
+    }
     obstacles.retain(|obstacle| obstacle.id != target.id);
     for obstacle in &mut obstacles {
-        obstacle.clear_m = obstacle.clear_m.min(obstacle.centre.distance(goal));
+        obstacle.clear_m = obstacle.clear_m.min(
+            (obstacle.centre.distance(goal) - standoff)
+                .abs()
+                .max(obstacle.exclusion_m),
+        );
     }
-    obstacles
+    Ok(obstacles)
+}
+
+/// Approximations behind the bodies' clearances, such as an extended
+/// atmosphere's constant-gravity estimate, for the readout.
+fn warnings(field: &impl Gravity, seconds: f64) -> Option<String> {
+    let warnings: Vec<_> = field
+        .obstacles(seconds)
+        .into_iter()
+        .filter_map(|o| o.warning.map(|warning| format!("`{}`: {warning}", o.id)))
+        .collect();
+    (!warnings.is_empty()).then(|| warnings.join("; "))
 }
 
 /// Whether moving by `travel` passes within `radius` of a point `offset`
@@ -364,6 +430,35 @@ pub fn align_seconds(angle: f64, turn_rate: f64) -> f64 {
 }
 
 impl Craft {
+    /// Last-line swept check of the actual midpoint warp step, including
+    /// ordinary drift and linearly moving obstacles. Never applies to manual
+    /// warp. A refusal stops the bubble, not ordinary momentum or gravity.
+    pub(super) fn check_route_step(
+        &self,
+        field: &impl Gravity,
+        travel: DVec3,
+    ) -> Result<(), String> {
+        if !self.route.as_ref().is_some_and(Route::active) {
+            return Ok(());
+        }
+        let from = DVec3::from_array(self.state().position);
+        for obstacle in field.obstacles(self.seconds()) {
+            if let Some(error) = obstacle.error {
+                return Err(format!("Unsafe clearance for `{}`: {error}", obstacle.id));
+            }
+            let relative = travel - obstacle.velocity * STEP_SECONDS;
+            if from.distance(obstacle.centre) < obstacle.exclusion_m
+                || reaches(obstacle.centre - from, relative, obstacle.exclusion_m)
+            {
+                return Err(format!(
+                    "Route stopped before entering the navigation exclusion of `{}`",
+                    obstacle.id
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Plot a route to `id` and engage warp. A target in the ship's system,
     /// or one of the other craft in `ships`, is plotted at once, with every
     /// check first, so a refused order leaves the ship unchanged. One in
@@ -424,6 +519,7 @@ impl Craft {
             slowed_by: None,
             aligned: false,
             end: None,
+            clearance_warning: None,
         });
         Ok(())
     }
@@ -452,7 +548,8 @@ impl Craft {
             ));
         }
         // Timed along the path round bodies in the way, with its bends.
-        let obstacles = others(field, &target, seconds);
+        let obstacles = others(field, &target, seconds, from, standoff)?;
+        let clearance_warning = warnings(field, seconds);
         let aim = wrap::aim(&obstacles, from, goal, standoff);
         let (path, bends) = wrap::path(&obstacles, from, goal, standoff);
         let turn_rate = self.turn_rate();
@@ -494,6 +591,7 @@ impl Craft {
                 .flatten(),
             aligned: false,
             end: None,
+            clearance_warning,
         });
         Ok(())
     }
@@ -566,12 +664,30 @@ impl Craft {
         let goal = DVec3::from_array(target.state.position);
         let offset = goal - from;
         let distance = offset.length();
-        if distance <= route.standoff_m {
+        let standoff = match target.standoff().and_then(|s| {
+            // A changing target's bound can grow, never retain a stale unsafe standoff.
+            others(field, &target, seconds, from, s).map(|obstacles| (s, obstacles))
+        }) {
+            Ok(value) => value,
+            Err(reason) => {
+                self.end_route(&reason);
+                self.disengage_warp(&reason);
+                return;
+            }
+        };
+        let refresh = self.tick.rem_euclid(REFERENCE_STEPS) == 0;
+        let route = self.route.as_mut().expect("active route");
+        route.standoff_m = standoff.0;
+        // Once a second is enough to pick up the bodies of a system entered.
+        if refresh {
+            route.clearance_warning = warnings(field, seconds);
+        }
+        if distance <= standoff.0 {
             self.arrive(&target, distance);
             return;
         }
-        let obstacles = others(field, &target, seconds);
-        let aim = wrap::aim(&obstacles, from, goal, route.standoff_m);
+        let (standoff, obstacles) = standoff;
+        let aim = wrap::aim(&obstacles, from, goal, standoff);
         let nose = DQuat::from_array(self.orientation) * -DVec3::Z;
         let turn_rate = self.turn_rate();
         let tick = self.tick;

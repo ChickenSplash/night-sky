@@ -511,6 +511,9 @@ fn route_facts(
         eta += " · top speed";
     }
     rows.push(("Route ETA".into(), eta));
+    if let Some(warning) = &route.clearance_warning {
+        rows.push(("Route clearance".into(), warning.clone()));
+    }
     rows
 }
 

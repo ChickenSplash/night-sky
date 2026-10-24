@@ -295,6 +295,20 @@ pub struct Column {
     pub validity: ColumnValidity,
 }
 
+impl Column {
+    /// Gas mass density above the reference level, including beyond the optical
+    /// cutoff. This extrapolates the isothermal constant-gravity model, not a
+    /// thermosphere/exosphere solution. Underflow to zero is valid.
+    pub fn density_at(&self, altitude_m: f64) -> Result<f64, AtmosphereError> {
+        if !altitude_m.is_finite() || altitude_m < 0.0 {
+            return Err(AtmosphereError::InvalidValue("column altitude"));
+        }
+        positive("column density", self.density_kg_m3)?;
+        positive("column scale height", self.scale_height_m)?;
+        Ok(self.density_kg_m3 * (-altitude_m / self.scale_height_m).exp())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AtmosphereError {
     InvalidValue(&'static str),

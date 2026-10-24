@@ -1,6 +1,7 @@
 use super::*;
 use crate::craft::warp::GravityPolicy;
 use crate::craft::{CraftKind, Frame, Order, WarpOrder};
+use crate::system::atmosphere::{Composition, Gas, GasAtmosphere, ReferenceLevel};
 use space_shared::{Barycentre, Orbit, Planet, Star, StarSystem};
 
 fn star(letter: &str, mass_solar: f64) -> Star {
@@ -32,6 +33,17 @@ fn pair(letters: &str, members: [&str; 2], semi_major_au: f64) -> Barycentre {
     }
 }
 
+/// Generated and airless: an unknown atmosphere refuses routes.
+fn airless() -> space_shared::PlanetEnvironment {
+    space_shared::PlanetEnvironment {
+        irradiation_w_m2: 1_361.0,
+        assumed_bond_albedo: 0.3,
+        equilibrium_temperature_k: 255.0,
+        age_gyr: 4.5,
+        atmosphere: None,
+    }
+}
+
 /// A hierarchical triple, (AB)C: A and B `ab_au` apart, C 400 AU from
 /// their barycentre, with an Earth at 1 AU around A.
 fn triple(ab_au: f64) -> Field {
@@ -44,6 +56,7 @@ fn triple(ab_au: f64) -> Field {
         },
         radius_km: 6_371.0,
         mass_earth: 1.0,
+        environment: Some(airless()),
         ..Planet::default()
     };
     Field::new(
@@ -475,6 +488,7 @@ fn planet(
         },
         radius_km,
         mass_earth,
+        environment: Some(airless()),
         ..Planet::default()
     }
 }
@@ -483,25 +497,180 @@ fn planet(
 /// an Earth `t/1` at 2 AU in line behind it, and an Earth `t/3` at 1 AU
 /// opposite.
 fn blocked() -> Field {
+    Field::new(blocked_system(), 0)
+}
+
+fn blocked_system() -> StarSystem {
     let mut sun = star("A", 1.0);
     sun.id = "t".into();
-    Field::new(
-        StarSystem {
-            id: "t".into(),
-            name: "Blocked".into(),
-            position_ly: [0.0; 3],
-            planets: vec![
-                planet(0, 1.0, 0.0, 69_911.0, 317.8),
-                planet(1, 2.0, 0.0, 6_371.0, 1.0),
-                planet(2, 1.5, 0.0, 58_232.0, 95.2),
-                planet(3, 1.0, std::f64::consts::PI, 6_371.0, 1.0),
-            ],
-            stars: vec![sun],
-            barycentres: Vec::new(),
-            page_stars: Vec::new(),
-        },
-        0,
+    StarSystem {
+        id: "t".into(),
+        name: "Blocked".into(),
+        position_ly: [0.0; 3],
+        planets: vec![
+            planet(0, 1.0, 0.0, 69_911.0, 317.8),
+            planet(1, 2.0, 0.0, 6_371.0, 1.0),
+            planet(2, 1.5, 0.0, 58_232.0, 95.2),
+            planet(3, 1.0, std::f64::consts::PI, 6_371.0, 1.0),
+        ],
+        stars: vec![sun],
+        barycentres: Vec::new(),
+        page_stars: Vec::new(),
+    }
+}
+
+/// `blocked`, with planet `index` spun fast and given a gas atmosphere at
+/// `pressure_pa` and `temperature_k`, so its clearance grows with both its
+/// equatorial bulge and its air.
+fn airy(
+    index: usize,
+    gases: &[(Gas, f64)],
+    level: ReferenceLevel,
+    pressure_pa: f64,
+    temperature_k: f64,
+) -> Field {
+    let mut system = blocked_system();
+    let planet = &mut system.planets[index];
+    planet.spin.period_hours = 10.0;
+    let gm = planet.mass_earth * crate::EARTH_SOLAR * crate::SUN_GM;
+    let gas = GasAtmosphere::new(
+        Composition::new(gases).unwrap(),
+        level,
+        pressure_pa,
+        temperature_k,
+        None,
     )
+    .unwrap();
+    planet.environment.as_mut().unwrap().atmosphere =
+        Some(gas.to_data(gm, planet.radius_km * 1e3).unwrap());
+    Field::new(system, 0)
+}
+
+fn obstacle(field: &Field, id: &str) -> Obstacle {
+    field
+        .obstacles(0.0)
+        .into_iter()
+        .find(|o| o.id == id)
+        .unwrap()
+}
+
+#[test]
+fn atmosphere_and_oblateness_widen_a_planets_clearance() {
+    let bare = obstacle(&blocked(), "t/0");
+    let field = airy(
+        0,
+        &[(Gas::Hydrogen, 0.86), (Gas::Helium, 0.14)],
+        ReferenceLevel::OneBar,
+        1e5,
+        165.0,
+    );
+    let jupiter = obstacle(&field, "t/0");
+    let shape = crate::system::shape::planet_shape(&field.system().planets[0]);
+    assert!(shape.equatorial > 69_911e3 * 1.01, "{shape:?}");
+    let column = GasAtmosphere::try_from(
+        field.system().planets[0]
+            .environment
+            .as_ref()
+            .unwrap()
+            .atmosphere
+            .as_ref()
+            .unwrap(),
+    )
+    .unwrap()
+    .column(317.8 * crate::EARTH_SOLAR * crate::SUN_GM, 69_911e3)
+    .unwrap();
+    // Past the bulge and the visible air, not just the mean radius.
+    assert!(
+        jupiter.exclusion_m > shape.equatorial + column.extent_m,
+        "{jupiter:?}"
+    );
+    assert!(jupiter.exclusion_m > bare.exclusion_m);
+    assert!(jupiter.clear_m > jupiter.exclusion_m);
+    // The arrival standoff stays outside the exclusion.
+    let target = field.target("t/0", 0.0).unwrap();
+    assert!(target.standoff().unwrap() > jupiter.exclusion_m);
+}
+
+#[test]
+fn a_route_round_an_atmosphere_never_enters_its_exclusion() {
+    let field = airy(
+        0,
+        &[(Gas::Hydrogen, 0.86), (Gas::Helium, 0.14)],
+        ReferenceLevel::OneBar,
+        1e5,
+        165.0,
+    );
+    let (jupiter, behind) = (centre(&field, "t/0"), centre(&field, "t/2"));
+    let exclusion = obstacle(&field, "t/0").exclusion_m;
+    let line = (jupiter - behind).normalize();
+    let mut craft = ship_at(jupiter + line * 40.0 * exclusion, behind);
+    order(&mut craft, &field, to("t/2", true, false, Some(40.0))).unwrap();
+    let mut nearest = f64::INFINITY;
+    for _ in 0..(2.0 * MAX_TRIP_S / STEP_SECONDS) as usize {
+        if !craft.route.as_ref().unwrap().active() {
+            break;
+        }
+        craft.step(&field);
+        let at = DVec3::from_array(craft.state().position);
+        nearest = nearest.min(at.distance(DVec3::from_array(
+            field.target("t/0", craft.seconds()).unwrap().state.position,
+        )));
+    }
+    assert_eq!(
+        craft.route.as_ref().unwrap().stage,
+        Stage::Arrived,
+        "{:?}",
+        craft.route
+    );
+    assert!(nearest > exclusion, "{nearest} within {exclusion}");
+}
+
+#[test]
+fn unknown_air_a_start_inside_the_exclusion_or_an_unsafe_arrival_is_refused() {
+    // Not generated is not airless.
+    let mut system = blocked_system();
+    system.planets[1].environment = None;
+    let unknown = Field::new(system, 0);
+    let craft = ship_at(
+        centre(&unknown, "t/3") + DVec3::X * 1e9,
+        centre(&unknown, "t/3"),
+    );
+    let mut tried = craft.clone();
+    let err = order(&mut tried, &unknown, to("t/3", false, false, None)).unwrap_err();
+    assert!(err.contains("unknown"), "{err}");
+    assert_eq!(tried, craft);
+    // Low inside an Earth's maintenance-free height: leave it by hand first.
+    let field = airy(
+        3,
+        &[(Gas::Nitrogen, 0.79), (Gas::Oxygen, 0.21)],
+        ReferenceLevel::Surface,
+        101_325.0,
+        288.0,
+    );
+    let earth = obstacle(&field, "t/3");
+    let low = centre(&field, "t/3") + DVec3::Z * (6_371e3 + 120e3);
+    assert!(low.distance(earth.centre) < earth.exclusion_m);
+    let craft = ship_at(low, centre(&field, "t/0"));
+    let mut tried = craft.clone();
+    let err = order(&mut tried, &field, to("t/0", false, false, None)).unwrap_err();
+    assert!(err.contains("inside the navigation exclusion"), "{err}");
+    assert_eq!(tried, craft);
+    // Another ship below that height cannot be met without entering it.
+    let parked = Target::craft(
+        "craft-9",
+        State {
+            position: low.to_array(),
+            velocity: [0.0; 3],
+        },
+        [0.0; 3],
+    );
+    let mut chaser = ship_at(centre(&field, "t/3") + DVec3::X * 1e9, low);
+    let before = chaser.clone();
+    let err = chaser
+        .fly_to(Some(&field), &[parked], "craft-9", ArrivalMode::Match, None)
+        .unwrap_err();
+    assert!(err.contains("Arrival region"), "{err}");
+    assert_eq!(chaser, before);
 }
 
 /// A flight's record: seconds flown, the nearest it came to any body's
