@@ -87,11 +87,14 @@ table. A fast test checks scattering once matches a fine march. Measurements
 
 **Pick up here (2026-10-24):**
 
-- All of 4b is in the working tree, uncommitted; the branch is also one
-  commit ahead of `origin` (`499c367`, not pushed). `./scripts/check.sh`
-  passes.
-- Waiting for the user to check it live (see step 1 below), then commit it
-  as one checkpoint. Push only when the user says so.
+- All of 4b is committed and pushed (`e0d024d`), waiting for the user to
+  check it live (see step 1 below).
+- **Pop-in to fix:** the multiple scattering arrives seconds after the
+  rest, so the look changes suddenly. Agreed direction: build it in
+  parallel across cores (rows are independent; the solve is about 0.5 s),
+  build tables before a planet is seen (on entering its system, nearest
+  first, once air is per planet in checkpoint 5), and fade the extra light
+  in over a moment as a safety net.
 - GPU cost not measured yet: ask the user to run the atmosphere GPU test
   with `atmosphere_multiple` on and off.
 - Test build: `/tmp/ns-jitter-test.sh` (API port 4330, log
@@ -106,7 +109,7 @@ dimming, the opaque stop, the ground's dimming), the thinned transmittance
 scattered more than once, and its flow). The first is built alone (about
 0.1 s) so slider drags stay quick; the other two follow together.
 
-Done in the working tree, not committed:
+Built:
 
 - New setting `haze_absorbed` (share of the light the haze stops that it
   absorbs): slider "Haze absorbs", `set_atmosphere haze_absorbed=...`.
