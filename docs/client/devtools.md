@@ -1,6 +1,6 @@
 # Debug tools and diagnostics
 
-Settings and debug tooling are unified in `devtools/mod.rs`: a floating,
+Settings and debug tooling are unified in `devtools.rs`: a floating,
 movable/resizable window toggled by the cog, backtick or F3. There is no separate settings window. Client paths
 are relative to `crates/client/src/`. See [controls](controls.md),
 [benchmarks](benchmarks.md), [developer API/CLI](developer-api.md) and

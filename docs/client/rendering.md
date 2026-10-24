@@ -164,7 +164,7 @@ shaded by `body.wgsl`); stars keep the sphere mesh.
 
 A planet drawn as a disc may have an atmosphere: a shell mesh slightly larger
 than the air's top, whose pixels march single scattering along the line of
-sight (`render/atmosphere/mod.rs`, with `atmosphere.wgsl` beside it). The shader
+sight (`render/atmosphere.rs`, with `atmosphere/atmosphere.wgsl`). The shader
 finds the ground
 and the top analytically, in planet radii and measured from the ray's closest
 approach to the centre, so the limb holds in f32 at real distances; the mesh
@@ -330,7 +330,7 @@ extinction, relativistic light propagation or a physically evolving atmosphere.
   Photometry lives in `crates/simulation/src/light.rs`;
   light inputs and cached photometry in `render/lights.rs`, per-body exposure in
   `render/resolve.rs`, the pools and the HDR camera in `render/bodies.rs`,
-  with the plugin and materials in `render/mod.rs` and the shaders in
+  with the plugin and materials in `render.rs` and the shaders in
   `render/body.wgsl` and `render/point.wgsl`.
 - Every star of a multiple system lights its planets: `PlanetLight::light`
   holds up to `MAX_LIGHTS` (4) stars' direction, flux and temperature,

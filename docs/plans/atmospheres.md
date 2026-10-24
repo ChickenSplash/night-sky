@@ -213,7 +213,7 @@ Later, only if wanted: colour-dependent dimming of what lies behind
 
 ## Working notes
 
-- **Code:** `render/atmosphere/mod.rs` (settings, presets, material, sync),
+- **Code:** `render/atmosphere.rs` (settings, presets, material, sync),
   `render/atmosphere/atmosphere.wgsl`, `render/atmosphere/tables.rs`,
   `render/atmosphere/multiple.rs`, `render/atmosphere/reference.rs`,
   `render/debug.rs` (switches), `devtools/tabs/atmosphere.rs`,

@@ -153,7 +153,7 @@ with the [shared UI kit](kit.md). The query and engine are described in
 
 Paths below are relative to `crates/client/src/`:
 
-- `ui/browser/mod.rs`: browser state, query controls and command wiring.
+- `ui/browser.rs`: browser state, query controls and command wiring.
 - `ui/browser/filters.rs` and `picker.rs`: filter chips and their editor.
 - `ui/browser/results.rs`: status, results table and selected-object details.
 - `ui/browser/tests.rs`: query, selection, responsiveness and rendering regressions.

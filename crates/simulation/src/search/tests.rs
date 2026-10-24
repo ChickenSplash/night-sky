@@ -539,7 +539,7 @@ fn designations_resolve_to_ids() {
     }
 }
 
-/// Star class as `star/mod.rs` names its stars, independently of the engine.
+/// Star class as `star.rs` names its stars, independently of the engine.
 fn class_of(star: &space_shared::Star) -> &'static str {
     match star.kind.as_str() {
         "Red dwarf" => "m",

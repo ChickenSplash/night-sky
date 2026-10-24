@@ -146,7 +146,7 @@ pub enum UiCommand {
         switch: crate::render::debug::DebugSwitch,
         on: bool,
     },
-    /// The prototype atmosphere's preset, values and steps (`render/atmosphere/mod.rs`).
+    /// The prototype atmosphere's preset, values and steps (`render/atmosphere.rs`).
     SetAtmosphere(crate::render::atmosphere::AtmosphereChange),
     /// Search from the camera and show the request in the object browser,
     /// replacing the one it shows (`search.rs`). In `ns search` text.

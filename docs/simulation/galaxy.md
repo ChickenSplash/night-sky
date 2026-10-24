@@ -169,7 +169,7 @@ mixture draws on the burst history discussed by Nogueras-Lara et al. (2020).
 Kinematics follow the same review, with asymmetric drift after Dehnen & Binney
 (1998) and thin-disc heating after Aumer & Binney (2009).
 Parameters and simplified profiles are implemented in
-`crates/simulation/src/galaxy/mod.rs`.
+`crates/simulation/src/galaxy.rs`.
 
 This is a statistical synthetic galaxy, not a reconstruction of observed stars,
 a galactic gravitational simulation or an evolving star-formation calculation.

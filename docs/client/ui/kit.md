@@ -12,7 +12,7 @@ Paths are relative to `crates/client/src/`.
 
 | Module | Responsibility |
 | --- | --- |
-| `ui/mod.rs` | UI composition, top-right window toggles and command dispatch |
+| `ui.rs` | UI composition, top-right window toggles and command dispatch |
 | `ui/hud.rs` | Draggable scene HUD controls and pointer capture |
 | `ui/canvas.rs` | Scene captions, markers and picking overlays |
 | `ui/breadcrumb.rs` | Independent location/selection trails and inspection tabs |
@@ -112,7 +112,7 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 
 1. Put reusable behaviour in `ui/kit/`, with a focused module for stateful
    controls (`pill`, `dropdown`, `number`, `range`, `scroll`). Export through
-   `kit/mod.rs`; callers should not depend on private implementation modules.
+   `kit.rs`; callers should not depend on private implementation modules.
 2. Use the owning theme and shared spacing/easing. Reserve button slots with
    `button_size` so layout and rendered controls agree in both themes.
 3. Scope persistent widget IDs to the owning UI. Use `push_id` or

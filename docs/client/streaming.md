@@ -60,7 +60,7 @@ The magnitude limit is the faintest apparent magnitude drawn as a star point:
 default `VISIBLE_MAGNITUDE` (6.5), adjustable from 3 to 10.5 in tenths. A HUD
 drag previews the value and applies it on release (`SetMagnitude`,
 `set_magnitude 5.5`), because a change restarts streaming from nothing.
-`stars/stream/mod.rs` starts a new `Backend` whenever its magnitude differs.
+`stars/stream.rs` starts a new `Backend` whenever its magnitude differs.
 
 The upload filter, shader cutoff, rebuild distance, star picking and glow's
 unresolved light table all follow the limit. Fainter stars move into the glow,

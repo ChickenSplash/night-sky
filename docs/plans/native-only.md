@@ -91,25 +91,25 @@ Keep the native side of every branch and drop the `cfg`. Files:
 
 - `main.rs`: crash reports, benchmark mode, window/canvas options, the
   `core_load`/`gpu_test`/smoke/automation/HTTP registrations.
-- `network.rs`, `stars/mod.rs`, `stars/starfield.rs` (`StarPointsPlugin`,
-  `frame.points`), `stars/stream/mod.rs`, `search/mod.rs`, `craft.rs`,
+- `network.rs`, `stars.rs`, `stars/starfield.rs` (`StarPointsPlugin`,
+  `frame.points`), `stars/stream.rs`, `search.rs`, `craft.rs`,
   `craft/loading.rs`, `craft/forecast.rs` (`STEPS_PER_FRAME` 250),
-  `scene/mod.rs` (depth `TEXTURE_BINDING` always; keep `NoIndirectDrawing`,
+  `scene.rs` (depth `TEXTURE_BINDING` always; keep `NoIndirectDrawing`,
   which GPU culling at the 1e30 far plane needs natively), `scene/location.rs`,
   `render/debug.rs` (`point_stars` default true, diagnostics always,
   tooltip without "native only").
-- devtools: `mod.rs`, `snapshot.rs`, `capture.rs`, `gpu_test.rs`,
+- devtools: `devtools.rs`, `snapshot.rs`, `capture.rs`, `gpu_test.rs`,
   `core_load.rs`, `tabs/tools.rs`, `tabs/perf.rs` (threads row and buttons,
   GPU pass timings), `devtools/command_line.rs`.
 - Remove every `cfg_attr(target_arch = "wasm32", allow(dead_code))` and
   `cfg_attr(not(...), allow(dead_code))`; fix any real dead code they hid.
 - `crates/simulation`: `craft/voyage.rs` `threads()`,
-  `craft/voyage/loading.rs`, `search/mod.rs`.
+  `craft/voyage/loading.rs`, `search.rs`.
 - The 90 `#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test...)]` /
   `#[cfg_attr(not(...), test)]` pairs in 10 simulation test files become
   plain `#[test]`.
 - Comments and user-facing strings that mention the browser, WebGL or WASM
-  (for example the WebGL note in `scene/mod.rs`).
+  (for example the WebGL note in `scene.rs`).
 
 ### 3. Scripts and server
 

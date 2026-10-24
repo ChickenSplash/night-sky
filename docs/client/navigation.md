@@ -11,7 +11,7 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 - There is one mode: the streamed galaxy. List pages are ordinary cell stars,
   drawn and picked like any other, with no markers of their own until their
   system is loaded (see Selection and picking).
-- `Navigation::visit` (`navigation/mod.rs`) is the system the camera is anchored to
+- `Navigation::visit` (`navigation.rs`) is the system the camera is anchored to
   (at, flying to, or showing as a constellation): `Visit::List` (a list index,
   at `Navigation::page`) or `Visit::Generated` (task-free planets built from
   the star's ID, never added to the lists' `Universe`). `None` is open space,

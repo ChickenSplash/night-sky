@@ -58,15 +58,15 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, BODY_SHADER, "body.wgsl", Shader::from_wgsl);
-        load_internal_asset!(app, POINT_SHADER, "point.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, BODY_SHADER, "render/body.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, POINT_SHADER, "render/point.wgsl", Shader::from_wgsl);
         load_internal_asset!(
             app,
             ATMOSPHERE_SHADER,
-            "atmosphere/atmosphere.wgsl",
+            "render/atmosphere/atmosphere.wgsl",
             Shader::from_wgsl
         );
-        load_internal_asset!(app, GROUND_SHADER, "ground.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, GROUND_SHADER, "render/ground.wgsl", Shader::from_wgsl);
         app.add_plugins((
             MaterialPlugin::<BodyMaterial>::default(),
             MaterialPlugin::<PointMaterial>::default(),

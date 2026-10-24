@@ -65,8 +65,11 @@ tools/              The TUI's Python environment and UI prototypes (ignored)
 vendor/             Documented Bevy renderer patch
 ```
 
-Large test blocks live in sibling `tests.rs` files. Shaders are beside their Rust
-modules; internal asset paths are relative to the loading `.rs` file.
+Project-owned modules use `name.rs` with a sibling `name/` directory for
+submodules, rather than `name/mod.rs`. Vendored code retains its upstream layout.
+Large test blocks live in the owning module's directory as `tests.rs`. Shaders
+stay in their feature directories; internal asset paths are relative to the
+loading `.rs` file, so moving a module entry point requires checking those paths.
 
 Simulation modules are grouped by domain, not by technical layer. `galaxy/`
 owns spatial populations and their loading, `star/` owns stellar properties and

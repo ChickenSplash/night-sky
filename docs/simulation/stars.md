@@ -104,7 +104,7 @@ not time-integrated mass loss or a replay of actual planet formation.
   systems come from `galactic_bodies(id, component)`.
 - Legacy page stars (`star(id)`) use a fixed solar-neighbourhood census: mostly
   red dwarfs, a few giants and white dwarfs. Galactic and page stars share the
-  builders in `crates/simulation/src/star/mod.rs`; census draws must keep their
+  builders in `crates/simulation/src/star.rs`; census draws must keep their
   order, or every page star changes.
 - Host mass sets orbital periods (`StarSystem::host_mass`); radius and
   temperature determine the drawn size and `spectral_colour`, and stellar

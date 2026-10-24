@@ -264,5 +264,5 @@ scale.
   `render/body.wgsl`, `render/atmosphere/atmosphere.wgsl`, `scene/controls.rs` (free
   flight), `scene/placement.rs` (anchor carry, near plane, render scale),
   `scene/camera.rs`, `crates/simulation/src/system/generation.rs` (`planet_spin`),
-  `crates/simulation/src/star/mod.rs` (star spins), `space_shared::Spin`.
+  `crates/simulation/src/star.rs` (star spins), `space_shared::Spin`.
 - **Live checks are the user's;** test builds as in the atmospheres plan.
