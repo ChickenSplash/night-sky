@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Night Sky · Object browser prototype</title>
+<style>
+:root{color-scheme:dark;--bg:#070b12;--panel:#0b111bf5;--line:#293442;--muted:#8795a7;--text:#dce4ed;--blue:#91c7ff;--hover:#17273b;--mono:ui-monospace,"Cascadia Code","Liberation Mono",monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px var(--mono);min-height:100vh}button,input,select{font:inherit;color:inherit}button{cursor:pointer;background:transparent;border:1px solid var(--line);padding:9px 12px;border-radius:3px}button:hover{background:var(--hover);border-color:#6386a7}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}button.active{background:#203248;color:var(--blue);border-color:#517ca4}button:disabled{opacity:.4;cursor:default}input,select{background:#080e17;border:1px solid var(--line);border-radius:3px;padding:10px;min-width:0}input::placeholder{color:#718194}a{color:var(--blue)}.sky{position:fixed;inset:0;pointer-events:none;overflow:hidden;background:radial-gradient(ellipse at 68% 70%,#15213580,transparent 44%),radial-gradient(ellipse at 30% 30%,#11192b,transparent 55%)}.star{position:absolute;border-radius:50%;background:#d3e4ff;box-shadow:0 0 5px #a9caff55}.orbit{position:absolute;width:720px;height:720px;border:1px solid #51637b22;border-radius:50%;left:calc(70% - 360px);top:calc(60% - 360px);transform:rotateX(65deg) rotateZ(-25deg)}.orbit.two{width:1100px;height:1100px;left:calc(70% - 550px);top:calc(60% - 550px)}.scene-header{position:fixed;top:26px;left:30px;color:#9caaba;line-height:1.8;font-size:12px}.scene-header strong{color:#dae4ef;font-size:15px;font-weight:400}.scene-footer{position:fixed;bottom:23px;left:30px;color:#77889c;font-size:11px}.open-button{position:fixed;right:30px;top:28px;background:#0c1420}.workspace{position:relative;min-height:100vh;padding:115px 28px 80px;display:flex;align-items:flex-start;justify-content:center}.browser{width:760px;border:1px solid #445367;border-radius:6px;background:var(--panel);box-shadow:0 30px 100px #0009;overflow:hidden;transition:width .18s}.browser.expanded{width:min(1250px,100%)}.titlebar{display:flex;justify-content:space-between;align-items:center;padding:17px 22px;border-bottom:1px solid var(--line);gap:10px}.eyebrow{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}h1{font-size:16px;font-weight:400;margin:6px 0 0}.title-actions{display:flex;gap:8px}.quiet{border-color:transparent;color:var(--muted)}.search-area{padding:22px}.search-box{display:flex;align-items:center;border:1px solid #4a6481;background:#070d16;border-radius:3px;padding:0 14px;gap:12px}.search-box:focus-within{border-color:var(--blue);box-shadow:0 0 0 1px #91c7ff33}.search-icon{font-size:23px;color:var(--blue)}#search{width:100%;background:none;border:0;padding:16px 0;font-size:16px;outline:none;box-shadow:none}.key{color:var(--muted);font-size:10px;border:1px solid var(--line);padding:3px 5px;border-radius:3px;white-space:nowrap}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:15px}.segments{display:flex}.segments button{border-radius:0;padding:8px 12px}.segments button:first-child{border-radius:3px 0 0 3px}.segments button:last-child{border-radius:0 3px 3px 0}.segments button+button{margin-left:-1px}#type{max-width:245px;padding:8px}.scope-row{display:flex;justify-content:space-between;gap:12px;margin-top:15px;font-size:11px;color:var(--muted);align-items:center}.scope-row select{padding:5px;font-size:11px}.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.chip{display:flex;align-items:center;gap:8px;background:#142338;border:1px solid #355270;padding:6px 9px;font-size:11px;border-radius:3px;color:#b8d7f4}.chip button{border:0;padding:0 3px;color:#b8d7f4}.body{display:grid;grid-template-columns:minmax(0,1fr)}.expanded .body{grid-template-columns:minmax(0,1fr) 330px}.results{min-width:0;border-top:1px solid var(--line)}.results-toolbar{padding:12px 22px;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--muted);font-size:11px;background:#0e1621}.results-toolbar select{font-size:11px;padding:5px}.column-head,.result{display:grid;grid-template-columns:minmax(160px,1fr) minmax(150px,.9fr) 85px;gap:10px;align-items:center}.column-head{padding:11px 22px;color:#65778e;text-transform:uppercase;letter-spacing:1px;font-size:9px;border-bottom:1px solid #1e2937}.column-head span:last-child{text-align:right}#results{max-height:360px;overflow:auto;scrollbar-color:#3d5068 #0b111b}.expanded #results{max-height:465px}.result{width:100%;text-align:left;border:0;border-bottom:1px solid #1b2533;border-radius:0;padding:14px 22px;position:relative}.result:hover{background:#131e2d}.result[aria-selected=true]{background:#192b40;box-shadow:inset 3px 0 var(--blue)}.identity{display:flex;gap:12px;align-items:center;min-width:0}.dot{width:12px;height:12px;flex-shrink:0;border-radius:50%;background:var(--object-colour);box-shadow:0 0 11px color-mix(in srgb,var(--object-colour) 35%,transparent)}.dot.planet{background:transparent;box-shadow:none;border:1px solid var(--object-colour)}.name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.secondary{color:var(--muted);font-size:10px;margin-top:5px}.type-cell{font-size:11px;color:#aebdce;line-height:1.6}.distance{font-size:11px;text-align:right;color:#b3c0cf}.empty{padding:45px 25px;text-align:center;color:var(--muted);line-height:1.8}.detail{display:none;border-left:1px solid var(--line);padding:22px;background:#0b121e}.expanded .detail{display:block}.detail-object{height:92px;display:flex;align-items:center;justify-content:center}.body-symbol{width:53px;height:53px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff8,var(--object-colour) 55%,#1c2637);box-shadow:0 0 35px color-mix(in srgb,var(--object-colour) 20%,transparent)}.body-symbol.planet{box-shadow:none;background:radial-gradient(circle at 25% 25%,var(--object-colour),#111b2b 80%);border:1px solid #6c839d}.detail h2{font-weight:400;font-size:18px;margin:10px 0}.detail .subtitle{color:var(--muted);font-size:11px;line-height:1.7}.facts{margin:22px 0;font-size:11px}.fact{display:flex;justify-content:space-between;gap:15px;padding:9px 0;border-bottom:1px solid #1d2938}.fact dt{color:var(--muted)}.fact dd{margin:0;text-align:right}.detail-actions{display:flex;gap:8px}.primary{background:#1a3049;color:#c3e1ff;border-color:#527da7}.note{font-size:10px;color:var(--muted);line-height:1.8;margin-top:17px}.preview{border-top:1px solid var(--line);padding:12px 22px;display:flex;gap:15px;justify-content:space-between;align-items:center;font-size:11px}.expanded .preview{display:none}.preview-text{color:var(--muted);line-height:1.6}.footer{padding:13px 22px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;font-size:10px;color:var(--muted)}.shortcuts{display:flex;flex-wrap:wrap;gap:12px}.advanced{display:none;border-top:1px solid var(--line);padding:16px 22px;background:#0c1522}.expanded .advanced{display:block}summary{cursor:pointer;color:#a8bed7;font-size:11px}.cli-line{display:flex;gap:10px;align-items:center;margin-top:12px}.cli-line code{flex:1;background:#070d16;padding:12px;overflow:auto;font-size:11px;white-space:nowrap;color:#a8d0f3}.cli-line button{font-size:11px}.toast{position:fixed;bottom:65px;left:50%;transform:translateX(-50%);padding:12px 20px;border:1px solid #537494;background:#112036;color:#c6def7;border-radius:4px;font-size:12px;max-width:90%;z-index:5}.hidden{display:none!important}dialog{background:#0d1623;color:var(--text);border:1px solid #4a6078;border-radius:5px;padding:0;width:min(510px,calc(100vw - 32px));box-shadow:0 20px 90px #000b}dialog::backdrop{background:#02060dbb}dialog .dialog-content{padding:20px}dialog h2{font-size:16px;font-weight:400;margin:0}#filter-search{width:100%;margin-bottom:15px}.filter-option{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;border:0;border-bottom:1px solid #263446;border-radius:0;padding:13px 8px;font-size:12px}.filter-option span{color:var(--muted);font-size:10px}.filter-group{margin:16px 8px 6px;color:var(--blue);font-size:10px;text-transform:uppercase;letter-spacing:1px}.filter-fields{display:flex;gap:12px;margin:20px 0}.filter-fields label{flex:1;font-size:11px;color:var(--muted)}.filter-fields input,.filter-fields select{display:block;width:100%;margin-top:8px}.dialog-buttons{display:flex;justify-content:flex-end;gap:10px}.filter-description{font-size:11px;line-height:1.8;color:var(--muted);margin-top:12px}.mobile-detail{display:none}.inspector-modal .detail{display:block;border:0}.inspector-modal{width:390px}#filter-options{max-height:330px;overflow:auto}@media(min-height:1000px){.workspace{padding-top:165px}}@media(max-width:900px){.expanded .body{grid-template-columns:minmax(0,1fr) 280px}.column-head,.result{grid-template-columns:minmax(120px,1fr) 130px 65px;gap:6px}.search-area{padding:16px}.detail{padding:16px}}@media(max-width:700px){.workspace{padding:90px 12px 65px}.scene-header{left:16px;top:16px}.scene-footer{left:16px;font-size:9px}.open-button{right:16px;top:20px}.titlebar{padding:14px}.title-actions button{padding:7px;font-size:11px}.expanded .body{grid-template-columns:1fr}.expanded .detail{display:none}.expanded .preview{display:flex}.result,.column-head{padding-left:14px;padding-right:14px;grid-template-columns:minmax(110px,1fr) 115px 60px}.type-cell{font-size:10px}.scope-row{align-items:flex-start;flex-direction:column}.footer{padding:12px 14px}.key.search-hint{display:none}.preview{padding:12px 14px}.cli-line{align-items:stretch;flex-direction:column}}
+/* Keep sky decoration separate from star-result glyphs. */
+.identity .dot{position:static}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true" id="sky"><div class="orbit"></div><div class="orbit two"></div></div>
+<div class="scene-header"><strong>Night Sky</strong><br>Milky Way · Solar neighbourhood</div>
+<button class="open-button" id="open">Browse objects <span class="key">Ctrl K</span></button>
+<div class="scene-footer">DESIGN PROTOTYPE · Synthetic catalogue · No connection to the simulation</div>
+<main class="workspace">
+<section class="browser" id="browser" aria-label="Object browser">
+<header class="titlebar"><div><div class="eyebrow">Explore the catalogue</div><h1>Object browser</h1></div><div class="title-actions"><button id="expand">Expand browser ↗</button><button class="quiet" id="close" aria-label="Close browser">✕</button></div></header>
+<div class="search-area">
+<label class="search-box"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" type="search" autocomplete="off" placeholder="Search a name, designation or ID…" aria-label="Search objects"><span class="key search-hint">↑ ↓ Enter</span></label>
+<div class="controls"><button id="add-filter">+ Add filter</button><span class="secondary">All objects · refine only when you need to</span></div>
+<div class="chips" id="chips"></div>
+<div class="scope-row"><label>Scope <select id="scope"><option value="nearby">Nearby · within 50 ly</option><option value="system">Current system</option><option value="all">Entire mock catalogue</option></select></label><span id="source-note">Synthetic demo data · distances from current location</span></div>
+</div>
+<div class="body"><section class="results" aria-label="Search results"><div class="results-toolbar"><span id="count" role="status" aria-live="polite"></span><label>Sort <select id="sort"><option value="distance">Nearest first</option><option value="name">Name A to Z</option><option value="type">Object type</option></select></label></div><div class="column-head"><span>Object / host system</span><span>Classification</span><span>Distance</span></div><div id="results" role="listbox" aria-label="Matching objects"></div></section><aside class="detail" id="detail" aria-label="Selected object details"></aside></div>
+<div class="preview" id="preview"></div>
+<div class="advanced"><details><summary>Equivalent CLI query <span class="secondary">· proposed syntax</span></summary><div class="cli-line"><code id="cli"></code><button id="copy">Copy query</button></div><div class="note">The future egui browser and CLI will use the same typed query. This prototype only filters local mock records, including illustrative future object categories.</div></details></div>
+<footer class="footer"><div class="shortcuts"><span>↑↓ Navigate</span><span>Enter Inspect</span><span>Esc Close</span></div><button class="quiet" id="reset" style="padding:0;font-size:10px">Reset search & filters</button></footer>
+</section>
+</main>
+<dialog id="filter-dialog" aria-labelledby="filter-title"><header class="titlebar"><h2 id="filter-title">Add a filter</h2><button class="quiet" id="filter-close" aria-label="Close filter picker">✕</button></header><div class="dialog-content" id="filter-content"></div></dialog>
+<dialog class="inspector-modal" id="inspect-dialog" aria-label="Inspect object"><header class="titlebar"><span class="eyebrow">Object inspector</span><button class="quiet" id="inspect-close" aria-label="Close inspector">✕</button></header><div class="detail" id="modal-detail"></div></dialog>
+<div class="toast hidden" id="toast" role="status"></div>
+<script>
+'use strict';
+// Standalone design fixture. Labels mirror today's Rust generators, but this
+// is not a live enum export. Production UI/CLI should consume a shared catalogue.
+const starTypes=['Red dwarf','Orange dwarf','Yellow dwarf','Yellow-white dwarf','White main-sequence star','Blue-white main-sequence star','Blue main-sequence star','Red giant','Orange giant','Yellow giant','Red supergiant','Blue supergiant','White dwarf'];
+const planetTypes=['Dwarf planet','Rocky planet','Sub-Neptune','Ice giant','Gas giant'];
+const systems=[
+ ['Aster','Yellow dwarf','G2 V',0,5772,1,1,1,1,'#ffe1a1'],
+ ['Ember','Red dwarf','M4 V',4.3,3200,.24,.29,.012,2,'#ffb68e'],
+ ['Copper','Orange dwarf','K3 V',8.7,4700,.76,.8,.31,1,'#ffd0a0'],
+ ['Vesper','White dwarf','DA2',11.2,18000,.62,.012,.014,2,'#dce9ff'],
+ ['Lumen','Yellow-white dwarf','F5 V',16.4,6600,1.35,1.27,2.7,1,'#fff1ce'],
+ ['Hearth','Red giant','M2 III',24.6,3600,1.8,46,290,1,'#ffc39b'],
+ ['Lyric','White main-sequence star','A3 V',31.8,8700,2.1,1.8,17,3,'#e0e8ff'],
+ ['Saffron','Orange giant','K1 III',43.2,4500,2.4,19,135,2,'#ffe0b0'],
+ ['Azure','Blue-white main-sequence star','B5 V',68.5,15400,5.9,4.2,900,2,'#bfd5ff'],
+ ['Crown','Yellow giant','G4 III',89,5200,3.1,15,150,1,'#fff0c7'],
+ ['Helix','Blue main-sequence star','O8 V',142,35000,22,8,86000,3,'#adcaff'],
+ ['Garnet','Red supergiant','M1 I',220,3700,14,650,72000,1,'#ffc49b'],
+ ['Beacon','Blue supergiant','B2 I',310,20000,19,46,190000,2,'#c2daff']
+];
+const records=[];
+systems.forEach((s,i)=>{
+ const [name,type,spectral,distance,temperature,mass,radius,luminosity,members,colour]=s;
+ records.push({id:`demo-${i+1}#A`,name:`${name}${members>1?' A':''}`,system:name,kind:'star',type,spectral,distance,temperature,mass,radius,luminosity,members,colour,systemIndex:i});
+ const n=type.includes('supergiant')?2:5;
+ for(let p=0;p<n;p++){
+  const classIndex=(p+i)%5,pt=planetTypes[classIndex];
+  const masses=[.003,1.12,6.4,18,265],radii=[1180,6600,17000,25500,68800];
+  records.push({id:`demo-${i+1}/${p}`,name:`${name} ${String.fromCharCode(98+p)}`,system:name,kind:'planet',type:pt,distance,mass:+(masses[classIndex]*(.8+(i%4)*.13)).toFixed(3),radius:Math.round(radii[classIndex]*(.9+(p%3)*.08)),period:+(34*Math.pow(3.2,p)*(1+i*.12)).toFixed(1),orbit:+(.12*Math.pow(2.8,p)).toFixed(2),locked:p===0,members,colour:['#adb6c5','#b6bb91','#9bc4dc','#9bcddc','#d5bd9d'][classIndex],systemIndex:i});
+ }
+});
+const filterDefs=[
+ {id:'distance',label:'Distance',group:'Location',unit:'ly',kind:'any',field:'distance',min:0,max:10000,step:'any'},
+ {id:'members',label:'Stars in system',group:'System',kind:'any',field:'members',options:[['1','Single star'],['2','Binary system'],['3','Triple system']]},
+ {id:'temperature',label:'Surface temperature',group:'Stellar properties',unit:'K',kind:'star',field:'temperature',min:0,max:100000,step:'any'},
+ {id:'star-mass',label:'Stellar mass',group:'Stellar properties',unit:'solar masses',kind:'star',field:'mass',min:0,max:1000,step:'any'},
+ {id:'luminosity',label:'Luminosity',group:'Stellar properties',unit:'solar luminosities',kind:'star',field:'luminosity',min:0,max:1000000,step:'any'},
+ {id:'planet-mass',label:'Planet mass',group:'Planetary properties',unit:'Earth masses',kind:'planet',field:'mass',min:0,max:100000,step:'any'},
+ {id:'radius',label:'Planet radius',group:'Planetary properties',unit:'km',kind:'planet',field:'radius',min:0,max:1000000,step:'any'},
+ {id:'period',label:'Orbital period',group:'Orbits & rotation',unit:'days',kind:'planet',field:'period',min:0,max:10000000,step:'any'},
+ {id:'locked',label:'Tidally locked',group:'Orbits & rotation',kind:'planet',field:'locked',options:[['true','Yes'],['false','No']]}
+];
+const $=id=>document.getElementById(id);
+// Browsing groups are not scientific taxonomy. Composition and relationships
+// are properties, rather than a separate type for every possible combination.
+const families=[
+ ['star','Stars & remnants',[...starTypes,'Brown dwarf','Neutron star','Black hole']],
+ ['planet','Planetary bodies',planetTypes.concat(['Rogue planet'])],
+ ['moon','Moons & satellites',['Moon','Irregular satellite']],
+ ['small','Small bodies',['Asteroid','Comet']],
+ ['system','Systems',['Stellar system']],
+ ['structure','Clusters, nebulae & galaxies',['Open cluster','Globular cluster','Nebula','Galaxy']]
+];
+systems.forEach((s,i)=>records.push({id:`system-${i}`,name:`${s[0]} system`,system:s[0],kind:'system',type:'Stellar system',distance:s[3],members:s[8],contains:s[1],colour:s[9],systemIndex:i}));
+const future=[
+ ['Nacre','moon','Moon',4.3,{composition:'Ice-rich',radius:820,mass:.007,host:'Ember b',hostKind:'Planet',period:12}],
+ ['Flint','moon','Moon',8.7,{composition:'Rocky',radius:1400,mass:.018,host:'Copper c',hostKind:'Planet',period:8}],
+ ['Pebble','moon','Irregular satellite',4.3,{composition:'Rocky',radius:12,mass:.000001,host:'Ember b',hostKind:'Planet',period:3}],
+ ['Rime','moon','Moon',11.2,{composition:'Ice-rich',radius:190,host:'Vesper b',hostKind:'Dwarf planet',period:6}],
+ ['Wanderer','planet','Rogue planet',18,{composition:'Mixed',radius:9100,mass:2.4,host:'None',hostKind:'None'}],
+ ['Cinder','star','Brown dwarf',12,{mass:.014,radius:.1,temperature:450,luminosity:.00001,spectral:'Y2'}],
+ ['Umber','star','Brown dwarf',30,{mass:.075,radius:.1,temperature:2400,luminosity:.0004,spectral:'L0'}],
+ ['Pulse','star','Neutron star',43,{mass:1.4,radius:.000017,temperature:600000}],
+ ['Umbra','star','Black hole',48,{mass:9}],
+ ['Umbra binary','system','Stellar system',48,{members:2,contains:'Black hole'}],
+ ['Shard','small','Asteroid',6,{composition:'Rocky',radius:3}],
+ ['Veil','structure','Nebula',1200,{}],
+ ['Lanterns','structure','Open cluster',600,{}],
+ ['Crown swarm','structure','Globular cluster',22000,{}],
+ ['Neighbour galaxy','structure','Galaxy',2500000,{}]
+];
+future.forEach(([name,kind,type,distance,props],i)=>records.push({id:`future-${i}`,name,kind,type,distance,system:props.host||'Independent object',colour:'#b3ccd9',future:true,...props}));
+filterDefs.push(
+ {id:'composition',label:'Composition',group:'Physical properties',kind:'any',field:'composition',options:[['Ice-rich','Ice-rich'],['Rocky','Rocky'],['Mixed','Mixed']]},
+ {id:'body-radius',label:'Body radius',group:'Physical properties',kind:'any',field:'radius',unit:'km',kinds:['planet','moon','small'],min:0,max:1000000,step:'any'},
+ {id:'host',label:'Orbits a…',group:'Relationships',kind:'any',field:'hostKind',kinds:['planet','moon','small'],options:[['Planet','Planet'],['Dwarf planet','Dwarf planet'],['None','No host (free-floating)']]},
+ {id:'contains',label:'System contains…',group:'Relationships',kind:'system',field:'contains',options:[['Black hole','Black hole'],['Neutron star','Neutron star'],['Brown dwarf','Brown dwarf']]}
+);
+records.forEach(r=>{if(r.kind==='planet'&&!r.hostKind){r.hostKind='Star';r.host=r.system;}if(r.kind==='planet'&&!r.composition)r.composition=r.type==='Rocky planet'?'Rocky':'Mixed';});
+filterDefs.find(d=>d.id==='radius').label='Planet radius';
+filterDefs.find(d=>d.id==='members').kind='system';
+const state={kind:'any',type:'',filters:[],selected:null,expanded:false,visible:[]};
+const num=n=>Number(n).toLocaleString('en-GB',{maximumFractionDigits:3});
+let toastTimer;
+function toast(text){$('toast').textContent=text;$('toast').classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),3800)}
+function make(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el}
+function fillTypes(){} // Type discovery now lives inside Add filter.
+function applicable(d,kind){return d.kinds?d.kinds.includes(kind):d.kind==='any'||d.kind===kind}
+function setKind(kind){state.kind=kind;state.type='';state.filters=state.filters.filter(f=>kind==='any'||applicable(f.def,kind));render()}
+function matches(r){const q=$('search').value.trim().toLowerCase();if(q&&!`${r.name} ${r.id} ${r.system} ${r.type} ${r.spectral||''} ${r.composition||''} ${r.host||''}`.toLowerCase().includes(q))return false;if(state.kind!=='any'&&r.kind!==state.kind)return false;if(state.type&&r.type!==state.type)return false;if($('scope').value==='nearby'&&r.distance>50)return false;if($('scope').value==='system'&&r.systemIndex!==0)return false;return state.filters.every(f=>{if(!applicable(f.def,r.kind))return false;const v=r[f.def.field];if(v==null)return false;return f.def.options?String(v)===f.value:(f.min==null||v>=f.min)&&(f.max==null||v<=f.max)})}
+function render(){
+ state.visible=records.filter(matches).sort((a,b)=>$('sort').value==='name'?a.name.localeCompare(b.name):$('sort').value==='type'?a.type.localeCompare(b.type)||a.distance-b.distance:a.distance-b.distance||a.kind.localeCompare(b.kind)||a.name.localeCompare(b.name));
+ if(!state.visible.some(r=>r.id===state.selected))state.selected=state.visible[0]?.id||null;
+ $('count').textContent=`${state.visible.length} matching object${state.visible.length===1?'':'s'} · mock catalogue complete`;
+ $('results').replaceChildren();
+ for(const r of state.visible){const row=make('button',undefined,'result');row.id=`row-${r.id.replace(/[^a-z0-9]/gi,'-')}`;row.setAttribute('role','option');row.setAttribute('aria-selected',String(r.id===state.selected));row.tabIndex=r.id===state.selected?0:-1;row.style.setProperty('--object-colour',r.colour);const identity=make('span',undefined,'identity');identity.append(make('span','',`dot ${r.kind}`));const name=make('span',undefined,'name');name.append(make('span',r.name),make('div',`${r.system} system · ${r.kind}`, 'secondary'));identity.append(name);const classification=make('span',r.type,'type-cell');if(r.spectral)classification.append(make('div',r.spectral,'secondary'));row.append(identity,classification,make('span',`${num(r.distance)} ly`,'distance'));row.onclick=()=>select(r.id);row.ondblclick=()=>inspect();$('results').append(row)}
+ if(!state.visible.length){const empty=make('div',undefined,'empty');empty.append(make('div','No objects match this query.'),make('div','Try removing a filter or widening the scope.'));$('results').append(empty)}
+ renderChips();renderSelected();renderCli();
+}
+function select(id,scroll=false){state.selected=id;for(const row of $('results').children){const selected=row.id===`row-${id.replace(/[^a-z0-9]/gi,'-')}`;row.setAttribute('aria-selected',String(selected));row.tabIndex=selected?0:-1;if(selected&&scroll)row.scrollIntoView({block:'nearest'})}renderSelected()}
+function selected(){return state.visible.find(r=>r.id===state.selected)}
+function detailContent(r){
+ const fragment=document.createDocumentFragment();if(!r){fragment.append(make('div','Select an object to see its properties.','empty'));return fragment}
+ const visual=make('div',undefined,'detail-object');const sphere=make('div','',`body-symbol ${r.kind}`);sphere.style.setProperty('--object-colour',r.colour);visual.append(sphere);fragment.append(make('div','Selected object','eyebrow'),visual,make('h2',r.name),make('div',`${r.type}${r.spectral?' · '+r.spectral:''}`,'subtitle'));
+  const facts=make('dl',undefined,'facts');const values=[['Catalogue ID',r.id],['Context',r.host||r.system],['Distance',`${num(r.distance)} ly`]];
+  if(r.members!=null)values.push(['System',`${r.members} star${r.members===1?'':'s'}`]);
+  if(r.mass!=null)values.push(['Mass',`${num(r.mass)} ${r.kind==='star'?'M☉':'M⊕'}`]);
+  if(r.radius!=null)values.push(['Radius',`${num(r.radius)} ${r.kind==='star'?'R☉':'km'}`]);
+  if(r.composition)values.push(['Composition',r.composition]);
+  if(r.contains)values.push(['Contains',r.contains]);
+  if(r.temperature!=null)values.push(['Temperature',`${num(r.temperature)} K`]);
+  if(r.luminosity!=null)values.push(['Luminosity',`${num(r.luminosity)} L☉`]);
+  if(r.period!=null)values.push(['Orbital period',`${num(r.period)} days`]);
+  if(r.orbit!=null)values.push(['Semi-major axis',`${num(r.orbit)} AU`]);
+  if(r.locked!=null)values.push(['Tidally locked',r.locked?'Yes':'No']);
+  if(r.future)values.push(['Availability','Future category · mock fixture only']);
+ for(const [label,value] of values){const fact=make('div',undefined,'fact');fact.append(make('dt',label),make('dd',value));facts.append(fact)}fragment.append(facts);
+ const actions=make('div',undefined,'detail-actions');const fly=make('button','Fly to object','primary');fly.onclick=()=>toast(`Prototype only: would fly to ${r.name}. No camera movement is connected.`);const copy=make('button','Copy ID');copy.onclick=()=>copyText(r.id,'Object ID copied');actions.append(fly,copy);fragment.append(actions,make('div','Synthetic demo object. Illustration is decorative, not a physical size comparison. Inspecting never moves the camera.','note'));return fragment;
+}
+function renderSelected(){const r=selected();$('detail').replaceChildren(detailContent(r));$('preview').replaceChildren();$('preview').append(make('span',r?`${r.name} · ${r.type}${r.future?' · Future category':''}`:'No object selected','preview-text'));const inspectButton=make('button','Inspect ↗');inspectButton.disabled=!r;inspectButton.onclick=inspect;$('preview').append(inspectButton);if($('inspect-dialog').open)$('modal-detail').replaceChildren(detailContent(r))}
+function inspect(){if(!selected())return;$('modal-detail').replaceChildren(detailContent(selected()));if(!$('inspect-dialog').open)$('inspect-dialog').showModal()}
+function filterLabel(f){if(f.def.options)return `${f.def.label}: ${f.def.options.find(o=>o[0]===f.value)[1]}`;const range=f.min!=null&&f.max!=null?`${num(f.min)} to ${num(f.max)}`:f.min!=null?`≥ ${num(f.min)}`:`≤ ${num(f.max)}`;return `${f.def.label}: ${range} ${f.def.unit}`}
+function renderChips(){
+ $('chips').replaceChildren();
+ if(state.kind!=='any'){
+  const chip=make('span',undefined,'chip');const edit=make('button',state.type||families.find(f=>f[0]===state.kind)[1]);edit.onclick=openFilters;
+  const remove=make('button','×');remove.setAttribute('aria-label','Remove object type filter');remove.onclick=()=>setKind('any');chip.append(edit,remove);$('chips').append(chip);
+ }
+ state.filters.forEach((f,i)=>{const chip=make('span',undefined,'chip');const edit=make('button',filterLabel(f));edit.setAttribute('aria-label',`Edit ${filterLabel(f)}`);edit.onclick=()=>openEditor(f.def,i);const remove=make('button','×');remove.setAttribute('aria-label',`Remove ${f.def.label} filter`);remove.onclick=()=>{state.filters.splice(i,1);render()};chip.append(edit,remove);$('chips').append(chip)});
+}
+function openFilters(){
+ $('filter-title').textContent='Refine your search';const content=$('filter-content');content.replaceChildren();
+ const input=make('input');input.id='filter-search';input.placeholder='Find a type or property…';input.setAttribute('aria-label','Find an object type or filter');
+ const options=make('div');options.id='filter-options';content.append(input,make('p','Start with a family, or search directly for “moon”, “black hole” or a property.','note'),options);
+ function choose(kind,type=''){setKind(kind);state.type=type;$('filter-dialog').close();render()}
+ function list(){
+  options.replaceChildren();const query=input.value.toLowerCase();
+  for(const [kind,label,types] of families){
+   const matching=types.filter(t=>`${label} ${t}`.toLowerCase().includes(query));if(!matching.length)continue;
+   const section=make('details');section.open=Boolean(query)||state.kind===kind;section.append(make('summary',label));
+   const broad=make('button',`All ${label.toLowerCase()}`,'filter-option');broad.onclick=()=>choose(kind);section.append(broad);
+   for(const type of matching){const button=make('button',type,'filter-option');button.onclick=()=>choose(kind,type);section.append(button)}options.append(section);
+  }
+  const defs=filterDefs.filter(d=>(state.kind==='any'||applicable(d,state.kind))&&`${d.label} ${d.group}`.toLowerCase().includes(query));
+  if(defs.length)options.append(make('div',state.kind==='any'?'Properties · missing values do not match':'Properties for this selection','filter-group'));
+  for(const d of defs){const button=make('button',undefined,'filter-option');button.append(make('strong',d.label),make('span',d.unit||'Choose a value'));button.onclick=()=>openEditor(d,state.filters.findIndex(f=>f.def.id===d.id));options.append(button)}
+  if(!options.children.length)options.append(make('div','No matching types or properties.','empty'));
+ }
+ input.oninput=list;list();if(!$('filter-dialog').open)$('filter-dialog').showModal();input.focus();
+}
+function openEditor(def,index=-1){
+ $('filter-title').textContent=def.label;const content=$('filter-content');content.replaceChildren();const existing=state.filters[index];const form=make('form');const description=make('div',`${def.kind==='any'?'Applies to stars and planets.':`Applies to ${def.kind==='star'?'stars':'planets'} only. Adding this filter selects that object kind.`}${def.unit?' Units: '+def.unit+'.':''}`,'filter-description');form.append(description);const fields=make('div',undefined,'filter-fields');
+  description.textContent=`${def.kind==='any'?'Matches objects with this property; missing values are excluded.':`Applies to ${families.find(f=>f[0]===def.kind)?.[1]||def.kind}. Adding this filter selects that family.`}${def.unit?' Units: '+def.unit+'.':''}`;
+  if(def.options){const label=make('label','Value');const select=make('select');select.name='value';def.options.forEach(([value,text])=>select.append(new Option(text,value)));select.value=existing?.value||def.options[0][0];label.append(select);fields.append(label)}else{for(const edge of ['min','max']){const label=make('label',edge==='min'?'Minimum (optional)':'Maximum (optional)');const input=make('input');input.type='number';input.name=edge;input.min=def.min;input.max=def.max;input.step=def.step;input.placeholder='No limit';input.value=existing?.[edge]??'';label.append(input);fields.append(label)}}
+ const error=make('div','','filter-description');error.setAttribute('role','alert');const buttons=make('div',undefined,'dialog-buttons');const back=make('button','Back');back.type='button';back.onclick=()=>{$('filter-dialog').close();openFilters()};const apply=make('button',index>=0?'Update filter':'Apply filter','primary');apply.type='submit';buttons.append(back,apply);form.append(fields,error,buttons);form.onsubmit=e=>{e.preventDefault();const data=new FormData(form);const filter={def};if(def.options)filter.value=data.get('value');else{filter.min=data.get('min')===''?null:Number(data.get('min'));filter.max=data.get('max')===''?null:Number(data.get('max'));if(filter.min==null&&filter.max==null){error.textContent='Enter at least one limit.';return}if(filter.min!=null&&filter.max!=null&&filter.min>filter.max){error.textContent='Minimum cannot exceed maximum.';return}}if(def.kind!=='any'&&state.kind!==def.kind)setKind(def.kind);const actual=state.filters.findIndex(f=>f.def.id===def.id);if(actual>=0)state.filters[actual]=filter;else state.filters.push(filter);$('filter-dialog').close();render()};content.append(form);fields.querySelector('input,select').focus();
+}
+function slug(text){return text.toLowerCase().replace(/[^a-z0-9]+/g,'-')}
+function shellQuote(text){return "'"+text.replace(/'/g,"'\\''")+"'"}
+function renderCli(){const args=['./scripts/ns search'];if(state.kind!=='any')args.push('--object '+state.kind);if($('search').value.trim())args.push('--query '+shellQuote($('search').value.trim()));if(state.type)args.push('--type '+slug(state.type));args.push($('scope').value==='nearby'?'--within-ly 50':$('scope').value==='system'?'--scope current-system':'--scope mock-catalogue');for(const f of state.filters){const key=f.def.id;if(f.def.options)args.push(`--${key} ${f.value}`);else{if(f.min!=null)args.push(`--${key}-min ${f.min}`);if(f.max!=null)args.push(`--${key}-max ${f.max}`)}}args.push('--sort '+$('sort').value,'--limit 25');$('cli').textContent=args.join(' ')}
+async function copyText(text,message){try{await navigator.clipboard.writeText(text);toast(message)}catch{const area=make('textarea',text);area.style.position='fixed';area.style.opacity='0';document.body.append(area);area.select();const ok=document.execCommand('copy');area.remove();toast(ok?message:'Clipboard unavailable. Select and copy the text manually.')}}
+function reset(){state.type='';state.filters=[];$('search').value='';$('scope').value='nearby';$('sort').value='distance';setKind('any');$('search').focus()}
+function openBrowser(){$('browser').classList.remove('hidden');$('search').focus()}
+ $('search').oninput=render;$('scope').onchange=render;$('sort').onchange=render;$('reset').onclick=reset;$('open').onclick=openBrowser;$('close').onclick=()=>$('browser').classList.add('hidden');$('expand').onclick=()=>{state.expanded=!state.expanded;$('browser').classList.toggle('expanded',state.expanded);$('expand').textContent=state.expanded?'Compact view ↙':'Expand browser ↗';$('expand').setAttribute('aria-expanded',String(state.expanded))};$('add-filter').onclick=openFilters;$('filter-close').onclick=()=>$('filter-dialog').close();$('inspect-close').onclick=()=>$('inspect-dialog').close();$('copy').onclick=()=>copyText($('cli').textContent,'Proposed CLI query copied');
+document.addEventListener('keydown',e=>{
+ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(!$('filter-dialog').open&&!$('inspect-dialog').open)openBrowser();return}
+ if($('filter-dialog').open||$('inspect-dialog').open)return;
+ if(e.key==='Escape'){e.preventDefault();$('browser').classList.add('hidden');$('open').focus();return}
+ if($('browser').classList.contains('hidden'))return;
+ const target=e.target;const navigating=target===$('search')||target.closest('#results');if(!navigating)return;
+ if((e.key==='ArrowDown'||e.key==='ArrowUp')&&state.visible.length){e.preventDefault();const index=state.visible.findIndex(r=>r.id===state.selected);select(state.visible[(index+(e.key==='ArrowDown'?1:-1)+state.visible.length)%state.visible.length].id,true)}
+ if(e.key==='Enter'){e.preventDefault();inspect()}
+});
+// Seeded decoration keeps the prototype identical between reloads.
+let seed=19;for(let i=0;i<190;i++){seed=(seed*16807)%2147483647;const x=seed/2147483647;seed=(seed*16807)%2147483647;const y=seed/2147483647;const star=make('span','','star');const size=i%17===0?2:1;Object.assign(star.style,{left:x*100+'%',top:y*100+'%',width:size+'px',height:size+'px',opacity:String(.2+(i%7)/10)});$('sky').append(star)}
+fillTypes();render();$('search').focus();
+</script>
+</body>
+</html>

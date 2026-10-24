@@ -64,10 +64,12 @@ docs/               Explanations grouped by simulation, client, shared and serve
   server/            Demo backend and serving behaviour
   plans/             Implementation history and future proposals
 scripts/            Launch, build and verification commands
+prototypes/         Tracked HTML mockups and design experiments
 assets/             Reserved project assets
 data/               Local logs, fixtures and screenshots (ignored)
+  prototypes/       Generated prototype screenshots (ignored)
 target/             Compiled output (ignored)
-tools/              The TUI's Python environment and UI prototypes (ignored)
+tools/              The TUI's Python environment (ignored)
 vendor/             Documented Bevy renderer patch
 ```
 

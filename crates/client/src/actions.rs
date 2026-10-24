@@ -1,5 +1,5 @@
 //! Every panel action goes through `UiCommand`, whether it comes from egui or a
-//! browser test script (`automation.rs`). Lists and tasks are named by ID, so a
+//! developer API command. Lists and tasks are named by ID, so a
 //! data refresh that reorders them cannot redirect a click.
 use crate::{Clock, Navigation, Selection, Universe, navigation::presentation::PresentationMode};
 use bevy::prelude::*;
