@@ -4,10 +4,10 @@
 states and a first column approximation, independent of Bevy and shaders.
 `system/atmosphere/generation.rs` now assigns a physical environment to each
 planet after the entire stellar hierarchy and stable orbits exist. The
-inspector shows that data. **Rendering is not connected yet:** the client
-still uses its hand-set atmosphere on the selected planet.
+inspector shows that data. `system/atmosphere/optics.rs` derives approximate
+visible optics, which the client applies to each planet's atmosphere shell.
 See [the plan](../plans/atmospheres.md#checkpoint-5--every-planet-with-air)
-for the remaining optical conversion and rendering integration work.
+for checkpoint history and remaining visual validation.
 
 ## State and reference level
 
@@ -63,7 +63,7 @@ Omit the layer for clear air rather than assigning it zero density.
 
 Operational extent is **12.5 times the larger of gas and aerosol scale
 heights**, above the reference level. It matches the renderer's exponential
-cutoff convention, but is not connected to rendering or flight clearance yet.
+cutoff convention and now sets the rendered extent, but not flight clearance.
 It is not an exobase, escape boundary or physical end of the atmosphere.
 
 An extent greater than 0.1 reference radii is flagged `Extended`, not clamped
@@ -131,6 +131,53 @@ class priors while keeping physical validation, wire conversion and optics.
 Until then, class-derived radii are not self-consistent with retained envelope
 mass or composition. Pressure alone never reclassifies a planet.
 
+## Visible optical conversion
+
+Optics remain independent of generation and Bevy. `GasAtmosphere::optics`
+derives a column and reference coefficients per metre. All gas coefficients
+follow its exponential scale height, while prescribed aerosols have their own
+profile. The client performs radius scaling; it never fits debug slider presets
+to a generated mixture.
+
+- **Rayleigh:** `beta(lambda) = [p/(kT)] × Σ x_i sigma_i(550 nm)
+  × (550 nm/lambda)^4`, using representative channels 680, 550 and 440 nm.
+  Rounded dilute-gas cross sections account for differing gas refractivity
+  and depolarisation, with dispersion reduced to the fourth-power law.
+  Earth-like clear gas agrees with the existing reference coefficients within
+  8%. This is not spectral RGB integration or a dense-gas dielectric model.
+- **Visible absorption:** a separate exponential gas term uses methane's
+  mole fraction and tunable effective colour-band cross sections
+  `[2e-29, 4e-30, 0] m²/molecule`. These are deliberately rough appearance
+  prescriptions, not measured line-by-line spectra, validated band means,
+  or a temperature/pressure-dependent methane opacity calculation. Other
+  supported gases are treated as visibly nonabsorbing in this version. No
+  oxygen-derived ozone, CO₂ infrared absorption or water greenhouse absorption
+  is invented. CO₂ alone therefore does not give an orange sky.
+- **Prescribed aerosols:** particles with radius at least 0.5 µm use a simple
+  geometric extinction efficiency `Q_ext = 2`, so mass loading gives
+  `beta_ext = 3 Q_ext rho_aerosol / (4 rho_particle radius_particle)`.
+  Fixed representative material densities, absorption shares, scattering
+  colours and phase asymmetries are isolated in the conversion. Dust and
+  organic haze colours are illustrative, not derived from optical constants.
+  This is not a Mie solver, and even the lower end of the accepted size range
+  is only approximate. Smaller particles return an explicit unsupported-size
+  error, rather than applying geometric optics to Rayleigh-sized particles.
+  Generation still creates no aerosol loading or cloud deck.
+- **Validity:** extended columns remain marked and are rendered with their
+  original constant-gravity estimate, not truncated at an artificial radius.
+  Ideal-gas and dilute optical approximations remain unreliable for very
+  dense, dissociating or ionised gas. Invalid/nonfinite conversions are rejected;
+  input validation is not proof of accuracy in these regimes.
+
+Reference-world tests use prescribed physical Earth, Mars, Venus, Titan and
+hydrogen-rich inputs. They check clear-gas coefficients and physical scaling,
+not equality to the old hand-tuned haze presets. Those presets include clouds,
+dust or ozone that cannot be inferred from bulk gas composition alone.
+
+The renderer's one-bar lower boundary is an opaque cloud/deep-envelope proxy,
+not landable ground and not an inferred physical cloud altitude. It changes no
+simulation radius or collision rule. Deep-envelope descent remains future work.
+
 ## Transport and inspection
 
 `Hosted::environment` is copied to `Planet::environment` for both normal
@@ -162,6 +209,6 @@ dissociation/ionisation, upper-air
 temperature structure, winds or variable-gravity envelopes. Physically
 valid input ranges are not evidence that these approximations hold in every
 regime. In particular, dense/hot atmospheres and deep giant envelopes will
-need better treatment. The eventual optical conversion must remain separate:
+need better treatment. Optical conversion remains separate:
 visible absorption is not greenhouse absorption, and CO₂ does not by itself
 make a sky orange.

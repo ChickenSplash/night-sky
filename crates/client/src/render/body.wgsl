@@ -6,6 +6,7 @@
 struct SurfaceAir {
     // World pole and equatorial/polar stretch; zero means bare lighting.
     pole: vec4<f32>,
+    blend: vec4<f32>,
     // Exposed stellar flux. The table already includes surface albedo / pi.
     suns: array<vec4<f32>, 4>,
 }
@@ -128,12 +129,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Every star lights the side facing it in its own colour: a binary's
     // planet has a second, fainter day side towards the far star.
     var shade = body.colour.rgb * body.light.w;
+    for (var i = 0u; i < 4u; i++) {
+        shade += body.tints[i].rgb * max(dot(normal, body.lights[i].xyz), 0.0);
+    }
     if body.air.pole.w > 0.0 {
-        shade = atmospheric_ground(normal);
-    } else {
-        for (var i = 0u; i < 4u; i++) {
-            shade += body.tints[i].rgb * max(dot(normal, body.lights[i].xyz), 0.0);
-        }
+        shade = mix(shade, atmospheric_ground(normal), body.air.blend.x);
     }
 #ifdef LEVELS
     // Ground chunks tinted by level (`ground.wgsl`), faintly on the night side.

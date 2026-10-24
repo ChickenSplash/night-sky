@@ -325,9 +325,10 @@ def parser():
     ships.add_parser("tree", help="print every ship command as a tree, without connecting")
     add_orders(ships, craft_schema())
     atmosphere = sub.add_parser(
-        "atmosphere", help="read or set the prototype air on the selected planet, with its GPU cost",
+        "atmosphere", help="read or set the selected planet's debug air override, with its GPU cost",
         description="Without arguments, prints the air, the shader steps and the GPU time. Arguments are "
-        "set_atmosphere's: a preset (earth, venus, mars, titan, hydrogen_giant), then any values over it.",
+        "set_atmosphere's: a preset (earth, venus, mars, titan, hydrogen_giant), then any values over it. "
+        "Use enabled=false to restore generated air on the selected planet.",
         epilog="example: ns atmosphere mars haze=20 haze_colour=[1,0.5,0.3]")
     atmosphere.add_argument("words", nargs="*", help="preset and field=value pairs")
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")

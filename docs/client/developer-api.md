@@ -107,11 +107,15 @@ two seconds for the main-thread reply; timeout does not cancel the queued job.
 ./scripts/ns screenshot
 ```
 
-`ns atmosphere` prints the prototype air on the selected planet (`/state/atmosphere`),
+`ns atmosphere` prints the selected-planet debug override settings, including
+whether they are enabled (`/state/atmosphere`),
 the switch, and the GPU frame and transparent-pass times from the snapshot's
 GPU diagnostics. Arguments are sent as `set_atmosphere`: a preset, then any
 `field=value` over it, such as `ns atmosphere mars haze=20`. It then waits for
-a snapshot taken after the change before printing.
+a snapshot taken after the change before printing. A preset or optical edit
+enables the override; `ns atmosphere enabled=false` restores generated air.
+Quality-only changes do not enable it. These settings are not the generated
+physical atmosphere shown in the inspector.
 
 `cmd` takes one quoted text/JSON string; refusals exit 1 with the reason.
 `--wait` polls `/state` until a snapshot sampled after the reply has no flight,

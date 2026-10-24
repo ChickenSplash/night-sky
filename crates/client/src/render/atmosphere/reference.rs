@@ -120,7 +120,9 @@ struct Reference {
 impl Reference {
     fn new(air: Air, channel: usize, ground_albedo: f64) -> Self {
         let c = channel;
-        let majorant = f64::from(air.rayleigh[c] + air.mie[c] + air.mie.w + air.absorption[c]);
+        let majorant = f64::from(
+            air.rayleigh[c] + air.gas_absorption[c] + air.mie[c] + air.mie.w + air.absorption[c],
+        );
         Self {
             air,
             channel,

@@ -3,6 +3,7 @@ use crate::render::atmosphere::{AirSettings, Preset, tables::MultipleTables};
 
 fn shell() -> Shell {
     Shell {
+        fade: 1.0,
         centre: Vec3::Z * -10.0,
         radius: 1.0,
         pole: Quat::from_rotation_z(0.7) * Vec3::Y,
@@ -110,6 +111,16 @@ fn shell_skips_legacy_sunlight_dimming_only_when_surface_lighting_is_ready() {
         );
         assert_eq!(material.switches.z, if ready { 1.0 } else { 0.0 });
     }
+}
+
+#[test]
+fn shell_and_surface_use_the_same_point_disc_presentation_fade() {
+    let mut shell = shell();
+    shell.fade = 0.37;
+    let light = SurfaceLight::new(&shell, &RenderDebug::default(), Some(tables(true)));
+    let material = shell.material(Vec3::ZERO, 0.01, (16, 8), [true; 4], Some(tables(true)));
+    assert_eq!(light.uniform.blend.x, shell.fade);
+    assert_eq!(material.switches.w, shell.fade);
 }
 
 #[test]

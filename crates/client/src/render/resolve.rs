@@ -567,6 +567,7 @@ pub fn resolve(
             let ground = (surface * planet.surface.albedo).min(DVec3::ONE).as_vec3();
             let index = frame.shells.len();
             frame.shells.push(Shell {
+                fade: ((planet.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0),
                 centre: planet.centre,
                 radius: planet.radius,
                 pole: planet.spin * Vec3::Y,

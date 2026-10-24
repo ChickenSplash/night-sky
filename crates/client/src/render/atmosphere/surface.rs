@@ -13,6 +13,8 @@ use bevy::{prelude::*, render::render_resource::ShaderType};
 pub struct SurfaceUniform {
     /// World pole and equatorial/polar stretch; zero disables table lighting.
     pub pole: Vec4,
+    /// Point/disc presentation blend; x is atmospheric lighting's share.
+    pub blend: Vec4,
     /// Exposed stellar flux, not reflected radiance: the table includes albedo.
     pub suns: [Vec4; MAX_LIGHTS],
 }
@@ -35,6 +37,7 @@ impl SurfaceLight {
         Self {
             uniform: SurfaceUniform {
                 pole: shell.pole.extend(1.0 / (1.0 - shell.flattening)),
+                blend: Vec4::splat(shell.fade),
                 suns: shell.suns,
             },
             table,

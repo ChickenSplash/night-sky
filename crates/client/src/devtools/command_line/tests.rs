@@ -57,6 +57,7 @@ fn every_usage_parses() {
                 "set_atmosphere venus",
                 "set_atmosphere mars 0.01 12 3 10 11 [1,0.6,0.3] 0.1 24 6",
                 "set_atmosphere haze=5 haze_colour=[1,0.8,0.6]",
+                "set_atmosphere enabled=false",
             ] {
                 parse(line).unwrap_or_else(|err| panic!("{line}: {err}"));
             }

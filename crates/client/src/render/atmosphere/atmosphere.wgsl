@@ -26,6 +26,7 @@ struct Air {
     mie: vec4<f32>,
     shape: vec4<f32>,
     absorption: vec4<f32>,
+    gas_absorption: vec4<f32>,
     // 1 to jitter the view steps; 1 to end each ray where the air turns
     // opaque (with TABLES only); 1 when the ground already includes its air lighting.
     switches: vec4<f32>,
@@ -67,7 +68,7 @@ fn medium(height: f32) -> Medium {
     let rayleigh = exp(-max(height, 0.0) / air.rayleigh.w);
     let mie = exp(-max(height, 0.0) / air.shape.x);
     let layer = max(0.0, 1.0 - abs(height - air.shape.z) / air.shape.w);
-    let extinction = air.rayleigh.rgb * rayleigh + (air.mie.rgb + air.mie.w) * mie
+    let extinction = (air.rayleigh.rgb + air.gas_absorption.rgb) * rayleigh + (air.mie.rgb + air.mie.w) * mie
         + air.absorption.rgb * layer;
     return Medium(rayleigh, mie, extinction);
 }
@@ -337,5 +338,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
     let through = dot(exp(-depth), vec3(1.0 / 3.0)) * sunlit;
-    return vec4(encode(light), 1.0 - through);
+    return vec4(encode(light * air.switches.w), (1.0 - through) * air.switches.w);
 }

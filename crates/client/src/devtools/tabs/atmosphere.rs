@@ -1,4 +1,4 @@
-//! The `atmosphere` tab: the prototype air on the selected planet, its
+//! The `atmosphere` tab: optional override air on the selected planet, its
 //! presets and shader steps, and what it costs the GPU.
 use super::perf::{gpu_total, pass_times};
 use crate::Navigation;
@@ -24,14 +24,14 @@ pub fn atmosphere(
     diagnostics: Option<&DiagnosticsStore>,
     out: &mut Vec<UiCommand>,
 ) {
-    terminal::heading(ui, "atmosphere (prototype)");
+    terminal::heading(ui, "atmosphere");
     let detail = format!(
         "{} {}",
         DebugSwitch::Atmospheres.detail(),
         if matches!(nav.selection, Some(crate::Selection::Planet(_))) {
-            "Applies to the selected planet only, drawn as a disc with realistic lighting."
+            "Generated air applies to every planet, drawn with realistic lighting."
         } else {
-            "Select a planet to see it: the air applies to the selected planet only."
+            "Generated air applies to every planet. Select one to use a debug override."
         },
     );
     if terminal::check(ui, debug.atmospheres, "Atmospheres", true, &detail) {
@@ -101,6 +101,18 @@ pub fn atmosphere(
         });
     }
     gpu(ui, diagnostics);
+    if terminal::check(
+        ui,
+        tuning.enabled,
+        "Selected planet override",
+        true,
+        "Replace only the selected planet's generated air with the settings below. Disable to restore generated air. Editing air settings enables the override; quality settings do not.",
+    ) {
+        out.push(UiCommand::SetAtmosphere(AtmosphereChange {
+            enabled: Some(!tuning.enabled),
+            ..default()
+        }));
+    }
     let mut change = |change: AtmosphereChange| out.push(UiCommand::SetAtmosphere(change));
 
     terminal::heading(ui, "presets");
@@ -108,7 +120,7 @@ pub fn atmosphere(
     let edited = tuning.air != AirSettings::preset(tuning.preset);
     ui.horizontal_wrapped(|ui| {
         for (preset, label) in Preset::ALL {
-            let chosen = preset == tuning.preset;
+            let chosen = tuning.enabled && preset == tuning.preset;
             let label = if chosen && edited {
                 format!("{label}*")
             } else {
@@ -156,7 +168,7 @@ pub fn atmosphere(
         air.scale_height_km,
         row(
             "Scale height",
-            "How far up the gas thins by a factor of e: the air's thickness. The simulation stage will derive it from temperature, molecular mass and gravity.",
+            "Override scale height. Generated air derives this from temperature, molecular mass and gravity.",
             HEIGHT_KM,
             " km",
             true,

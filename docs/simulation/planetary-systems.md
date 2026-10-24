@@ -203,7 +203,8 @@ environment: all-star mean heating, atmospheric retention, gas mixtures,
 reference pressure and isothermal column estimates. Separate seeds preserve
 orbital generation. Class is only a provisional envelope-inventory prior;
 the later bulk-composition refactor will replace that assumption. The inspector
-shows generated air, but rendering still uses the selected planet's debug air.
+shows generated air, and per-planet optical conversion supplies rendering.
+Selected-planet debug air remains an optional override.
 
 ## Presentation and limitations
 

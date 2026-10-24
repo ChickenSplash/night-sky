@@ -1,6 +1,7 @@
 //! Planetary atmospheres: a scattering shell around a planet's disc
 //! (`atmosphere.wgsl`). The shell mesh only chooses which pixels run the
 //! shader; the shader finds the ground and the top of the air itself.
+pub mod generated;
 mod multiple;
 #[cfg(test)]
 mod reference;
@@ -64,6 +65,8 @@ pub struct Atmosphere {
     /// Rayleigh scattering by gas at the ground, per channel, and its scale height.
     pub rayleigh: DVec3,
     pub rayleigh_height: f64,
+    /// Visible absorption mixed with gas, with the gas's exponential profile.
+    pub gas_absorption: DVec3,
     /// Mie scattering and grey absorption by haze at the ground, its scale
     /// height and its phase asymmetry (Cornette-Shanks `g`).
     pub mie: DVec3,
@@ -93,13 +96,13 @@ impl Atmosphere {
                 over(self.layer_width),
             ),
             absorption: per(self.absorption),
+            gas_absorption: per(self.gas_absorption),
             ground: Vec3::splat(GROUND_ALBEDO),
         }
     }
 }
 
-/// An atmosphere as the debug sliders set it, by hand until the simulation
-/// stage generates one per planet.
+/// Hand-set atmosphere for the selected planet's optional debug override.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct AirSettings {
     pub pressure_bar: f64,
@@ -216,6 +219,7 @@ impl AirSettings {
             top: (tallest * TOP_HEIGHTS).max(self.layer_km + self.layer_width_km) * 1e3,
             rayleigh: AIR_PER_BAR * self.gas * self.pressure_bar,
             rayleigh_height: self.scale_height_km * 1e3,
+            gas_absorption: DVec3::ZERO,
             mie: colour * HAZE_SCATTERING * self.haze,
             mie_absorption: HAZE_SCATTERING * self.haze * self.haze_absorbed
                 / (1.0 - self.haze_absorbed),
@@ -249,10 +253,11 @@ impl Preset {
     ];
 }
 
-/// The prototype's air, applied to the selected planet, and the shader's
-/// steps. Set from the debug window's `atmosphere` tab or `set_atmosphere`.
+/// Optional selected-planet debug air override, plus global shader quality.
+/// Set from the debug window's `atmosphere` tab or `set_atmosphere`.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct AtmosphereTuning {
+    pub enabled: bool,
     /// The preset last applied; the sliders may have moved since.
     pub preset: Preset,
     pub air: AirSettings,
@@ -263,6 +268,7 @@ pub struct AtmosphereTuning {
 impl Default for AtmosphereTuning {
     fn default() -> Self {
         Self {
+            enabled: false,
             preset: Preset::Earth,
             air: AirSettings::preset(Preset::Earth),
             view_steps: 16,
@@ -274,6 +280,8 @@ impl Default for AtmosphereTuning {
 /// A change to the tuning: a preset first, then any values over it.
 #[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct AtmosphereChange {
+    #[serde(default)]
+    pub enabled: Option<bool>,
     #[serde(default)]
     pub preset: Option<Preset>,
     #[serde(default)]
@@ -354,6 +362,17 @@ impl AtmosphereTuning {
             self.preset = preset;
             self.air = AirSettings::preset(preset);
         }
+        let optical_change = change.preset.is_some()
+            || change.pressure_bar.is_some()
+            || change.scale_height_km.is_some()
+            || change.gas.is_some()
+            || change.haze.is_some()
+            || change.haze_height_km.is_some()
+            || change.haze_absorbed.is_some()
+            || change.haze_colour.is_some();
+        if let Some(enabled) = change.enabled.or(optical_change.then_some(true)) {
+            self.enabled = enabled;
+        }
         let air = &mut self.air;
         set(&mut air.pressure_bar, change.pressure_bar, PRESSURE_BAR);
         set(&mut air.scale_height_km, change.scale_height_km, HEIGHT_KM);
@@ -381,6 +400,7 @@ pub struct Air {
     /// Mie scale height and asymmetry, absorbing layer height and half width.
     pub shape: Vec4,
     pub absorption: Vec3,
+    pub gas_absorption: Vec3,
     /// The ground's albedo per channel, for the light it reflects back up
     /// into the air.
     pub ground: Vec3,
@@ -389,6 +409,8 @@ pub struct Air {
 /// A planet's atmosphere ready for the GPU.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shell {
+    /// Presentation fade at the unresolved-point/disc hand-over, not physics.
+    pub fade: f32,
     pub centre: Vec3,
     /// The planet's equatorial radius, in render units.
     pub radius: f32,
@@ -423,6 +445,8 @@ pub struct AtmosphereMaterial {
     shape: Vec4,
     #[uniform(0)]
     absorption: Vec4,
+    #[uniform(0)]
+    gas_absorption: Vec4,
     /// 1 to jitter the view steps, and 1 to end each ray where the air turns
     /// opaque (with the tables only), and 1 when the surface already includes
     /// its atmospheric lighting, so the shell must not dim its sunlight again.
@@ -545,7 +569,8 @@ impl Shell {
             mie: self.air.mie,
             shape: self.air.shape,
             absorption: self.air.absorption.extend(0.0),
-            switches: Vec4::new(jitter, opaque, f32::from(u8::from(switches[3])), 0.0),
+            gas_absorption: self.air.gas_absorption.extend(0.0),
+            switches: Vec4::new(jitter, opaque, f32::from(u8::from(switches[3])), self.fade),
             pole: self.pole.extend(1.0 / (1.0 - self.flattening)),
             lights: self.lights,
             suns: self.suns,

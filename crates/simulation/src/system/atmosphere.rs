@@ -7,6 +7,7 @@ use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K};
 use std::fmt;
 
 pub mod generation;
+pub mod optics;
 mod wire;
 
 /// One bar in SI pascals.
@@ -185,7 +186,7 @@ impl AerosolLayer {
 }
 
 /// Absence is not a zero-pressure gas column or a rendering-slider minimum.
-/// Not yet attached to generated planets or their wire models.
+/// Wire snapshots represent this as an optional gas atmosphere.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Atmosphere {
     #[default]
@@ -300,6 +301,7 @@ pub enum AtmosphereError {
     DuplicateGas(Gas),
     FractionSum,
     OneBarPressure,
+    UnsupportedOptics(&'static str),
 }
 
 impl fmt::Display for AtmosphereError {
@@ -312,6 +314,9 @@ impl fmt::Display for AtmosphereError {
             Self::DuplicateGas(gas) => write!(f, "duplicate gas: {gas:?}"),
             Self::FractionSum => write!(f, "gas mole fractions must sum to one (within 1e-9)"),
             Self::OneBarPressure => write!(f, "a one-bar reference level requires 100000 Pa"),
+            Self::UnsupportedOptics(regime) => {
+                write!(f, "unsupported optical approximation: {regime}")
+            }
         }
     }
 }

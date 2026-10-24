@@ -304,8 +304,9 @@ pub const USAGE: [Usage; 34] = [
             "haze_absorbed",
             "view_steps",
             "light_steps",
+            "enabled",
         ],
-        about: "Prototype air on the selected planet: a preset (earth, venus, mars, titan, hydrogen_giant), then any values over it; haze_colour as [r,g,b] 0 to 1",
+        about: "Selected-planet debug override: enabled=false restores generated air; a preset or optical edit enables it. Presets: earth, venus, mars, titan, hydrogen_giant; haze_colour as [r,g,b] 0 to 1",
     },
     Usage {
         name: "search",

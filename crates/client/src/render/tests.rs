@@ -66,6 +66,58 @@ fn brightness(body: &Shaded) -> f32 {
     body.colour.max_element()
 }
 
+#[test]
+fn multiple_planets_keep_distinct_shells_and_airless_bodies_have_no_shell_index() {
+    use atmosphere::{AirSettings, Preset};
+    let mut lights = lights();
+    lights.stars.clear();
+    lights.planets.truncate(2);
+    lights.planets.push(planet(1361.0, 10.0));
+    lights.planets[0].air = Some(
+        AirSettings::preset(Preset::Earth)
+            .atmosphere()
+            .scaled(6.371e6),
+    );
+    lights.planets[2].air = Some(
+        AirSettings::preset(Preset::Mars)
+            .atmosphere()
+            .scaled(3.3895e6),
+    );
+    let frame = resolve(&lights, &Photometry::default(), -10.0, 1.0, PSF_SIGMA_PX);
+    assert_eq!(frame.shells.len(), 2);
+    assert_eq!(
+        frame
+            .bodies
+            .iter()
+            .map(|b| b.atmosphere)
+            .collect::<Vec<_>>(),
+        vec![Some(0), None, Some(1)]
+    );
+    assert_ne!(frame.shells[0].air, frame.shells[1].air);
+}
+
+#[test]
+fn atmosphere_and_surface_lighting_fade_continuously_from_the_point_disc_switch() {
+    use atmosphere::{AirSettings, Preset};
+    let mut lights = lights();
+    lights.stars.clear();
+    lights.planets.truncate(1);
+    lights.planets[0].air = Some(
+        AirSettings::preset(Preset::Earth)
+            .atmosphere()
+            .scaled(6.371e6),
+    );
+    for (pixels, expected) in [
+        (POINT_PIXELS, 0.0),
+        (2.5 * POINT_PIXELS, 0.5),
+        (4.0 * POINT_PIXELS, 1.0),
+    ] {
+        lights.planets[0].pixels = pixels;
+        let frame = resolve(&lights, &Photometry::default(), -10.0, 1.0, PSF_SIGMA_PX);
+        assert!((frame.shells[0].fade - expected).abs() < 1e-6);
+    }
+}
+
 impl Point {
     /// Whole light of the point, before colour.
     fn light(&self) -> f32 {

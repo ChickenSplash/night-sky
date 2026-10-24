@@ -160,7 +160,7 @@ shaded by `body.wgsl`); stars keep the sphere mesh.
   true` tints chunks by level. `/perf/ground` counts planets, chunks drawn,
   hidden, cached, building and built this frame, and the deepest level.
 
-### Atmospheres (prototype)
+### Atmospheres
 
 A planet drawn as a disc may have an atmosphere: a shell mesh slightly larger
 than the air's top, whose pixels march single scattering along the line of
@@ -176,7 +176,8 @@ in the air and path lengths are off by at most the flattening near the poles
 (0.3% on Earth, 10% on Saturn), and phase angles use the true directions. At each of 16 view steps (by default), light
 from every star is attenuated on its way in (none where the planet is in the
 way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase). Densities fall exponentially with height; an
-absorbing layer, such as ozone, falls linearly either side of its peak. For
+absorbing layer in debug presets, such as ozone, falls linearly either side of
+its peak. Generated gas absorption instead follows the exponential gas profile. For
 extinction coefficient $\sigma_t$, scattering $\sigma_s$, phase $p(\mu)$ and
 star flux $F$:
 
@@ -249,6 +250,13 @@ instead (the light steps). A test compares the table with a 20,000-step
 march: within 1% of the light that gets through, for every preset, from the
 ground to the top.
 
+Transmittance and multiple-scattering tables share a least-recently-used
+cache: at most 32 resident atmospheres (roughly 9 MiB of image data), with
+at most 8 retained when unused, plus one build of each kind in flight.
+The key includes every optical coefficient, profile, radius scaling and lower
+boundary albedo. Visible planets request their own air, never another planet's
+table. More than 32 simultaneous distinct atmospheres can cause rebuild churn.
+
 **Multiple scattering.** Light scattered more than once is read from a
 second table (`render/atmosphere/multiple.rs`), built after the
 transmittance table in the background (a few seconds) and cached with it;
@@ -307,9 +315,38 @@ its near side, after its planet's limb sprites. Seen from inside, or close
 enough above that the near plane would cut its near side, the far side of
 the shell is drawn over everything instead.
 
-**Settings.** For now only the selected planet has air, set by hand
-(`AtmosphereTuning`) from the debug window's `atmosphere` tab, `set_atmosphere`
-or `ns atmosphere`; `set_debug atmospheres false` hides it. Earth's preset uses
+**Generated air.** Every resolved planet with a generated atmosphere receives
+its own optical shell, regardless of selection. `atmosphere/generated.rs`
+revalidates wire inputs, recomputes columns using the mean reference radius,
+then adapts simulation optics to the shader. It scales physical coefficients
+and heights by the drawn equatorial radius, preserving the existing spheroidal
+approximation. Missing, airless or invalid data gets no shell. Unsupported
+prescribed submicron aerosols currently fail optical conversion rather than
+being silently given micron-particle optics. See the
+[physical optics assumptions](../simulation/atmospheres.md#visible-optical-conversion).
+
+Extended columns retain the constant-gravity estimate and inspector warning,
+without a radius clamp. A one-bar envelope's lower opaque sphere is a simple
+cloud/deep-envelope proxy at the reference radius, shaded with the existing
+class reflectance and atmosphere tables, not a generated cloud deck or a solid
+surface. It has no terrain chunks. This rendering choice changes neither
+collision nor flight mechanics, and does not model descent below that radius.
+
+At the point/disc hand-over the shell's scattered light and opacity and the
+surface's atmospheric table lighting fade from zero to full between one and
+four times `POINT_PIXELS`. Optical coefficients and cache keys do not change
+with this presentation fade. Distant point photometry is still airless, not an
+integral of the atmospheric disc; this avoids an abrupt new shell, not a fully
+photometrically matched atmosphere point model. Table readiness pop-in remains.
+
+**Settings.** Generated air is the default. `AtmosphereTuning` is an optional
+selected-planet override from the debug window's `atmosphere` tab,
+`set_atmosphere` or `ns atmosphere`. A preset or optical slider edit enables it;
+quality edits do not. The **Selected planet override** toggle or
+`set_atmosphere enabled=false` restores generated air. The override follows
+selection, affects no other planets, and never mutates physical inspector data.
+`set_debug atmospheres false` hides all shells and atmospheric surface lighting.
+Earth's debug preset uses
 Hillaire's (2020) coefficients. The sliders are physical: gas scattering is
 Earth's air per bar scaled by pressure and a gas factor (the gas and its
 number density per bar), haze is Earth's continental haze times an amount,

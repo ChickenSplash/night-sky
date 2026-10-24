@@ -284,7 +284,14 @@ prototype until 5c/5d. Inspector visually accepted before implementation commit.
   including clear airless/unknown states and non-ground 1 bar reference levels.
   Keep rendering unchanged until 5c/5d. No aerosols generated in this first recipe.
 
-### 5c · Physical state to optics
+### 5c ✅ Physical state to optics
+
+Implemented alongside 5d and visually accepted by the user. Simulation optics use
+gas number density and composition-weighted Rayleigh cross sections, a separate
+exponential methane absorption prescription, and geometric-optics estimates for
+prescribed micron-sized aerosols. Submicron aerosol optics are explicitly
+unsupported. Reference-world checks do not invent the clouds/ozone in the old
+debug presets. See [optical assumptions](../simulation/atmospheres.md#visible-optical-conversion).
 
 - Derive gas scattering, density and vertical profiles from the physical state;
   approximate visible absorbers and aerosols separately. CO₂ does not imply an
@@ -292,7 +299,18 @@ prototype until 5c/5d. Inspector visually accepted before implementation commit.
 - Check against the existing reference worlds. Keep assumptions explicit and
   the conversion replaceable without changing the renderer or generation.
 
-### 5d · Per-planet rendering
+### 5d ✅ Per-planet rendering
+
+Implemented alongside 5c and visually accepted by the user. Every resolved generated
+atmosphere now supplies its own shell and surface lighting. Generated air is the
+default; optical preset/slider edits enable a selected-planet debug override,
+and `set_atmosphere enabled=false` restores generated air. One-bar envelopes
+use an opaque lower-cloud proxy without terrain chunks; simulation collision
+and deep descent remain unchanged. Extended columns retain their flagged estimate.
+Shell/ground presentation fades at the point/disc hand-over. The air-keyed
+table cache has a 32-entry resident cap and retains the 8 most recently used
+inactive entries. Table readiness pop-in and airless point/rim photometry remain
+documented limitations, not solved spectral/point integration.
 
 - Feed generated air to every planet; `AtmosphereTuning` becomes a selected
   planet's debug override. Define an opaque lower-cloud approximation for
@@ -302,6 +320,20 @@ prototype until 5c/5d. Inspector visually accepted before implementation commit.
   previously deferred issue to agree before changing its behaviour.
 
 ### 5e · Validation
+
+Automated 5c/5d regression checks cover clear-gas reference worlds, pressure/
+temperature/mixture scaling, methane's exponential absorption, prescribed aerosol
+loading/size limits, all atmospheric columns in the existing 120-system sample,
+selection/override independence, multiple shell indices, point/disc fades, cache
+keys/bounds and headless WGSL validation. Workspace tests, strict Clippy and the
+runnable build pass. Logs: `data/logs/atmosphere-optics-{check,build}.log`.
+
+The user accepted the 5c/5d visuals, including a visit to the generated rocky
+world `g13b7db6.4.24/6` (8.39 bar). Broader 5e validation remains: several
+atmospheres together, airless worlds and one-bar envelopes, orbit/low altitude,
+twilight, changing selection and the point/disc switch. Compare debug presets
+and restore with `set_atmosphere enabled=false`; let tables finish before
+judging settled lighting. No GPU benchmark was run by the agent.
 
 - Inspect population distributions and physical invariants across many systems,
   not only hand-picked worlds. Check several different atmospheres together,

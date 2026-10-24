@@ -23,6 +23,8 @@ pub const SIZE: [usize; 2] = [256, 64];
 const STEPS: usize = 512;
 /// Tables kept for air no longer drawn.
 const CACHED: usize = 8;
+/// Hard resident table budget, including currently requested air (~9 MiB).
+const MAX_RESIDENT: usize = 32;
 
 /// Extinction at `height` above the ground, as `medium` in `atmosphere.wgsl`.
 pub(super) fn extinction(air: &Air, height: f64) -> DVec3 {
@@ -30,7 +32,7 @@ pub(super) fn extinction(air: &Air, height: f64) -> DVec3 {
     let rayleigh = (-above / f64::from(air.rayleigh.w)).exp();
     let mie = (-above / f64::from(air.shape.x)).exp();
     let layer = (1.0 - (height - f64::from(air.shape.z)).abs() / f64::from(air.shape.w)).max(0.0);
-    air.rayleigh.truncate().as_dvec3() * rayleigh
+    (air.rayleigh.truncate() + air.gas_absorption).as_dvec3() * rayleigh
         + (air.mie.truncate().as_dvec3() + f64::from(air.mie.w)) * mie
         + air.absorption.as_dvec3() * layer
 }
@@ -126,17 +128,18 @@ pub(super) fn image(size: [usize; 2], texels: &[DVec3]) -> Image {
 
 /// An air, bit for bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Key([u32; 19]);
+struct Key([u32; 22]);
 
 impl Key {
     fn new(air: &Air) -> Self {
-        let mut bits = [0; 19];
+        let mut bits = [0; 22];
         let values = [air.top]
             .into_iter()
             .chain(air.rayleigh.to_array())
             .chain(air.mie.to_array())
             .chain(air.shape.to_array())
             .chain(air.absorption.to_array())
+            .chain(air.gas_absorption.to_array())
             .chain(air.ground.to_array());
         for (bit, value) in bits.iter_mut().zip(values) {
             *bit = value.to_bits();
@@ -174,6 +177,8 @@ pub struct AtmosphereTables {
     building_multiple: Option<(Key, Task<[Image; 3]>)>,
     wanted: Vec<(Key, Air)>,
     used: HashSet<Key>,
+    last_used: HashMap<Key, u64>,
+    frame: u64,
 }
 
 impl AtmosphereTables {
@@ -181,11 +186,12 @@ impl AtmosphereTables {
     pub fn get(&mut self, air: &Air) -> Option<Tables> {
         let key = Key::new(air);
         self.used.insert(key);
-        if let Some(table) = self.ready.get(&key) {
-            return Some(table.clone());
-        }
+        self.last_used.insert(key, self.frame);
         if !self.wanted.iter().any(|w| w.0 == key) {
             self.wanted.push((key, *air));
+        }
+        if let Some(table) = self.ready.get(&key) {
+            return Some(table.clone());
         }
         None
     }
@@ -235,16 +241,41 @@ impl AtmosphereTables {
             self.building_multiple = Some((key, task));
         }
         self.wanted.clear();
-        let unused: Vec<Key> = self
+        self.trim();
+        self.used.clear();
+        self.frame = self.frame.wrapping_add(1);
+    }
+
+    fn trim(&mut self) {
+        let mut unused: Vec<Key> = self
             .ready
             .keys()
             .filter(|k| !self.used.contains(k))
             .copied()
             .collect();
+        unused.sort_by_key(|key| std::cmp::Reverse(self.last_used.get(key).copied().unwrap_or(0)));
         for key in unused.into_iter().skip(CACHED) {
             self.ready.remove(&key);
+            self.last_used.remove(&key);
         }
-        self.used.clear();
+        while self.ready.len() > MAX_RESIDENT {
+            let key = *self
+                .ready
+                .keys()
+                .min_by_key(|key| self.last_used.get(key).copied().unwrap_or(0))
+                .unwrap();
+            self.ready.remove(&key);
+            self.last_used.remove(&key);
+        }
+        // Forget requests that never became resident, except in-flight work.
+        self.last_used.retain(|key, _| {
+            self.ready.contains_key(key)
+                || self.building.as_ref().is_some_and(|(k, _)| k == key)
+                || self
+                    .building_multiple
+                    .as_ref()
+                    .is_some_and(|(k, _)| k == key)
+        });
     }
 }
 
@@ -255,6 +286,70 @@ mod tests {
     use bevy::math::DVec2;
 
     const EARTH_M: f64 = 6.371e6;
+
+    #[test]
+    fn ready_transmittance_still_requests_its_multiple_scattering_build() {
+        let air = air(Preset::Earth);
+        let key = Key::new(&air);
+        let mut cache = AtmosphereTables::default();
+        let mut images = Assets::<Image>::default();
+        cache.ready.insert(
+            key,
+            Tables {
+                transmittance: images.add(Image::default()),
+                multiple: None,
+            },
+        );
+        assert!(cache.get(&air).is_some());
+        assert_eq!(cache.wanted, vec![(key, air)]);
+        cache.get(&air);
+        assert_eq!(cache.wanted.len(), 1);
+    }
+
+    #[test]
+    fn table_cache_is_bounded_and_drops_least_recently_used_air() {
+        let mut cache = AtmosphereTables::default();
+        let mut images = Assets::<Image>::default();
+        let mut keys = Vec::new();
+        for i in 0..MAX_RESIDENT + 4 {
+            let mut air = air(Preset::Earth);
+            air.top += i as f32 * 0.01;
+            let key = Key::new(&air);
+            cache.ready.insert(
+                key,
+                Tables {
+                    transmittance: images.add(Image::default()),
+                    multiple: None,
+                },
+            );
+            cache.last_used.insert(key, i as u64);
+            cache.used.insert(key);
+            keys.push(key);
+        }
+        cache.trim();
+        assert_eq!(cache.ready.len(), MAX_RESIDENT);
+        assert!(!cache.ready.contains_key(&keys[0]));
+        assert!(cache.ready.contains_key(keys.last().unwrap()));
+        cache.used.clear();
+        cache.trim();
+        assert_eq!(cache.ready.len(), CACHED);
+        assert!(cache.ready.contains_key(keys.last().unwrap()));
+    }
+
+    #[test]
+    fn exponential_gas_absorption_is_in_depths_and_the_cache_key() {
+        let mut air = air(Preset::Earth);
+        let original = Key::new(&air);
+        air.mie = Vec4::ZERO;
+        air.absorption = Vec3::ZERO;
+        air.gas_absorption = Vec3::new(0.1, 0.02, 0.0);
+        assert_ne!(Key::new(&air), original);
+        let got = optical_depth(&air, 1.0, 1.0);
+        let expected = (air.rayleigh.truncate() + air.gas_absorption).as_dvec3()
+            * f64::from(air.rayleigh.w)
+            * (1.0 - (-f64::from(air.top - 1.0) / f64::from(air.rayleigh.w)).exp());
+        assert!((got / expected - DVec3::ONE).abs().max_element() < 0.01);
+    }
 
     fn air(preset: Preset) -> Air {
         AirSettings::preset(preset).atmosphere().scaled(EARTH_M)

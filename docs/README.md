@@ -107,10 +107,10 @@ The Bevy/egui client in `crates/client`:
   controls, automatic arrivals, atmospheric exclusion, saving or collisions yet;
   predicted impacts outside warp are shown but not enforced.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
-- Atmospheres are a rendering prototype: hand-set air (presets and sliders)
-  on the selected planet only, with lookup tables, multiple scattering and
-  ground lighting from filtered sunlight and skylight. Planets now have generated
-  atmospheric data in the inspector, but it is not connected to rendering yet.
+- Atmospheres use approximate generated columns and visible optics,
+  with lookup tables, multiple scattering and
+  ground lighting from filtered sunlight and skylight. Generated atmospheric
+  data drives each resolved planet's air, with an optional selected-planet override.
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.

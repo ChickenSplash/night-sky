@@ -170,7 +170,7 @@ struct Canvas<'a> {
     photometry: &'a Photometry,
     frame_ly: DVec3,
     /// The prototype's air, for the selected planet.
-    air: render::atmosphere::Atmosphere,
+    air: Option<render::atmosphere::Atmosphere>,
     /// Bodies flattened by their spin (`RenderDebug::oblateness`).
     oblate: bool,
 }
@@ -596,7 +596,7 @@ impl Canvas<'_> {
                 && let Some(per_pixel) = self.per_pixel(centre)
             {
                 let disc = self.units(radius);
-                // Prototype: the debug air on the selected planet only.
+                // Every generated atmosphere, with an opt-in selected override.
                 let selected = matches!(&nav.selection,
                     Some(crate::Selection::Planet(id)) if *id == planet.id);
                 lights.planets.push(PlanetLight {
@@ -608,16 +608,22 @@ impl Canvas<'_> {
                     per_pixel,
                     light: self.illumination(orbital, local),
                     surface: space_simulation::light::surface(&planet.class),
-                    air: selected.then(|| self.air.scaled(radius)),
-                    ground: Some(ground_key(&planet.id, &shape)),
+                    air: render::atmosphere::generated::for_planet(
+                        planet, selected, self.air, radius,
+                    ),
+                    // Envelope lower boundary is an opaque cloud proxy, not terrain.
+                    ground: (!render::atmosphere::generated::envelope(planet))
+                        .then(|| ground_key(&planet.id, &shape)),
                 });
-                lights.grounds.push(render::GroundSource {
-                    key: ground_key(&planet.id, &shape),
-                    planet: planet.clone(),
-                    shape,
-                    from_eye: galactic - self.pose.eye,
-                    basis,
-                });
+                if !render::atmosphere::generated::envelope(planet) {
+                    lights.grounds.push(render::GroundSource {
+                        key: ground_key(&planet.id, &shape),
+                        planet: planet.clone(),
+                        shape,
+                        from_eye: galactic - self.pose.eye,
+                        basis,
+                    });
+                }
             }
             let pixels = self.outline(
                 gizmos,
@@ -775,7 +781,7 @@ pub fn draw(
         seconds: clock.0.seconds,
         photometry: &photometry,
         frame_ly: rig.frame_ly,
-        air: tuning.air.atmosphere(),
+        air: tuning.enabled.then(|| tuning.air.atmosphere()),
         oblate: debug.oblateness,
     };
     let markers = &mut markers.0;
