@@ -383,8 +383,12 @@ pub struct Air {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shell {
     pub centre: Vec3,
-    /// The planet's radius, in render units.
+    /// The planet's equatorial radius, in render units.
     pub radius: f32,
+    /// The planet's pole, in world axes, and its flattening: the ground and
+    /// every layer of the air are spheroids of this shape.
+    pub pole: Vec3,
+    pub flattening: f32,
     pub air: Air,
     /// Direction to each star lighting the planet, and the exposed colour of
     /// its flux; zero when unused.
@@ -416,6 +420,10 @@ pub struct AtmosphereMaterial {
     /// opaque (with the tables only).
     #[uniform(0)]
     switches: Vec4,
+    /// The pole, and how far to stretch along it to make the planet round:
+    /// its equatorial radius over its polar.
+    #[uniform(0)]
+    pole: Vec4,
     #[uniform(0)]
     lights: [Vec4; MAX_LIGHTS],
     #[uniform(0)]
@@ -529,6 +537,7 @@ impl Shell {
             shape: self.air.shape,
             absorption: self.air.absorption.extend(0.0),
             switches: Vec4::new(jitter, opaque, 0.0, 0.0),
+            pole: self.pole.extend(1.0 / (1.0 - self.flattening)),
             lights: self.lights,
             suns: self.suns,
             transmittance: tables.map(|t| t.transmittance),

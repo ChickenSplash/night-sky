@@ -20,6 +20,10 @@ struct Point {
     // xy: a star's pole, or a planet's direction to its star, projected onto
     // the sprite (+y down); z: one for a star, whose whole limb shines.
     axis: vec4<f32>,
+    // A disc's outline, an ellipse for a flattened body: xy the pole's
+    // direction on the sprite, z the outline's radius along it over its
+    // radius across it.
+    outline: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> point: Point;
@@ -127,10 +131,16 @@ fn streaks(r: f32, n: vec2<f32>, start: f32) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let p = (in.uv * 2.0 - 1.0) * point.shape.x;
+    var p = (in.uv * 2.0 - 1.0) * point.shape.x;
+    let limb = point.shape.z;
+    // Stretched along the pole, a flattened disc's outline is a circle of
+    // its full radius. The limb's blur and the corona narrow there by the
+    // same share, at most the flattening.
+    if limb > 0.0 && point.outline.z > 0.0 && point.outline.z < 1.0 {
+        p += point.outline.xy * dot(p, point.outline.xy) * (1.0 / point.outline.z - 1.0);
+    }
     let r = length(p);
     let n = p / max(r, 1e-4);
-    let limb = point.shape.z;
     var light = vec3(0.0);
     var start = 1.5 * point.shape.y;
     // Streaks leave only the lit part of a planet's limb.

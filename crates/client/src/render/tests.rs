@@ -14,6 +14,7 @@ fn star(radiance: f64, pixels: f32) -> StarLight {
         radiance,
         kelvin: 5772.0,
         spin: Quat::IDENTITY,
+        flattening: 0.0,
         granules: 700.0,
     }
 }
@@ -22,6 +23,8 @@ fn planet(flux: f64, pixels: f32) -> PlanetLight {
     PlanetLight {
         centre: Vec3::X * 10.0,
         radius: 1.0,
+        spin: Quat::IDENTITY,
+        flattening: 0.0,
         pixels,
         per_pixel: 1.0,
         light: vec![Illumination {

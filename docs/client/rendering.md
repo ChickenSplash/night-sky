@@ -99,6 +99,19 @@ of that peak, a half-lit disc ($\alpha=\pi/2$) has about 32% of its full-phase l
 and a new planet contributes none from that star. The factor avoids confusing
 the brightest point on a sphere with its average brightness.
 
+### Flattened bodies
+
+Stars and planets are drawn as the spheroids their spin makes them
+([shape](../simulation/planetary-systems.md#shape-flattening-by-spin)): the
+sphere mesh scaled to the equatorial radius across and the polar along the
+spin axis, so normals and lighting follow the shape. The wireframe rings
+squash the same way. A disc's rim sprite (`point.wgsl`) stretches its
+coordinates along the pole's projection on screen until the outline, an
+ellipse, is a circle, so the blurred limb and a star's corona follow the
+outline at any angle. Sizes on screen, labels and the point switch use the
+equatorial radius; a point's light ignores the shape. `set_debug oblateness
+false` draws every body as the sphere of its mean radius, to compare.
+
 ### Atmospheres (prototype)
 
 A planet drawn as a disc may have an atmosphere: a shell mesh slightly larger
@@ -106,7 +119,12 @@ than the air's top, whose pixels march single scattering along the line of
 sight (`render/atmosphere.rs`, `atmosphere.wgsl`). The shader finds the ground
 and the top analytically, in planet radii and measured from the ray's closest
 approach to the centre, so the limb holds in f32 at real distances; the mesh
-only chooses which pixels run. At each of 16 view steps (by default), light
+only chooses which pixels run. A flattened planet is first made round: the
+camera, the ray and the star directions are stretched along the pole by
+$a/c$, which makes the ground a sphere of the equatorial radius. Ground, top,
+limb and the planet's shadow stay exact and the tables stay spherical; heights
+in the air and path lengths are off by at most the flattening near the poles
+(0.3% on Earth, 10% on Saturn), and phase angles use the true directions. At each of 16 view steps (by default), light
 from every star is attenuated on its way in (none where the planet is in the
 way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase). Densities fall exponentially with height; an
 absorbing layer, such as ozone, falls linearly either side of its peak. For
@@ -273,7 +291,8 @@ extinction, relativistic light propagation or a physically evolving atmosphere.
   from the brightest only), and a point planet sums every star's light by
   its own phase. The table shows only the primary, one row of planets per
   host (`TableLayout`), lit from the primary's side.
-- Bodies are plain spheres under the wireframes. `scene/draw.rs` gathers `Lights`
+- Bodies are spheroids under the wireframes, flattened by their spin
+  ([flattened bodies](#flattened-bodies)). `scene/draw.rs` gathers `Lights`
   while drawing gizmos; `render::bodies::sync_bodies`/`sync_points` place pooled mesh
   entities in the camera's cell and write `GlobalTransform` directly, because
   they run after propagation.

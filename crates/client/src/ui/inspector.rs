@@ -136,6 +136,12 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                     info.fact("Type", format!("{} · {}", star.kind, star.spectral));
                     info.fact("Mass", format!("{:.2} solar masses", star.mass_solar));
                     info.fact("Radius", star_radius_text(star.radius_solar));
+                    info.fact(
+                        "Flattening",
+                        crate::format::flattening_text(
+                            space_simulation::star_shape(star).flattening(),
+                        ),
+                    );
                     info.fact("Temperature", format!("{:.0} K", star.temperature_k));
                     info.fact(
                         "Luminosity",
@@ -183,6 +189,12 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                 }
                 info.fact("Mass", mass_text(planet.mass_earth));
                 info.fact("Radius", format!("{:.0} km", planet.radius_km));
+                info.fact(
+                    "Flattening",
+                    crate::format::flattening_text(
+                        space_simulation::planet_shape(planet).flattening(),
+                    ),
+                );
                 info.fact(
                     "Orbital distance",
                     format!("{:.3} AU", planet.orbit.semi_major_au),

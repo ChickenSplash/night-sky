@@ -12,10 +12,12 @@ pub mod population;
 pub mod search;
 #[cfg(test)]
 mod search_probe;
+pub mod shape;
 mod star;
 pub mod stream;
 mod system;
 
+pub use shape::{Spheroid, planet_shape, star_shape};
 use space_shared::{Orbit, Planet, StarSystem};
 pub use star::{galactic_star, lifetime_gyr, luminosity, spectral_colour, spin_angle, star};
 use std::f64::consts::TAU;

@@ -40,6 +40,8 @@ pub enum DebugSwitch {
     /// Add the light scattered more than once, from a table built per air
     /// (`atmosphere_multiple.rs`). Needs the tables.
     AtmosphereMultiple,
+    /// Draw bodies flattened by their spin, rather than as spheres.
+    Oblateness,
 }
 
 impl DebugSwitch {
@@ -84,6 +86,9 @@ impl DebugSwitch {
             Self::AtmosphereMultiple => {
                 "Add the light that scatters more than once in the air, read from a table built once per air, so thick air such as Venus's glows through instead of turning black, and twilight lasts longer. Uses the lookup tables, so does nothing with them off. Turn off to compare."
             }
+            Self::Oblateness => {
+                "Draw stars and planets flattened at the poles by their spin, with their air following the same shape. Turn off to draw every body as a sphere of its mean radius."
+            }
         }
     }
 }
@@ -103,6 +108,7 @@ pub struct RenderDebug {
     pub atmosphere_tables: bool,
     pub atmosphere_stop_opaque: bool,
     pub atmosphere_multiple: bool,
+    pub oblateness: bool,
 }
 
 impl Default for RenderDebug {
@@ -121,12 +127,13 @@ impl Default for RenderDebug {
             atmosphere_tables: true,
             atmosphere_stop_opaque: true,
             atmosphere_multiple: true,
+            oblateness: true,
         }
     }
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 13] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 14] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -146,6 +153,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereMultiple,
             "Atmosphere multiple scattering",
         ),
+        (DebugSwitch::Oblateness, "Flattened bodies"),
     ];
 
     pub fn get(&self, switch: DebugSwitch) -> bool {
@@ -163,6 +171,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereTables => self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => self.atmosphere_multiple,
+            DebugSwitch::Oblateness => self.oblateness,
         }
     }
 
@@ -181,6 +190,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereTables => &mut self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => &mut self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => &mut self.atmosphere_multiple,
+            DebugSwitch::Oblateness => &mut self.oblateness,
         } = on;
     }
 }

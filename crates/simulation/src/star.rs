@@ -484,13 +484,17 @@ pub(crate) fn evolved(
         luminosity_solar: light,
         temperature_k: kelvin,
         colour: spectral_colour(kelvin),
-        spin: Spin {
-            period_hours,
-            tilt_rad: rng.rayleigh(0.15),
-            azimuth_rad: rng.range(0.0, TAU),
-            phase_rad: rng.range(0.0, TAU),
-            locked: false,
-        },
+        spin: crate::shape::star_spin(
+            Spin {
+                period_hours,
+                tilt_rad: rng.rayleigh(0.15),
+                azimuth_rad: rng.range(0.0, TAU),
+                phase_rad: rng.range(0.0, TAU),
+                locked: false,
+            },
+            mass,
+            radius,
+        ),
         component: String::new(),
     };
     let swallowed = 3.0 * radius * crate::SUN_RADIUS_METRES / crate::AU_METRES;
@@ -548,14 +552,18 @@ pub(crate) fn white_dwarf_of_mass(
         luminosity_solar: light,
         temperature_k: kelvin,
         colour: spectral_colour(kelvin),
-        spin: Spin {
-            period_hours: hours(rng, 0.05, 3.0),
-            // The spin axis keeps its progenitor's direction.
-            tilt_rad: rng.rayleigh(0.1),
-            azimuth_rad: rng.range(0.0, TAU),
-            phase_rad: rng.range(0.0, TAU),
-            locked: false,
-        },
+        spin: crate::shape::star_spin(
+            Spin {
+                period_hours: hours(rng, 0.05, 3.0),
+                // The spin axis keeps its progenitor's direction.
+                tilt_rad: rng.rayleigh(0.1),
+                azimuth_rad: rng.range(0.0, TAU),
+                phase_rad: rng.range(0.0, TAU),
+                locked: false,
+            },
+            mass,
+            radius,
+        ),
         component: String::new(),
     };
     Formation {
@@ -604,13 +612,17 @@ pub(crate) fn main_sequence(id: &str, rng: &mut Rng, kelvin: f64, mass: f64) -> 
         luminosity_solar: light,
         temperature_k: kelvin,
         colour: spectral_colour(kelvin),
-        spin: Spin {
-            period_hours: period_days * 24.0,
-            tilt_rad: tilt.min(PI),
-            azimuth_rad: rng.range(0.0, TAU),
-            phase_rad: rng.range(0.0, TAU),
-            locked: false,
-        },
+        spin: crate::shape::star_spin(
+            Spin {
+                period_hours: period_days * 24.0,
+                tilt_rad: tilt.min(PI),
+                azimuth_rad: rng.range(0.0, TAU),
+                phase_rad: rng.range(0.0, TAU),
+                locked: false,
+            },
+            mass,
+            radius,
+        ),
         component: String::new(),
     };
     // The disc's inner edge, where dust sublimates.
@@ -691,6 +703,21 @@ mod tests {
                 _ => assert!((0.2..=150.0).contains(&days)),
             }
         }
+    }
+
+    #[test]
+    fn spins_keep_stars_round_enough() {
+        use crate::shape::{MAX_FLATTENING, fastest_star_hours, star_flattening};
+        let stars = stars();
+        let mut slowed = std::collections::BTreeMap::<&str, usize>::new();
+        for star in &stars {
+            let f = star_flattening(star.mass_solar, star.radius_solar, star.spin.period_hours);
+            assert!(f <= MAX_FLATTENING, "{star:?}");
+            if star.spin.period_hours == fastest_star_hours(star.mass_solar, star.radius_solar) {
+                *slowed.entry(star.kind.as_str()).or_default() += 1;
+            }
+        }
+        eprintln!("{} stars, slowed to the limit: {slowed:?}", stars.len());
     }
 
     #[test]

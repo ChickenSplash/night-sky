@@ -37,8 +37,8 @@ and heights as well as the air's extent.
 
 ## Order
 
-1. **Shape** (checkpoint 1): oblateness in the simulation, bodies and air
-   drawn as spheroids.
+1. **Shape** (checkpoint 1, done):
+   oblateness in the simulation, bodies and air drawn as spheroids.
 2. **Landing** (checkpoints 2 to 5): a smooth spheroid ground that matches the
    shape exactly, the surface frame, the near plane by height, and the floor.
 3. **Light on the ground:** [atmospheres 4c](atmospheres.md#4c-light-on-the-ground),
@@ -61,6 +61,32 @@ committed. Simulation changes come with tests; new generation may freely
 regenerate bodies (alpha).
 
 ## Checkpoint 1 · Shape (oblateness)
+
+**Done (2026-10-24), checked live by the user.** The canonical
+description is now in [planetary systems](../simulation/planetary-systems.md#shape-flattening-by-spin)
+and [rendering](../client/rendering.md#flattened-bodies). What differs from the
+proposal below:
+
+- One limit for every body, `MAX_FLATTENING` 0.2 (a star at about 0.93 of
+  break-up). 76 of 4,378 test planets are slowed to it (67 dwarf planets, 9 gas
+  giants); 7 of 20,000 test stars (hot B stars). 265 planets are flatter than
+  0.05, mostly dwarfs and gas giants.
+- Stars come out in closed form: with the mean radius kept, the Roche
+  flattening is $W = \omega^2R^3/2GM$ itself. Planets too:
+  $f(1-f) = K\omega^2R^3/GM$.
+- Rim sprites stretch along the pole's projection so the limb blur and the
+  corona follow the ellipse.
+- **Craft keep the mean radius for now.** Moving craft clearances and spawn
+  heights to the equatorial radius tripped
+  `a_predicted_path_is_anchored_where_its_planet_is_now`, which turned out
+  fragile on its own: moving the spawn 10 m swings its drift from 211 m to
+  4.3 km against a 1 km bound. Left for flight-sim phase 11, with that test
+  looked at then.
+- Live check: a giant such as `g1e01000002.2.162/5` (flattening 0.025, the
+  hydrogen giant preset), `set_debug oblateness false` to compare; the
+  inspector shows "Flattening". Look at the limb from the equator and the
+  pole, the rim's blur on the polar limb, the air's limb and twilight band,
+  and a fast hot star's corona.
 
 A spinning body settles into an oblate spheroid: equatorial radius $a$, polar
 radius $c$, flattening $f = (a - c)/a$. Every input is already generated: mass,

@@ -18,6 +18,8 @@ how optional tasks attach to planets.
 - Spins have independent seeds and tilted axes. Close-in planets can be tidally
   locked; others draw spin-orbit states, slow spins or large tilts. Spin does
   not move an orbit.
+- Every planet and star is flattened by its spin into an oblate spheroid
+  ([shape](#shape-flattening-by-spin)).
 
 ## Generation, from the inside out
 
@@ -133,6 +135,49 @@ These outcomes are assigned during generation, not obtained by integrating
 tidal torques. System planes have isotropically distributed poles; planets
 within a system generally have small inclinations, with a broader distribution
 for dwarf planets. Obliquity is the spin-axis tilt, not orbital inclination.
+Free spins are slowed where needed so no planet is flatter than
+`MAX_FLATTENING` (below); about 2% are, mostly fast dwarf planets.
+
+### Shape: flattening by spin
+
+A body round under its own gravity and spinning settles into an oblate
+spheroid, its equatorial radius $a$ longer than its polar radius $c$; the
+flattening is $f = (a - c)/a$. Its surface is one of equal gravity plus spin
+potential, so it is also sea level: water at height zero lies flat on it, and
+later heights are measured from it along its normal. `space_simulation::shape`
+computes it from mass, radius, class and spin period (`planet_shape`,
+`star_shape`), deterministically, for every crate that needs it.
+
+- **Planets, Darwin-Radau.** With spin parameter $m = \omega^2 a^3 / GM$
+  (centrifugal over gravitational acceleration at the equator) and moment of
+  inertia factor $k = C/Ma^2$ (0.4 for uniform density, less the more mass
+  gathers at the centre):
+
+$$
+f = \frac{\tfrac{5}{2}m}{1 + \tfrac{25}{4}\left(1 - \tfrac{3}{2}k\right)^2}
+$$
+
+  $k$ is a prescription per class until interiors are modelled: rocky 0.33,
+  dwarf 0.35, sub-Neptune 0.26, ice giant 0.23, gas giant 0.25. Earth comes
+  out at 1/300 (measured 1/298), Jupiter 0.065 (0.065), Neptune 0.018 (0.017);
+  Saturn, more centrally condensed than 0.25 allows, at 0.115 (0.098).
+- **Stars, Roche model** (mass at the centre). The equator sits where
+  $GM/R_e + \omega^2 R_e^2/2 = GM/R_p$, up to $1.5R_p$ at break-up. With the
+  mean radius kept, $R_e/R_p = 1/(1 - W)$ for $W = \omega^2 R^3 / 2GM$, so
+  $f = W$. The Sun comes out at about $10^{-5}$, Altair at 0.18 (0.20).
+- **Mean radius kept.** `radius_km` and `radius_solar` stay the radius of the
+  sphere of equal volume, so densities are unchanged: $a = R(1-f)^{-1/3}$,
+  $c = a(1-f)$. For planets $f(1 - f) = K\omega^2R^3/GM$ then solves in
+  closed form, $K$ being Darwin-Radau's factor.
+- **Limit.** `MAX_FLATTENING` is 0.2: a star that flat spins at about 0.93
+  of its break-up speed, and a fluid planet much flatter stops being a
+  spheroid (Haumea is a three-axis ellipsoid). Generation slows faster spins
+  to it (`fastest_planet_hours`, `fastest_star_hours`); a tidally locked
+  planet keeps its orbit's period, and its shape is capped instead.
+
+Not modelled: three-axis shapes of very fast or tidally stretched bodies,
+non-hydrostatic shape (Mars's is partly held up by Tharsis), and the bulge's
+pull on orbits ($J_2$).
 
 ## Stable identities
 

@@ -5,6 +5,12 @@
 // the ray's closest approach to the centre, so the limb holds in f32 from far
 // away. Output is premultiplied: scattered light added, what lies behind
 // dimmed by the transmittance.
+//
+// A flattened planet is made round first: positions and directions are
+// stretched along its pole until its ground is a sphere of its equatorial
+// radius, which keeps the ground, the top of the air, the limb and the
+// planet's shadow exact and the tables spherical. Heights in the air and
+// path lengths are then off by at most the flattening, near the poles.
 #import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings::view}
 #import night_sky::hdr::encode
 
@@ -23,6 +29,8 @@ struct Air {
     // 1 to jitter the view steps; 1 to end each ray where the air turns
     // opaque (with TABLES only).
     switches: vec4<f32>,
+    // The pole, and the stretch along it that makes the planet round.
+    pole: vec4<f32>,
     // Direction to each star, and the exposed colour of its flux.
     lights: array<vec4<f32>, 4>,
     suns: array<vec4<f32>, 4>,
@@ -181,6 +189,11 @@ fn multiple_uv(r: f32, mu: f32, top: f32) -> vec2<f32> {
 }
 #endif
 
+// Stretched along the pole, so the planet is round.
+fn rounded(v: vec3<f32>) -> vec3<f32> {
+    return v + air.pole.xyz * (dot(v, air.pole.xyz) * (air.pole.w - 1.0));
+}
+
 // Where each view step takes its sample, from 0 (its start) to 1 (its end).
 // Neighbouring pixels sample at different points (Jimenez 2014's interleaved
 // gradient noise), so sharp changes along the ray, such as the edge of the
@@ -195,8 +208,9 @@ fn jitter(pixel: vec2<f32>) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let dir = normalize(in.world_position.xyz - view.world_position);
-    let eye = -air.centre.xyz / air.centre.w;
+    let view_dir = normalize(in.world_position.xyz - view.world_position);
+    let dir = normalize(rounded(view_dir));
+    let eye = rounded(-air.centre.xyz / air.centre.w);
     let top = air.steps.x;
     // Underground nothing is seen, not even the air beyond the far side.
     if dot(eye, eye) < 1.0 {
@@ -270,7 +284,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             if all(sun == vec3(0.0)) {
                 continue;
             }
-            let towards = air.lights[j].xyz;
+            let towards = normalize(rounded(air.lights[j].xyz));
 #ifdef MULTIPLE
             // Light scattered more than once, the same from every direction,
             // and the haze's forward scattering of its net flow up or down;
@@ -288,7 +302,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             if path.w == 0.0 {
                 continue;
             }
-            let mu = dot(dir, towards);
+            let mu = dot(view_dir, air.lights[j].xyz);
             let scattering = air.rayleigh.rgb * m.rayleigh * rayleigh_phase(mu)
                 + air.mie.rgb * m.mie * mie_phase(mu, air.shape.y);
             light += sun * exp(-path.xyz) * seen * scattering;
@@ -308,7 +322,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         var total = 0.0;
         for (var j = 0u; j < 4u; j++) {
             let sun = air.suns[j].rgb;
-            let towards = air.lights[j].xyz;
+            let towards = normalize(rounded(air.lights[j].xyz));
             let facing = dot(surface, towards);
             if all(sun == vec3(0.0)) || facing <= 0.0 {
                 continue;

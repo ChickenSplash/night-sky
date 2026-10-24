@@ -14,7 +14,8 @@ use bevy::{
 };
 use space_shared::{Orbit, Star, StarSystem};
 use space_simulation::{
-    SUN_RADIUS_METRES, member_position, planet_position, position_at_eccentric_anomaly,
+    SUN_RADIUS_METRES, Spheroid, member_position, planet_position, planet_shape,
+    position_at_eccentric_anomaly, star_shape,
 };
 use std::f64::consts::TAU;
 
@@ -162,6 +163,8 @@ struct Canvas<'a> {
     frame_ly: DVec3,
     /// The prototype's air, for the selected planet.
     air: render::atmosphere::Atmosphere,
+    /// Bodies flattened by their spin (`RenderDebug::oblateness`).
+    oblate: bool,
 }
 
 impl Canvas<'_> {
@@ -176,6 +179,15 @@ impl Canvas<'_> {
         let eye = self.view.translation().as_dvec3();
         for strip in clip_strip(points, eye, self.view.forward().as_dvec3()) {
             gizmos.linestrip(strip, tint);
+        }
+    }
+
+    /// A body's shape, or the sphere of its mean radius with flattening off.
+    fn shape(&self, shape: Spheroid) -> Spheroid {
+        if self.oblate {
+            shape
+        } else {
+            Spheroid::of((shape.equatorial.powi(2) * shape.polar).cbrt(), 0.0)
         }
     }
 
@@ -218,12 +230,15 @@ impl Canvas<'_> {
     /// `basis` orients the latitude rings, so bodies share their system's plane.
     /// `flat` projects the sphere onto its equatorial plane, as seen from directly
     /// above. Used for a star beside a close top-down camera, where its upper rings
-    /// would otherwise reach past the camera.
+    /// would otherwise reach past the camera. `squash` is the polar radius over
+    /// `radius`, the equatorial.
+    #[allow(clippy::too_many_arguments)]
     fn sphere(
         &self,
         gizmos: &mut Gizmos,
         centre: Vec3,
         radius: f32,
+        squash: f32,
         tint: Color,
         basis: DQuat,
         flat: bool,
@@ -239,7 +254,16 @@ impl Canvas<'_> {
             p if p < 90.0 => (2, 6, 40),
             p => (4, 12, (p as usize / 4).clamp(96, 1024)),
         };
-        let point = |v: Vec3| centre + basis * if flat { v.with_y(0.0) } else { v } * radius;
+        let point = |v: Vec3| {
+            centre
+                + basis
+                    * if flat {
+                        v.with_y(0.0)
+                    } else {
+                        v.with_y(v.y * squash)
+                    }
+                    * radius
+        };
         if latitudes == 0 {
             let (right, up) = if flat {
                 (basis * Vec3::X, basis * Vec3::Z)
@@ -303,7 +327,7 @@ impl Canvas<'_> {
         &self,
         gizmos: &mut Gizmos,
         centre: Vec3,
-        radius: f32,
+        (radius, squash): (f32, f32),
         tint: Color,
         basis: DQuat,
         flat: bool,
@@ -315,12 +339,12 @@ impl Canvas<'_> {
                     self.dot(gizmos, centre, tint);
                     Some(p)
                 }
-                _ => self.sphere(gizmos, centre, radius, tint, basis, flat),
+                _ => self.sphere(gizmos, centre, radius, squash, tint, basis, flat),
             },
             // A small realistic body is its own point: a ring would only hide it.
             (true, true) => match self.pixels(centre, radius) {
                 Some(p) if p < RING_PIXELS => Some(p),
-                _ => self.sphere(gizmos, centre, radius * 1.01, tint, basis, flat),
+                _ => self.sphere(gizmos, centre, radius * 1.01, squash, tint, basis, flat),
             },
             (true, false) => self.pixels(centre, radius),
         }
@@ -420,7 +444,11 @@ impl Canvas<'_> {
         let table = pose.layout > 0.5;
         let galactic = self.frame * local;
         let centre = self.world(galactic);
-        let physical = body.map_or(SUN_RADIUS_METRES, |b| b.radius_solar * SUN_RADIUS_METRES);
+        let shape = body.map_or(Spheroid::of(SUN_RADIUS_METRES, 0.0), |b| {
+            self.shape(star_shape(b))
+        });
+        let physical = shape.equatorial;
+        let flattening = shape.flattening() as f32;
         let tint = body.map_or([255, 192, 108], |b| b.colour);
         let basis = match body {
             Some(b) => spin_basis(self.frame, &b.spin, self.seconds),
@@ -449,13 +477,14 @@ impl Canvas<'_> {
                 radiance,
                 kelvin: body.temperature_k,
                 spin: basis.as_quat(),
+                flattening,
                 granules: render::granules(body),
             });
         }
         self.outline(
             gizmos,
             centre,
-            self.units(radius),
+            (self.units(radius), 1.0 - flattening),
             colour(tint),
             basis,
             table,
@@ -546,7 +575,8 @@ impl Canvas<'_> {
             let local = orbital.lerp(layout.position(planet), pose.layout);
             let galactic = place(local);
             let centre = self.world(galactic);
-            let radius = planet.radius_km * 1000.0;
+            let shape = self.shape(planet_shape(planet));
+            let (radius, flattening) = (shape.equatorial, shape.flattening() as f32);
             let tint = colour(planet.colour());
             let basis = spin_basis(self.frame, &planet.spin, seconds);
             if nav.realistic
@@ -559,6 +589,8 @@ impl Canvas<'_> {
                 lights.planets.push(PlanetLight {
                     centre,
                     radius: disc,
+                    spin: basis.as_quat(),
+                    flattening,
                     pixels: disc / per_pixel,
                     per_pixel,
                     light: self.illumination(orbital, local),
@@ -566,7 +598,14 @@ impl Canvas<'_> {
                     air: selected.then(|| self.air.scaled(radius)),
                 });
             }
-            let pixels = self.outline(gizmos, centre, self.units(radius), tint, basis, false);
+            let pixels = self.outline(
+                gizmos,
+                centre,
+                (self.units(radius), 1.0 - flattening),
+                tint,
+                basis,
+                false,
+            );
             if let Some(point) = self.screen(centre) {
                 markers.push(Marker {
                     point,
@@ -680,11 +719,12 @@ pub fn draw(
         ResMut<Lights>,
         Res<Photometry>,
         Res<render::atmosphere::AtmosphereTuning>,
+        Res<render::debug::RenderDebug>,
     ),
     fleet: Res<crate::craft::Fleet>,
     rig: Res<super::CameraRig>,
 ) {
-    let (mut lights, photometry, tuning) = light;
+    let (mut lights, photometry, tuning, debug) = light;
     markers.0.clear();
     lights.clear();
     let Ok((camera, view)) = camera.single() else {
@@ -713,6 +753,7 @@ pub fn draw(
         photometry: &photometry,
         frame_ly: rig.frame_ly,
         air: tuning.air.atmosphere(),
+        oblate: debug.oblateness,
     };
     let markers = &mut markers.0;
     if nav.overlays && nav.presentation_mode == PresentationMode::Constellation {

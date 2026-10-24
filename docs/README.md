@@ -105,8 +105,8 @@ The Bevy/egui client in `crates/client`:
 - Atmospheres are a rendering prototype: hand-set air (presets and sliders)
   on the selected planet only, with lookup tables and multiple scattering but
   no light from the sky on the ground. No planet has a simulated atmosphere yet.
-- Bodies are spheres with no terrain, drawn as a faceted mesh, and the camera
-  can pass through the ground.
+- Bodies are smooth spheroids flattened by their spin, with no terrain, drawn
+  as a faceted mesh, and the camera can pass through the ground.
 
 ## Organisation
 

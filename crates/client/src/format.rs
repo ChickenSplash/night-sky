@@ -101,6 +101,17 @@ pub fn tilt_text(radians: f64) -> String {
     )
 }
 
+/// A body's flattening: `1/298` when slight, `0.065` when marked.
+pub fn flattening_text(flattening: f64) -> String {
+    if flattening < 1e-7 {
+        "None".into()
+    } else if flattening < 0.01 {
+        format!("1/{}", grouped((1.0 / flattening).round() as usize))
+    } else {
+        format!("{flattening:.3}")
+    }
+}
+
 pub fn star_radius_text(solar: f64) -> String {
     if solar < 0.05 {
         format!("{:.0} km", solar * 695_700.0)

@@ -223,13 +223,17 @@ pub(super) fn sync_bodies(
         place(
             (transform, global, body_cell, visibility),
             *cell,
-            Transform::from_translation(body.centre).with_scale(Vec3::splat(body.radius)),
+            Transform::from_translation(body.centre)
+                .with_rotation(body.rotation)
+                .with_scale(body.radius * Vec3::new(1.0, 1.0 - body.flattening, 1.0)),
         );
-        // Only touch changed materials: every change re-uploads the bind group.
+        // Only a star's surface shows its turning. Only touch changed
+        // materials: every change re-uploads the bind group.
+        let star = body.light.w < 0.0;
         let changed = BodyMaterial {
             colour: body.colour.extend(1.0),
             light: body.light,
-            spin: Vec4::from(body.rotation),
+            spin: Vec4::from(if star { body.rotation } else { Quat::IDENTITY }),
             surface: body.surface,
             lights: body.lights,
             tints: body.tints,

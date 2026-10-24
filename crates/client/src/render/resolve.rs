@@ -90,16 +90,20 @@ pub(super) fn spread(radiance: f64, pixels: f32) -> f64 {
     radiance * disc_area(pixels) / disc_area(POINT_PIXELS)
 }
 
-/// A shaded sphere ready for the GPU.
+/// A shaded spheroid ready for the GPU.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shaded {
     pub centre: Vec3,
+    /// Equatorial radius.
     pub radius: f32,
+    /// How much shorter the polar radius is, along `rotation`'s +Y.
+    pub flattening: f32,
     /// A star's surface, or a planet's colour facing its brightest star.
     pub colour: Vec3,
     /// Direction to the brightest star and night-side ambient; negative
     /// ambient for stars.
     pub light: Vec4,
+    /// Orientation of the surface: its pole is local +Y.
     pub rotation: Quat,
     /// Granules per radius, on-screen radius and contrast; zero for planets.
     pub surface: Vec4,
@@ -130,6 +134,10 @@ pub struct Point {
     pub axis: Vec3,
     /// A star's whole limb shines; a planet's only on its lit side.
     pub star: bool,
+    /// A disc's pole, in world axes, and its flattening: the limb is the
+    /// outline of that spheroid. Zero for a sphere.
+    pub pole: Vec3,
+    pub flattening: f32,
 }
 
 /// Streaks for light peaking at `peak` (display value), tinted towards white
@@ -209,6 +217,8 @@ impl Point {
             streaks,
             axis: Vec3::ZERO,
             star: false,
+            pole: Vec3::ZERO,
+            flattening: 0.0,
         }
     }
 
@@ -248,6 +258,17 @@ impl Point {
             streaks,
             axis,
             star,
+            pole: Vec3::ZERO,
+            flattening: 0.0,
+        }
+    }
+
+    /// The rim of a spheroid's disc rather than a sphere's.
+    pub(super) fn flattened(self, pole: Vec3, flattening: f32) -> Self {
+        Self {
+            pole,
+            flattening,
+            ..self
         }
     }
 
@@ -256,6 +277,18 @@ impl Point {
     pub(super) fn material(&self, facing: Quat) -> PointMaterial {
         let right = facing * Vec3::X;
         let up = facing * Vec3::Y;
+        // A spheroid's outline is an ellipse: its full radius across the
+        // pole's projection, and along it shorter the more the pole faces
+        // the sprite's side.
+        let pole = Vec2::new(self.pole.dot(right), -self.pole.dot(up));
+        let side = pole.length_squared().min(1.0);
+        let squash = 1.0 - self.flattening;
+        let outline = Vec4::new(
+            pole.normalize_or_zero().x,
+            pole.normalize_or_zero().y,
+            (1.0 - side + squash * squash * side).sqrt(),
+            0.0,
+        );
         PointMaterial {
             colour: self.colour.extend(1.0),
             shape: self.shape,
@@ -267,6 +300,7 @@ impl Point {
                 if self.star { 1.0 } else { 0.0 },
                 0.0,
             ),
+            outline,
         }
     }
 }
@@ -319,6 +353,7 @@ pub fn resolve(
         frame.bodies.push(Shaded {
             centre: star.centre,
             radius: star.radius,
+            flattening: star.flattening,
             colour: hdr_colour(colour, value),
             light: Vec4::new(0.0, 0.0, 0.0, -1.0),
             rotation: star.spin,
@@ -334,18 +369,21 @@ pub fn resolve(
         // The corona grows in from a point, and is whiter than the surface.
         let fade = f64::from(((star.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0));
         let pearl = (colour + DVec3::splat(colour.max_element())) * 0.5;
-        frame.rims.push(Point::rim(
-            star.centre,
-            star.pixels,
-            star.per_pixel,
-            psf,
-            colour * LIMB_EDGE * value,
-            pearl * value * CORONA_SHARE * fade,
-            streaks(colour, colour.max_element() * value, lights.streaks),
-            star.spin * Vec3::Y,
-            true,
-            (star.kelvin * 0.618_034).fract() as f32,
-        ));
+        frame.rims.push(
+            Point::rim(
+                star.centre,
+                star.pixels,
+                star.per_pixel,
+                psf,
+                colour * LIMB_EDGE * value,
+                pearl * value * CORONA_SHARE * fade,
+                streaks(colour, colour.max_element() * value, lights.streaks),
+                star.spin * Vec3::Y,
+                true,
+                (star.kelvin * 0.618_034).fract() as f32,
+            )
+            .flattened(star.spin * Vec3::Y, star.flattening),
+        );
     }
     for planet in &lights.planets {
         // Each star's light, tinted by its colour and the surface's.
@@ -409,6 +447,8 @@ pub fn resolve(
             frame.shells.push(Shell {
                 centre: planet.centre,
                 radius: planet.radius,
+                pole: planet.spin * Vec3::Y,
+                flattening: planet.flattening,
                 air: Air { ground, ..air },
                 lights: directions,
                 suns,
@@ -417,9 +457,10 @@ pub fn resolve(
         frame.bodies.push(Shaded {
             centre: planet.centre,
             radius: planet.radius,
+            flattening: planet.flattening,
             colour: tints[0].truncate(),
             light: directions[0],
-            rotation: Quat::IDENTITY,
+            rotation: planet.spin,
             surface: Vec4::ZERO,
             lights: directions,
             tints,
@@ -433,18 +474,21 @@ pub fn resolve(
             } else {
                 Vec4::ZERO
             };
-            frame.rims.push(Point::rim(
-                planet.centre,
-                planet.pixels,
-                planet.per_pixel,
-                psf,
-                colour,
-                DVec3::ZERO,
-                streaks,
-                *towards,
-                false,
-                0.0,
-            ));
+            frame.rims.push(
+                Point::rim(
+                    planet.centre,
+                    planet.pixels,
+                    planet.per_pixel,
+                    psf,
+                    colour,
+                    DVec3::ZERO,
+                    streaks,
+                    *towards,
+                    false,
+                    0.0,
+                )
+                .flattened(planet.spin * Vec3::Y, planet.flattening),
+            );
         }
     }
     frame

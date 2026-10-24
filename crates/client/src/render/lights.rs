@@ -17,8 +17,10 @@ pub struct StarLight {
     /// Surface radiance of the drawn disc.
     pub radiance: f64,
     pub kelvin: f64,
-    /// Orientation of the surface, in world axes.
+    /// Orientation of the surface, in world axes: its pole is local +Y.
     pub spin: Quat,
+    /// How much shorter the polar radius is than `radius`, the equatorial.
+    pub flattening: f32,
     /// Granules per disc radius (`granules`).
     pub granules: f64,
 }
@@ -39,7 +41,10 @@ pub struct Illumination {
 /// How a planet is lit, before exposure.
 pub struct PlanetLight {
     pub centre: Vec3,
+    /// Equatorial radius, as for `StarLight`.
     pub radius: f32,
+    pub spin: Quat,
+    pub flattening: f32,
     pub pixels: f32,
     pub per_pixel: f32,
     /// Each star's light, brightest first, at most `MAX_LIGHTS`.

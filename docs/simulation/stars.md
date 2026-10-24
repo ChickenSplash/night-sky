@@ -110,7 +110,10 @@ not time-integrated mass loss or a replay of actual planet formation.
   temperature determine the drawn size and `spectral_colour`, and stellar
   properties shape planet formation.
 - Stars and planets carry a `Spin`. Their spins draw from their own seeds,
-  so changing spin does not move an orbit.
+  so changing spin does not move an orbit. Spin flattens a star (the Roche
+  model, see [shape](planetary-systems.md#shape-flattening-by-spin)); no star
+  is generated spinning so fast it would be flatter than 0.2, a few fast hot
+  stars are slowed to that.
 
 ## Companions and hierarchy
 

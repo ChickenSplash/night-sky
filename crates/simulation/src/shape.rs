@@ -1,0 +1,222 @@
+//! Bodies flattened by their spin. A body round under its own gravity settles
+//! into an oblate spheroid, widest at the equator, whose surface is one of
+//! equal gravity and spin potential: water at height zero lies flat on it.
+//!
+//! - Planets follow the Darwin-Radau relation, which allows for mass
+//!   concentrated towards the centre through the moment of inertia factor.
+//! - Stars follow the Roche model, all their mass at the centre: the equator
+//!   widens up to 1.5 times the pole at break-up.
+//! - A body's generated radius stays its mean radius, the sphere of the same
+//!   volume, so its density is unchanged.
+//! - Generation keeps spins slower than `MAX_FLATTENING` allows
+//!   (`fastest_planet_hours`, `fastest_star_hours`).
+
+use crate::{Class, EARTH_SOLAR, SUN_GM, SUN_RADIUS_METRES};
+use space_shared::{Planet, Spin, Star};
+use std::f64::consts::TAU;
+
+/// The flattest a generated body may be. A star this flat spins at about 0.93
+/// of its break-up speed; a fluid planet flatter than this, like the dwarf
+/// planet Haumea, no longer keeps a spheroid's shape.
+pub const MAX_FLATTENING: f64 = 0.2;
+
+/// An oblate spheroid, in metres.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spheroid {
+    pub equatorial: f64,
+    pub polar: f64,
+}
+
+impl Spheroid {
+    /// `(equatorial - polar) / equatorial`: zero for a sphere.
+    pub fn flattening(&self) -> f64 {
+        1.0 - self.polar / self.equatorial
+    }
+
+    /// The spheroid of this mean radius and flattening.
+    pub fn of(mean_radius: f64, flattening: f64) -> Self {
+        let equatorial = mean_radius * (1.0 - flattening).powf(-1.0 / 3.0);
+        Self {
+            equatorial,
+            polar: equatorial * (1.0 - flattening),
+        }
+    }
+}
+
+impl Class {
+    /// From `Class::name`, as a planet carries it.
+    pub fn from_name(name: &str) -> Option<Self> {
+        [
+            Class::Dwarf,
+            Class::Rocky,
+            Class::SubNeptune,
+            Class::IceGiant,
+            Class::GasGiant,
+        ]
+        .into_iter()
+        .find(|class| class.name() == name)
+    }
+
+    /// Moment of inertia over $Ma^2$: 0.4 for uniform density, less the more
+    /// the mass gathers at the centre. Representative values (Earth 0.331,
+    /// Jupiter 0.254, Uranus 0.23) until interiors are modelled.
+    fn inertia(self) -> f64 {
+        match self {
+            Class::Dwarf => 0.35,
+            Class::Rocky => 0.33,
+            Class::SubNeptune => 0.26,
+            Class::IceGiant => 0.23,
+            Class::GasGiant => 0.25,
+        }
+    }
+
+    /// Darwin-Radau: flattening over the spin parameter $m = \omega^2 a^3 / GM$.
+    fn response(self) -> f64 {
+        2.5 / (1.0 + 6.25 * (1.0 - 1.5 * self.inertia()).powi(2))
+    }
+}
+
+/// Spin rate squared, in rad² s⁻², or zero for a body that does not turn.
+fn spin_rate_squared(period_hours: f64) -> f64 {
+    if period_hours > 0.0 {
+        (TAU / (period_hours * 3_600.0)).powi(2)
+    } else {
+        0.0
+    }
+}
+
+/// A planet's flattening from its mean radius: Darwin-Radau with $a$ from
+/// the mean radius, $f(1 - f) = K\,\omega^2 R^3 / GM$.
+pub(crate) fn planet_flattening(
+    class: Class,
+    mass_earth: f64,
+    radius_km: f64,
+    period_hours: f64,
+) -> f64 {
+    let gm = mass_earth * EARTH_SOLAR * SUN_GM;
+    let radius = radius_km * 1_000.0;
+    let spin = class.response() * spin_rate_squared(period_hours) * radius.powi(3) / gm;
+    (0.5 * (1.0 - (1.0 - 4.0 * spin).max(0.0).sqrt())).min(MAX_FLATTENING)
+}
+
+/// A star's flattening. In the Roche model the equator sits at
+/// $R_e / R_p = 1 / (1 - W)$, $W = \omega^2 R^3 / 2GM$ with $R$ the mean
+/// radius, so the flattening is $W$ itself.
+pub(crate) fn star_flattening(mass_solar: f64, radius_solar: f64, period_hours: f64) -> f64 {
+    let radius = radius_solar * SUN_RADIUS_METRES;
+    let w = spin_rate_squared(period_hours) * radius.powi(3) / (2.0 * mass_solar * SUN_GM);
+    w.min(MAX_FLATTENING)
+}
+
+/// A planet's shape. Unknown classes are taken as rocky.
+pub fn planet_shape(planet: &Planet) -> Spheroid {
+    let class = Class::from_name(&planet.class).unwrap_or(Class::Rocky);
+    let radius = planet.radius_km * 1_000.0;
+    Spheroid::of(
+        radius,
+        planet_flattening(
+            class,
+            planet.mass_earth,
+            planet.radius_km,
+            planet.spin.period_hours,
+        ),
+    )
+}
+
+pub fn star_shape(star: &Star) -> Spheroid {
+    Spheroid::of(
+        star.radius_solar * SUN_RADIUS_METRES,
+        star_flattening(star.mass_solar, star.radius_solar, star.spin.period_hours),
+    )
+}
+
+/// The shortest day a planet may have: where it reaches `MAX_FLATTENING`.
+pub(crate) fn fastest_planet_hours(class: Class, mass_earth: f64, radius_km: f64) -> f64 {
+    let gm = mass_earth * EARTH_SOLAR * SUN_GM;
+    let spin = MAX_FLATTENING * (1.0 - MAX_FLATTENING) / class.response();
+    TAU / (spin * gm / (radius_km * 1_000.0).powi(3)).sqrt() / 3_600.0
+}
+
+/// The shortest day a star may have: where it reaches `MAX_FLATTENING`.
+pub(crate) fn fastest_star_hours(mass_solar: f64, radius_solar: f64) -> f64 {
+    let radius = radius_solar * SUN_RADIUS_METRES;
+    TAU / (2.0 * MAX_FLATTENING * mass_solar * SUN_GM / radius.powi(3)).sqrt() / 3_600.0
+}
+
+/// A star's spin no faster than its shape allows.
+pub(crate) fn star_spin(spin: Spin, mass_solar: f64, radius_solar: f64) -> Spin {
+    Spin {
+        period_hours: spin
+            .period_hours
+            .max(fastest_star_hours(mass_solar, radius_solar)),
+        ..spin
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(value: f64, expected: f64, share: f64) {
+        assert!(
+            (value / expected - 1.0).abs() < share,
+            "{value} is not within {share} of {expected}"
+        );
+    }
+
+    #[test]
+    fn solar_system_flattening() {
+        // Mean radius, mass, sidereal day and the measured flattening.
+        let earth = planet_flattening(Class::Rocky, 1.0, 6_371.0, 23.934);
+        close(earth, 1.0 / 298.26, 0.03);
+        let jupiter = planet_flattening(Class::GasGiant, 317.83, 69_911.0, 9.925);
+        close(jupiter, 0.0649, 0.05);
+        let neptune = planet_flattening(Class::IceGiant, 17.15, 24_622.0, 16.11);
+        close(neptune, 0.0171, 0.1);
+        // Saturn's mass is more concentrated (0.21) than the gas giants'
+        // 0.25 allows for, so it comes out flatter than its 0.098.
+        let saturn = planet_flattening(Class::GasGiant, 95.16, 58_232.0, 10.656);
+        close(saturn, 0.098, 0.2);
+        // The Sun's 25.4 day equator: about 9e-6 is measured.
+        let sun = star_flattening(1.0, 1.0, 25.4 * 24.0);
+        assert!((5e-6..2e-5).contains(&sun), "{sun}");
+        // Altair: 1.86 solar masses, a mean radius of 1.89 solar and 8.9
+        // hours; its equator is 2.03 solar radii and its pole 1.63.
+        close(star_flattening(1.86, 1.89, 8.9), 0.197, 0.15);
+    }
+
+    #[test]
+    fn mean_radius_keeps_the_volume() {
+        let shape = Spheroid::of(1_000.0, 0.1);
+        close(shape.equatorial.powi(2) * shape.polar, 1e9, 1e-12);
+        close(shape.flattening(), 0.1, 1e-12);
+    }
+
+    #[test]
+    fn fastest_spins_reach_the_limit() {
+        for class in [Class::Dwarf, Class::Rocky, Class::GasGiant] {
+            let hours = fastest_planet_hours(class, 2.0, 9_000.0);
+            close(
+                planet_flattening(class, 2.0, 9_000.0, hours),
+                MAX_FLATTENING,
+                1e-9,
+            );
+            assert!(planet_flattening(class, 2.0, 9_000.0, hours * 1.01) < MAX_FLATTENING);
+        }
+        let hours = fastest_star_hours(3.0, 2.5);
+        close(star_flattening(3.0, 2.5, hours), MAX_FLATTENING, 1e-9);
+    }
+
+    #[test]
+    fn classes_round_trip_by_name() {
+        for class in [
+            Class::Dwarf,
+            Class::Rocky,
+            Class::SubNeptune,
+            Class::IceGiant,
+            Class::GasGiant,
+        ] {
+            assert_eq!(Class::from_name(class.name()), Some(class));
+        }
+    }
+}

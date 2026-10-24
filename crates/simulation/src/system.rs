@@ -419,7 +419,12 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
             phase_rad: phase,
         };
         bodies.push(Body {
-            spin: planet_spin(&mut spins, class, &orbit, mass_solar),
+            spin: planet_spin(
+                &mut spins,
+                (class, mass, radius * EARTH_RADIUS_KM),
+                &orbit,
+                mass_solar,
+            ),
             orbit,
             class,
             mass_earth: mass,
@@ -439,7 +444,13 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
 ///   spin-orbit resonance like Mercury, circular ones spin slowly either way like Venus.
 /// - Free planets keep their birth spin: about a day for rocky worlds, ten to twenty
 ///   hours for giants. Giant impacts leave some tilted far over, like Uranus.
-fn planet_spin(rng: &mut Rng, class: Class, orbit: &Orbit, star_mass: f64) -> Spin {
+/// - None turns so fast that it would be flatter than `shape::MAX_FLATTENING`.
+fn planet_spin(
+    rng: &mut Rng,
+    (class, mass_earth, radius_km): (Class, f64, f64),
+    orbit: &Orbit,
+    star_mass: f64,
+) -> Spin {
     let orbital_hours = period_seconds(orbit, star_mass) / 3_600.0;
     let a = orbit.semi_major_au;
     let reach = star_mass.cbrt();
@@ -482,7 +493,8 @@ fn planet_spin(rng: &mut Rng, class: Class, orbit: &Orbit, star_mass: f64) -> Sp
             }
             _ => isotropic(rng),
         };
-        (hours, tilt, false)
+        let fastest = crate::shape::fastest_planet_hours(class, mass_earth, radius_km);
+        (hours.max(fastest), tilt, false)
     };
     Spin {
         period_hours,
@@ -1163,5 +1175,41 @@ mod tests {
             "{locked} of {total} locked"
         );
         assert!(retrograde > 0 && retrograde < total / 4);
+    }
+
+    #[test]
+    fn spins_keep_bodies_round_enough() {
+        use crate::shape::{MAX_FLATTENING, fastest_planet_hours, planet_flattening};
+        let (mut slowed, mut total) = (0, 0);
+        let (mut flat, mut slowed_by) = (
+            BTreeMap::<&str, usize>::new(),
+            BTreeMap::<&str, usize>::new(),
+        );
+        for body in systems().flatten() {
+            total += 1;
+            let spin = body.spin;
+            let f = planet_flattening(
+                body.class,
+                body.mass_earth,
+                body.radius_km,
+                spin.period_hours,
+            );
+            let fastest = fastest_planet_hours(body.class, body.mass_earth, body.radius_km);
+            if !spin.locked {
+                assert!(spin.period_hours >= fastest * (1.0 - 1e-12), "{body:?}");
+            }
+            assert!(f <= MAX_FLATTENING, "{body:?}");
+            if spin.period_hours == fastest {
+                slowed += 1;
+                *slowed_by.entry(body.class.name()).or_default() += 1;
+            }
+            if f > 0.05 {
+                *flat.entry(body.class.name()).or_default() += 1;
+            }
+        }
+        eprintln!(
+            "{slowed} of {total} slowed to the limit {slowed_by:?}; flatter than 0.05: {flat:?}"
+        );
+        assert!(slowed < total / 10, "{slowed} of {total} slowed");
     }
 }

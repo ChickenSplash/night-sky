@@ -135,6 +135,10 @@ pub struct PointMaterial {
     streaks: Vec4,
     #[uniform(0)]
     axis: Vec4,
+    /// A disc's outline: the pole's direction on the sprite, and the outline's
+    /// radius along it over its radius across it.
+    #[uniform(0)]
+    outline: Vec4,
 }
 
 impl Material for PointMaterial {
