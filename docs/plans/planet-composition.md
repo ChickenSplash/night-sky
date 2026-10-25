@@ -7,8 +7,9 @@ escape and reconciles retained structure at final orbits. Atmospheres and cold
 condensates share that budget. Derived labels, validated composition transport
 and the sectioned, bounded inspector are implemented. Calibration and regression
 review are recorded in the composition guide. Checkpoint 5b, the approved
-condensed-boundary atmosphere correction, is implemented and checked. Final
-visual review and integration remain checkpoint 6.
+condensed-boundary atmosphere correction, is implemented and checked. Checkpoint
+5c (descent into deep envelopes) is approved and not started. Final visual review
+and integration remain checkpoint 6.
 Physical prescriptions and limitations are in the
 [composition guide](../simulation/planet-composition.md).
 Work on `refactor/planet-composition`,
@@ -324,12 +325,60 @@ results are documented, and examples are ready for checkpoint 6. No further user
 modelling decision is required to begin; final visual/integration approval is still
 reserved for checkpoint 6.
 
+### 5c. Descent into deep envelopes
+
+Approved by the user after 5b; not started. Worlds without a supported condensed
+boundary (giants, envelope worlds and planets with `deep_boundary_unresolved`)
+still render an opaque sphere at their one-bar radius, and navigation treats that
+radius as a hard exclusion. The column describes no gas below one bar, so there
+is nothing to descend into. One bar is a reference label, not a surface: the
+renderer and simulation must agree that the camera can fly down through the gas.
+
+- [ ] Extend the deep-envelope column below its one-bar reference. Pressure and
+  density keep rising with depth; temperature rises along a simple, documented
+  adiabatic (polytropic) profile rather than staying isothermal. Keep the
+  existing isothermal column above one bar. This is a descriptive profile of the
+  conserved gas reservoir, never additional inventory or a giant-interior solve.
+- [ ] Define a **deepest modelled level**: a declared, centralised pressure
+  (initially about 1,000 bar), or the condensed proxy radius if that is shallower.
+  It is a labelled modelling limit, never ground. Pressure alone still never
+  creates or removes ground. Apply the same treatment to transition and other
+  unresolved-boundary worlds.
+- [ ] Remove the opaque one-bar sphere for these worlds. The shader's lower bound
+  becomes the deepest modelled level, and the gas's own optical depth makes the
+  disc opaque from outside. Use the existing opacity early-stop to bound cost.
+  Generated clouds remain deferred: render plain gas, with no cloud or haze
+  stand-in. Giants may look less familiar until clouds exist; record that.
+- [ ] Support the camera inside the deep column: extend scattering tables and
+  the view march over that depth range, with step spacing that tightens with
+  density. Descending should grow darker and hazier, reaching black. Keep f32
+  precision and spheroidal handling consistent with the existing shell.
+- [ ] Render the gas all the way down to the deepest modelled level. Nothing
+  happens at that limit yet: no stop, damage or collision, matching how the
+  camera can currently pass through rocky ground. Camera ground rules, landing
+  and collision belong to the [planet surfaces plan](planet-surfaces.md).
+- [ ] Navigation route clearance keeps its preferred height above the
+  atmosphere, so automatic flights still stay outside. Move the envelope's hard
+  exclusion from the one-bar radius to the deepest modelled level. Drag and
+  heating are deferred.
+- [ ] Inspector, browser and developer export: show the deepest modelled level
+  (labelled as a modelling limit) and indicate when the camera is below one bar.
+- [ ] Tests: continuity of pressure, density and optics across one bar, finite
+  optics to the model limit, camera-inside rendering inputs, unchanged supported
+  5b boundary worlds, clearance ordering and validated transport. Update the
+  atmosphere, composition and rendering guides; run `./scripts/check.sh`.
+
+Exit: deep envelopes render gas continuously from space down to a labelled model
+limit, with no surface at one bar; supported boundary worlds are unchanged.
+Cost stays bounded. No further user modelling decision is required to begin.
+
 ### 6. User visual review and integration
 
 - [ ] Provide launch instructions and reproducible sample IDs covering airless
   rock, water-rich bodies, small envelopes and giants across representative hosts,
   including checkpoint 5b's high-pressure condensed-boundary regression example
-  and a deep-envelope one-bar reference for comparison.
+  and a deep-envelope one-bar reference for comparison, plus a checkpoint 5c
+  descent into that giant's envelope.
 - [ ] User checks physical sizes, flattening, atmosphere appearance, inspector
   facts and craft clearance. Agents do not launch performance benchmarks.
 - [ ] Fix issues and rerun the affected tests and full check script.
