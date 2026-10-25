@@ -3,8 +3,8 @@
 The physical foundation lives in simulation `system/composition.rs`
 and `system/structure.rs`. [Planet generation](planetary-systems.md) now draws
 inventories first and derives retained mass, radius and inertia from them.
-Atmospheric gas supply is still the old independent prescription pending
-checkpoint 3; full inventory/reference transport and labels await checkpoint 4.
+Atmospheric gas and condensed reservoirs now share the same conserved inventory;
+full inventory/reference transport and labels await checkpoint 4.
 Integration checkpoints are in [the refactor plan](../plans/planet-composition.md).
 
 ## Conserved inventory, not a classification
@@ -170,7 +170,7 @@ radii for a prescribed Neptune-like input, 8–12 for Saturn-like and 10–12 fo
 Jupiter-like. These are regression guardrails, **not measured error bars**.
 The mixture/giant approximations have no established statistical uncertainty;
 temperature, differentiation, entropy and phase errors can be substantial.
-Population calibration and coupling to atmospheric reservoirs remain future work.
+Population calibration remains future work.
 
 ## Formation priors and retained structure
 
@@ -188,8 +188,11 @@ Heavy material starts in interior (rock/metal) or unresolved condensed volatiles
 (water/secondary molecules). This is an initial accounting allocation, not a
 solved phase state. H/He acquisition uses gas/heavy mass ratio
 `onset × (M_heavy/5)^2.5 × log_uniform(1e-4,30) × min(M_host,1)/(1+x/20)`.
-`onset=clamp((M_heavy-0.1)/0.1,0,1)` smoothly excludes unsupported small-envelope
-bodies. Gas is 75% H₂ and 25% He by mass, limited to 3,900 minus heavy mass in
+`onset=clamp((M_protected-0.1)/0.1,0,1)` smoothly excludes unsupported small-envelope
+bodies. `M_protected` subtracts all accessible water/secondary material from heavy
+mass, so subsequent escape cannot move a trace envelope below the 0.1 Earth-mass
+domain. This is a formation prior, not a post-loss mass clamp. Gas is 75% H₂ and
+25% He by mass, limited to 3,900 minus heavy mass in
 Earth units, within the structure domain. Lower-mass hosts therefore acquire
 less gas at equal core/seed. All allocations are scaled together if formation
 mass exceeds 0.4% of current host mass. The recomputed sum is the source budget.
@@ -209,8 +212,10 @@ current flux and age, while `T_exo=max(1000 max(F_loss/1361,0.01)^0.2,2T_eq)`
 and `T_eq=max(20,[0.7F/(4σ)]^0.25)` are fixed-albedo heuristic estimates.
 These are not actual XUV spectra, Jeans escape rates or integrated evolution.
 H₂ and He have the same retained fraction, deliberately deferring fractionation.
-Heavy materials are fully retained at this checkpoint; their escape/partitioning
-and the atmosphere generator's independent supply remain checkpoint 3 work.
+Rock/metal are fully retained. Accessible secondary loss is applied first, using
+the fixed pre-loss source structure at the final irradiation and age (see below).
+It is not iterated inside the H/He solve. All remaining heavy material enters
+every H/He trial, including its protected and accessible volatile inventories.
 
 Scalar bisection brackets `s` on [0,1], with at most 40 steps. Stop when absolute
 survival residual or bracket width is ≤1e-8. This bounds gas-mass uncertainty to
@@ -226,6 +231,45 @@ Mass, radius, inertia and provisional description are updated together; neighbou
 stability is checked again with retained masses, without moving any orbits.
 The cost is bounded algebraic structure work per bisection step, not numerical
 interior integration or repeated stellar phase sampling.
+
+## Secondary escape and reservoir partition
+
+The accessible fractions are tunable outgassing/exposure priors: `a=1e-5` of
+source water and `a=0.1` of each secondary molecular constituent. The rest stays
+protected in `CondensedVolatiles`. No mantle release, ocean evaporation history,
+photochemistry, oxygen production or exchange between molecular budgets is solved.
+For source mass `S_i`, accessible survival `r` gives retained mass
+`S_i [1-a_i(1-r)]`, escaped mass `S_i a_i(1-r)` and available gas supply
+`retained_i - S_i(1-a_i)`. Cold trapping does not delete the protected supply.
+
+`r=1/[1+(F_loss/(1361 × 10 × (v_escape/11200)^4))^1.5]` is the existing
+shoreline-inspired trend, now used as a surviving **mass fraction**, not a random
+probability that air exists. Escape speed uses immutable pre-loss source structure
+at current flux/age. This fixed reference avoids a second nonlinear solve but
+does not reproduce feedback from secondary loss, envelope shielding or differential
+escape. It is not an integrated escape rate or a fitted universal shoreline.
+Re-evaluation starts from source, never from already depleted retained material.
+
+The [atmosphere model](atmospheres.md#inventory-backed-generation) partitions the
+accessible retained supply using its prescribed temperature and saturation caps.
+All retained H₂ and He remain in `Gas`; other molecules not in gas remain in
+`CondensedVolatiles`, including newly cold-trapped material. This reservoir name
+does not assert a resolved phase, ocean or exposed ice layer. Atomic reservoir
+transfers preserve authoritative retained/escaped totals, so partition does not
+change bulk mass, structure or spin. Sub-precision gas transfers are omitted, not
+manufactured. Trace gas below the 0.1 Pa display cutoff remains accounted for.
+
+Boundary-column pressure is `p=M_gas g/(4πR²)`. One-bar envelopes instead use
+the complete gas reservoir's molecular mixture at a fixed reference pressure;
+that column is never inverted to infer total giant mass. Both obey partial-pressure
+cold caps with explicit mass-to-mole conversion. The partition uses a fixed
+64-step scalar bisection, not a deep atmosphere integration. Constant gravity,
+ideal gas and well-mixed bulk gas are prescriptions, especially unreliable for
+dense secondary air and extended columns. Heavy vapour still uses the cold bulk
+radius proxy, with no steam-envelope expansion or greenhouse feedback. These
+limitations are explicit rather than silently imposing an arbitrary pressure cap.
+Emitted columns are checked against saturation and one-bar supply with a 1e-9
+relative roundoff allowance; failure is explicit rather than a fabricated column.
 
 ## Inertia and spin
 

@@ -114,8 +114,8 @@ The Bevy/egui client in `crates/client`:
 - Atmospheres use approximate generated columns and visible optics,
   not solved climate or atmospheric evolution. No generated clouds/aerosols or
   greenhouse solution yet; extended columns retain constant-gravity estimates.
-  Bulk mass/radius now use conserved inventories, but atmospheric gas supply is
-  still independent pending composition checkpoint 3; labels remain provisional.
+  Bulk mass/radius, atmospheric gas and cold condensates now share conserved
+  inventories; labels remain provisional pending composition checkpoint 4.
   Table-readiness pop-in, grey view-path transmission and airless point/rim
   photometry remain. Envelope lower boundaries are opaque proxies, not solid
   ground or simulated deep descent. See [physical assumptions](simulation/atmospheres.md)

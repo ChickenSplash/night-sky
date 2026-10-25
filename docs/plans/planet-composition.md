@@ -2,9 +2,9 @@
 
 ## Status and goal
 
-Checkpoints 1 and 2 implemented. Generation now draws inventories and reconciles
-retained structure at final orbits; atmosphere supply remains the old transitional
-prior until checkpoint 3. Labels and full composition transport await checkpoint 4.
+Checkpoints 1 through 3 implemented. Generation draws inventories, accounts for
+escape and reconciles retained structure at final orbits. Atmospheres and cold
+condensates share that budget. Labels and full transport await checkpoint 4.
 Physical prescriptions and limitations are in the
 [composition guide](../simulation/planet-composition.md).
 Work on `refactor/planet-composition`,
@@ -159,22 +159,28 @@ Exit: body mass, radius, shape inputs and inventory agree before labels exist.
 Checkpoint 2 transports the optional inertia factor early so client shapes and
 generation spin limits share the same physical input. Full inventory/reference
 transport and the classification audit remain checkpoint 4. H/He retention uses
-a bounded scalar bisection against immutable formation supply; secondary volatile
-escape/partitioning remains checkpoint 3.
+a bounded scalar bisection against immutable formation supply; checkpoint 3 adds
+secondary volatile escape/partitioning to that foundation.
 
 ### 3. Atmosphere and reservoir integration
 
-- [ ] Remove class-based envelope probabilities and unbacked volatile supply.
-- [ ] Source hydrogen/helium and secondary gases from retained material budgets.
+- [x] Remove class-based envelope probabilities and unbacked volatile supply.
+- [x] Source hydrogen/helium and secondary gases from retained material budgets.
   Bound atmospheric mass/pressure consistently within the declared column model;
   do not extrapolate a thin column to estimate the entire mass of a giant.
-- [ ] Allocate condensation back to a named reservoir and handle airless/trace
+- [x] Allocate condensation back to a named reservoir and handle airless/trace
   outcomes without negative masses or fabricated gases.
-- [ ] Reuse atmospheric validation, all-star heating, optics and extended-column
+- [x] Reuse atmospheric validation, all-star heating, optics and extended-column
   warnings. Preserve flight-clearance integration and its safety semantics.
-- [ ] Test inventory-to-gas conversions, pressure bounds and reservoir conservation.
+- [x] Test inventory-to-gas conversions, pressure bounds and reservoir conservation.
 
 Exit: atmosphere and interior reference the same conserved material inventory.
+
+Integration regression: thick atmospheres now receive the same 1.5-times
+preferred wrapping margin as solid bodies, measured outside the atmospheric
+clearance height. Hard exclusion/swept refusal rules are unchanged. Client
+route fixtures launch above computed exclusion rather than assuming 400 km
+always clears procedural air.
 
 ### 4. Classification, transport and inspection
 

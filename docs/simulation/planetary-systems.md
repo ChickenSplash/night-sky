@@ -11,7 +11,7 @@ how optional tasks attach to planets.
 
 Generation uses the [inventory and structure model](planet-composition.md).
 Mass and composition drive radius and inertia; compatibility labels are derived
-afterwards. Atmospheric supply is still transitional until reservoir integration.
+afterwards. Atmospheric supply and condensates share the conserved material budget.
 
 - Water acquisition rises smoothly across the formation snow line. Heavy-core
   growth, feeding mass and host mass control gas acquisition, without class draws.
@@ -40,8 +40,9 @@ accreting into planets. For each permitted host (a star or close pair):
 6. Stop if the orbit's farthest point exceeds the host's stable zone. Otherwise
    store its formation inventory and continue outward.
 7. Once the entire hierarchy and final orbits exist, share all-star heating
-   samples with the atmosphere model. Solve H/He survival and structure together,
-   then assign independently seeded spin and provisional descriptions.
+   samples with the atmosphere model. Account for accessible secondary volatile
+   escape, solve H/He survival and structure together, then assign independently
+   seeded spin and provisional descriptions. Partition retained gas and condensates.
 8. Recheck stability using final retained masses. Escape only reduces masses,
    so the formation-mass spacing remains conservative.
 
@@ -78,10 +79,9 @@ current irradiation are deliberately different inputs.
 Radius is derived from the retained constituent inventory, using compressed
 heavy-material fits, mixture interpolation and a bounded light-envelope/giant
 surrogate. There is no independent radius scatter or class-based radius lookup.
-Escaped H/He is tracked separately and excluded from gravitational mass.
+Escaped H/He and secondary volatiles are tracked separately and excluded from gravitational mass.
 See the [composition guide](planet-composition.md) for exact formation priors,
-retention convergence bounds, radius conventions and limitations. Secondary
-volatile escape and atmosphere allocation remain the next integration checkpoint.
+retention convergence bounds, reservoir partition, radius conventions and limitations.
 
 ### Hill spacing and resonances
 

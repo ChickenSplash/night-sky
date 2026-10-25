@@ -1,5 +1,9 @@
 use super::*;
-use crate::system::{Body, atmosphere::ColumnValidity};
+use crate::system::{
+    Body, Class,
+    atmosphere::ColumnValidity,
+    composition::{Budget, Inventory, Material, Reservoir},
+};
 use space_shared::{Barycentre, Orbit, Spin};
 
 fn orbit_at(au: f64) -> Orbit {
@@ -184,10 +188,13 @@ fn retention_is_smooth_and_responds_to_escape_speed_heating_and_activity() {
 
 #[test]
 fn cold_condensation_reduces_partial_pressures_and_can_leave_airless_worlds() {
-    let warm = secondary(&mut Rng::new("supply"), 280.0, 1.0, 1.0)
+    let mut warm_body = volatile_body();
+    let mut cold_body = warm_body.clone();
+    let mut frozen_body = warm_body.clone();
+    let warm = partition::atmosphere(&mut warm_body, 280.0)
         .unwrap()
         .unwrap();
-    let cold = secondary(&mut Rng::new("supply"), 90.0, 1.0, 1.0)
+    let cold = partition::atmosphere(&mut cold_body, 90.0)
         .unwrap()
         .unwrap();
     assert!(cold.pressure_pa() < warm.pressure_pa());
@@ -195,8 +202,21 @@ fn cold_condensation_reduces_partial_pressures_and_can_leave_airless_worlds() {
         cold.composition().fraction(Gas::CarbonDioxide)
             < warm.composition().fraction(Gas::CarbonDioxide)
     );
-    let frozen = secondary(&mut Rng::new("supply"), 20.0, 1.0, 1.0).unwrap();
+    let frozen = partition::atmosphere(&mut frozen_body, 20.0).unwrap();
     assert!(frozen.is_none());
+    assert!(
+        cold_body
+            .budget
+            .reservoir(Reservoir::CondensedVolatiles)
+            .mass_kg(Material::CarbonDioxide)
+            > warm_body
+                .budget
+                .reservoir(Reservoir::CondensedVolatiles)
+                .mass_kg(Material::CarbonDioxide)
+    );
+    for body in [&warm_body, &cold_body, &frozen_body] {
+        assert_conserved(body);
+    }
     for gas in [Gas::CarbonDioxide, Gas::Nitrogen, Gas::Methane, Gas::Argon] {
         assert!(vapour_pressure(gas, 40.0) < vapour_pressure(gas, 80.0));
         assert!(vapour_pressure(gas, 80.0).is_finite());
@@ -205,31 +225,151 @@ fn cold_condensation_reduces_partial_pressures_and_can_leave_airless_worlds() {
 }
 
 #[test]
-fn classes_are_priors_not_physical_constraints() {
-    let mut rocky = body();
-    rocky.mass_earth = 10.0;
-    rocky.radius_km = 12_000.0;
-    let mut envelope = false;
-    let mut secondary_air = false;
-    for seed in 0..1000 {
-        let environment = generate(
-            &mut Rng::new(&format!("prior:{seed}")),
-            &rocky,
-            Heating {
-                flux: 1000.0,
-                loss_flux: 1000.0,
-            },
-            4.5,
-        )
-        .unwrap();
-        if let Some(air) = environment.atmosphere {
-            match air.reference_level {
-                space_shared::AtmosphereReference::OneBar => envelope = true,
-                space_shared::AtmosphereReference::Surface => secondary_air = true,
+fn labels_cannot_create_gas_or_change_atmospheric_supply() {
+    let mut dry = body();
+    dry.class = Class::GasGiant;
+    assert!(partition::atmosphere(&mut dry, 280.0).unwrap().is_none());
+    let mut first = volatile_body();
+    let mut relabelled = first.clone();
+    relabelled.class = Class::GasGiant;
+    let air = partition::atmosphere(&mut first, 280.0).unwrap();
+    assert_eq!(air, partition::atmosphere(&mut relabelled, 280.0).unwrap());
+    assert_eq!(first.budget, relabelled.budget);
+}
+
+fn volatile_body() -> Body {
+    let mut body = body();
+    let interior = *body.budget.retained();
+    let volatiles = Inventory::new(&[
+        (Material::Nitrogen, 1e19),
+        (Material::CarbonDioxide, 1e19),
+        (Material::Water, 1e21),
+        (Material::Methane, 1e17),
+        (Material::Argon, 1e17),
+    ])
+    .unwrap();
+    body.budget = Budget::new(
+        interior.checked_add(&volatiles).unwrap(),
+        interior,
+        volatiles,
+        Inventory::default(),
+    )
+    .unwrap();
+    body.structure = crate::system::structure::derive(&body.budget, 1361.0, 4.5).unwrap();
+    body.mass_earth = body.structure.mass_kg() / crate::units::EARTH_MASS_KG;
+    body.radius_km = body.structure.radius_m() / 1000.0;
+    body
+}
+
+fn assert_conserved(body: &Body) {
+    let budget = &body.budget;
+    assert_eq!(body.structure.mass_kg(), budget.retained().total_mass_kg());
+    for material in Material::ALL {
+        let retained = budget.retained().mass_kg(material);
+        let allocated: f64 = [
+            Reservoir::Interior,
+            Reservoir::CondensedVolatiles,
+            Reservoir::Gas,
+        ]
+        .iter()
+        .map(|&r| budget.reservoir(r).mass_kg(material))
+        .sum();
+        assert!((retained - allocated).abs() <= retained * 1e-14);
+        let source = budget.source().mass_kg(material);
+        assert!((source - retained - budget.escaped().mass_kg(material)).abs() <= source * 1e-14);
+    }
+}
+
+#[test]
+fn boundary_columns_use_mass_to_mole_conversion_and_obey_cold_caps() {
+    for temperature in [20.0, 40.0, 90.0, 150.0, 280.0, 1000.0] {
+        let mut body = volatile_body();
+        let air = partition::atmosphere(&mut body, temperature).unwrap();
+        assert_conserved(&body);
+        if let Some(air) = air {
+            let gas = body.budget.reservoir(Reservoir::Gas);
+            assert_eq!(air.composition(), &gas.gas_composition().unwrap().unwrap());
+            let weight = body.structure.reference_gravity_m_s2()
+                / (4.0 * std::f64::consts::PI * body.structure.radius_m().powi(2));
+            close(air.pressure_pa(), gas.total_mass_kg() * weight, 1e-12);
+            for species in Gas::ALL {
+                assert!(
+                    air.pressure_pa() * air.composition().fraction(species)
+                        <= vapour_pressure(species, temperature) * (1.0 + 1e-12)
+                );
             }
         }
     }
-    assert!(envelope && secondary_air);
+}
+
+#[test]
+fn sub_bar_light_gas_and_giant_columns_are_bounded_by_real_supply() {
+    for light_mass in [1e12, 1e22, 1e27] {
+        let mut body = volatile_body();
+        let interior = *body.budget.reservoir(Reservoir::Interior);
+        let condensed = *body.budget.reservoir(Reservoir::CondensedVolatiles);
+        let light = Inventory::new(&[
+            (Material::Hydrogen, 0.75 * light_mass),
+            (Material::Helium, 0.25 * light_mass),
+        ])
+        .unwrap();
+        let source = interior
+            .checked_add(&condensed)
+            .unwrap()
+            .checked_add(&light)
+            .unwrap();
+        body.budget = Budget::new(source, interior, condensed, light).unwrap();
+        body.structure = crate::system::structure::derive(&body.budget, 1361.0, 4.5).unwrap();
+        let air = partition::atmosphere(&mut body, 90.0).unwrap().unwrap();
+        assert_conserved(&body);
+        assert_eq!(
+            body.budget
+                .reservoir(Reservoir::Gas)
+                .mass_kg(Material::Hydrogen),
+            0.75 * light_mass
+        );
+        let weight = body.structure.reference_gravity_m_s2()
+            / (4.0 * std::f64::consts::PI * body.structure.radius_m().powi(2));
+        let supply_pressure = body.budget.reservoir(Reservoir::Gas).total_mass_kg() * weight;
+        assert!(air.pressure_pa() <= supply_pressure * (1.0 + 1e-12));
+        if light_mass == 1e12 {
+            assert_eq!(air.reference_level(), ReferenceLevel::Surface);
+            assert!(air.pressure_pa() < ONE_BAR_PA);
+        } else {
+            assert_eq!(air.reference_level(), ReferenceLevel::OneBar);
+            assert_eq!(air.pressure_pa(), ONE_BAR_PA);
+        }
+        for species in Gas::ALL {
+            assert!(
+                air.pressure_pa() * air.composition().fraction(species)
+                    <= vapour_pressure(species, 90.0) * (1.0 + 1e-12)
+            );
+        }
+    }
+}
+
+#[test]
+fn secondary_escape_debits_only_accessible_source_and_does_not_compound() {
+    use crate::system::generation::retention::{accessible_fraction, finalise};
+    let initial = volatile_body();
+    let mut body = initial.clone();
+    finalise(&mut body, "escape-test", 1.0, 1361.0, 1e12, 4.5);
+    assert_conserved(&body);
+    assert!(body.budget.escaped().mass_kg(Material::Nitrogen) > 0.0);
+    for material in [Material::Water, Material::Nitrogen, Material::CarbonDioxide] {
+        let original = initial.budget.source().mass_kg(material);
+        assert!(
+            body.budget.escaped().mass_kg(material)
+                <= original * accessible_fraction(material) * (1.0 + 1e-10)
+        );
+    }
+    assert_eq!(body.budget.escaped().mass_kg(Material::Metal), 0.0);
+    let first = body.clone();
+    partition::atmosphere(&mut body, 90.0).unwrap();
+    finalise(&mut body, "escape-test", 1.0, 1361.0, 1e12, 4.5);
+    assert_eq!(body.budget, first.budget);
+    assert_eq!(body.structure, first.structure);
+    assert_eq!(body.spin, first.spin);
 }
 
 #[test]
@@ -245,6 +385,7 @@ fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
         assert_eq!(first.planets.len(), again.planets.len());
         let expected_age = crate::system_age_gyr(&key);
         for (planet, repeated) in first.planets.iter().zip(&again.planets) {
+            assert_conserved(&planet.body);
             assert_eq!(planet.id(), repeated.id());
             assert_eq!(planet.body.orbit, repeated.body.orbit);
             assert_eq!(planet.environment, repeated.environment);
@@ -272,6 +413,21 @@ fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
             match air.reference_level() {
                 ReferenceLevel::Surface => surface += 1,
                 ReferenceLevel::OneBar => envelope += 1,
+            }
+            for species in Gas::ALL {
+                let material = Material::from_gas(species);
+                let gas_mass = planet
+                    .body
+                    .budget
+                    .reservoir(Reservoir::Gas)
+                    .mass_kg(material);
+                if air.composition().fraction(species) > 0.0 {
+                    assert!(gas_mass > 0.0);
+                }
+                assert!(
+                    air.pressure_pa() * air.composition().fraction(species)
+                        <= vapour_pressure(species, data.temperature_k) * (1.0 + 1e-10)
+                );
             }
             let encoded = serde_json::to_string(environment).unwrap();
             let decoded: PlanetEnvironment = serde_json::from_str(&encoded).unwrap();

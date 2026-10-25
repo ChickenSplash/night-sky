@@ -82,7 +82,10 @@ impl Policy {
         }
         let exclusion_m =
             shape.equatorial + atmosphere_height_m + self.hull_radius_m + self.safety_m;
-        let preferred_m = (KEEP_CLEAR * shape.equatorial).max(exclusion_m + self.safety_m);
+        // Wrap comfortably outside the atmosphere as well as the ground. A
+        // thick column must not collapse the preferred/hard gap to just 1 km.
+        let preferred_m = (KEEP_CLEAR * (shape.equatorial + atmosphere_height_m))
+            .max(exclusion_m + self.safety_m);
         if !preferred_m.is_finite() {
             return Err("Navigation clearance overflow".into());
         }

@@ -106,6 +106,21 @@ fn spherical_bound_covers_oblate_equatorial_polar_and_tilted_shells() {
 }
 
 #[test]
+fn preferred_routes_keep_a_fractional_margin_outside_thick_atmospheres() {
+    let policy = Policy::default();
+    let shape = Spheroid::of(1e6, 0.0);
+    for height in [0.0, 1e5, 1e6, 1e7] {
+        let bound = policy.bound(shape, height, height > 1e5).unwrap();
+        assert_eq!(
+            bound.exclusion_m,
+            1e6 + height + policy.hull_radius_m + policy.safety_m
+        );
+        assert_eq!(bound.preferred_m, KEEP_CLEAR * (1e6 + height));
+        assert!(bound.preferred_m - bound.exclusion_m > 0.49 * (1e6 + height));
+    }
+}
+
+#[test]
 fn airless_unknown_invalid_and_extended_envelopes_are_distinguished() {
     let mut p = earth();
     p.environment.as_mut().unwrap().atmosphere = None;

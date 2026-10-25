@@ -565,9 +565,12 @@ stops use them; future collision and approach assists should too.
   (30 m) + 1 km safety. The routes never plot into it or past it. A sphere
   round the equator covers polar and tilted passes too, at the cost of extra
   room over the poles.
-- **Preferred:** the larger of 1.5 equatorial radii and the exclusion plus
-  another 1 km. Routes wrap round this, and may relax it towards an arrival,
-  never below the exclusion.
+- **Preferred:** the larger of `1.5 × (equatorial radius + atmosphere clearance
+  height)` and the exclusion plus another 1 km. The fractional margin includes
+  the atmosphere so a thick column cannot reduce route-steering headroom to
+  just 1 km. Routes wrap round this, and may relax it towards an arrival,
+  never below the exclusion. The hard exclusion and swept-step safety stop are
+  unchanged.
 - **Atmosphere clearance height:** the lowest height where a circular orbit
   loses at most **1 m of radius per year** to drag, for a reference ship of
   ballistic coefficient m/(Cd A) = 10 kg/m², flying retrograde against air

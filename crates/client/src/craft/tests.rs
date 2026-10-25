@@ -336,6 +336,15 @@ fn planet_system() -> (StarSystem, u32, String) {
     (system, page, planet)
 }
 
+/// Route tests need a safe launch, not an assumption about procedural air depth.
+fn navigation_altitude_km(system: &StarSystem, id: &str) -> f64 {
+    let planet = system.planets.iter().find(|p| p.id == id).unwrap();
+    let clearance = space_simulation::system::clearance::Policy::default()
+        .planet(planet)
+        .unwrap();
+    ((clearance.exclusion_m - planet.radius_km * 1000.0) / 1000.0 + 100.0).max(400.0)
+}
+
 #[test]
 fn warp_respects_pause_without_the_sublight_time_cap() {
     use space_simulation::craft::WarpOrder;
@@ -591,11 +600,12 @@ fn matched_dropout_command_reaches_physics_and_ship_readout() {
 fn a_plotted_route_reaches_its_target_and_the_readout_shows_it() {
     let mut app = app();
     let (system, page, planet) = planet_system();
+    let altitude_km = navigation_altitude_km(&system, &planet);
     send(
         &mut app,
         UiCommand::SpawnShip {
             body: Some(planet),
-            altitude_km: 400.0,
+            altitude_km,
             speed_kms: None,
             velocity_kms: None,
         },
@@ -630,11 +640,12 @@ fn a_route_to_another_system_flies_through_the_command_path() {
     use space_simulation::{craft::voyage, galaxy::neighbourhood};
     let mut app = app();
     let (system, page, planet) = planet_system();
+    let altitude_km = navigation_altitude_km(&system, &planet);
     send(
         &mut app,
         UiCommand::SpawnShip {
             body: Some(planet),
-            altitude_km: 400.0,
+            altitude_km,
             speed_kms: None,
             velocity_kms: None,
         },
@@ -687,8 +698,9 @@ fn a_route_to_another_system_flies_through_the_command_path() {
 #[test]
 fn a_ship_flies_to_another_and_holds_formation_through_the_command_path() {
     let mut app = app();
-    let (_, _, planet) = planet_system();
-    for altitude_km in [400.0, 200_000.0] {
+    let (system, _, planet) = planet_system();
+    let safe_altitude = navigation_altitude_km(&system, &planet);
+    for altitude_km in [safe_altitude, safe_altitude + 200_000.0] {
         send(
             &mut app,
             UiCommand::SpawnShip {
@@ -740,8 +752,7 @@ fn a_ship_flies_to_another_and_holds_formation_through_the_command_path() {
         .map(|i| (at[i] - body.state.position[i]).powi(2))
         .sum::<f64>()
         .sqrt();
-    // The target orbits inside the planet's keep-clear sphere: the route
-    // skims round at its height, never lower.
+    // The route never drops below the target's safe orbital height.
     assert!(lowest > 0.999 * r / body.radius_m, "{lowest} radii");
     let route = route(&app);
     assert_eq!(route["stage"], "arrived", "{route}");

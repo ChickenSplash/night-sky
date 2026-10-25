@@ -9,11 +9,10 @@ visible optics, which the client applies to each planet's atmosphere shell.
 See [the plan](../plans/atmospheres.md#checkpoint-5--every-planet-with-air)
 for checkpoint history and remaining visual validation.
 
-Composition checkpoint 2 now reconciles bulk H/He retention and structure first,
-sharing this module's final-orbit all-star heating samples. The atmospheric
-supply recipe below is still transitional and independent of those budgets;
-checkpoint 3 will connect gas supply and condensates. Re-evaluating population
-at a different age can now change retained mass, radius and spin, but never
+Composition generation reconciles secondary escape, bulk H/He retention and
+structure first, sharing this module's final-orbit all-star heating samples.
+Atmospheric supply and cold condensates use those same budgets. Re-evaluating
+population at a different age can change retained mass, radius and spin, but never
 formation inventories, IDs, orbits or resonances. See the
 [composition model](planet-composition.md#formation-priors-and-retained-structure).
 
@@ -29,8 +28,10 @@ error normalised. No missing gas or arbitrary weight normalisation is inferred.
 
 Pressure and temperature refer to a defined level:
 
-- **Surface:** the reference ground spheroid on rocky/dwarf worlds, before
-  terrain corrections. Pressure can be any positive finite value.
+- **Surface:** a condensed-boundary column, before terrain corrections. Water-rich
+  boundaries have unresolved phase, not necessarily landable solid ground. Tiny
+  H/He inventories that cannot support one bar also use this reference. Pressure
+  can be any positive finite value.
 - **One bar:** a chosen reference level for envelope worlds. Pressure must
   equal `ONE_BAR_PA` (100,000 Pa). This is not solid ground, necessarily a
   visible cloud top, or a promise that every measured giant radius uses it.
@@ -38,7 +39,7 @@ Pressure and temperature refer to a defined level:
 The caller supplies GM in m³/s² and the radius of that level in metres.
 For spheroids use the existing volume-equivalent mean radius; the column
 currently ignores latitude, rotation and atmospheric self-gravity. The new
-convention does not change generated radii, geometry or collision behaviour.
+column model does not independently change radii, geometry or collision behaviour.
 
 The reference temperature is a representative **isothermal gas-column
 temperature**, not an equilibrium-temperature calculation or a solved
@@ -84,12 +85,13 @@ estimates; future consumers must decide how to handle the warning. `Thin`
 only passes this geometry check, not every possible physical validity check.
 Invalid inputs and nonfinite/nonpositive derived values return errors.
 
-## Initial generation recipe
+## Inventory-backed generation
 
 Each atmospheric draw uses its planet ID plus `:atmosphere:v1`, independently
 of the orbit/spin streams. Stellar system age is obtained from the same draw
 as companion generation, using a cloned RNG so no existing draws are consumed.
-Atmosphere work changes no masses, radii, classes, spins or orbital elements.
+Retention updates physical bodies before partition; partition changes only reservoir
+allocations and atmosphere records, never orbital elements or bulk structure.
 
 1. **Heating from all stars.** Add bolometric `L / (4πd²)` for every star,
    including companions outside the planet's host. Average 32 deterministic
@@ -104,29 +106,25 @@ Atmosphere work changes no masses, radii, classes, spins or orbital elements.
    use `T_eq = [F(1-A)/(4σ)]^(1/4)` for full redistribution and unit emissivity.
    This albedo is a provisional input, not derived from the renderer. Keep
    equilibrium temperature separate from the floored column estimate.
-3. **Loss trends.** Use a smooth, shoreline-inspired secondary-atmosphere
-   survival probability, falling with heating and rising with escape speed
+3. **Loss trends.** Use a smooth, shoreline-inspired secondary-material
+   surviving mass fraction, falling with heating and rising with escape speed
    to the fourth power. Its nominal transition at Earth's escape speed is
    ten solar fluxes, an uncalibrated prescription, not a reproduced empirical
    fit or a guarantee of survival. Weight loss forcing by a saturation-then-
    inverse-age activity proxy: low-mass stars stay active longer, and hot stars
    receive an extra UV proxy factor. This does not calculate XUV spectra,
    flare events or the irradiation history of evolved stars.
-4. **Provisional inventories.** Class only supplies a probability of an initial
-   H₂/He envelope (0.99 gas giant, 0.95 ice giant, 0.8 sub-Neptune, 0.03 rocky,
-   0.005 dwarf), multiplied by a soft hydrogen-retention trend based on a
-   Jeans parameter and estimated exospheric temperature. No class is forced
-   to have/lose air. Successful envelopes get H₂/He plus temperature-dependent
-   trace methane, referenced at 1 bar. This is not an envelope-mass calculation.
-5. **Secondary air.** Otherwise, survival and a broad volatile-supply draw
-   determine a N₂/CO₂ mixture with Ar, CH₄ and H₂O. Supply pressure spans
-   1 Pa to 10 MPa before mass scaling and loss, with an upper supply cap of
-   100 MPa. Gas fractions share a single pressure budget, rather than being
-   independent slider values. Rough Clausius-Clapeyron limits remove excess
-   cold CO₂, N₂, CH₄, Ar and water vapour, then total pressure and mole fractions
-   are recomputed. Methane in hydrogen envelopes is cold-capped too. Removed
-   condensate is not yet assigned to an ocean, ice or interior reservoir.
-6. **Absence and columns.** Secondary pressure below 0.1 Pa is treated as
+4. **Conserved supply.** Class never selects gas occurrence or composition.
+   Use retained H₂/He and the accessible retained secondary molecular supply,
+   not a separate pressure or mixture draw. The [composition guide](planet-composition.md#secondary-escape-and-reservoir-partition)
+   specifies exposure fractions, protected material, escape accounting and the
+   bounded H/He solve. No additional atmospheric mass is invented.
+5. **Partition.** Rough Clausius-Clapeyron limits cap cold CO₂, N₂, CH₄, Ar and
+   water partial pressures; the remainder stays in `CondensedVolatiles`. This is
+   cold trapping, not a solved phase diagram. Pressure and molecular fractions
+   are solved consistently with the actual gas masses, not clipped independently.
+   No aerosols or clouds are inferred from the transferred mass.
+6. **Absence and columns.** Boundary pressure below 0.1 Pa is treated as
    absent/trace for this population model. This cutoff is not a physical ban
    on exospheres. Validate the physical state and derive its column. Retain
    extended-column warnings in the snapshot, without silently shrinking it.
@@ -136,11 +134,29 @@ the data model are not a claim that this recipe already predicts them.
 Generating a gas mixture is insufficient evidence for aerosol loading, so
 prescribed aerosols remain an extension point rather than random haze sliders.
 
-These priors and formulas are intentionally collected in the atmosphere
-generator. Later bulk-composition work can supply inventories and replace
-class priors while keeping physical validation, wire conversion and optics.
-Until then, class-derived radii are not self-consistent with retained envelope
-mass or composition. Pressure alone never reclassifies a planet.
+### Pressure and cold-trap solve
+
+At a condensed boundary, use `p=M_gas g/(4πR²)`. With molecular masses `μ_i`
+in common units, set `p_i=C m_i/μ_i`, where `C=mean_μ g/(4πR²)`.
+For each trial `C`, allocate `m_i=min(supply_i, p_sat_i μ_i/C)`, then reconcile
+the implied mean molecular mass with a 64-step bisection bracketed by the
+catalogue's minimum and maximum molecular masses. This is the well-mixed,
+constant-gravity column approximation, not independent species scale heights.
+
+When structure supplies a one-bar reference, use the **entire** envelope reservoir
+but solve `C Σ(m_i/μ_i)=100000 Pa` instead. The brackets use all offered molecules
+and the noncondensing H₂/He alone. This caps condensable mole fractions at that
+reference, not at a fictional envelope bottom. The H₂/He structure supply check
+already guarantees at least a one-bar column. Most giant gas lies deeper than
+the represented column and is never counted a second time.
+
+No arbitrary pressure cap truncates the inventory. Very dense boundary columns
+retain the declared ideal-gas limitations; no steam expansion, greenhouse or
+variable-gravity correction is invented. Extended-column warnings, validating
+wire conversion and optics remain unchanged. Flight clearance keeps its hard
+exclusion and swept safety stop; its preferred wrapping margin now includes
+atmospheric clearance height, avoiding a near-zero steering gap around thick air.
+Pressure alone never reclassifies a planet.
 
 ## Visible optical conversion
 
@@ -213,6 +229,12 @@ eccentric-orbit averages, stellar and circumbinary hosts, nested companions,
 initial-phase independence, activity/retention trends, cold condensation,
 wire validation and deterministic population diversity. Inspector tests cover
 unknown, airless, surface and envelope records.
+
+Inventory integration tests also check per-species source/retained/escaped sums,
+gas/condensate conservation, saturation caps, mass-to-mole conversion, sub-bar
+H₂/He, giant column supply, label independence and non-compounding re-evaluation.
+Route tests use the calculated safe launch height, not a fixed altitude that
+can lie inside newly generated air; the clearance refusal policy is unchanged.
 
 Not modelled: physical escape rates, atmospheric evolution, chemical equilibrium,
 resolved phase diagrams/hydrospheres, greenhouse heating, nonideal dense gases,

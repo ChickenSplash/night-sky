@@ -1,0 +1,152 @@
+//! Well-mixed reservoir partition, with explicit cold-trap mass accounting.
+use super::*;
+use crate::system::{
+    composition::{CompositionError, Inventory, Material, Reservoir},
+    generation::retention::accessible_fraction,
+    structure::RadiusReference,
+};
+use std::f64::consts::PI;
+
+pub(super) fn atmosphere(
+    body: &mut crate::system::Body,
+    temperature: f64,
+) -> Result<Option<GasAtmosphere>, AtmosphereError> {
+    let budget = &body.budget;
+    let available = Inventory::new(&Gas::ALL.map(|gas| {
+        let material = Material::from_gas(gas);
+        let retained = budget.retained().mass_kg(material);
+        let mass = if matches!(gas, Gas::Hydrogen | Gas::Helium) {
+            retained
+        } else {
+            // Protected material is never offered to the atmosphere. Rebuilding
+            // from immutable source also makes repeated population idempotent.
+            (retained - budget.source().mass_kg(material) * (1.0 - accessible_fraction(material)))
+                .max(0.0)
+        };
+        (material, mass)
+    }))
+    .map_err(|_| AtmosphereError::InvalidValue("available gas inventory"))?;
+    if available.total_mass_kg() == 0.0 {
+        return Ok(None);
+    }
+    let one_bar = body.structure.reference() == RadiusReference::OneBar;
+    let weight_per_area =
+        body.structure.reference_gravity_m_s2() / (4.0 * PI * body.structure.radius_m().powi(2));
+    // p_i = C m_i / mu_i. For a boundary column C = mean_mu g / area;
+    // at one bar C = p / sum(m_i/mu_i). The latter samples an entire envelope
+    // without estimating its mass from a thin one-bar column.
+    let allocated = |coefficient: f64| -> Inventory {
+        Inventory::new(&Gas::ALL.map(|gas| {
+            let material = Material::from_gas(gas);
+            let cap = vapour_pressure(gas, temperature) * gas.molecular_mass_u() / coefficient;
+            (material, available.mass_kg(material).min(cap))
+        }))
+        .expect("finite nonnegative bounded allocations")
+    };
+    let mole_weight = |inventory: &Inventory| -> f64 {
+        Gas::ALL
+            .iter()
+            .map(|&gas| inventory.mass_kg(Material::from_gas(gas)) / gas.molecular_mass_u())
+            .sum()
+    };
+    let (mut low, mut high) = if one_bar {
+        let light_moles = available.mass_kg(Material::Hydrogen) / Gas::Hydrogen.molecular_mass_u()
+            + available.mass_kg(Material::Helium) / Gas::Helium.molecular_mass_u();
+        (
+            ONE_BAR_PA / mole_weight(&available),
+            ONE_BAR_PA / light_moles,
+        )
+    } else {
+        let min = Gas::ALL
+            .iter()
+            .map(|g| g.molecular_mass_u())
+            .fold(f64::INFINITY, f64::min);
+        let max = Gas::ALL
+            .iter()
+            .map(|g| g.molecular_mass_u())
+            .fold(0.0, f64::max);
+        (min * weight_per_area, max * weight_per_area)
+    };
+    // Fixed bounded bisection, molecular masses give the boundary-column bracket.
+    // No unsolved iterative clipping of mole fractions after condensation.
+    for _ in 0..64 {
+        let coefficient = (low + high) * 0.5;
+        let gas = allocated(coefficient);
+        let moles = mole_weight(&gas);
+        let below = if one_bar {
+            coefficient * moles < ONE_BAR_PA
+        } else {
+            coefficient * moles < gas.total_mass_kg() * weight_per_area
+        };
+        if below {
+            low = coefficient;
+        } else {
+            high = coefficient;
+        }
+    }
+    // Upper bracket ensures saturation caps are not exceeded by roundoff.
+    let gas = allocated(high);
+    let mut partitioned = *budget;
+    for species in Gas::ALL {
+        let material = Material::from_gas(species);
+        let current = partitioned.reservoir(Reservoir::Gas).mass_kg(material);
+        let desired = gas.mass_kg(material);
+        let (from, to, amount) = if desired >= current {
+            (
+                Reservoir::CondensedVolatiles,
+                Reservoir::Gas,
+                desired - current,
+            )
+        } else {
+            (
+                Reservoir::Gas,
+                Reservoir::CondensedVolatiles,
+                current - desired,
+            )
+        };
+        match partitioned.transfer(from, to, material, amount) {
+            Ok(()) => {}
+            // Below reservoir precision: do not manufacture trace gas.
+            Err(CompositionError::TransferPrecision) if desired >= current => {}
+            Err(_) => return Err(AtmosphereError::InvalidValue("gas reservoir transfer")),
+        }
+    }
+    let gas = partitioned.reservoir(Reservoir::Gas);
+    let pressure = if one_bar {
+        ONE_BAR_PA
+    } else {
+        gas.total_mass_kg() * weight_per_area
+    };
+    let mixture = gas
+        .gas_composition()
+        .map_err(|_| AtmosphereError::InvalidValue("partitioned gas mixture"))?;
+    // Trace gas remains accounted for, even when no rendered column is emitted.
+    if pressure < MIN_PRESSURE_PA || mixture.is_none() {
+        body.budget = partitioned;
+        return Ok(None);
+    }
+    let mixture = mixture.unwrap();
+    for species in Gas::ALL {
+        if pressure * mixture.fraction(species)
+            > vapour_pressure(species, temperature) * (1.0 + 1e-9)
+        {
+            return Err(AtmosphereError::InvalidValue("cold-trap solve residual"));
+        }
+    }
+    if one_bar && pressure > gas.total_mass_kg() * weight_per_area * (1.0 + 1e-9) {
+        return Err(AtmosphereError::InvalidValue("one-bar gas supply"));
+    }
+    let atmosphere = GasAtmosphere::new(
+        mixture,
+        if one_bar {
+            ReferenceLevel::OneBar
+        } else {
+            ReferenceLevel::Surface
+        },
+        pressure,
+        temperature,
+        None,
+    )?;
+    body.budget = partitioned;
+    Ok(Some(atmosphere))
+}

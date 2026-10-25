@@ -46,8 +46,14 @@ pub(super) fn draw(
     ])
     .unwrap();
     // Below 0.1 Earth masses the envelope structure model is unsupported.
-    // The continuous onset is a formation prior, not a clamp after a failed solve.
-    let onset = ((heavy - 0.1) / 0.1).clamp(0.0, 1.0);
+    // Use the protected heavy mass so later secondary escape cannot take a
+    // trace-envelope body below that domain. This is a continuous formation
+    // prior, not a post-solve mass clamp or suppression of physical escape.
+    let protected_heavy = heavy
+        * (1.0
+            - water * retention::accessible_fraction(Material::Water)
+            - secondary * retention::accessible_fraction(Material::Nitrogen));
+    let onset = ((protected_heavy - 0.1) / 0.1).clamp(0.0, 1.0);
     let gas_ratio =
         onset * (heavy / 5.0).powf(2.5) * rng.log_range(1e-4, 30.0) * host_mass.min(1.0)
             / (1.0 + x / 20.0);

@@ -8,6 +8,9 @@ use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K, EARTH_MASS_KG, GRAVITATIONAL_C
 
 pub const MAX_STEPS: u8 = 40;
 pub const SURVIVAL_TOLERANCE: f64 = 1e-8;
+/// Tunable exposure/outgassing priors, not measured partition coefficients.
+pub const ACCESSIBLE_WATER_FRACTION: f64 = 1e-5;
+pub const ACCESSIBLE_SECONDARY_FRACTION: f64 = 0.1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetentionSolve {
@@ -27,6 +30,7 @@ pub(super) fn reconcile(
     if !loss_flux.is_finite() || loss_flux < 0.0 {
         return Err(StructureError::InvalidValue("loss flux"));
     }
+    let formation = secondary_budget(formation, flux, loss_flux, age)?;
     // Always solve against the immutable source, not the previously retained
     // envelope. Re-evaluation must not apply the loss history a second time.
     let gas = Inventory::new(&[
@@ -42,8 +46,8 @@ pub(super) fn reconcile(
     .map_err(|_| StructureError::InvalidValue("source gas"))?;
     if gas.total_mass_kg() == 0.0 {
         return Ok((
-            *formation,
-            structure::derive(formation, flux, age)?,
+            formation,
+            structure::derive(&formation, flux, age)?,
             RetentionSolve::NoEnvelope,
         ));
     }
@@ -76,6 +80,68 @@ pub(super) fn reconcile(
         }
     }
     Err(StructureError::OutsideDomain("retention did not converge"))
+}
+
+/// Accessible volatile supply is a population prescription, not solved outgassing.
+/// Protected material remains condensed; only accessible material can escape.
+pub(crate) fn accessible_fraction(material: Material) -> f64 {
+    match material {
+        Material::Water => ACCESSIBLE_WATER_FRACTION,
+        Material::Metal | Material::Silicate | Material::Hydrogen | Material::Helium => 0.0,
+        _ => ACCESSIBLE_SECONDARY_FRACTION,
+    }
+}
+
+fn secondary_budget(
+    previous: &Budget,
+    flux: f64,
+    loss_flux: f64,
+    age: f64,
+) -> Result<Budget, StructureError> {
+    let source = previous.source();
+    let interior = Inventory::new(&Material::ALL.map(|m| {
+        (
+            m,
+            if m.properties().gas.is_none() {
+                source.mass_kg(m)
+            } else {
+                0.0
+            },
+        )
+    }))
+    .map_err(|_| StructureError::InvalidValue("source interior"))?;
+    let condensed = Inventory::new(&Material::ALL.map(|m| {
+        (
+            m,
+            if accessible_fraction(m) > 0.0 {
+                source.mass_kg(m)
+            } else {
+                0.0
+            },
+        )
+    }))
+    .map_err(|_| StructureError::InvalidValue("source volatiles"))?;
+    let gas = Inventory::new(&[
+        (Material::Hydrogen, source.mass_kg(Material::Hydrogen)),
+        (Material::Helium, source.mass_kg(Material::Helium)),
+    ])
+    .map_err(|_| StructureError::InvalidValue("source envelope"))?;
+    let initial = Budget::new(*source, interior, condensed, gas)
+        .map_err(|_| StructureError::InvalidValue("source budget"))?;
+    // Fixed pre-loss structure at the final irradiation/age. This deliberately
+    // avoids claiming a coupled multi-species evolution/escape solution.
+    let physical = structure::derive(&initial, flux, age)?;
+    let escape = (2.0 * GRAVITATIONAL_CONSTANT * physical.mass_kg() / physical.radius_m()).sqrt();
+    let survival = crate::system::atmosphere::generation::secondary_retention(escape, loss_flux);
+    let condensed = Inventory::new(&Material::ALL.map(|m| {
+        (
+            m,
+            condensed.mass_kg(m) * (1.0 - accessible_fraction(m) * (1.0 - survival)),
+        )
+    }))
+    .map_err(|_| StructureError::InvalidValue("retained volatiles"))?;
+    Budget::new(*source, interior, condensed, gas)
+        .map_err(|_| StructureError::InvalidValue("secondary escape budget"))
 }
 
 fn hydrogen_survival(physical: &Structure, flux: f64, loss_flux: f64) -> f64 {
