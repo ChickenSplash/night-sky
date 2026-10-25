@@ -17,6 +17,7 @@ pub fn generated_system(id: &str, position_ly: [f64; 3]) -> Option<StarSystem> {
             mass_earth: hosted.body.mass_earth,
             class: hosted.body.class.name().into(),
             environment: hosted.environment,
+            inertia_factor: Some(hosted.body.structure.inertia_factor()),
             resonance: hosted.body.resonance,
             spin: hosted.body.spin,
             task: None,

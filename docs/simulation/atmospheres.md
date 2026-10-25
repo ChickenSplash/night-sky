@@ -9,6 +9,14 @@ visible optics, which the client applies to each planet's atmosphere shell.
 See [the plan](../plans/atmospheres.md#checkpoint-5--every-planet-with-air)
 for checkpoint history and remaining visual validation.
 
+Composition checkpoint 2 now reconciles bulk H/He retention and structure first,
+sharing this module's final-orbit all-star heating samples. The atmospheric
+supply recipe below is still transitional and independent of those budgets;
+checkpoint 3 will connect gas supply and condensates. Re-evaluating population
+at a different age can now change retained mass, radius and spin, but never
+formation inventories, IDs, orbits or resonances. See the
+[composition model](planet-composition.md#formation-priors-and-retained-structure).
+
 ## State and reference level
 
 An atmosphere is explicitly airless or contains a gas atmosphere. Absence

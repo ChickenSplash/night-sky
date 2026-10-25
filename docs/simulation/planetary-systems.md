@@ -9,13 +9,13 @@ how optional tasks attach to planets.
 
 ## Bodies, composition and spacing
 
-An independent [inventory and structure foundation](planet-composition.md) now
-exists for the composition refactor. It is not connected to generation yet;
-the class-first behaviour below remains current.
+Generation uses the [inventory and structure model](planet-composition.md).
+Mass and composition drive radius and inertia; compatibility labels are derived
+afterwards. Atmospheric supply is still transitional until reservoir integration.
 
-- Composition follows the snow line: rocky worlds and sub-Neptunes inside,
-  giants farther out and dwarf planets beyond. Radii range from Pluto-like to
-  just beyond Jupiter.
+- Water acquisition rises smoothly across the formation snow line. Heavy-core
+  growth, feeding mass and host mass control gas acquisition, without class draws.
+  Radii range from sub-Pluto metal-rich bodies to roughly Jupiter-sized envelopes.
 - Neighbours stay Hill-stable without crossing orbits; some pairs have
   resonant period ratios (2:1, 3:2, 4:3, 5:4, 5:3, 3:1).
 - Planet mass is capped at 0.4% of the star's, or Hill spacing cannot converge.
@@ -32,12 +32,18 @@ accreting into planets. For each permitted host (a star or close pair):
 
 1. Establish the inner boundary, snow line and companion-imposed outer limit.
 2. Choose a target count of 7 to 14 planets, then propose orbits inside-out.
-3. Draw a class and mass from the proposed distance relative to the snow line.
+3. Draw heavy-material mass/fractions and gas acquisition at the proposed orbit.
+   Scale all allocations together to respect the host-mass cap.
 4. Draw eccentricity, inclination, orbital orientation and phase.
-5. Move the proposed orbit outward until neighbour-spacing conditions hold;
+5. Solve the two neighbour-spacing inequalities using formation masses;
    optionally place it at an allowed resonant period ratio.
 6. Stop if the orbit's farthest point exceeds the host's stable zone. Otherwise
-   assign its radius and separately seeded spin, then continue outward.
+   store its formation inventory and continue outward.
+7. Once the entire hierarchy and final orbits exist, share all-star heating
+   samples with the atmosphere model. Solve H/He survival and structure together,
+   then assign independently seeded spin and provisional descriptions.
+8. Recheck stability using final retained masses. Escape only reduces masses,
+   so the formation-mass spacing remains conservative.
 
 The count is a starting target, not a guarantee: a companion may leave fewer
 planets or none. Different hosts in one multiple system each contribute planets.
@@ -45,7 +51,7 @@ If an ordinary generated system extends beyond 1,000 AU, the model retries
 with a compact, lower-mass population, rather than letting crowded systems
 grow to interstellar scales.
 
-### The snow line and planet classes
+### The formation snow line
 
 The snow line is the approximate distance where water could freeze in the
 planet-forming disc. Ice beyond it provides additional solid material, helping
@@ -60,41 +66,22 @@ A Sun-like host has a 2.7 AU snow line; one at 0.01 solar luminosities has a
 0.27 AU line. Giants and white dwarfs retain progenitor-based formation scales;
 see [evolved stars](stars.md#how-an-evolved-star-changes-its-planets).
 
-| Region | Favoured generated bodies |
-| --- | --- |
-| Inside the snow line | Rocky planets and sub-Neptunes |
-| One to four snow-line distances | Gas giants, ice giants and rocky planets |
-| Beyond four snow-line distances | Mostly dwarf planets, with some giants |
-
-These are probability mixtures, not rigid boundaries. A **sub-Neptune** is a
-small volatile-envelope world, an **ice giant** an intermediate-mass world
-with a larger volatile contribution, and a **gas giant** a massive gas-rich
-world. They are model classes, not composition resolved by chemistry. Gas
-giants are less likely around lower-mass stars. The compact retry uses rocky
-and dwarf bodies instead of the ordinary class mixture.
-
-Composition is chosen at the proposed orbit before stability adjustments,
-so moving an orbit outward does not redraw its class. The snow line is a
-formation heuristic, not a strict present-day classification boundary.
+The water fraction varies smoothly with proposed orbit divided by the snow line.
+Additional feeding material near/beyond it favours heavier cores, while distant
+feeding tapers away. Compact retries reduce feeding mass rather than switching
+to rock/dwarf class templates. Composition is chosen before spacing adjustments;
+moving an orbit outward never redraws its formation material. Formation and
+current irradiation are deliberately different inputs.
 
 ### Mass and radius are linked
 
-Rocky/dwarf radii scale approximately as $R \propto M^{0.27}$; volatile-envelope
-worlds grow more steeply up to about 130 Earth masses, then giant radii change
-little with increasing mass. With mass/radius in Earth units, the fits are:
-
-$$
-R = \begin{cases}
-M^{0.27} & \text{rocky or dwarf} \\
-1.2(M/2)^{0.55} & \text{other classes, }M < 130 \\
-11.9(M/130)^{-0.04} & \text{other classes, }M \ge 130
-\end{cases}
-$$
-
-A small multiplicative scatter (0.92 to 1.10) is applied to radius. A ten-Earth-mass
-envelope world has a nominal radius near 2.9 Earth radii before scatter;
-doubling a gas giant's mass does not double its radius. This is an empirical
-size approximation, not a solved interior or atmospheric model.
+Radius is derived from the retained constituent inventory, using compressed
+heavy-material fits, mixture interpolation and a bounded light-envelope/giant
+surrogate. There is no independent radius scatter or class-based radius lookup.
+Escaped H/He is tracked separately and excluded from gravitational mass.
+See the [composition guide](planet-composition.md) for exact formation priors,
+retention convergence bounds, radius conventions and limitations. Secondary
+volatile escape and atmosphere allocation remain the next integration checkpoint.
 
 ### Hill spacing and resonances
 
@@ -129,18 +116,18 @@ Spin is distinct from orbital motion. Close-in planets receive synchronous
 rotation: the assigned spin period equals the orbital period. On an aligned
 circular orbit this keeps the same face toward the host; on an eccentric orbit,
 uniform spin does not track the changing instantaneous orbital angular speed.
-The locking-distance prescription
-depends on class and scales with the cube root of host mass. Just beyond that
-region, eccentric rocky/sub-Neptune worlds can receive 3:2 spin-orbit states;
-less eccentric ones can spin slowly, sometimes retrograde. Farther-out worlds
-draw class-dependent periods and tilts, including occasional large tilts.
+The locking-distance prescription depends on retained envelope fraction and mass
+and scales with the cube root of host mass. Just beyond that region, eccentric
+low-envelope worlds can receive 3:2 spin-orbit states; less eccentric ones can
+spin slowly, sometimes retrograde. Farther-out worlds draw continuously blended
+mass/envelope-dependent periods and tilts, including occasional large tilts.
 
 These outcomes are assigned during generation, not obtained by integrating
 tidal torques. System planes have isotropically distributed poles; planets
 within a system generally have small inclinations, with a broader distribution
-for dwarf planets. Obliquity is the spin-axis tilt, not orbital inclination.
+for bodies below 0.02 Earth masses. Obliquity is the spin-axis tilt, not orbital inclination.
 Free spins are slowed where needed so no planet is flatter than
-`MAX_FLATTENING` (below); about 2% are, mostly fast dwarf planets.
+`MAX_FLATTENING` (below). Spins use per-body `{host}/{index}:spin:v2` seeds.
 
 ### Shape: flattening by spin
 
@@ -151,7 +138,7 @@ potential, so it is also sea level: water at height zero lies flat on it, and
 later heights are measured from it along its normal: `space_simulation::system::surface`
 gives the ground as the spheroid plus `height(planet, direction)`, zero until
 there is terrain, for drawing and collision alike. `space_simulation::system::shape`
-computes the spheroid from mass, radius, class and spin period (`planet_shape`,
+computes the spheroid from mass, radius, inertia factor and spin period (`planet_shape`,
 `star_shape`), deterministically, for every crate that needs it.
 
 - **Planets, Darwin-Radau.** With spin parameter $m = \omega^2 a^3 / GM$
@@ -163,10 +150,10 @@ $$
 f = \frac{\tfrac{5}{2}m}{1 + \tfrac{25}{4}\left(1 - \tfrac{3}{2}k\right)^2}
 $$
 
-  $k$ is a prescription per class until interiors are modelled: rocky 0.33,
-  dwarf 0.35, sub-Neptune 0.26, ice giant 0.23, gas giant 0.25. Earth comes
-  out at 1/300 (measured 1/298), Jupiter 0.065 (0.065), Neptune 0.018 (0.017);
-  Saturn, more centrally condensed than 0.25 allows, at 0.115 (0.098).
+  Generated $k$ uses an approximate composition/envelope central-concentration
+  prescription, [documented here](planet-composition.md#inertia-and-spin).
+  It is carried on wire records so clients and spin limits agree. Only older
+  records without a valid physical factor use the isolated class-based fallback.
 - **Stars, Roche model** (mass at the centre). The equator sits where
   $GM/R_e + \omega^2 R_e^2/2 = GM/R_p$, up to $1.5R_p$ at break-up. With the
   mean radius kept, $R_e/R_p = 1/(1 - W)$ for $W = \omega^2 R^3 / 2GM$, so
@@ -205,8 +192,9 @@ After the full stellar hierarchy and stable planetary orbits are known,
 the [physical atmosphere model](atmospheres.md) assigns each planet an approximate
 environment: all-star mean heating, atmospheric retention, gas mixtures,
 reference pressure and isothermal column estimates. Separate seeds preserve
-orbital generation. Class is only a provisional envelope-inventory prior;
-the later bulk-composition refactor will replace that assumption. The inspector
+orbital generation. Atmospheric supply still uses a provisional class prior,
+not yet the conserved bulk inventory. This temporary mismatch is checkpoint 3
+work, not a claim of atmosphere/interior consistency. The inspector
 shows generated air, and per-planet optical conversion supplies rendering.
 Selected-planet debug air remains an optional override.
 
@@ -222,11 +210,12 @@ not the result of integrating forces between generated bodies.
 
 ## Scientific basis and approximations
 
-Mass–radius fits are inspired by Chen & Kipping (2017), giant occurrence by
-the host-mass trend in Johnson et al. (2010), and neighbour-spacing choices by
+Composition-based radii and retention are documented with their sources in the
+[composition guide](planet-composition.md). Host-mass acquisition loosely preserves
+the trend in Johnson et al. (2010); neighbour-spacing choices are inspired by
 Chambers et al. (1996) and Pu & Wu (2015). Tidal-spin prescriptions draw on
 Solar System examples and the trends discussed by Gladman et al. (1996).
-These are simplified fits/heuristics implemented in `crates/simulation/src/system/generation.rs`,
+These are simplified fits/heuristics implemented under simulation `system/generation`,
 not exact reproductions of the cited models.
 
 The model does not solve atmospheric chemistry, surface climate, habitability,

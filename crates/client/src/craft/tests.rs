@@ -1207,7 +1207,25 @@ fn craft_share_the_budget_and_fast_time_ages_a_forecast() {
 
 #[test]
 fn a_predicted_path_is_anchored_where_its_planet_is_now() {
-    let (system, page, body) = planet_system();
+    let (mut system, page, body) = planet_system();
+    // This tests forecast anchoring, not population calibration. Keep its
+    // orbital size/period controlled as procedural demo compositions change.
+    let planet = system.planets.iter_mut().find(|p| p.id == body).unwrap();
+    planet.mass_earth = 1.0;
+    planet.radius_km = 6371.0;
+    planet.inertia_factor = Some(0.33);
+    planet.environment = None;
+    planet.orbit = space_shared::Orbit {
+        semi_major_au: 1.0,
+        ..Default::default()
+    };
+    let star = system.stars.iter_mut().find(|s| s.page == page).unwrap();
+    star.mass_solar = 1.0;
+    planet.host = star.id.clone();
+    let host = star.id.clone();
+    system.planets.retain(|p| p.id == body);
+    system.stars.retain(|s| s.id == host);
+    system.barycentres.clear();
     let galaxy = space_simulation::demo_galaxy();
     let mut fleet = Fleet::default();
     // Slightly eccentric, so it has distinct predicted apsides.

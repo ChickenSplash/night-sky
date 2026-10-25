@@ -111,6 +111,9 @@ pub struct Planet {
     /// Generated physical environment; absent in older or hand-built records.
     #[serde(default)]
     pub environment: Option<PlanetEnvironment>,
+    /// C/(M a²), composition-based shape input; absent in legacy records.
+    #[serde(default)]
+    pub inertia_factor: Option<f64>,
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,

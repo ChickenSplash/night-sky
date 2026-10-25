@@ -28,8 +28,8 @@ seed helpers, object identities and photometry stay at the crate root; see
   snow line, mass–radius fits, Hill spacing, resonances, spins and stable body IDs.
 - [Physical atmospheres](simulation/atmospheres.md): initial retention/generation,
   gas mixtures, reference pressure levels, isothermal columns and their limits.
-- [Material inventories and structure](simulation/planet-composition.md): independently
-  tested conserved budgets and approximate radii, not yet used by generation.
+- [Material inventories and structure](simulation/planet-composition.md): conserved
+  formation/retained budgets, approximate radii and bounded H/He retention.
 - [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
@@ -114,6 +114,8 @@ The Bevy/egui client in `crates/client`:
 - Atmospheres use approximate generated columns and visible optics,
   not solved climate or atmospheric evolution. No generated clouds/aerosols or
   greenhouse solution yet; extended columns retain constant-gravity estimates.
+  Bulk mass/radius now use conserved inventories, but atmospheric gas supply is
+  still independent pending composition checkpoint 3; labels remain provisional.
   Table-readiness pop-in, grey view-path transmission and airless point/rim
   photometry remain. Envelope lower boundaries are opaque proxies, not solid
   ground or simulated deep descent. See [physical assumptions](simulation/atmospheres.md)

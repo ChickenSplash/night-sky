@@ -1,8 +1,10 @@
 # Material inventories and approximate structure
 
-The independently tested foundation lives in simulation `system/composition.rs`
-and `system/structure.rs`. **Planet generation does not use it yet.** Generated
-planets still follow [the current class-first recipe](planetary-systems.md).
+The physical foundation lives in simulation `system/composition.rs`
+and `system/structure.rs`. [Planet generation](planetary-systems.md) now draws
+inventories first and derives retained mass, radius and inertia from them.
+Atmospheric gas supply is still the old independent prescription pending
+checkpoint 3; full inventory/reference transport and labels await checkpoint 4.
 Integration checkpoints are in [the refactor plan](../plans/planet-composition.md).
 
 ## Conserved inventory, not a classification
@@ -168,7 +170,89 @@ radii for a prescribed Neptune-like input, 8–12 for Saturn-like and 10–12 fo
 Jupiter-like. These are regression guardrails, **not measured error bars**.
 The mixture/giant approximations have no established statistical uncertainty;
 temperature, differentiation, entropy and phase errors can be substantial.
-Population calibration and coupling to retention/atmospheres remain future work.
+Population calibration and coupling to atmospheric reservoirs remain future work.
+
+## Formation priors and retained structure
+
+`generation/materials.rs` isolates tunable population heuristics. These are not
+observationally fitted disc-accretion models. For proposed formation distance
+`x=a/snow`, ice availability is `I=x⁴/(1+x⁴)` and feeding factor is
+`(1+2I)/(1+(x/5)²)`. Draw a log-uniform heavy mass from 0.0022–12 Earth masses
+times feeding, with a 0.0022 minimum. A compact retry multiplies feeding by 0.01
+before that minimum. Water is `I × uniform(0.05,0.6)` of heavy mass; secondary
+molecules together take a log-uniform 1e-7–0.003 share. The remainder is metal
+and silicate, with metal taking 15–70% of rock. Secondary material is 98% split
+between CO₂ and N₂ (5–90% CO₂ share), 1% CH₄ and 1% Ar. No free O₂ is drawn.
+
+Heavy material starts in interior (rock/metal) or unresolved condensed volatiles
+(water/secondary molecules). This is an initial accounting allocation, not a
+solved phase state. H/He acquisition uses gas/heavy mass ratio
+`onset × (M_heavy/5)^2.5 × log_uniform(1e-4,30) × min(M_host,1)/(1+x/20)`.
+`onset=clamp((M_heavy-0.1)/0.1,0,1)` smoothly excludes unsupported small-envelope
+bodies. Gas is 75% H₂ and 25% He by mass, limited to 3,900 minus heavy mass in
+Earth units, within the structure domain. Lower-mass hosts therefore acquire
+less gas at equal core/seed. All allocations are scaled together if formation
+mass exceeds 0.4% of current host mass. The recomputed sum is the source budget.
+
+The formation mass sets conservative Hill spacing. Two algebraic inequality
+solutions replace unbounded outward stepping; the host-mass cap keeps both
+denominators positive. Resonances and companion bounds still constrain final
+placement, and the 1,000 AU compact retry remains. The proposed formation location
+is retained even when spacing moves the final orbit outward. Evolved hosts keep
+their existing progenitor snow/inner scales rather than using present luminosity.
+
+Final structure shares the atmosphere model's cached 32-phase all-star heating
+and activity/history-weighted loss forcing. For original gas mass `M_g`, solve
+retained fraction `s` such that `s=1/[1+(25/λ)^4]`, where `λ=GM μ_H2/(R kT_exo)`
+is evaluated at the **retained** mass and radius. The structure solve uses
+current flux and age, while `T_exo=max(1000 max(F_loss/1361,0.01)^0.2,2T_eq)`
+and `T_eq=max(20,[0.7F/(4σ)]^0.25)` are fixed-albedo heuristic estimates.
+These are not actual XUV spectra, Jeans escape rates or integrated evolution.
+H₂ and He have the same retained fraction, deliberately deferring fractionation.
+Heavy materials are fully retained at this checkpoint; their escape/partitioning
+and the atmosphere generator's independent supply remain checkpoint 3 work.
+
+Scalar bisection brackets `s` on [0,1], with at most 40 steps. Stop when absolute
+survival residual or bracket width is ≤1e-8. This bounds gas-mass uncertainty to
+1e-8 of original gas supply for a bracketed continuous root when the width
+criterion is met. A residual stop only bounds the survival equation's residual,
+not distance to a unique solution. It does not establish physical uncertainty.
+The stripped endpoint is continuous in radius; bisection does not require a
+monotonic radius law. No-envelope inputs bypass iteration. Unsupported structure
+or exhaustion returns an explicit error; production asserts its supported draws
+cannot reach that failure, rather than substituting an invented fallback world.
+Re-evaluation always starts from immutable source H/He, so loss is not compounded.
+Mass, radius, inertia and provisional description are updated together; neighbour
+stability is checked again with retained masses, without moving any orbits.
+The cost is bounded algebraic structure work per bisection step, not numerical
+interior integration or repeated stellar phase sampling.
+
+## Inertia and spin
+
+The structure model adds an explicitly heuristic inertia factor for Darwin-Radau:
+`k=clamp((1-f) k_heavy (R_heavy/R)^2 + 0.25f,0.12,0.36)`, where
+`k_heavy=0.36-0.08 × metal/heavy mass` and `f` is retained H/He fraction.
+The radius ratio represents a compact heavy component under a larger envelope;
+the bounds avoid claiming resolved central concentration. This is not a layered
+moment-of-inertia integration or a prediction of giant interiors.
+
+For spins, set `e=clamp(f/0.5,0,1)`, `q=clamp((0.02-M)/0.02,0,1)` (Earth mass
+units). The lock distance is `(0.3-0.2e)(1-q) M_host^(1/3)` AU. Within 2.5 times
+that distance, bodies with `f<0.1` can receive the existing slow or 3:2 states.
+Otherwise free periods are log-uniform between `10-e-6q` and `60-45e+340q`
+hours. With probability `(0.75+0.1e)(1-q)`, tilt is Rayleigh with scale
+`22-4e` degrees; otherwise isotropic. These are prescribed Solar-System-inspired
+outcomes, not integrated tidal histories. Spin streams are per stable body ID,
+independent of orbital/material/atmosphere draws. Free spins are limited using
+the physical inertia factor and the existing 0.2 flattening cap. Locked/slow
+states keep their assigned periods, with the existing shape cap as a safeguard.
+
+`Planet::inertia_factor` is optional for legacy compatibility, transported early
+in checkpoint 2 on both generated and task-overlay paths. Valid values override
+all class strings in `planet_shape`; older or invalid records use an isolated
+legacy shape fallback. Full composition transport/validation and the class-
+dependent photometry/surface/search audit are still checkpoint 4. New body labels
+are temporary fraction-based old names, not inputs to mass, radius or spin.
 
 ## Sources
 

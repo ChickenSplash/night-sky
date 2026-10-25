@@ -74,7 +74,8 @@ impl Class {
 
     /// Moment of inertia over $Ma^2$: 0.4 for uniform density, less the more
     /// the mass gathers at the centre. Representative values (Earth 0.331,
-    /// Jupiter 0.254, Uranus 0.23) until interiors are modelled.
+    /// Jupiter 0.254, Uranus 0.23). Legacy records only: new generation supplies
+    /// its composition-derived factor explicitly.
     fn inertia(self) -> f64 {
         match self {
             Class::Dwarf => 0.35,
@@ -84,11 +85,10 @@ impl Class {
             Class::GasGiant => 0.25,
         }
     }
+}
 
-    /// Darwin-Radau: flattening over the spin parameter $m = \omega^2 a^3 / GM$.
-    fn response(self) -> f64 {
-        2.5 / (1.0 + 6.25 * (1.0 - 1.5 * self.inertia()).powi(2))
-    }
+fn response(inertia: f64) -> f64 {
+    2.5 / (1.0 + 6.25 * (1.0 - 1.5 * inertia).powi(2))
 }
 
 /// Spin rate squared, in rad² s⁻², or zero for a body that does not turn.
@@ -103,14 +103,14 @@ fn spin_rate_squared(period_hours: f64) -> f64 {
 /// A planet's flattening from its mean radius: Darwin-Radau with $a$ from
 /// the mean radius, $f(1 - f) = K\,\omega^2 R^3 / GM$.
 pub(crate) fn planet_flattening(
-    class: Class,
+    inertia: f64,
     mass_earth: f64,
     radius_km: f64,
     period_hours: f64,
 ) -> f64 {
     let gm = mass_earth * EARTH_SOLAR * SUN_GM;
     let radius = radius_km * 1_000.0;
-    let spin = class.response() * spin_rate_squared(period_hours) * radius.powi(3) / gm;
+    let spin = response(inertia) * spin_rate_squared(period_hours) * radius.powi(3) / gm;
     (0.5 * (1.0 - (1.0 - 4.0 * spin).max(0.0).sqrt())).min(MAX_FLATTENING)
 }
 
@@ -123,14 +123,22 @@ pub(crate) fn star_flattening(mass_solar: f64, radius_solar: f64, period_hours: 
     w.min(MAX_FLATTENING)
 }
 
-/// A planet's shape. Unknown classes are taken as rocky.
+/// Physical inertia for generated planets; isolated legacy class fallback only
+/// for records predating composition-based generation or invalid wire values.
 pub fn planet_shape(planet: &Planet) -> Spheroid {
-    let class = Class::from_name(&planet.class).unwrap_or(Class::Rocky);
+    let inertia = planet
+        .inertia_factor
+        .filter(|k| k.is_finite() && (0.1..=0.4).contains(k))
+        .unwrap_or_else(|| {
+            Class::from_name(&planet.class)
+                .unwrap_or(Class::Rocky)
+                .inertia()
+        });
     let radius = planet.radius_km * 1_000.0;
     Spheroid::of(
         radius,
         planet_flattening(
-            class,
+            inertia,
             planet.mass_earth,
             planet.radius_km,
             planet.spin.period_hours,
@@ -146,9 +154,9 @@ pub fn star_shape(star: &Star) -> Spheroid {
 }
 
 /// The shortest day a planet may have: where it reaches `MAX_FLATTENING`.
-pub(crate) fn fastest_planet_hours(class: Class, mass_earth: f64, radius_km: f64) -> f64 {
+pub(crate) fn fastest_planet_hours(inertia: f64, mass_earth: f64, radius_km: f64) -> f64 {
     let gm = mass_earth * EARTH_SOLAR * SUN_GM;
-    let spin = MAX_FLATTENING * (1.0 - MAX_FLATTENING) / class.response();
+    let spin = MAX_FLATTENING * (1.0 - MAX_FLATTENING) / response(inertia);
     TAU / (spin * gm / (radius_km * 1_000.0).powi(3)).sqrt() / 3_600.0
 }
 
@@ -182,15 +190,15 @@ mod tests {
     #[test]
     fn solar_system_flattening() {
         // Mean radius, mass, sidereal day and the measured flattening.
-        let earth = planet_flattening(Class::Rocky, 1.0, 6_371.0, 23.934);
+        let earth = planet_flattening(0.33, 1.0, 6_371.0, 23.934);
         close(earth, 1.0 / 298.26, 0.03);
-        let jupiter = planet_flattening(Class::GasGiant, 317.83, 69_911.0, 9.925);
+        let jupiter = planet_flattening(0.25, 317.83, 69_911.0, 9.925);
         close(jupiter, 0.0649, 0.05);
-        let neptune = planet_flattening(Class::IceGiant, 17.15, 24_622.0, 16.11);
+        let neptune = planet_flattening(0.23, 17.15, 24_622.0, 16.11);
         close(neptune, 0.0171, 0.1);
         // Saturn's mass is more concentrated (0.21) than the gas giants'
         // 0.25 allows for, so it comes out flatter than its 0.098.
-        let saturn = planet_flattening(Class::GasGiant, 95.16, 58_232.0, 10.656);
+        let saturn = planet_flattening(0.25, 95.16, 58_232.0, 10.656);
         close(saturn, 0.098, 0.2);
         // The Sun's 25.4 day equator: about 9e-6 is measured.
         let sun = star_flattening(1.0, 1.0, 25.4 * 24.0);
@@ -209,14 +217,14 @@ mod tests {
 
     #[test]
     fn fastest_spins_reach_the_limit() {
-        for class in [Class::Dwarf, Class::Rocky, Class::GasGiant] {
-            let hours = fastest_planet_hours(class, 2.0, 9_000.0);
+        for inertia in [0.12, 0.25, 0.33, 0.35] {
+            let hours = fastest_planet_hours(inertia, 2.0, 9_000.0);
             close(
-                planet_flattening(class, 2.0, 9_000.0, hours),
+                planet_flattening(inertia, 2.0, 9_000.0, hours),
                 MAX_FLATTENING,
                 1e-9,
             );
-            assert!(planet_flattening(class, 2.0, 9_000.0, hours * 1.01) < MAX_FLATTENING);
+            assert!(planet_flattening(inertia, 2.0, 9_000.0, hours * 1.01) < MAX_FLATTENING);
         }
         let hours = fastest_star_hours(3.0, 2.5);
         close(star_flattening(3.0, 2.5, hours), MAX_FLATTENING, 1e-9);
@@ -254,5 +262,28 @@ mod tests {
         ] {
             assert_eq!(Class::from_name(class.name()), Some(class));
         }
+    }
+
+    #[test]
+    fn transported_physical_inertia_overrides_labels_and_legacy_is_unknown() {
+        let mut planet = Planet {
+            mass_earth: 5.0,
+            radius_km: 10_000.0,
+            inertia_factor: Some(0.24),
+            spin: Spin {
+                period_hours: 12.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let expected = planet_shape(&planet);
+        for class in ["Rocky planet", "Gas giant", "unknown label"] {
+            planet.class = class.into();
+            assert_eq!(planet_shape(&planet), expected);
+        }
+        let mut wire = serde_json::to_value(&planet).unwrap();
+        wire.as_object_mut().unwrap().remove("inertia_factor");
+        let legacy: Planet = serde_json::from_value(wire).unwrap();
+        assert_eq!(legacy.inertia_factor, None);
     }
 }

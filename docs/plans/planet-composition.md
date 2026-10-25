@@ -2,7 +2,9 @@
 
 ## Status and goal
 
-Checkpoint 1 implemented as an independent foundation; generation is unchanged.
+Checkpoints 1 and 2 implemented. Generation now draws inventories and reconciles
+retained structure at final orbits; atmosphere supply remains the old transitional
+prior until checkpoint 3. Labels and full composition transport await checkpoint 4.
 Physical prescriptions and limitations are in the
 [composition guide](../simulation/planet-composition.md).
 Work on `refactor/planet-composition`,
@@ -142,17 +144,23 @@ Exit: independently testable physical model, with no generation changes yet.
 
 ### 2. Composition-first populations and retained structure
 
-- [ ] Replace `draw_class`, class-based mass/radius selection and compact-retry
+- [x] Replace `draw_class`, class-based mass/radius selection and compact-retry
   templates with inventory draws and physically bounded acquisition.
-- [ ] Keep host occurrence trends, compact retries, stable identities, resonances,
+- [x] Keep host occurrence trends, compact retries, stable identities, resonances,
   companion limits and bounded system extents, without requiring old outputs.
-- [ ] Integrate final-orbit heating, bounded retention/structure reconciliation
+- [x] Integrate final-orbit heating, bounded retention/structure reconciliation
   and conservative formation-mass spacing across single and multiple hosts.
-- [ ] Derive spin and inertia parameters without classification dependencies;
+- [x] Derive spin and inertia parameters without classification dependencies;
   preserve the flattening cap and independently seeded spins.
-- [ ] Add deterministic population and stability tests, including evolved hosts.
+- [x] Add deterministic population and stability tests, including evolved hosts.
 
 Exit: body mass, radius, shape inputs and inventory agree before labels exist.
+
+Checkpoint 2 transports the optional inertia factor early so client shapes and
+generation spin limits share the same physical input. Full inventory/reference
+transport and the classification audit remain checkpoint 4. H/He retention uses
+a bounded scalar bisection against immutable formation supply; secondary volatile
+escape/partitioning remains checkpoint 3.
 
 ### 3. Atmosphere and reservoir integration
 

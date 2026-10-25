@@ -1,5 +1,5 @@
 //! Fast, explicitly approximate composition-based reference radii.
-//! This foundation is not yet connected to population generation.
+//! Population generation reconciles these against retained material inventories.
 //! Prescriptions, provenance and domains: docs/simulation/planet-composition.md.
 
 pub mod parameters;
@@ -38,6 +38,7 @@ pub struct Structure {
     radius_m: f64,
     condensed_radius_m: f64,
     h_he_mass_fraction: f64,
+    inertia_factor: f64,
     reference: RadiusReference,
     approximations: Vec<Approximation>,
 }
@@ -56,6 +57,10 @@ impl Structure {
     }
     pub fn h_he_mass_fraction(&self) -> f64 {
         self.h_he_mass_fraction
+    }
+    /// Approximate central concentration for Darwin-Radau, not an interior solve.
+    pub fn inertia_factor(&self) -> f64 {
+        self.inertia_factor
     }
     pub fn reference(&self) -> RadiusReference {
         self.reference
@@ -158,11 +163,24 @@ pub fn derive(
         let reference = condensed_reference(inventory.mass_kg(Material::Water));
         (condensed_radius_m, reference)
     };
+    let heavy_mass = mass_kg - h_he;
+    let metal_share = if heavy_mass > 0.0 {
+        inventory.mass_kg(Material::Metal) / heavy_mass
+    } else {
+        0.0
+    };
+    let heavy_inertia =
+        parameters::HEAVY_INERTIA_BASE - parameters::METAL_INERTIA_REDUCTION * metal_share;
+    let inertia_factor =
+        ((1.0 - fraction) * heavy_inertia * (condensed_radius_m / radius_m).powi(2)
+            + fraction * parameters::ENVELOPE_INERTIA)
+            .clamp(parameters::MIN_INERTIA, parameters::HEAVY_INERTIA_BASE);
     let result = Structure {
         mass_kg,
         radius_m,
         condensed_radius_m,
         h_he_mass_fraction: fraction,
+        inertia_factor,
         reference,
         approximations,
     };

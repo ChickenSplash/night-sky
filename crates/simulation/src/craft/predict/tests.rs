@@ -167,7 +167,7 @@ fn a_prediction_runs_in_slices_and_says_how_far_it_got() {
     );
 }
 
-/// A demo planet of a single star, with its system's field.
+/// Prescribed Sun/Earth scales, independent of generated population changes.
 fn planet_field() -> (Field, Planet) {
     let galaxy = crate::demo_galaxy();
     let (system, planet) = galaxy
@@ -176,7 +176,30 @@ fn planet_field() -> (Field, Planet) {
         .flat_map(|s| s.planets.iter().map(move |p| (s, p)))
         .find(|(s, p)| s.barycentres_on(p.page).next().is_none() && p.mass_earth > 0.5)
         .unwrap();
-    (Field::new(system.clone(), planet.page), planet.clone())
+    let mut system = system.clone();
+    let id = planet.id.clone();
+    let planet = system.planets.iter_mut().find(|p| p.id == id).unwrap();
+    planet.mass_earth = 1.0;
+    planet.radius_km = 6371.0;
+    planet.inertia_factor = Some(0.33);
+    planet.environment = None;
+    planet.orbit = space_shared::Orbit {
+        semi_major_au: 1.0,
+        ..Default::default()
+    };
+    let star = system
+        .stars
+        .iter_mut()
+        .find(|s| s.page == planet.page)
+        .unwrap();
+    star.mass_solar = 1.0;
+    planet.host = star.id.clone();
+    let host = star.id.clone();
+    let planet = planet.clone();
+    system.planets.retain(|p| p.id == id);
+    system.stars.retain(|s| s.id == host);
+    system.barycentres.clear();
+    (Field::new(system, planet.page), planet)
 }
 
 fn around(field: &Field, planet: &Planet, height: f64, speed_share: f64) -> Craft {

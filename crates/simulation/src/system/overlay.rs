@@ -115,6 +115,7 @@ pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
                 radius_km: hosted.body.radius_km,
                 mass_earth: hosted.body.mass_earth,
                 class: hosted.body.class.name().into(),
+                inertia_factor: Some(hosted.body.structure.inertia_factor()),
                 environment: hosted.environment,
                 resonance: hosted.body.resonance,
                 spin: hosted.body.spin,

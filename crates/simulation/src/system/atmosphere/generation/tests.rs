@@ -38,6 +38,23 @@ fn system(stars: Vec<Star>, pairs: Vec<Barycentre>) -> StarSystem {
 }
 
 fn body() -> Body {
+    use crate::system::{
+        RetentionSolve,
+        composition::{Budget, Inventory, Material},
+        structure,
+    };
+    let inventory = Inventory::from_mass_fractions(
+        crate::units::EARTH_MASS_KG,
+        &[(Material::Metal, 0.325), (Material::Silicate, 0.675)],
+    )
+    .unwrap();
+    let budget = Budget::new(
+        inventory,
+        inventory,
+        Inventory::default(),
+        Inventory::default(),
+    )
+    .unwrap();
     Body {
         orbit: orbit_at(1.0),
         class: Class::Rocky,
@@ -45,6 +62,11 @@ fn body() -> Body {
         radius_km: 6371.0,
         resonance: None,
         spin: Spin::default(),
+        budget,
+        structure: structure::derive(&budget, 1361.0, 5.0).unwrap(),
+        formation_mass_earth: 1.0,
+        formation_distance_au: 1.0,
+        retention_solve: RetentionSolve::NoEnvelope,
     }
 }
 
@@ -267,7 +289,7 @@ fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
 }
 
 #[test]
-fn repopulating_with_different_loss_history_preserves_all_existing_body_properties() {
+fn changed_loss_history_preserves_orbits_and_source_but_reconciles_structure() {
     let original = crate::bodies("atmosphere-independent-streams");
     let mut changed = original.clone();
     populate(&mut changed, 0.01);
@@ -276,12 +298,29 @@ fn repopulating_with_different_loss_history_preserves_all_existing_body_properti
     for (before, after) in original.planets.iter().zip(&changed.planets) {
         assert_eq!(before.id(), after.id());
         assert_eq!(before.body.orbit, after.body.orbit);
-        assert_eq!(before.body.mass_earth, after.body.mass_earth);
-        assert_eq!(before.body.radius_km, after.body.radius_km);
-        assert_eq!(before.body.class, after.body.class);
-        assert_eq!(before.body.spin, after.body.spin);
+        assert_eq!(before.body.budget.source(), after.body.budget.source());
+        assert_eq!(
+            before.body.formation_mass_earth,
+            after.body.formation_mass_earth
+        );
+        assert_eq!(
+            before.body.formation_distance_au,
+            after.body.formation_distance_au
+        );
+        assert_eq!(
+            after.body.structure.mass_kg(),
+            after.body.budget.retained().total_mass_kg()
+        );
         assert_eq!(before.body.resonance, after.body.resonance);
         assert_eq!(after.environment.as_ref().unwrap().age_gyr, 0.01);
+    }
+    let once = changed.clone();
+    populate(&mut changed, 0.01);
+    for (before, after) in once.planets.iter().zip(&changed.planets) {
+        assert_eq!(before.body.structure, after.body.structure);
+        assert_eq!(before.body.budget, after.body.budget);
+        assert_eq!(before.body.spin, after.body.spin);
+        assert_eq!(before.environment, after.environment);
     }
 }
 

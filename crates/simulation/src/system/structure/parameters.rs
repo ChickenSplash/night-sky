@@ -12,6 +12,10 @@ pub const CONDENSED_CONTINUATION_EXPONENT: f64 = 0.2;
 pub const MAX_TRACE_VOLATILE_FRACTION: f64 = 0.01;
 pub const MIN_HELIUM_SHARE: f64 = 0.15;
 pub const MAX_HELIUM_SHARE: f64 = 0.35;
+pub const HEAVY_INERTIA_BASE: f64 = 0.36;
+pub const METAL_INERTIA_REDUCTION: f64 = 0.08;
+pub const ENVELOPE_INERTIA: f64 = 0.25;
+pub const MIN_INERTIA: f64 = 0.12;
 
 // Lopez & Fortney (2014), equation 4. Applied to envelope thickness only.
 pub const ENVELOPE_THICKNESS_EARTH: f64 = 2.06;

@@ -28,7 +28,9 @@ struct Heating {
 }
 
 /// Fill only after the entire stellar hierarchy and final stable orbits exist.
-/// No generation draw here can change masses, radii, spins or orbital placement.
+/// Reconcile bulk structure and spin first using the same heating samples.
+/// Atmosphere priors remain transitional until reservoir integration; neither
+/// stage changes orbital placement or formation inventories.
 pub(crate) fn populate(bodies: &mut Bodies, age_gyr: f64) {
     let system = StarSystem {
         id: String::new(),
@@ -42,11 +44,35 @@ pub(crate) fn populate(bodies: &mut Bodies, age_gyr: f64) {
     let samples = stellar_samples(&system);
     for hosted in &mut bodies.planets {
         let heating = heating(&system, &samples, &hosted.host, hosted.body.orbit, age_gyr);
+        let id = hosted.id();
+        crate::system::generation::retention::finalise(
+            &mut hosted.body,
+            &id,
+            system.member_mass(0, &hosted.host),
+            heating.flux,
+            heating.loss_flux,
+            age_gyr,
+        );
         let mut rng = Rng::new(&format!("{}:atmosphere:v1", hosted.id()));
         hosted.environment = Some(
             generate(&mut rng, &hosted.body, heating, age_gyr)
                 .expect("generated atmospheric inputs and columns must be finite and valid"),
         );
+    }
+    // Formation masses were used during spacing; retained masses can only fall.
+    for (host, planets) in bodies.by_host() {
+        for pair in planets.windows(2) {
+            assert!(
+                crate::system::generation::stable(
+                    pair[0],
+                    pair[1].orbit.semi_major_au,
+                    pair[1].orbit.eccentricity,
+                    pair[1].mass_earth,
+                    bodies.mass(host)
+                ),
+                "retained planets must remain Hill stable"
+            );
+        }
     }
 }
 

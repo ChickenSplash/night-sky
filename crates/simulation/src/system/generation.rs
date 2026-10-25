@@ -3,10 +3,8 @@
 //!
 //! - Planet counts vary from `MIN_PLANETS` to `MAX_PLANETS` per star or close
 //!   pair, fewer where a companion's pull cuts the system short (`multiple`).
-//! - Composition follows the snow line: rocky worlds and sub-Neptunes inside it,
-//!   gas and ice giants just beyond it, dwarf planets far out.
-//! - Radii follow empirical mass-radius relations (after Chen & Kipping 2017),
-//!   so sizes run from Pluto to slightly larger than Jupiter.
+//! - Material inventories follow continuous formation-location priors.
+//! - Retained mass and composition determine reference radii, then descriptions.
 //! - Neighbours are spaced by mutual Hill radii and never cross orbits, the
 //!   criterion that separates long-lived systems from ones that go unstable.
 //! - Some pairs sit in mean-motion resonances, with phases that keep their
@@ -20,7 +18,16 @@ use crate::{period_seconds, stable_hash};
 use space_shared::{MAX_PLANETS, MIN_PLANETS, Orbit, Spin};
 use std::f64::consts::{PI, TAU};
 
-pub const EARTH_MASS_SOLAR: f64 = 3.003_489e-6;
+mod materials;
+pub(crate) mod retention;
+use super::{
+    composition::Budget,
+    structure::{self, Structure},
+};
+use crate::units::EARTH_MASS_KG;
+pub use retention::RetentionSolve;
+
+pub const EARTH_MASS_SOLAR: f64 = crate::units::EARTH_SOLAR;
 pub const EARTH_RADIUS_KM: f64 = 6_371.0;
 pub const JUPITER_MASS_EARTH: f64 = 317.83;
 
@@ -66,6 +73,13 @@ pub struct Body {
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,
+    pub budget: Budget,
+    pub structure: Structure,
+    /// Proposed formation location, never redrawn after orbital spacing.
+    pub formation_distance_au: f64,
+    /// Conservative pre-escape spacing mass.
+    pub formation_mass_earth: f64,
+    pub retention_solve: RetentionSolve,
 }
 
 /// Number of planets that form around a star or close pair, before any
@@ -81,64 +95,6 @@ pub fn planet_count(star: &str) -> u32 {
     bodies(star).planets.len() as u32
 }
 
-/// Empirical radius for a mass in Earth masses, in Earth radii.
-fn radius_earth(mass_earth: f64, class: Class) -> f64 {
-    match class {
-        Class::Dwarf | Class::Rocky => mass_earth.powf(0.27),
-        // Volatile envelopes inflate radius steeply with mass up to Saturn's range,
-        // then degeneracy pressure keeps giants near Jupiter's size.
-        _ if mass_earth < 130.0 => 1.2 * (mass_earth / 2.0).powf(0.55),
-        _ => 11.9 * (mass_earth / 130.0).powf(-0.04),
-    }
-}
-
-/// Giant planets are rarer around lighter stars, roughly in proportion to their
-/// mass (Johnson et al. 2010), and no planet exceeds `MAX_MASS_RATIO` of its star.
-fn draw_body(rng: &mut Rng, distance_au: f64, snow_au: f64, star_mass: f64) -> (Class, f64) {
-    let (class, mass) = draw_class(rng, distance_au, snow_au);
-    let (class, mass) = if class == Class::GasGiant && !rng.chance(star_mass.min(1.0)) {
-        (Class::IceGiant, rng.log_range(8.0, 25.0))
-    } else {
-        (class, mass)
-    };
-    (
-        class,
-        mass.min(MAX_MASS_RATIO * star_mass / EARTH_MASS_SOLAR),
-    )
-}
-
-fn draw_class(rng: &mut Rng, distance_au: f64, snow_au: f64) -> (Class, f64) {
-    let x = distance_au / snow_au;
-    let roll = rng.unit();
-    if x < 1.0 {
-        if roll < 0.35 {
-            (Class::SubNeptune, rng.log_range(2.5, 15.0))
-        } else {
-            (Class::Rocky, rng.log_range(0.02, 5.0))
-        }
-    } else if x < 4.0 {
-        if roll < 0.4 {
-            (
-                Class::GasGiant,
-                rng.log_range(40.0, 3.2 * JUPITER_MASS_EARTH),
-            )
-        } else if roll < 0.75 {
-            (Class::IceGiant, rng.log_range(8.0, 30.0))
-        } else {
-            (Class::Rocky, rng.log_range(0.05, 3.0))
-        }
-    } else if roll < 0.08 {
-        (
-            Class::GasGiant,
-            rng.log_range(40.0, 2.0 * JUPITER_MASS_EARTH),
-        )
-    } else if roll < 0.38 {
-        (Class::IceGiant, rng.log_range(8.0, 25.0))
-    } else {
-        (Class::Dwarf, rng.log_range(0.0022, 0.01))
-    }
-}
-
 /// Mutual Hill radius of two neighbours, in AU.
 fn mutual_hill(inner: &Body, outer_au: f64, outer_mass: f64, star: f64) -> f64 {
     let a = inner.orbit.semi_major_au;
@@ -149,7 +105,13 @@ fn mutual_hill(inner: &Body, outer_au: f64, outer_mass: f64, star: f64) -> f64 {
 
 /// Stable neighbours: enough Hill radii apart, and the outer periapsis stays
 /// clear of the inner apoapsis by more than the two-planet Hill limit (2√3).
-fn stable(inner: &Body, outer_au: f64, outer_e: f64, outer_mass: f64, star: f64) -> bool {
+pub(crate) fn stable(
+    inner: &Body,
+    outer_au: f64,
+    outer_e: f64,
+    outer_mass: f64,
+    star: f64,
+) -> bool {
     let a = inner.orbit.semi_major_au;
     let hill = mutual_hill(inner, outer_au, outer_mass, star);
     outer_au - a >= MIN_HILL_SPACING * hill
@@ -235,8 +197,6 @@ pub(crate) fn system_within(star: &str, formed: &Formation, limit_au: f64) -> Ve
 fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64) -> Vec<Body> {
     let suffix = if compact { ":compact" } else { "" };
     let mut rng = Rng::new(&format!("{star}:system{suffix}"));
-    // Spins draw from their own sequence, so they never move an orbit.
-    let mut spins = Rng::new(&format!("{star}:spins"));
     let (mass_solar, snow) = (formed.star.mass_solar, formed.snow_au);
     let light = snow / 2.7;
     // A few systems form tight resonant chains, like TRAPPIST-1 or Kepler-223.
@@ -251,16 +211,11 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
             None => (rng.log_range(0.04, 0.4) * light.max(0.1))
                 .max(formed.inner_au * rng.range(1.0, 1.4)),
         };
-        let (class, mass) = if compact && tentative < snow {
-            (Class::Rocky, rng.log_range(0.02, 0.2))
-        } else if compact {
-            (Class::Dwarf, rng.log_range(0.0022, 0.01))
-        } else {
-            draw_body(&mut rng, tentative, snow, mass_solar)
-        };
+        let budget = materials::draw(&mut rng, tentative, snow, mass_solar, compact);
+        let mass = budget.retained().total_mass_kg() / EARTH_MASS_KG;
         let (e_sigma, i_sigma) = if compact {
             (0.015, 0.025)
-        } else if class == Class::Dwarf {
+        } else if mass < 0.02 {
             (0.12, 0.1)
         } else {
             (0.035, 0.025)
@@ -273,9 +228,19 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
         let mut resonance = None;
         if let Some(inner) = previous {
             let a = inner.orbit.semi_major_au;
-            while !stable(inner, semi_major, eccentricity, mass, mass_solar) {
-                semi_major *= 1.01;
-            }
+            // Solve both Hill inequalities directly. The host-mass cap keeps
+            // their denominators positive; no unbounded outward-stepping loop.
+            let h = ((inner.formation_mass_earth + mass) * EARTH_MASS_SOLAR / (3.0 * mass_solar))
+                .cbrt()
+                * 0.5;
+            let circular = a * (1.0 + MIN_HILL_SPACING * h) / (1.0 - MIN_HILL_SPACING * h);
+            let clearance = 2.0 * 3_f64.sqrt() * h;
+            let eccentric =
+                a * (1.0 + inner.orbit.eccentricity + clearance) / (1.0 - eccentricity - clearance);
+            assert!(
+                circular.is_finite() && circular > 0.0 && eccentric.is_finite() && eccentric > 0.0
+            );
+            semi_major = semi_major.max(circular.max(eccentric) * (1.0 + 1e-12));
             let minimum = semi_major / a;
             let wanted = tentative.max(semi_major) / a;
             if chain || rng.chance(0.2) {
@@ -304,7 +269,14 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
         if semi_major * (1.0 + eccentricity) > limit_au {
             break;
         }
-        let radius = radius_earth(mass, class) * rng.range(0.92, 1.1);
+        // Provisional formation structure. Reconciled using all-star heating only
+        // after assembly; not used for orbital placement or inventory draws.
+        let physical = structure::derive(
+            &budget,
+            1361.0 * formed.star.luminosity_solar / semi_major.powi(2),
+            5.0,
+        )
+        .expect("formation draws stay within structure domains");
         let orbit = Orbit {
             semi_major_au: semi_major,
             eccentricity,
@@ -313,17 +285,17 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
             phase_rad: phase,
         };
         bodies.push(Body {
-            spin: planet_spin(
-                &mut spins,
-                (class, mass, radius * EARTH_RADIUS_KM),
-                &orbit,
-                mass_solar,
-            ),
+            spin: Spin::default(),
             orbit,
-            class,
+            class: materials::provisional_class(&physical),
             mass_earth: mass,
-            radius_km: radius * EARTH_RADIUS_KM,
+            radius_km: physical.radius_m() / 1000.0,
             resonance: resonance.map(|(r, _)| r),
+            budget,
+            structure: physical,
+            formation_mass_earth: mass,
+            formation_distance_au: tentative,
+            retention_solve: RetentionSolve::NoEnvelope,
         });
     }
     bodies
@@ -339,25 +311,19 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
 /// - Free planets keep their birth spin: about a day for rocky worlds, ten to twenty
 ///   hours for giants. Giant impacts leave some tilted far over, like Uranus.
 /// - None turns so fast that it would be flatter than `shape::MAX_FLATTENING`.
-fn planet_spin(
-    rng: &mut Rng,
-    (class, mass_earth, radius_km): (Class, f64, f64),
-    orbit: &Orbit,
-    star_mass: f64,
-) -> Spin {
+fn planet_spin(rng: &mut Rng, body: &Body, star_mass: f64) -> Spin {
+    let orbit = &body.orbit;
+    let gas = body.structure.h_he_mass_fraction();
+    let envelope = (gas / 0.5).clamp(0.0, 1.0);
+    let small = ((0.02 - body.mass_earth) / 0.02).clamp(0.0, 1.0);
     let orbital_hours = period_seconds(orbit, star_mass) / 3_600.0;
     let a = orbit.semi_major_au;
     let reach = star_mass.cbrt();
-    let lock = match class {
-        Class::GasGiant | Class::IceGiant => 0.1 * reach,
-        Class::SubNeptune => 0.24 * reach,
-        Class::Rocky => 0.3 * reach,
-        Class::Dwarf => 0.0,
-    };
+    let lock = (0.3 - 0.2 * envelope) * (1.0 - small) * reach;
     let isotropic = |rng: &mut Rng| (1.0 - 2.0 * rng.unit()).acos();
     let (period_hours, tilt, locked) = if a < lock {
         (orbital_hours, rng.rayleigh(0.5_f64.to_radians()), true)
-    } else if matches!(class, Class::Rocky | Class::SubNeptune) && a < 2.5 * lock {
+    } else if gas < 0.1 && a < 2.5 * lock {
         if orbit.eccentricity > 0.1 {
             (
                 orbital_hours * 2.0 / 3.0,
@@ -370,24 +336,20 @@ fn planet_spin(
             (rng.log_range(1_000.0, 6_000.0), tilt, false)
         }
     } else {
-        let hours = match class {
-            Class::Rocky => rng.log_range(10.0, 60.0),
-            Class::SubNeptune => rng.log_range(10.0, 40.0),
-            Class::IceGiant => rng.log_range(12.0, 20.0),
-            Class::GasGiant => rng.log_range(9.0, 15.0),
-            Class::Dwarf => rng.log_range(4.0, 400.0),
+        let hours = rng.log_range(
+            10.0 - envelope - 6.0 * small,
+            60.0 - 45.0 * envelope + 340.0 * small,
+        );
+        let tilt = if rng.chance((0.75 + 0.1 * envelope) * (1.0 - small)) {
+            rng.rayleigh((22.0 - 4.0 * envelope).to_radians())
+        } else {
+            isotropic(rng)
         };
-        let tilt = match class {
-            Class::Dwarf => isotropic(rng),
-            Class::GasGiant | Class::IceGiant if rng.chance(0.85) => {
-                rng.rayleigh(18_f64.to_radians())
-            }
-            Class::Rocky | Class::SubNeptune if rng.chance(0.75) => {
-                rng.rayleigh(22_f64.to_radians())
-            }
-            _ => isotropic(rng),
-        };
-        let fastest = crate::system::shape::fastest_planet_hours(class, mass_earth, radius_km);
+        let fastest = crate::system::shape::fastest_planet_hours(
+            body.structure.inertia_factor(),
+            body.mass_earth,
+            body.radius_km,
+        );
         (hours.max(fastest), tilt, false)
     };
     Spin {
