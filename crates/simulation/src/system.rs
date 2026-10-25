@@ -6,6 +6,7 @@ pub mod composition;
 mod demo;
 mod generated;
 mod generation;
+pub mod materials;
 mod overlay;
 pub mod physical;
 pub mod shape;

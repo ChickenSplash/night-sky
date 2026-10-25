@@ -6,6 +6,10 @@ inventories first and derives retained mass, radius and inertia from them.
 Atmospheric gas and condensed reservoirs now share the same conserved inventory;
 validated inventory/reference transport and descriptive labels feed the inspector.
 Integration checkpoints are in [the refactor plan](../plans/planet-composition.md).
+The [layered structure contract](../plans/planet-structure.md) specifies the next
+phase. Its first dry-body solver is implemented as a separate headless API,
+described below. Generation still uses the approximate reservoir/radius model;
+no planets, snapshots, inspector fields or rendering use the new solver yet.
 
 ## Conserved inventory, not a classification
 
@@ -57,6 +61,9 @@ Condensation must explicitly transfer the same molecular material to condensates
 
 ## Cold compressed heavy-material radius
 
+This section describes the current **generation** model, not the separate radial
+solver below.
+
 Pure-material radii use Seager et al. (2007), equation 23 and the **modified-
 polytropic** rows of table 4, not the separate unparameterised full-EOS rows:
 
@@ -91,6 +98,92 @@ An H/He planet's heavy-material radius starts as a cold structural proxy, not a
 located core/envelope discontinuity. The bounded environmental correction below
 can promote it to an approximate thin-atmosphere boundary. Dissolved H₂/He is
 currently unsupported.
+
+## Headless dry-body solver
+
+`system::structure::dry` is an opt-in, spherical radial solver, not the generation
+default. The immutable request is a retained `Inventory`, imposed outer pressure
+and bounded numerical controls. The fixed model `cold_differentiated_seager_2007_v1`
+places all metal inside all silicate and omits zero-mass regions. Disjoint region
+inventories own allocation; their sum derives retained inventory. No mutable
+reservoir copy or legacy radius fallback is used along this path.
+
+Shared material identities now live in `system::materials`, re-exported from
+`composition` for existing callers. `materials::cold` supplies Seager et al.
+(2007), equation 11/table 3: `ρ(P)=ρ₀+cPⁿ`, in SI units:
+
+| Proxy | ρ₀ (kg/m³) | c (kg/m³ · Pa⁻ⁿ) | n |
+| --- | ---: | ---: | ---: |
+| Fe | 8300 | 0.00349 | 0.528 |
+| MgSiO₃ | 4100 | 0.00161 | 0.541 |
+
+The input mass domain is 0.0001–20 Earth masses and the pressure domain is
+0–10¹³ Pa **throughout**. These constraints intersect: not every mixture/load
+in the mass range can be solved below that pressure ceiling. The tested
+20-Earth-mass, 70%-metal and nearly/pure-metal fixtures return an explicit
+unbracketed error at the ceiling. Any positive water or gas, even a trace, is
+unsupported. An imposed external pressure allocates no atmospheric mass.
+Temperature and phase remain unresolved, including core solidity. Thermal
+expansion, reactions, porosity, mixtures within a region and rotational structure
+are not modelled. These are cold material proxies, not a reconstruction of Earth.
+
+The solver integrates mass conservation, hydrostatic balance and axial inertia.
+It uses dimensionless volume and `x=(m/M)^(1/3)` as the independent coordinate,
+with a regular centre expansion, adaptive Dormand-Prince 5(4) integration and
+central-pressure bracketing/bisection. Steps end exactly at material mass
+coordinates; interface radius, mass and pressure are continuous, while each
+region retains its own one-sided density. Error control measures volume/inertia
+**increments**, rather than letting a large accumulated state hide error in a
+trace shell. Negative-pressure trial stages are retried at smaller steps, never
+clamped or fed into an extrapolated EOS. No final radius rescaling or pressure
+translation repairs a failed solve.
+
+Results expose ordered profiles, material boundary radius, gravity, density,
+integrated inertia, model identity and raw pressure/work diagnostics. Profiles
+are accepted only with finite in-domain ordered states and per-region mass
+resolution to relative 10⁻⁸. If a tiny region cannot be represented by distinct
+mass/radius endpoints, it fails explicitly instead of losing its material.
+Allocation closure is species-local to relative 10⁻¹⁰ (exact for this pure-region
+allocation). The outer pressure residual is at most `max(1 Pa, 10⁻⁸ P_c)`, from
+above; this dry-body global criterion does **not** certify surface phase physics.
+Reference-pressure level lookup, atmosphere matching and transport are not yet
+part of this API.
+
+Numerical ceilings are 64 bracket expansions, 128 shooting iterations, 32,768
+attempted integration steps per trial and 2,000,000 EOS evaluations per request.
+Rejected steps and output density evaluations count towards those budgets. Controls
+may reduce ceilings, not raise them. Unsupported inputs, exhausted budgets,
+unbracketed roots, unresolved numerical intervals and invalid closure are typed
+failures, never partial successful planets or invitations to substitute a fit.
+
+Reproduce headless validation and the diagnostic reference table:
+
+```sh
+cargo test -p space-simulation system::structure::dry
+cargo test -p space-simulation prescribed_dry_reference_profiles -- --nocapture
+```
+
+Tests cover uniform and two-layer constant-density analytic solutions to relative
+10⁻⁶, independent radial quadrature of EOS density/inertia to relative 10⁻⁸,
+hydrostatic pressure-drop quadrature to relative 2×10⁻⁴, interface continuity,
+pure endpoints and 10⁻⁶-mass-fraction trace core/mantle fixtures. The grid spans
+0.0001, 0.0553, 1, 5 and 20 Earth masses, with ceiling failures asserted rather
+than replaced. Tightening integration tolerance by four and the maximum step by
+four changes accepted radius, inertia factor and central pressure by less than
+relative 10⁻⁵ on the refinement fixtures. Radial quadrature uses independent
+Gaussian integration of endpoint-Hermite pressure profiles, not cached mass
+coordinates or the solver's integrated inertia. Tests also check deterministic
+repeats, loading/compression and each work-budget failure. These tolerances
+measure numerical consistency, not scientific error bars.
+
+| Prescribed input | Radius (km) | Central pressure (bar) | I/(MR²) |
+| --- | ---: | ---: | ---: |
+| Mercury-like, 0.0553 Earth masses, 70% metal | 2248.354 | 500871.310 | 0.34434286 |
+| Earth-like, 1 Earth mass, 32.5% metal | 6113.591 | 3908596.767 | 0.34026229 |
+| Super-Earth, 5 Earth masses, 32.5% metal | 9764.913 | 17179412.883 | 0.32777865 |
+
+These diagnostic fixtures use vacuum outer pressure and are not exact matches to
+the named Solar System bodies. No coefficients were tuned to match them.
 
 ## Light envelopes and the giant transition
 

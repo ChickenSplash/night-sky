@@ -427,6 +427,16 @@ section proposes future work, not implemented behaviour. The reservoir contract
 above describes the current foundation; the region contract below is its planned
 replacement, not a second independently authoritative allocation.
 
+Checkpoint 1 specification is recorded in the
+[layered structure contract](planet-structure.md), including the first dry EOS,
+region ownership, unsupported cases, numerical targets and input/coverage
+fixtures. The user authorised checkpoint 2 after discussing the cold/dry scope
+and headless numerical validation. The separate `system::structure::dry` solver
+is now implemented and numerically tested; see the
+[canonical solver guide](../simulation/planet-composition.md#headless-dry-body-solver).
+Generation, transport and presentation remain unchanged. Water/thermal phase
+physics and dense envelopes are not implemented.
+
 ### Ownership and scope
 
 - Retained inventory is the conserved input, with source and escaped masses
@@ -510,7 +520,9 @@ modules and a small explicit public API. Add files as real responsibilities arri
    performance benchmarks and visually reviews changed presentation before the
    next integration. Update canonical guides as implementation lands.
 
-The next implementation task is checkpoint 1, not moving every file or replacing
-all planet types at once. Each checkpoint should leave a tested usable baseline;
+Checkpoint 2 now supplies the tested headless dry-body baseline. The next phase
+is checkpoint 3's water EOS/thermal/phase selection, not switching generation over
+or replacing all planet types at once. Each checkpoint should leave a tested
+usable baseline;
 an unsupported giant or water regime remains explicitly approximate until its
 own validated model exists.

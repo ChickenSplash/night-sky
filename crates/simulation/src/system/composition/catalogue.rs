@@ -1,54 +1,7 @@
 use super::super::atmosphere::Gas;
-
-/// Stable IDs, not ordinal values, are the external identity of constituents.
-/// Molecular budgets deliberately do not permit reactions between species.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Material {
-    Metal,
-    Silicate,
-    Water,
-    Hydrogen,
-    Helium,
-    Nitrogen,
-    CarbonDioxide,
-    Methane,
-    Oxygen,
-    Argon,
-}
+use super::Material;
 
 impl Material {
-    pub const ALL: [Self; 10] = [
-        Self::Metal,
-        Self::Silicate,
-        Self::Water,
-        Self::Hydrogen,
-        Self::Helium,
-        Self::Nitrogen,
-        Self::CarbonDioxide,
-        Self::Methane,
-        Self::Oxygen,
-        Self::Argon,
-    ];
-
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Metal => "iron_nickel",
-            Self::Silicate => "silicate",
-            Self::Water => "water",
-            Self::Hydrogen => "hydrogen",
-            Self::Helium => "helium",
-            Self::Nitrogen => "nitrogen",
-            Self::CarbonDioxide => "carbon_dioxide",
-            Self::Methane => "methane",
-            Self::Oxygen => "oxygen",
-            Self::Argon => "argon",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|m| m.id() == id)
-    }
-
     pub fn from_gas(gas: Gas) -> Self {
         match gas {
             Gas::Nitrogen => Self::Nitrogen,
@@ -60,10 +13,6 @@ impl Material {
             Gas::Oxygen => Self::Oxygen,
             Gas::Argon => Self::Argon,
         }
-    }
-
-    pub(super) fn index(self) -> usize {
-        Self::ALL.iter().position(|m| *m == self).unwrap()
     }
 
     pub fn properties(self) -> MaterialProperties {

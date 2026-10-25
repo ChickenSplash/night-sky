@@ -29,7 +29,8 @@ seed helpers, object identities and photometry stay at the crate root; see
 - [Physical atmospheres](simulation/atmospheres.md): initial retention/generation,
   gas mixtures, reference pressure levels, isothermal columns and their limits.
 - [Material inventories and structure](simulation/planet-composition.md): conserved
-  formation/retained budgets, approximate radii and bounded H/He retention.
+  formation/retained budgets, approximate generated radii, bounded H/He retention
+  and the separate headless dry-body radial solver.
 - [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
@@ -92,6 +93,8 @@ The Bevy/egui client in `crates/client`:
 - [Planet composition](plans/planet-composition.md): staged implementation plan for
   conserved material inventories, approximate structure, atmosphere integration
   and classifications derived afterwards, followed by user visual validation.
+- [Layered structure contract](plans/planet-structure.md): proposed region ownership,
+  first dry-interior EOS, numerical acceptance and water/envelope extension gates.
 
 ## Current limitations
 
@@ -127,6 +130,8 @@ The Bevy/egui client in `crates/client`:
    See [physical assumptions](simulation/atmospheres.md)
   and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
+  The cold layered dry-body solver is headless only, not used by generation,
+  transport or presentation; water phases and dense envelopes remain unsolved.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.
 

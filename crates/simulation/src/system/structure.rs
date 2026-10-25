@@ -1,8 +1,9 @@
-//! Fast, explicitly approximate composition-based reference radii.
-//! Population generation reconciles these against retained material inventories.
+//! Planet structure: fast approximate generated radii and a separate headless
+//! `dry` radial solver. Generation still uses the approximate inventory model.
 //! Prescriptions, provenance and domains: docs/simulation/planet-composition.md.
 
 pub(crate) mod boundary;
+pub mod dry;
 pub mod parameters;
 mod radius;
 
