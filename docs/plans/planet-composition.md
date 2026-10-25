@@ -418,3 +418,99 @@ Success is a coherent, extensible approximate model with conserved inventories,
 physical downstream inputs and descriptive labels. It is not a validated solution
 for every interior, climate, hydrosphere or geological surface. Visual review
 supplements physical tests; it cannot establish scientific accuracy by itself.
+
+## Next phase · layered planetary structure
+
+Draft started 2026-10-25 after the user requested integration of the current
+foundation and continued development on `refactor/planet-composition`. This
+section proposes future work, not implemented behaviour. The reservoir contract
+above describes the current foundation; the region contract below is its planned
+replacement, not a second independently authoritative allocation.
+
+### Ownership and scope
+
+- Retained inventory is the conserved input, with source and escaped masses
+  separately accounted. A solved planet allocates each material into physical
+  regions whose per-material totals reproduce that inventory.
+- A region carries composition and a radial profile of pressure, temperature,
+  density and phase. Regions can contain mixtures; neither each material nor
+  each phase automatically needs its own shell. Numerical integration cells
+  are implementation detail, not separate named geological layers.
+- Interior, condensed and atmospheric reservoir totals become derived views.
+  During migration, keep the old model behind an explicit adapter; never allow
+  both old reservoir allocations and new region allocations to be edited as truth.
+- The atmospheric column describes material already allocated to the atmosphere
+  or envelope. A giant's outer column is a subset of its mixed envelope, not
+  additional mass. A one-bar radius is a reference within that envelope.
+- Begin with spherical, differentiated, equilibrium structure. Select and declare
+  thermal prescriptions; composition and irradiation alone do not fix an interior.
+  Retain existing spheroidal geometry as a separate approximation.
+- Do not claim real-time differentiation, convection, impacts, chemical reactions,
+  climate, terrain or interior evolution. Bulk water does not imply an ocean.
+
+### Intended module ownership
+
+Under `crates/simulation/src/system/`, retain the domain namespaces:
+
+- `composition`: inventories and conservation bookkeeping.
+- `materials` (proposed): shared material identities, thermodynamic properties,
+  equations of state (EOS), phase and mixture prescriptions. Move existing
+  definitions when needed, rather than creating another material catalogue.
+- `structure`: regions/layers, radial integration, thermal prescriptions and
+  boundary/reference matching. Keep current radius fits isolated as approximate
+  models or test comparisons, not hidden substitutes for failed solves.
+- `atmosphere`: outer-column and optical calculations using the solved boundary.
+- `generation`: procedural inputs, retention and bounded orchestration of the
+  coupled solve. No interior differential equations in generation code.
+- `physical`: validated transport of solved facts. Client UI, rendering and
+  navigation consume those facts, never independently infer physical boundaries.
+
+Use existing `name.rs` plus sibling-directory conventions, private implementation
+modules and a small explicit public API. Add files as real responsibilities arrive.
+
+### Checkpoints and acceptance gates
+
+1. **Model contract and scientific prescriptions, before population changes.**
+   Specify inputs, outputs, region semantics, mass ownership, thermal boundary
+   conditions, supported EOS/phase/mixture domains and citations. Define numerical
+   tolerances, iteration/work limits and explicit unsupported/failure outcomes.
+   Include sample dry, water-rich, thin-atmosphere and H/He-envelope records.
+   Exit: one unambiguous allocation model and a reviewed scope for the first solver.
+2. **Independently tested radial solver.** Solve `dm/dr = 4πr²ρ` and
+   `dP/dr = -Gmρ/r²`, closed by the selected EOS and temperature prescription.
+   Handle the centre, interfaces and outer pressure boundary explicitly. Start
+   with analytic constant-density and differentiated dry-body fixtures. Test
+   mass closure, pressure continuity, convergence under resolution refinement,
+   inertia and gravity independently of the implementation's own identities.
+   Exit: bounded, deterministic solver, not yet the generation default.
+3. **Water-bearing condensed structures.** Add supported water phases and
+   interfaces under explicit thermal assumptions, including compression and
+   overlying atmospheric load. Validate against cited reference curves and
+   benchmark inputs with declared tolerances, not visual plausibility alone.
+   Preserve an explicit unresolved state outside supported domains.
+   Exit: supported water-rich bodies have meaningful outer boundaries without
+   asserting a resolved ocean or ice shell where the model cannot distinguish them.
+4. **Atmosphere/envelope coupling.** Match boundary pressure, mass and radius
+   iteratively, including volatile partitioning. Do not extend the ideal-gas outer
+   column into dense H/He and call it a giant interior. Add giant structure only
+   with a suitable EOS and thermal prescription; until then identify the existing
+   envelope approximation explicitly. Preserve unrestricted free-camera descent.
+   Exit: no duplicated gas inventory or independently chosen surface pressure.
+5. **Generation, transport and consumers.** Integrate with retention and final-orbit
+   forcing, with explicit convergence/failure semantics. Replace mutable reservoir
+   allocation with derived summaries along each migrated path. Validate snapshots
+   without repeating an expensive full solve for every UI/search read. Measure
+   generation/search costs and select caching or bounded approximations openly,
+   preserving deterministic results and stable IDs. Transport summaries first;
+   expose full radial profiles on demand if needed.
+6. **Calibration and user acceptance.** Check reference trends, population changes,
+   material conservation, interface continuity, stripping limits, shape/inertia,
+   clearance, rendering and inspector semantics. Run `./scripts/check.sh` and
+   affected shader checks; prepare reproducible live examples. The user runs
+   performance benchmarks and visually reviews changed presentation before the
+   next integration. Update canonical guides as implementation lands.
+
+The next implementation task is checkpoint 1, not moving every file or replacing
+all planet types at once. Each checkpoint should leave a tested usable baseline;
+an unsupported giant or water regime remains explicitly approximate until its
+own validated model exists.
