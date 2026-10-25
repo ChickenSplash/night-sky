@@ -9,6 +9,10 @@ how optional tasks attach to planets.
 
 ## Bodies, composition and spacing
 
+An independent [inventory and structure foundation](planet-composition.md) now
+exists for the composition refactor. It is not connected to generation yet;
+the class-first behaviour below remains current.
+
 - Composition follows the snow line: rocky worlds and sub-Neptunes inside,
   giants farther out and dwarf planets beyond. Radii range from Pluto-like to
   just beyond Jupiter.

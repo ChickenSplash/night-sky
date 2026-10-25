@@ -49,6 +49,8 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     atmosphere.rs    Physical air states, validation and isothermal columns
     atmosphere/      Seeded generation, visible optics and validated wire conversion
     clearance.rs     Navigation clearance: bulge, maintenance-free air height and margins
+    composition.rs   Conserved material inventories, catalogue and reservoir budgets
+    structure.rs     Independent approximate composition-based reference radii
     generation.rs    Natural planetary formation, independent of list/task placement
     overlay.rs       Optional task slots, pages and assigned-star placement
     demo.rs          Reproducible fictional overlay content

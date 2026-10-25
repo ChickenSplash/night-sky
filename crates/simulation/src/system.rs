@@ -2,11 +2,13 @@
 
 pub mod atmosphere;
 pub mod clearance;
+pub mod composition;
 mod demo;
 mod generated;
 mod generation;
 mod overlay;
 pub mod shape;
+pub mod structure;
 pub mod surface;
 
 pub use demo::demo_galaxy;

@@ -19,3 +19,7 @@ pub const SUN_GM: f64 =
     TAU * TAU * AU_METRES * AU_METRES * AU_METRES / (YEAR_SECONDS * YEAR_SECONDS);
 /// Earth's mass in solar masses.
 pub const EARTH_SOLAR: f64 = 3.003_489_6e-6;
+/// Newtonian gravitational constant, SI (CODATA 2022).
+pub const GRAVITATIONAL_CONSTANT: f64 = 6.674_30e-11;
+/// Mass unit consistent with the simulator's orbital gravitational parameter.
+pub const EARTH_MASS_KG: f64 = SUN_GM * EARTH_SOLAR / GRAVITATIONAL_CONSTANT;

@@ -28,6 +28,8 @@ seed helpers, object identities and photometry stay at the crate root; see
   snow line, mass–radius fits, Hill spacing, resonances, spins and stable body IDs.
 - [Physical atmospheres](simulation/atmospheres.md): initial retention/generation,
   gas mixtures, reference pressure levels, isothermal columns and their limits.
+- [Material inventories and structure](simulation/planet-composition.md): independently
+  tested conserved budgets and approximate radii, not yet used by generation.
 - [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
@@ -87,8 +89,9 @@ The Bevy/egui client in `crates/client`:
   per-planet rendering work, validation history and explicitly deferred follow-ups.
 - [Planet surfaces](plans/planet-surfaces.md): bodies flattened by their spin,
   landing on the ground, then geology, water and giants' depths.
-- [Planet composition](plans/planet-composition.md): starter proposal for physical
-  inventories, consistent properties and classifications derived afterwards.
+- [Planet composition](plans/planet-composition.md): staged implementation plan for
+  conserved material inventories, approximate structure, atmosphere integration
+  and classifications derived afterwards, followed by user visual validation.
 
 ## Current limitations
 
