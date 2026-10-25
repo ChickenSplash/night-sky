@@ -607,7 +607,7 @@ impl Canvas<'_> {
                     pixels: disc / per_pixel,
                     per_pixel,
                     light: self.illumination(orbital, local),
-                    surface: space_simulation::light::surface(&planet.class),
+                    surface: space_simulation::light::planet_surface(planet),
                     air: render::atmosphere::generated::for_planet(
                         planet, selected, self.air, radius,
                     ),

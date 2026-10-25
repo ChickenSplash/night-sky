@@ -980,7 +980,7 @@ fn a_query_built_with_chips_matches_the_cli() {
 #[test]
 fn chips_read_as_text_and_remove_what_they_stand_for() {
     let mut query = Query::parse(
-        "kind=planet planet_class=sub_neptune,ice_giant radius_km=1000..5000 orbits.star_class=m system.kind=star",
+        "kind=planet planet_class=sub_neptune,envelope_world radius_km=1000..5000 orbits.star_class=m system.kind=star",
     )
     .unwrap();
     let chips = filters::chips(&query);

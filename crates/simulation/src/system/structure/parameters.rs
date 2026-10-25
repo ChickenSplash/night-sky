@@ -35,10 +35,11 @@ pub const GIANT_TURNOVER_MASS_EARTH: f64 = 95.0;
 pub const GIANT_HIGH_MASS_EXPONENT: f64 = -0.04;
 pub const GIANT_BLEND_FRACTION_RANGE: [f64; 2] = [0.1, 0.5];
 
-/// Descriptive thresholds reserved for checkpoint 4, never structure inputs.
+/// Ordered display thresholds only, never structure or appearance inputs.
 pub mod classification {
     pub const METAL_RICH_MASS_FRACTION: f64 = 0.5;
     pub const WATER_RICH_MASS_FRACTION: f64 = 0.25;
     pub const SIGNIFICANT_H_HE_MASS_FRACTION: f64 = 0.001;
     pub const H_HE_DOMINATED_MASS_FRACTION: f64 = 0.5;
+    pub const ENVELOPE_WORLD_MASS_FRACTION: f64 = 0.1;
 }

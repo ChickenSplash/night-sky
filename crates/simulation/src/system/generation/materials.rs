@@ -82,17 +82,24 @@ pub(super) fn draw(
     Budget::new(source, interior, condensate, gas).expect("bounded formation allocations")
 }
 
-/// Temporary compatibility description only. Checkpoint 4 replaces these old
-/// names and audits consumers. This function never chooses a physical quantity.
-pub(super) fn provisional_class(structure: &crate::system::structure::Structure) -> Class {
+/// Ordered display rules only, never inputs to any physical prescription.
+pub(super) fn classify(budget: &Budget, structure: &crate::system::structure::Structure) -> Class {
     use crate::system::structure::parameters::classification;
     let fraction = structure.h_he_mass_fraction();
     if fraction >= classification::H_HE_DOMINATED_MASS_FRACTION {
         Class::GasGiant
-    } else if fraction >= 0.1 {
-        Class::IceGiant
+    } else if fraction >= classification::ENVELOPE_WORLD_MASS_FRACTION {
+        Class::EnvelopeWorld
     } else if fraction >= classification::SIGNIFICANT_H_HE_MASS_FRACTION {
         Class::SubNeptune
+    } else if budget.retained().mass_kg(Material::Water) / structure.mass_kg()
+        >= classification::WATER_RICH_MASS_FRACTION
+    {
+        Class::WaterRich
+    } else if budget.retained().mass_kg(Material::Metal) / structure.mass_kg()
+        >= classification::METAL_RICH_MASS_FRACTION
+    {
+        Class::MetalRich
     } else {
         Class::Rocky
     }
@@ -102,6 +109,64 @@ pub(super) fn provisional_class(structure: &crate::system::structure::Structure)
 mod tests {
     use super::*;
     use crate::system::composition::Reservoir;
+
+    #[test]
+    fn ordered_descriptions_do_not_assert_phase_or_dynamical_clearing() {
+        let mass = 100.0 * EARTH_MASS_KG;
+        let sample = |water: f64, metal: f64, light: f64| {
+            let interior = Inventory::new(&[
+                (Material::Metal, mass * metal),
+                (Material::Silicate, mass * (1.0 - metal - water - light)),
+            ])
+            .unwrap();
+            let condensed = Inventory::new(&[(Material::Water, mass * water)]).unwrap();
+            let gas = Inventory::new(&[
+                (Material::Hydrogen, mass * light * 0.75),
+                (Material::Helium, mass * light * 0.25),
+            ])
+            .unwrap();
+            let source = interior
+                .checked_add(&condensed)
+                .unwrap()
+                .checked_add(&gas)
+                .unwrap();
+            let b = Budget::new(source, interior, condensed, gas).unwrap();
+            let s = structure::derive(&b, 1361.0, 4.5).unwrap();
+            (b, s)
+        };
+        for (water, metal, light, expected) in [
+            (0.0, 0.3, 0.0, Class::Rocky),
+            (0.0, 0.5, 0.0, Class::MetalRich),
+            (0.25, 0.5, 0.0, Class::WaterRich),
+            (0.25, 0.5, 0.01, Class::SubNeptune),
+            (0.25, 0.3, 0.2, Class::EnvelopeWorld),
+            (0.0, 0.1, 0.6, Class::GasGiant),
+        ] {
+            let (b, s) = sample(water, metal, light);
+            assert_eq!(classify(&b, &s), expected);
+        }
+        // Both sides of label boundaries keep the continuous physical solution.
+        for (water, metal, light) in [
+            (0.25, 0.3, 0.0),
+            (0.0, 0.5, 0.0),
+            (0.0, 0.3, 0.001),
+            (0.0, 0.3, 0.1),
+            (0.0, 0.3, 0.5),
+        ] {
+            let (a, sa) = sample(
+                water * (1.0 - 1e-8),
+                metal * (1.0 - 1e-8),
+                light * (1.0 - 1e-8),
+            );
+            let (b, sb) = sample(
+                water * (1.0 + 1e-8),
+                metal * (1.0 + 1e-8),
+                light * (1.0 + 1e-8),
+            );
+            assert_ne!(classify(&a, &sa), classify(&b, &sb));
+            assert!((sa.radius_m() / sb.radius_m() - 1.0).abs() < 1e-6);
+        }
+    }
 
     #[test]
     fn continuous_feeding_and_host_mass_priors_not_class_lottery() {

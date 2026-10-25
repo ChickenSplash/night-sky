@@ -2,9 +2,11 @@
 
 ## Status and goal
 
-Checkpoints 1 through 3 implemented. Generation draws inventories, accounts for
+Checkpoints 1 through 4 implemented. Generation draws inventories, accounts for
 escape and reconciles retained structure at final orbits. Atmospheres and cold
-condensates share that budget. Labels and full transport await checkpoint 4.
+condensates share that budget. Derived labels, validated composition transport
+and the sectioned, bounded inspector are implemented. Calibration and final visual
+review remain checkpoints 5 and 6.
 Physical prescriptions and limitations are in the
 [composition guide](../simulation/planet-composition.md).
 Work on `refactor/planet-composition`,
@@ -184,29 +186,43 @@ always clears procedural air.
 
 ### 4. Classification, transport and inspection
 
-- [ ] Derive rocky/metal-rich, water-rich and envelope-world descriptions using
+- [x] Derive rocky/metal-rich, water-rich and envelope-world descriptions using
   documented physical thresholds. Conventional size labels may overlap in nature;
   deterministic display rules must be explicit and not feed back into physics.
-- [ ] Remove composition-class use of `Dwarf`. Do not assert orbital clearing from
+- [x] Remove composition-class use of `Dwarf`. Do not assert orbital clearing from
   a small mass alone; defer a dynamical dwarf classification unless justified.
-- [ ] Audit generation, shape, surface/photometry, search filters, fixtures,
+- [x] Audit generation, shape, surface/photometry, search filters, fixtures,
   snapshots and client rendering for class dependencies. Appearance proxies must
   use explicit physical inputs and be labelled as approximations where needed.
-- [ ] Carry composition and structure facts through generated systems and task
+- [x] Carry composition and structure facts through generated systems and task
   overlays, with validated wire conversion and explicit unknown legacy state.
-- [ ] Show material fractions, retained mass, density, envelope fraction and
+- [x] Show material fractions, retained mass, density, envelope fraction and
   solid/reference-radius meaning in the inspector and developer readout.
-- [ ] Introduce a small typed inspector presentation model with stable field IDs,
+- [x] Introduce a small typed inspector presentation model with stable field IDs,
   sections, labels, units, formatted values and explicit unknown values. HUD and
   developer export consume the same description; physical records remain separate.
   Use Overview, Composition, Orbit, Rotation and Atmosphere sections, leaving room
   for hydrospheres without introducing a general schema/configuration framework.
-- [ ] Bound the expanded inspector layout deliberately, using collapsible sections
+- [x] Bound the expanded inspector layout deliberately, using collapsible sections
   or scrolling rather than appending unbounded rows. Preserve the existing HUD style.
-- [ ] Update classification filters and registry tests. Additional composition
+- [x] Update classification filters and registry tests. Additional composition
   search operators are optional follow-up, not required for this refactor.
 
 Exit: changing a label threshold changes descriptions only, never physical output.
+
+Checkpoint 4 uses ordered retained-fraction labels (including metal-/water-rich
+and envelope worlds), with no dynamical dwarf or inferred ice-interior label.
+Both wire paths carry one conserved physical record, validated by budget
+reconstruction and algebraic structure re-derivation. Appearance is a continuous,
+explicit composition proxy; only missing legacy records may use class fallbacks.
+The halo inspector keeps the existing style with five sections and bounded
+vertical scrolling. Typed fields feed the HUD and developer export; legacy
+label/value API facts remain a projection. Tests cover label boundaries,
+relabelling, normal/overlay parity, invalid/legacy records, filters, field metadata,
+narrow viewports and scrolling through the final navigation action.
+
+The user visually reviewed checkpoint 4 and approved it for commit. This is
+checkpoint approval, not final approval to integrate into `main`.
 
 ### 5. Calibration, regression checks and documentation
 

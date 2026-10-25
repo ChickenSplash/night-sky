@@ -170,7 +170,7 @@ pub(crate) fn finalise(
         .expect("generated inventory must have supported convergent retained structure");
     body.mass_earth = structure.mass_kg() / EARTH_MASS_KG;
     body.radius_km = structure.radius_m() / 1000.0;
-    body.class = materials::provisional_class(&structure);
+    body.class = materials::classify(&budget, &structure);
     body.budget = budget;
     body.structure = structure;
     body.retention_solve = solve;

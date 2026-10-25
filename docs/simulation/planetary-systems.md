@@ -10,7 +10,7 @@ how optional tasks attach to planets.
 ## Bodies, composition and spacing
 
 Generation uses the [inventory and structure model](planet-composition.md).
-Mass and composition drive radius and inertia; compatibility labels are derived
+Mass and composition drive radius and inertia; descriptive labels are derived
 afterwards. Atmospheric supply and condensates share the conserved material budget.
 
 - Water acquisition rises smoothly across the formation snow line. Heavy-core
@@ -42,7 +42,7 @@ accreting into planets. For each permitted host (a star or close pair):
 7. Once the entire hierarchy and final orbits exist, share all-star heating
    samples with the atmosphere model. Account for accessible secondary volatile
    escape, solve H/He survival and structure together, then assign independently
-   seeded spin and provisional descriptions. Partition retained gas and condensates.
+   seeded spin and descriptions. Partition retained gas and condensates.
 8. Recheck stability using final retained masses. Escape only reduces masses,
    so the formation-mass spacing remains conservative.
 
@@ -153,7 +153,8 @@ $$
   Generated $k$ uses an approximate composition/envelope central-concentration
   prescription, [documented here](planet-composition.md#inertia-and-spin).
   It is carried on wire records so clients and spin limits agree. Only older
-  records without a valid physical factor use the isolated class-based fallback.
+  legacy records without composition or a valid physical factor use an isolated
+  class-based fallback; malformed new records never use their class as physics.
 - **Stars, Roche model** (mass at the centre). The equator sits where
   $GM/R_e + \omega^2 R_e^2/2 = GM/R_p$, up to $1.5R_p$ at break-up. With the
   mean radius kept, $R_e/R_p = 1/(1 - W)$ for $W = \omega^2 R^3 / 2GM$, so
@@ -192,9 +193,8 @@ After the full stellar hierarchy and stable planetary orbits are known,
 the [physical atmosphere model](atmospheres.md) assigns each planet an approximate
 environment: all-star mean heating, atmospheric retention, gas mixtures,
 reference pressure and isothermal column estimates. Separate seeds preserve
-orbital generation. Atmospheric supply still uses a provisional class prior,
-not yet the conserved bulk inventory. This temporary mismatch is checkpoint 3
-work, not a claim of atmosphere/interior consistency. The inspector
+orbital generation. Atmospheric supply and cold condensates use the same conserved
+material budget as bulk structure, never a class prior. The inspector
 shows generated air, and per-planet optical conversion supplies rendering.
 Selected-planet debug air remains an optional override.
 

@@ -1,7 +1,8 @@
 //! A body's ground: heights above its spheroid (`shape`), measured along the
-//! spheroid's normal as Earth's are from its reference ellipsoid. Height zero
-//! is sea level. Drawing, collision and later water and air all ask here, so
-//! the ground that is seen is the ground that is stood on.
+//! spheroid's normal. Height zero is the model reference boundary, not a claim
+//! of sea level or landable ground. One-bar envelopes use an opaque lower
+//! boundary proxy; volatile boundaries have unresolved phases. Drawing and
+//! collision share this geometry, without solving deep descent or an ocean.
 
 use crate::system::shape::Spheroid;
 use glam::DVec3;

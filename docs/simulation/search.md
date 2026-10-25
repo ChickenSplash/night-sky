@@ -16,7 +16,13 @@ measurements and future ideas, not the current UI specification.
   are browsing groups, not scientific taxonomy.
 - Types within a kind are properties: `kind=star star_class=m` for a red dwarf,
   `kind=planet planet_class=sub_neptune` for a sub-Neptune. Stellar classes
-  include O, B, A, F, G, K, M, giant and white dwarf.
+   include O, B, A, F, G, K, M, giant and white dwarf.
+- Planet choices are `rocky`, `metal_rich`, `water_rich`, `sub_neptune`,
+  `envelope_world`, `gas_giant`. These are ordered descriptive buckets, not physics
+  selectors; thresholds and precedence are in the
+  [composition guide](planet-composition.md#descriptive-labels).
+  `dwarf` and `ice_giant` are no longer accepted planet filters: neither orbital
+  clearing nor a resolved ice interior follows from this model.
 - `query::Query` is serde/versioned, with `text`, `kinds`, `filters`,
   `relations`, `scope`, `sort` and `limit`. `Query::parse`/`to_text` provide
   one text syntax; `check` refuses unsupported queries with reasons.

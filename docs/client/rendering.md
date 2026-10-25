@@ -80,10 +80,15 @@ $$
 A surface tilted by angle $\theta$ to the incoming light contributes a factor
 $\max(0,\cos\theta)$. Multiple stars add their contributions with their own
 directions and colours. There is no artificial night-side ambient illumination.
-Planet classes provide fixed representative coefficients and tints: rocky worlds
-use 0.30, dwarfs 0.15, sub-Neptunes 0.35, ice giants 0.45 and gas giants 0.50.
-These are appearance prescriptions, not calculated atmospheres, clouds, terrain
-or climate. The model does not resolve detailed scattering or spectral reflectance.
+Generated planets use a continuous composition-based **appearance proxy**, not a
+class lookup. With retained water/metal/H₂-He mass fractions `w`, `m`, `h`, set
+`e=clamp(h/0.5,0,1)`. Reflectance is `(0.30+0.15w-0.10m)(1-e)+0.50e`.
+Tint blends `[0.60+0.10m, 0.55+0.15w, 0.50+0.30w]` towards
+`[0.80,0.70,0.55]` by `e`, then normalises to unit luminance. These tunable proxies
+do not assert exposed water, mineral spectra or clouds. Atmospheric optical
+coefficients still come from actual gas composition. Label threshold changes
+cannot change reflected light. Only legacy records without physical composition
+keep the old class coefficients; invalid new records use neutral rock reflectance.
 
 When a planet is too small to resolve, its point light includes the illuminated
 phase. Let $\alpha$ be the angle at the planet between the star and observer:
@@ -328,7 +333,7 @@ being silently given micron-particle optics. See the
 Extended columns retain the constant-gravity estimate and inspector warning,
 without a radius clamp. A one-bar envelope's lower opaque sphere is a simple
 cloud/deep-envelope proxy at the reference radius, shaded with the existing
-class reflectance and atmosphere tables, not a generated cloud deck or a solid
+composition reflectance proxy and atmosphere tables, not a generated cloud deck or a solid
 surface. It has no terrain chunks. This rendering choice changes neither
 collision nor flight mechanics, and does not model descent below that radius.
 

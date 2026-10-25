@@ -7,6 +7,7 @@ mod demo;
 mod generated;
 mod generation;
 mod overlay;
+pub mod physical;
 pub mod shape;
 pub mod structure;
 pub mod surface;

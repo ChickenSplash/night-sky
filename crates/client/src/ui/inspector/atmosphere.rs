@@ -1,32 +1,49 @@
 //! Generated physical facts, never the renderer's selected-planet override.
-use super::Info;
+use super::{Info, Section};
 use space_shared::{AtmosphereReference, PlanetEnvironment};
 
 pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
+    info.section = Section::Atmosphere;
     let Some(environment) = environment else {
-        info.fact("Atmosphere", "Not generated");
+        info.unknown("atmosphere.state", "Atmosphere", "Not generated");
         return;
     };
-    info.fact(
+    info.field(
+        "atmosphere.heating",
         "Stellar heating",
+        Some("W/m²"),
         format!("{:.1} W/m² (mean estimate)", environment.irradiation_w_m2),
     );
-    info.fact(
+    info.field(
+        "atmosphere.equilibrium_temperature",
         "Equilibrium temperature",
+        Some("K"),
         format!(
             "{:.0} K (assumed albedo {:.2})",
             environment.equilibrium_temperature_k, environment.assumed_bond_albedo
         ),
     );
     let Some(air) = &environment.atmosphere else {
-        info.fact("Atmosphere", "Absent or trace (below model cutoff)");
+        info.field(
+            "atmosphere.state",
+            "Atmosphere",
+            None,
+            "Absent or trace (below model cutoff)",
+        );
         return;
     };
-    info.fact("Atmosphere", "Present · approximate generated model");
+    info.field(
+        "atmosphere.state",
+        "Atmosphere",
+        None,
+        "Present · approximate generated model",
+    );
     let mut gases: Vec<_> = air.gases.iter().collect();
     gases.sort_by(|a, b| b.mole_fraction.total_cmp(&a.mole_fraction));
-    info.fact(
+    info.field(
+        "atmosphere.mixture",
         "Gas mixture",
+        Some("% by molecule"),
         gases
             .iter()
             .map(|part| {
@@ -40,11 +57,13 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
             .collect::<Vec<_>>()
             .join(", "),
     );
-    info.fact(
+    info.field(
+        "atmosphere.pressure",
         match air.reference_level {
             AtmosphereReference::Surface => "Surface pressure",
             AtmosphereReference::OneBar => "Reference pressure",
         },
+        Some(if air.pressure_pa < 100.0 { "Pa" } else { "bar" }),
         if air.reference_level == AtmosphereReference::OneBar {
             "1 bar (reference level, not ground)".into()
         } else if air.pressure_pa < 100.0 {
@@ -53,31 +72,41 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
             format!("{:.4} bar", air.pressure_pa / 1e5)
         },
     );
-    info.fact(
+    info.field(
+        "atmosphere.column_temperature",
         "Column temperature",
+        Some("K"),
         format!(
             "{:.0} K (isothermal estimate, no greenhouse)",
             air.temperature_k
         ),
     );
-    info.fact(
+    info.field(
+        "atmosphere.density",
         "Gas density",
+        Some("kg/m³"),
         format!(
             "{:.3e} kg/m³ (ideal gas at reference level)",
             air.reference_density_kg_m3
         ),
     );
-    info.fact(
+    info.field(
+        "atmosphere.scale_height",
         "Scale height",
+        Some("km"),
         format!("{:.1} km", air.scale_height_m / 1e3),
     );
-    info.fact(
+    info.field(
+        "atmosphere.extent",
         "Atmosphere extent",
+        Some("km"),
         format!("{:.1} km (operational cutoff)", air.extent_m / 1e3),
     );
     if air.extended {
-        info.fact(
+        info.field(
+            "atmosphere.validity",
             "Column validity",
+            None,
             "Extended: constant-gravity estimate unreliable",
         );
     }
@@ -92,10 +121,10 @@ mod tests {
         let mut info = Info::default();
         facts(&mut info, None);
         assert_eq!(
-            info.rows,
-            vec![("Atmosphere".into(), "Not generated".into())]
+            info.rows().collect::<Vec<_>>(),
+            vec![("Atmosphere", "Not generated")]
         );
-        info.rows.clear();
+        info.fields.clear();
         facts(
             &mut info,
             Some(&PlanetEnvironment {
@@ -107,14 +136,13 @@ mod tests {
             }),
         );
         assert!(
-            info.rows
-                .iter()
+            info.rows()
                 .any(|(key, value)| key == "Atmosphere" && value.starts_with("Absent"))
         );
-        assert!(info.rows.iter().any(
+        assert!(info.rows().any(
             |(key, value)| key == "Equilibrium temperature" && value.contains("assumed albedo")
         ));
-        assert!(!info.rows.iter().any(|(key, _)| key == "Surface pressure"));
+        assert!(!info.rows().any(|(key, _)| key == "Surface pressure"));
     }
 
     #[test]
@@ -138,22 +166,20 @@ mod tests {
                 "Scale height",
                 "Atmosphere extent",
             ] {
-                assert!(info.rows.iter().any(|(key, _)| key == label));
+                assert!(info.rows().any(|(key, _)| key == label));
             }
             match air.reference_level {
                 AtmosphereReference::Surface => {
                     surface = true;
-                    assert!(info.rows.iter().any(|(key, _)| key == "Surface pressure"));
+                    assert!(info.rows().any(|(key, _)| key == "Surface pressure"));
                 }
                 AtmosphereReference::OneBar => {
                     envelope = true;
                     assert!(
-                        info.rows
-                            .iter()
-                            .any(|(key, value)| key == "Reference pressure"
-                                && value.contains("not ground"))
+                        info.rows().any(|(key, value)| key == "Reference pressure"
+                            && value.contains("not ground"))
                     );
-                    assert!(!info.rows.iter().any(|(key, _)| key == "Surface pressure"));
+                    assert!(!info.rows().any(|(key, _)| key == "Surface pressure"));
                 }
             }
         }

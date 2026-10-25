@@ -115,7 +115,8 @@ The Bevy/egui client in `crates/client`:
   not solved climate or atmospheric evolution. No generated clouds/aerosols or
   greenhouse solution yet; extended columns retain constant-gravity estimates.
   Bulk mass/radius, atmospheric gas and cold condensates now share conserved
-  inventories; labels remain provisional pending composition checkpoint 4.
+  inventories. Descriptive labels never select physical properties; composition
+  and reference facts are validated in transport and visible in the inspector.
   Table-readiness pop-in, grey view-path transmission and airless point/rim
   photometry remain. Envelope lower boundaries are opaque proxies, not solid
   ground or simulated deep descent. See [physical assumptions](simulation/atmospheres.md)

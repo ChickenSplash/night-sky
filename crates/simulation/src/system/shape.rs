@@ -62,10 +62,11 @@ impl Class {
     /// From `Class::name`, as a planet carries it.
     pub fn from_name(name: &str) -> Option<Self> {
         [
-            Class::Dwarf,
             Class::Rocky,
+            Class::MetalRich,
+            Class::WaterRich,
             Class::SubNeptune,
-            Class::IceGiant,
+            Class::EnvelopeWorld,
             Class::GasGiant,
         ]
         .into_iter()
@@ -78,10 +79,9 @@ impl Class {
     /// its composition-derived factor explicitly.
     fn inertia(self) -> f64 {
         match self {
-            Class::Dwarf => 0.35,
-            Class::Rocky => 0.33,
+            Class::Rocky | Class::MetalRich | Class::WaterRich => 0.33,
             Class::SubNeptune => 0.26,
-            Class::IceGiant => 0.23,
+            Class::EnvelopeWorld => 0.23,
             Class::GasGiant => 0.25,
         }
     }
@@ -123,13 +123,22 @@ pub(crate) fn star_flattening(mass_solar: f64, radius_solar: f64, period_hours: 
     w.min(MAX_FLATTENING)
 }
 
-/// Physical inertia for generated planets; isolated legacy class fallback only
-/// for records predating composition-based generation or invalid wire values.
+/// Physical inertia for generated planets. Class fallback is restricted to
+/// legacy records without composition; malformed new records use a neutral factor.
 pub fn planet_shape(planet: &Planet) -> Spheroid {
     let inertia = planet
         .inertia_factor
         .filter(|k| k.is_finite() && (0.1..=0.4).contains(k))
         .unwrap_or_else(|| {
+            if planet.physical.is_some() {
+                // Malformed new data must not turn a display label into physics.
+                return 0.33;
+            }
+            match planet.class.as_str() {
+                "Dwarf planet" => return 0.35,
+                "Ice giant" => return 0.23,
+                _ => {}
+            }
             Class::from_name(&planet.class)
                 .unwrap_or(Class::Rocky)
                 .inertia()
@@ -254,10 +263,11 @@ mod tests {
     #[test]
     fn classes_round_trip_by_name() {
         for class in [
-            Class::Dwarf,
             Class::Rocky,
+            Class::MetalRich,
+            Class::WaterRich,
             Class::SubNeptune,
-            Class::IceGiant,
+            Class::EnvelopeWorld,
             Class::GasGiant,
         ] {
             assert_eq!(Class::from_name(class.name()), Some(class));

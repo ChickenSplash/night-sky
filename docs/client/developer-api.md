@@ -173,6 +173,12 @@ action buttons and, for a located star or system, `velocity_kms`
 (galactocentric, galaxy axes). It reuses `ui::inspector::describe`, actions and list-page
 builders; facts invalidate on object/universe changes, not every publication.
 
+`fields` exports the typed inspector presentation used by the HUD: `id`, `section`,
+`label`, `unit` (nullable), and `value` with `state=known|unknown` and formatted
+`text`. Planet IDs are explicit, independent of display labels. `facts` remains
+the backwards-compatible ordered label/value projection. Missing composition
+exports unknown reasons instead of fabricated zero mass fractions.
+
 Buttons include label, current/available state, group and kind. Unreachable
 buttons are omitted, like the UI. Command buttons export ordered `commands`
 arrays of UiCommand JSON accepted by `ns cmd` or `POST /command`. List-system

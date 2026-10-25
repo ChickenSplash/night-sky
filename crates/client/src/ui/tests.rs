@@ -510,7 +510,7 @@ fn text_huds_share_edge_padding_and_bottom_baseline() {
 }
 
 #[test]
-fn floating_inspector_grows_after_tab_changes_and_wraps_in_a_narrow_viewport() {
+fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport() {
     let ctx = egui::Context::default();
     let galaxy = space_simulation::demo_galaxy();
     let mut nav = Navigation::default();
@@ -550,7 +550,7 @@ fn floating_inspector_grows_after_tab_changes_and_wraps_in_a_narrow_viewport() {
             );
         }
         if stage == 1 {
-            for prefix in ["Orbital period", "Fly to planet"] {
+            for prefix in ["Overview", "Composition", "Retained mass"] {
                 let shape = output
                     .shapes
                     .iter()
@@ -587,7 +587,7 @@ fn floating_inspector_grows_after_tab_changes_and_wraps_in_a_narrow_viewport() {
 }
 
 #[test]
-fn floating_inspector_expands_instead_of_scrolling() {
+fn floating_inspector_bounds_long_composition_with_scrolling() {
     let ctx = egui::Context::default();
     let galaxy = space_simulation::demo_galaxy();
     let mut nav = Navigation::default();
@@ -623,10 +623,54 @@ fn floating_inspector_expands_instead_of_scrolling() {
         .memory(|memory| memory.area_rect(egui::Id::new("breadcrumb")))
         .unwrap();
     assert!(
-        area.height() > viewport.height(),
-        "information must use its natural height: {area:?}"
+        area.bottom() <= viewport.bottom() - crate::ui::kit::halo::HUD_PADDING + 1.0,
+        "information must stay inside the viewport: {area:?}"
     );
     assert!((area.top() - crate::ui::kit::halo::HUD_PADDING).abs() < 1.0);
+    assert!(
+        !output.shapes.iter().any(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) =>
+                text.galley.job.text == "Fly to planet"
+                    && shape
+                        .clip_rect
+                        .contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())),
+            _ => false,
+        }),
+        "long information must be clipped until scrolled into view"
+    );
+    // The final action remains reachable through wheel scrolling, not discarded.
+    for frame in 0..12 {
+        output = ctx.run(
+            egui::RawInput {
+                time: Some(1.0 + frame as f64 * 0.1),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 1000.0),
+                )),
+                events: vec![
+                    egui::Event::PointerMoved(egui::pos2(400.0, 100.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -2000.0),
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ctx| {
+                crate::ui::breadcrumb::show(
+                    ctx,
+                    viewport,
+                    &nav,
+                    &galaxy,
+                    &crate::stars::stream::Starfield::default(),
+                    &mut inspector,
+                    crate::craft::Now::none(),
+                    &mut commands,
+                )
+            },
+        );
+    }
     assert!(
         output.shapes.iter().any(|shape| match &shape.shape {
             egui::epaint::Shape::Text(text) =>
@@ -636,7 +680,7 @@ fn floating_inspector_expands_instead_of_scrolling() {
                         .contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())),
             _ => false,
         }),
-        "final information row must remain visible, not inside a short scroll viewport"
+        "the final navigation action must be reachable by scrolling"
     );
 }
 

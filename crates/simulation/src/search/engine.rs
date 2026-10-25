@@ -682,10 +682,11 @@ pub(crate) fn star_class(star: &Star) -> &'static str {
 
 pub(crate) fn planet_class(class: Class) -> &'static str {
     match class {
-        Class::Dwarf => "dwarf",
         Class::Rocky => "rocky",
+        Class::MetalRich => "metal_rich",
+        Class::WaterRich => "water_rich",
         Class::SubNeptune => "sub_neptune",
-        Class::IceGiant => "ice_giant",
+        Class::EnvelopeWorld => "envelope_world",
         Class::GasGiant => "gas_giant",
     }
 }

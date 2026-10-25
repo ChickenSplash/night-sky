@@ -335,7 +335,7 @@ fn inventories_match_final_structure_and_regenerate_independently_of_order() {
                 }
                 // Spin draws and structure must not use the compatibility label.
                 let mut renamed = body.clone();
-                renamed.class = Class::Dwarf;
+                renamed.class = Class::WaterRich;
                 let spin =
                     |b: &Body| planet_spin(&mut Rng::new("same-spin"), b, actual.mass(&a.host));
                 assert_eq!(spin(body), spin(&renamed));

@@ -309,6 +309,8 @@ pub fn show(
             // so the shared inset is measured from the text itself.
             ui.spacing_mut().interact_size.y = 0.0;
             ui.set_max_width((rect.width() - HUD_PADDING * 2.0).max(1.0));
+            // Area's previous natural height must not constrain a newly longer tab.
+            ui.set_max_height((rect.height() - HUD_PADDING * 2.0).max(1.0));
             let location = trail(nav, galaxy);
             let selected = selection_trail(nav, galaxy, now);
             let active = active_inspection(nav, galaxy, &location, &selected);
@@ -350,9 +352,18 @@ pub fn show(
                 });
             }
             ui.add_space(HUD_LINE_GAP);
-            // Natural content height: no scrolling, scrollbar or reserved
-            // bottom strip. Long information can use the whole left side.
-            crate::ui::inspector::show(ui, &active, nav, galaxy, field, inspector, now, out);
+            // Keep long compositions inside the viewport, including small windows.
+            let height = (rect.bottom() - ui.cursor().top() - HUD_PADDING * 3.0).max(1.0);
+            ui.set_max_width(ui.available_width().min(480.0));
+            crate::ui::kit::ScrollArea::vertical()
+                .id_salt(("inspector", format!("{:?}", active.object)))
+                .max_height(height)
+                .min_scrolled_height(1.0)
+                .show(ui, |ui| {
+                    crate::ui::inspector::show(
+                        ui, &active, nav, galaxy, field, inspector, now, out,
+                    );
+                });
         });
     // Background areas are excluded by egui's normal pointer-area test.
     if let Some(area) = ctx.memory(|memory| memory.area_rect(egui::Id::new("breadcrumb"))) {

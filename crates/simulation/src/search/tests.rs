@@ -221,7 +221,12 @@ fn refusals_give_a_reason() {
     refused("family=deep_sky", "nothing of that family");
     refused("kind=star family=stars", "not both");
     refused("radius_km=5..1", "minimum 5 is above maximum 1");
-    refused("planet_class=lava", "is one of dwarf, rocky");
+    refused(
+        "planet_class=lava",
+        "is one of metal_rich, water_rich, rocky",
+    );
+    refused("planet_class=dwarf", "not `dwarf`");
+    refused("planet_class=ice_giant", "not `ice_giant`");
     refused("multiple=maybe", "yes or no");
     refused("radius_km=big", "needs a number");
     refused("within_ly=10001", "at most 10000");
@@ -713,7 +718,11 @@ fn live_ship() -> (live::LiveObject, crate::star::multiple::Hosted) {
 fn live_ships_match_kinds_filters_scopes_text_and_what_they_orbit() {
     let (ship, planet) = live_ship();
     let class = super::engine::planet_class(planet.body.class);
-    let other = if class == "dwarf" { "rocky" } else { "dwarf" };
+    let other = if class == "rocky" {
+        "water_rich"
+    } else {
+        "rocky"
+    };
     let key = ship.system_key.clone();
     let found = |text: &str| {
         let query = Query::parse(text).unwrap_or_else(|err| panic!("{text}: {err}"));

@@ -44,9 +44,11 @@ to `crates/client/src/`.
   automatically activates its leaf. Inspection changes neither selection nor
   camera/tracking. Missing tabs fall back to selected leaf, or current location
   with no selection.
-- The inspector uses natural content height, with no scroll area, scrollbar
-  or bottom-HUD height reservation. Long information uses the left side of
-  the view; its top stays anchored at the shared HUD inset. Facts are cached
+- The inspector keeps its borderless halo text, with Overview, Composition,
+  Orbit, Rotation and Atmosphere sections for planets. A shared-kit vertical
+  scroll area bounds long content to the viewport, reserving the bottom HUD
+  inset; wheel/scrollbar input reaches all facts and actions. Its top stays
+  anchored at the shared HUD inset. Facts are cached
   until target/snapshot changes; remote systems are never regenerated per frame.
 - `ObjectRef::Star` by system key is the whole system: its star or outermost
   barycentre, labelled with all letters (`System 2 AB`). Below it, both trails
@@ -62,6 +64,16 @@ to `crates/client/src/`.
   clear selection, else move up physically; crumbs contain no travel code.
 
 ## Inspector actions
+
+The inspector presentation uses typed fields: stable planet field IDs, sections,
+labels, display units, formatted known values or explicit unknown reasons. Both
+halo rendering and developer export consume them; physical records remain separate.
+The browser uses the same fields' label/value projection. Composition includes
+retained material mass fractions (not atmospheric mole fractions), retained and
+escaped mass, mean density, gravity, H₂/He fraction, gas/condensate reservoirs,
+radius meaning and model caveats. Missing legacy composition and invalid new
+records are visibly unknown, never zero-filled. Water-rich boundaries make no
+ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 
 Planet facts include generated all-star mean heating, equilibrium temperature
 with assumed albedo, atmospheric composition, reference pressure, column

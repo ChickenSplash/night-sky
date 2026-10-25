@@ -409,9 +409,8 @@ fn detail(
         .inspector
         .get(&result.object, galaxy, position, view.craft);
     let rows: Vec<(&str, String)> = info
-        .rows
-        .iter()
-        .map(|(label, value)| (label.as_str(), value.clone()))
+        .rows()
+        .map(|(label, value)| (label, value.to_owned()))
         .collect();
     let note = info.note.clone();
     kit::ScrollArea::vertical()

@@ -51,6 +51,7 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     clearance.rs     Navigation clearance: bulge, maintenance-free air height and margins
     composition.rs   Conserved material inventories, catalogue and reservoir budgets
     structure.rs     Independent approximate composition-based reference radii
+    physical.rs      Validated composition/structure wire conversion for both system paths
     generation.rs    Natural planetary formation, independent of list/task placement
     overlay.rs       Optional task slots, pages and assigned-star placement
     demo.rs          Reproducible fictional overlay content

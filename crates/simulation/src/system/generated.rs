@@ -18,6 +18,7 @@ pub fn generated_system(id: &str, position_ly: [f64; 3]) -> Option<StarSystem> {
             class: hosted.body.class.name().into(),
             environment: hosted.environment,
             inertia_factor: Some(hosted.body.structure.inertia_factor()),
+            physical: Some(super::physical::to_data(&hosted.body)),
             resonance: hosted.body.resonance,
             spin: hosted.body.spin,
             task: None,

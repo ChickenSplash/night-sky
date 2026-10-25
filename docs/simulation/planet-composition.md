@@ -4,7 +4,7 @@ The physical foundation lives in simulation `system/composition.rs`
 and `system/structure.rs`. [Planet generation](planetary-systems.md) now draws
 inventories first and derives retained mass, radius and inertia from them.
 Atmospheric gas and condensed reservoirs now share the same conserved inventory;
-full inventory/reference transport and labels await checkpoint 4.
+validated inventory/reference transport and descriptive labels feed the inspector.
 Integration checkpoints are in [the refactor plan](../plans/planet-composition.md).
 
 ## Conserved inventory, not a classification
@@ -157,10 +157,24 @@ no iterative convergence failure or random fallback. Invalid/unsupported states
 return typed errors. Inclusive mass-bound checks allow 16 machine epsilons for
 summation roundoff only.
 
-Provisional descriptive thresholds are centralised for checkpoint 4: metal-rich
-at 50% mass, water-rich at 25%, significant H/He at 0.1%, and H/He-dominated at
-50%. These are adjustable label choices, currently unused, never physics inputs.
-Display precedence and conventional size names are still checkpoint 4 work.
+### Descriptive labels
+
+Descriptive thresholds are centralised separately from structure inputs. Display
+precedence uses retained mass fractions in this order:
+
+1. H₂/He at least 50%: **Gas giant**.
+2. H₂/He at least 10%: **Envelope world**.
+3. H₂/He at least 0.1%: **Sub-Neptune**.
+4. Water at least 25%: **Water-rich planet**.
+5. Iron/nickel at least 50%: **Metal-rich planet**.
+6. Otherwise: **Rocky planet**.
+
+Equality takes the earlier rule. These are adjustable, disjoint display buckets,
+not universal size definitions: conventional giant/sub-Neptune names can overlap
+observationally. Water-rich does not mean an ocean, and envelope-world does not
+assert an ice interior. No mass-based `Dwarf` class is generated or searchable:
+dynamical orbital clearing is not established here. Changing these thresholds
+changes descriptions/search matches only, never structure, spin, gas or optics.
 
 Tests check pure and mixed material ordering, increasing compression, conserved
 reservoirs/escape, mole/mass conversion, stripping and blend continuity, invalid
@@ -227,7 +241,7 @@ monotonic radius law. No-envelope inputs bypass iteration. Unsupported structure
 or exhaustion returns an explicit error; production asserts its supported draws
 cannot reach that failure, rather than substituting an invented fallback world.
 Re-evaluation always starts from immutable source H/He, so loss is not compounded.
-Mass, radius, inertia and provisional description are updated together; neighbour
+Mass, radius, inertia and descriptive classification are updated together; neighbour
 stability is checked again with retained masses, without moving any orbits.
 The cost is bounded algebraic structure work per bisection step, not numerical
 interior integration or repeated stellar phase sampling.
@@ -292,11 +306,30 @@ the physical inertia factor and the existing 0.2 flattening cap. Locked/slow
 states keep their assigned periods, with the existing shape cap as a safeguard.
 
 `Planet::inertia_factor` is optional for legacy compatibility, transported early
-in checkpoint 2 on both generated and task-overlay paths. Valid values override
-all class strings in `planet_shape`; older or invalid records use an isolated
-legacy shape fallback. Full composition transport/validation and the class-
-dependent photometry/surface/search audit are still checkpoint 4. New body labels
-are temporary fraction-based old names, not inputs to mass, radius or spin.
+on both generated and task-overlay paths. Valid values override all class strings
+in `planet_shape`. Only records without composition may use the isolated legacy
+class fallback; malformed new records use a neutral factor, never their label.
+
+## Transport and downstream consumers
+
+`Planet::physical` carries stable material IDs with source, retained, escaped,
+interior, condensed and whole-gas masses, plus reference structure and stable
+approximation IDs. It is optional: absent means unknown, not zero inventory.
+`system/physical` reconstructs validated inventories/budgets, re-derives structure
+at transported irradiation/age and checks all duplicated facts, radius semantics
+and caveats (1e-10 relative roundoff tolerance). Unknown/duplicate/missing materials,
+nonfinite values and inconsistent records are refused explicitly. This bounded
+algebraic check does not repeat stellar heating or retention iteration.
+
+Generated systems and task overlays use one conversion. Their physical records
+must match for the same body ID; task metadata never alters them. New reflectance
+uses retained water/metal and H₂/He continuously, not classification. See the
+[rendering guide](../client/rendering.md#planet-reflectance-and-phase) for this
+unresolved appearance proxy. Old records keep isolated class-based reflectance
+and shape compatibility; invalid new reflectance uses a neutral proxy. Geometry,
+surface boundary semantics and atmospheric optics do not inspect class strings.
+Search consumes descriptions only. The [typed inspector](../client/ui/interface.md#breadcrumbs-and-inspector)
+and developer export share presentation fields, separate from these physical records.
 
 ## Sources
 

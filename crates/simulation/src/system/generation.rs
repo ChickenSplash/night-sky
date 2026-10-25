@@ -45,20 +45,22 @@ const RESONANCES: [[u32; 2]; 6] = [[2, 1], [3, 2], [4, 3], [5, 4], [5, 3], [3, 1
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
-    Dwarf,
     Rocky,
+    MetalRich,
+    WaterRich,
     SubNeptune,
-    IceGiant,
+    EnvelopeWorld,
     GasGiant,
 }
 
 impl Class {
     pub fn name(self) -> &'static str {
         match self {
-            Class::Dwarf => "Dwarf planet",
             Class::Rocky => "Rocky planet",
+            Class::MetalRich => "Metal-rich planet",
+            Class::WaterRich => "Water-rich planet",
             Class::SubNeptune => "Sub-Neptune",
-            Class::IceGiant => "Ice giant",
+            Class::EnvelopeWorld => "Envelope world",
             Class::GasGiant => "Gas giant",
         }
     }
@@ -287,7 +289,7 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
         bodies.push(Body {
             spin: Spin::default(),
             orbit,
-            class: materials::provisional_class(&physical),
+            class: materials::classify(&budget, &physical),
             mass_earth: mass,
             radius_km: physical.radius_m() / 1000.0,
             resonance: resonance.map(|(r, _)| r),

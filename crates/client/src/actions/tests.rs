@@ -93,7 +93,7 @@ fn an_unstreamed_generated_planet_can_be_selected_by_id() {
         crate::craft::Now::none(),
     );
     assert_eq!(info.title, system.planets[0].designation);
-    assert!(info.rows.iter().any(|(label, _)| label == "Mass"));
+    assert!(info.rows().any(|(label, _)| label == "Mass"));
 }
 
 #[test]

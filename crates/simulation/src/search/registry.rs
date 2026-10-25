@@ -200,10 +200,11 @@ pub const STAR_CLASSES: &[(&str, &str)] = &[
 ];
 
 pub const PLANET_CLASSES: &[(&str, &str)] = &[
-    ("dwarf", "Dwarf planet"),
+    ("metal_rich", "Metal-rich planet"),
+    ("water_rich", "Water-rich planet"),
     ("rocky", "Rocky planet"),
     ("sub_neptune", "Sub-Neptune"),
-    ("ice_giant", "Ice giant"),
+    ("envelope_world", "Envelope world"),
     ("gas_giant", "Gas giant"),
 ];
 

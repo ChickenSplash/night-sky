@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 mod atmosphere;
+mod composition;
 pub use atmosphere::{
     AerosolData, AerosolKind, AtmosphereData, AtmosphereReference, GasFraction, PlanetEnvironment,
 };
+pub use composition::{MaterialBudget, PlanetPhysical, RadiusReference};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Galaxy {
@@ -114,6 +116,9 @@ pub struct Planet {
     /// C/(M a²), composition-based shape input; absent in legacy records.
     #[serde(default)]
     pub inertia_factor: Option<f64>,
+    /// Conserved composition and reference structure; absent means unknown.
+    #[serde(default)]
+    pub physical: Option<PlanetPhysical>,
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,

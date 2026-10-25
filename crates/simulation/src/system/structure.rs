@@ -32,6 +32,20 @@ pub enum Approximation {
     SubBarEnvelope,
 }
 
+impl Approximation {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::CompressedVolumeMixing => "compressed_volume_mixing",
+            Self::CondensedMassContinuation => "condensed_mass_continuation",
+            Self::TraceVolatilesAsWater => "trace_volatiles_as_water",
+            Self::ColdWaterProxy => "cold_water_proxy",
+            Self::EnvelopeSurrogate => "envelope_surrogate",
+            Self::EnvelopeFitInputsBounded => "envelope_fit_inputs_bounded",
+            Self::SubBarEnvelope => "sub_bar_envelope",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Structure {
     mass_kg: f64,

@@ -29,6 +29,11 @@ remain available through the existing `space_simulation` and `system` exports.
   between missing data and a generated airless world.
 - Task slots are append-only per list, including when tasks disappear from a
   snapshot. Tasks fill stable generated planets, not the other way around.
+- `Planet::physical` carries conserved composition and reference structure
+  through the same conversion for overlays and task-free systems. The same body
+  ID has identical physical records in both. Omitted legacy composition is
+  unknown, not an empty inventory. Validation and reference meanings are in the
+  [composition guide](../simulation/planet-composition.md#transport-and-downstream-consumers).
 
 ## Pages and assigned stars
 

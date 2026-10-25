@@ -1,5 +1,7 @@
 //! One borderless readout shared by both breadcrumb trails.
 mod atmosphere;
+mod composition;
+mod presentation;
 use crate::{
     Navigation,
     actions::{GalaxyReference, UiCommand},
@@ -12,6 +14,7 @@ use crate::{
 };
 use bevy::math::DVec3;
 use bevy_egui::egui;
+use presentation::{Fact, Section, Value};
 use space_shared::Galaxy;
 use space_simulation::{
     LY_METRES,
@@ -51,7 +54,8 @@ impl Cache {
 #[derive(Default)]
 pub struct Info {
     pub title: String,
-    pub rows: Vec<(String, String)>,
+    pub fields: Vec<Fact>,
+    section: Section,
     pub note: String,
     description: String,
     url: Option<String>,
@@ -61,7 +65,37 @@ pub struct Info {
 
 impl Info {
     fn fact(&mut self, label: &str, value: impl Into<String>) {
-        self.rows.push((label.into(), value.into()));
+        // Compatibility adapter for non-planet readouts with dynamic labels.
+        self.field(&label.to_lowercase().replace(' ', "_"), label, None, value);
+    }
+    fn field(
+        &mut self,
+        id: &str,
+        label: &str,
+        unit: Option<&'static str>,
+        value: impl Into<String>,
+    ) {
+        self.fields.push(Fact {
+            id: id.into(),
+            section: self.section,
+            label: label.into(),
+            unit,
+            value: Value::Known(value.into()),
+        });
+    }
+    fn unknown(&mut self, id: &str, label: &str, reason: &str) {
+        self.fields.push(Fact {
+            id: id.into(),
+            section: self.section,
+            label: label.into(),
+            unit: None,
+            value: Value::Unknown(reason.into()),
+        });
+    }
+    pub fn rows(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.fields
+            .iter()
+            .map(|f| (f.label.as_str(), f.value.text()))
     }
 }
 
@@ -173,14 +207,16 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
             {
                 let days = space_simulation::planet_period(&system, planet) / 86400.0;
                 info.title = planet.designation.clone();
-                info.fact("Type", planet.class.clone());
+                info.field("planet.class", "Type", None, planet.class.clone());
                 if system.barycentres_on(planet.page()).next().is_some() {
                     let host: Vec<_> = member_component(&system, &planet.host)
                         .chars()
                         .map(String::from)
                         .collect();
-                    info.fact(
+                    info.field(
+                        "orbit.host",
                         "Orbits",
+                        None,
                         match host.split_last() {
                             Some((last, rest)) if !rest.is_empty() => {
                                 format!("Stars {} and {last}", rest.join(", "))
@@ -189,46 +225,108 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                         },
                     );
                 }
-                info.fact("Mass", mass_text(planet.mass_earth));
-                info.fact("Radius", format!("{:.0} km", planet.radius_km));
-                info.fact(
+                info.field(
+                    "planet.mass",
+                    "Mass",
+                    Some(if planet.mass_earth >= 31.783 {
+                        "Jupiter masses"
+                    } else {
+                        "Earth masses"
+                    }),
+                    mass_text(planet.mass_earth),
+                );
+                info.field(
+                    "planet.radius",
+                    "Radius",
+                    Some("km"),
+                    format!("{:.0} km", planet.radius_km),
+                );
+                composition::facts(&mut info, planet);
+                info.section = Section::Rotation;
+                info.field(
+                    "rotation.flattening",
                     "Flattening",
+                    Some("fraction"),
                     crate::format::flattening_text(
                         space_simulation::planet_shape(planet).flattening(),
                     ),
                 );
-                info.fact(
+                info.section = Section::Orbit;
+                info.field(
+                    "orbit.distance",
                     "Orbital distance",
+                    Some("AU"),
                     format!("{:.3} AU", planet.orbit.semi_major_au),
                 );
-                info.fact("Orbital period", period_text(days));
-                info.fact("Eccentricity", format!("{:.3}", planet.orbit.eccentricity));
-                info.fact(
+                info.field(
+                    "orbit.period",
+                    "Orbital period",
+                    Some(if days >= 730.0 { "years" } else { "days" }),
+                    period_text(days),
+                );
+                info.field(
+                    "orbit.eccentricity",
+                    "Eccentricity",
+                    Some("fraction"),
+                    format!("{:.3}", planet.orbit.eccentricity),
+                );
+                info.section = Section::Rotation;
+                info.field(
+                    "rotation.period",
                     "Rotation",
+                    if planet.spin.locked {
+                        None
+                    } else {
+                        Some(if planet.spin.period_hours < 2.0 {
+                            "minutes"
+                        } else if planet.spin.period_hours < 48.0 {
+                            "hours"
+                        } else if planet.spin.period_hours / 24.0 < 730.0 {
+                            "days"
+                        } else {
+                            "years"
+                        })
+                    },
                     if planet.spin.locked {
                         "Tidally locked".into()
                     } else {
                         rotation_text(planet.spin.period_hours)
                     },
                 );
-                info.fact("Axial tilt", crate::format::tilt_text(planet.spin.tilt_rad));
+                info.field(
+                    "rotation.tilt",
+                    "Axial tilt",
+                    Some("degrees"),
+                    crate::format::tilt_text(planet.spin.tilt_rad),
+                );
+                info.section = Section::Orbit;
                 if let Some([p, q]) = planet.resonance {
-                    info.fact("Resonance", format!("{p}:{q} with inner neighbour"));
+                    info.field(
+                        "orbit.resonance",
+                        "Resonance",
+                        None,
+                        format!("{p}:{q} with inner neighbour"),
+                    );
                 }
                 atmosphere::facts(&mut info, planet.environment.as_ref());
+                info.section = Section::Overview;
                 if let Some(task) = &planet.task {
-                    info.fact("Task", task.name.clone());
-                    info.fact("Status", task.status.clone());
-                    info.fact(
+                    info.field("task.name", "Task", None, task.name.clone());
+                    info.field("task.status", "Status", None, task.status.clone());
+                    info.field(
+                        "task.assignees",
                         "Assigned",
+                        None,
                         if task.assignees.is_empty() {
                             "Nobody".into()
                         } else {
                             task.assignees.join(", ")
                         },
                     );
-                    info.fact(
+                    info.field(
+                        "task.due",
                         "Due",
+                        None,
                         task.due_date_ms
                             .map_or("No due date".into(), crate::format::due_text),
                     );
@@ -239,7 +337,11 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
         }
         ObjectRef::Craft { id } => {
             if let Some(live) = now.get(id) {
-                (info.title, info.rows) = crate::craft::facts(live, galaxy, now.seconds);
+                let (title, rows) = crate::craft::facts(live, galaxy, now.seconds);
+                info.title = title;
+                for (label, value) in rows {
+                    info.fact(&label, value);
+                }
                 info.note = "Player-made · simulated live".into();
             }
         }
@@ -247,6 +349,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
     if info.title.is_empty() {
         info.title = "Object unavailable".into();
     }
+    info.fields.sort_by_key(|field| field.section);
     info
 }
 
@@ -534,7 +637,8 @@ pub fn readout(
     json!({
         "inspection": inspection, "object": inspection.object,
         "title": info.title,
-        "facts": info.rows.iter().map(|(label, value)| json!({"label": label, "value": value})).collect::<Vec<_>>(),
+        "facts": info.rows().map(|(label, value)| json!({"label": label, "value": value})).collect::<Vec<_>>(),
+        "fields": info.fields,
         "description": info.description, "note": info.note, "actions": buttons,
         "velocity_kms": info.velocity_kms,
     })
@@ -572,19 +676,34 @@ pub fn show(
     halo_wrapped_text(ui, &cache.info.title, width, CURRENT);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
-        for (label, value) in &cache.info.rows {
-            ui.horizontal(|ui| {
-                let label_width = (width * 0.4).min(150.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(label_width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_min_width(label_width);
-                        halo_wrapped_text(ui, label, label_width, LINK);
-                    },
-                );
-                halo_wrapped_text(ui, value, width - label_width - 16.0, CURRENT);
-            });
+        for section in Section::ALL {
+            let fields: Vec<_> = cache
+                .info
+                .fields
+                .iter()
+                .filter(|f| f.section == section)
+                .collect();
+            if fields.is_empty() {
+                continue;
+            }
+            if matches!(object, ObjectRef::Planet { .. }) {
+                ui.add_space(HUD_LINE_GAP);
+                halo_wrapped_text(ui, section.label(), width, LINK);
+            }
+            for field in fields {
+                ui.horizontal(|ui| {
+                    let label_width = (width * 0.4).min(150.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(label_width, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_min_width(label_width);
+                            halo_wrapped_text(ui, &field.label, label_width, LINK);
+                        },
+                    );
+                    halo_wrapped_text(ui, field.value.text(), width - label_width - 16.0, CURRENT);
+                });
+            }
         }
     });
     if !cache.info.description.is_empty() {
@@ -641,6 +760,55 @@ mod tests {
     use super::*;
     use crate::ui::breadcrumb::TrailSource;
 
+    #[test]
+    fn typed_planet_fields_share_ids_sections_units_values_and_unknowns() {
+        let mut galaxy = space_simulation::demo_galaxy();
+        let planet = &galaxy.systems[0].planets[0];
+        let object = ObjectRef::Planet {
+            id: planet.id.clone(),
+        };
+        let info = describe(&object, &galaxy, None, Now::none());
+        let mut ids = std::collections::HashSet::new();
+        for field in &info.fields {
+            assert!(ids.insert(&field.id), "duplicate field {}", field.id);
+            assert!(!field.value.text().is_empty());
+        }
+        for section in Section::ALL {
+            assert!(info.fields.iter().any(|f| f.section == section));
+        }
+        let density = info
+            .fields
+            .iter()
+            .find(|f| f.id == "composition.density")
+            .unwrap();
+        assert_eq!(density.unit, Some("kg/m³"));
+        assert!(matches!(density.value, Value::Known(_)));
+        let exported = readout(
+            &inspection(object.clone()),
+            &Navigation::default(),
+            &galaxy,
+            &Starfield::default(),
+            &mut Cache::default(),
+            Now::none(),
+        );
+        assert_eq!(
+            exported["fields"],
+            serde_json::to_value(&info.fields).unwrap()
+        );
+        let mut relabelled = info.fields.clone();
+        relabelled[0].label = "Translated display label".into();
+        assert_eq!(info.fields[0].id, relabelled[0].id);
+        galaxy.systems[0].planets[0].physical = None;
+        let unknown = describe(&object, &galaxy, None, Now::none());
+        assert!(
+            unknown
+                .fields
+                .iter()
+                .any(|f| f.id == "composition.density" && matches!(f.value, Value::Unknown(_)))
+        );
+        assert!(!unknown.rows().any(|(_, value)| value == "0.0 kg/m³"));
+    }
+
     fn inspection(object: ObjectRef) -> Inspection {
         Inspection {
             source: TrailSource::Selection,
@@ -689,15 +857,17 @@ mod tests {
             // A list page's star is located, so its motion is known.
             if matches!(object, ObjectRef::Star { .. }) {
                 assert_eq!(exported["velocity_kms"].as_array().unwrap().len(), 3);
-                assert!(
-                    info.rows
-                        .iter()
-                        .any(|(label, _)| label == "Galactic velocity")
-                );
+                assert!(info.rows().any(|(label, _)| label == "Galactic velocity"));
             }
-            assert_eq!(exported["facts"].as_array().unwrap().len(), info.rows.len());
-            for (fact, (label, value)) in
-                exported["facts"].as_array().unwrap().iter().zip(info.rows)
+            assert_eq!(
+                exported["facts"].as_array().unwrap().len(),
+                info.fields.len()
+            );
+            for (fact, (label, value)) in exported["facts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(info.rows())
             {
                 assert_eq!(fact["label"], label);
                 assert_eq!(fact["value"], value);

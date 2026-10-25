@@ -265,10 +265,9 @@ fn a_companions_planet_is_reached_through_the_barycentre_and_its_star() {
     // Each crumb describes its own object.
     let fact = |object: &ObjectRef, label: &str| {
         crate::ui::inspector::describe(object, &galaxy, None, crate::craft::Now::none())
-            .rows
-            .into_iter()
-            .find(|(l, _)| l == label)
-            .map(|(_, value)| value)
+            .rows()
+            .find(|(l, _)| *l == label)
+            .map(|(_, value)| value.to_owned())
     };
     assert_eq!(
         fact(&location[2].object, "Type").unwrap(),

@@ -133,7 +133,7 @@ pub struct Surface {
     pub tint: [f64; 3],
 }
 
-/// Representative geometric albedos and colours by planet class.
+/// Isolated appearance fallback for records predating composition transport.
 pub fn surface(class: &str) -> Surface {
     let (albedo, tint) = match class {
         "Dwarf planet" => (0.15, [0.55, 0.5, 0.45]),
@@ -146,6 +146,42 @@ pub fn surface(class: &str) -> Surface {
     Surface {
         albedo,
         tint: tint.map(|c| c / y),
+    }
+}
+
+/// Continuous, deliberately unresolved appearance proxy, not solved surface phases,
+/// clouds or mineral spectra. Display classification is never an input.
+pub fn composition_surface(water: f64, metal: f64, h_he: f64) -> Surface {
+    let envelope = (h_he / 0.5).clamp(0.0, 1.0);
+    let albedo = (0.3 + 0.15 * water - 0.1 * metal) * (1.0 - envelope) + 0.5 * envelope;
+    let rocky = [0.6 + 0.1 * metal, 0.55 + 0.15 * water, 0.5 + 0.3 * water];
+    let gas = [0.8, 0.7, 0.55];
+    let tint = std::array::from_fn(|i| rocky[i] * (1.0 - envelope) + gas[i] * envelope);
+    let y = luminance(tint);
+    Surface {
+        albedo,
+        tint: tint.map(|c| c / y),
+    }
+}
+
+pub fn planet_surface(planet: &space_shared::Planet) -> Surface {
+    match crate::system::physical::validate(planet) {
+        Ok(Some(data)) => {
+            let fraction = |id| {
+                data.materials
+                    .iter()
+                    .find(|p| p.material == id)
+                    .map_or(0.0, |p| p.retained_kg / data.retained_mass_kg)
+            };
+            composition_surface(
+                fraction("water"),
+                fraction("iron_nickel"),
+                data.h_he_mass_fraction,
+            )
+        }
+        Ok(None) => surface(&planet.class),
+        // Invalid new records do not regain label-dependent physics.
+        Err(_) => composition_surface(0.0, 0.0, 0.0),
     }
 }
 
