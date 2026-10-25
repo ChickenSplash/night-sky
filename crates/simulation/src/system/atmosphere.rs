@@ -12,7 +12,7 @@ mod wire;
 
 /// One bar in SI pascals.
 pub const ONE_BAR_PA: f64 = 100_000.0;
-/// Match the renderer's current exponential-column cutoff.
+/// Minimum exponential-column depth, and depth above one bar for denser columns.
 pub const EXTENT_SCALE_HEIGHTS: f64 = 12.5;
 /// Operational warning threshold, not a physical atmospheric boundary.
 /// At this height/radius, spherical gravity has fallen by about 17%.
@@ -243,6 +243,28 @@ impl GasAtmosphere {
         self.aerosol.as_ref()
     }
 
+    /// Height of a pressure level in the same constant-gravity isothermal model.
+    /// `None` means below the supplied reference, not absence of physical ground.
+    /// This does not locate a boundary inside an unresolved deep envelope.
+    pub fn pressure_level_altitude_m(
+        &self,
+        pressure_pa: f64,
+        gm_m3_s2: f64,
+        radius_m: f64,
+    ) -> Result<Option<f64>, AtmosphereError> {
+        positive("pressure level", pressure_pa)?;
+        let column = self.column(gm_m3_s2, radius_m)?;
+        if pressure_pa > self.pressure_pa {
+            return Ok(None);
+        }
+        // Difference of logs avoids overflowing the pressure ratio.
+        let altitude = column.scale_height_m * (self.pressure_pa.ln() - pressure_pa.ln());
+        if !altitude.is_finite() {
+            return Err(AtmosphereError::InvalidValue("pressure level altitude"));
+        }
+        Ok(Some(altitude))
+    }
+
     /// GM in m³/s², reference radius in metres (use the volume-equivalent
     /// radius for a spheroid). No rotation or latitude dependence yet.
     /// Extended columns are returned with an explicit warning, not clamped.
@@ -255,7 +277,12 @@ impl GasAtmosphere {
         let density_kg_m3 = self.pressure_pa * molecular_mass_kg / thermal_energy;
         let scale_height_m = thermal_energy / molecular_mass_kg / gravity_m_s2;
         let aerosol_height = self.aerosol.map_or(0.0, |aerosol| aerosol.scale_height_m);
-        let extent_m = EXTENT_SCALE_HEIGHTS * scale_height_m.max(aerosol_height);
+        // Preserve the upper column when moving a dense atmosphere's lower
+        // reference from one bar to its boundary. Below one bar keep the former
+        // relative cutoff, rather than discarding tenuous atmospheres.
+        let extra_heights = (self.pressure_pa.ln() - ONE_BAR_PA.ln()).max(0.0);
+        let gas_extent = (EXTENT_SCALE_HEIGHTS + extra_heights) * scale_height_m;
+        let extent_m = gas_extent.max(EXTENT_SCALE_HEIGHTS * aerosol_height);
         for value in [gravity_m_s2, density_kg_m3, scale_height_m, extent_m] {
             positive("derived column quantity", value)?;
         }

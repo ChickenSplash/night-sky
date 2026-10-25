@@ -60,7 +60,7 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
     info.field(
         "atmosphere.pressure",
         match air.reference_level {
-            AtmosphereReference::Surface => "Surface pressure",
+            AtmosphereReference::Surface => "Boundary pressure (approx.)",
             AtmosphereReference::OneBar => "Reference pressure",
         },
         Some(if air.pressure_pa < 100.0 { "Pa" } else { "bar" }),
@@ -71,6 +71,27 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
         } else {
             format!("{:.4} bar", air.pressure_pa / 1e5)
         },
+    );
+    if air.reference_level == AtmosphereReference::Surface {
+        info.field(
+            "atmosphere.one_bar_altitude",
+            "One-bar altitude",
+            Some("km"),
+            if air.pressure_pa >= 1e5 {
+                format!(
+                    "{:.1} km above boundary (isothermal estimate)",
+                    air.scale_height_m * (air.pressure_pa.ln() - 1e5_f64.ln()) / 1e3
+                )
+            } else {
+                "Not above boundary (sub-bar column)".into()
+            },
+        );
+    }
+    info.field(
+        "atmosphere.model_limits",
+        "Atmosphere model",
+        None,
+        "Ideal gas and dilute optics; dense-gas EOS, greenhouse and phases unresolved",
     );
     info.field(
         "atmosphere.column_temperature",
@@ -142,7 +163,11 @@ mod tests {
         assert!(info.rows().any(
             |(key, value)| key == "Equilibrium temperature" && value.contains("assumed albedo")
         ));
-        assert!(!info.rows().any(|(key, _)| key == "Surface pressure"));
+        assert!(
+            !info
+                .rows()
+                .any(|(key, _)| key == "Boundary pressure (approx.)")
+        );
     }
 
     #[test]
@@ -171,7 +196,10 @@ mod tests {
             match air.reference_level {
                 AtmosphereReference::Surface => {
                     surface = true;
-                    assert!(info.rows().any(|(key, _)| key == "Surface pressure"));
+                    assert!(
+                        info.rows()
+                            .any(|(key, _)| key == "Boundary pressure (approx.)")
+                    );
                 }
                 AtmosphereReference::OneBar => {
                     envelope = true;
@@ -179,10 +207,49 @@ mod tests {
                         info.rows().any(|(key, value)| key == "Reference pressure"
                             && value.contains("not ground"))
                     );
-                    assert!(!info.rows().any(|(key, _)| key == "Surface pressure"));
+                    assert!(
+                        !info
+                            .rows()
+                            .any(|(key, _)| key == "Boundary pressure (approx.)")
+                    );
                 }
             }
         }
         assert!(surface && envelope);
+    }
+
+    #[test]
+    fn motivating_boundary_exports_pressure_height_and_model_limits() {
+        let system =
+            space_simulation::system::generated_system("g13b6ffffcfeba.2.1", [0.0; 3]).unwrap();
+        let world = system
+            .planets
+            .iter()
+            .find(|p| p.id.ends_with("/1"))
+            .unwrap();
+        let mut info = Info::default();
+        facts(&mut info, world.environment.as_ref());
+        assert!(
+            info.rows()
+                .any(|(label, value)| label == "Boundary pressure (approx.)"
+                    && value.starts_with("729."))
+        );
+        assert!(
+            info.rows()
+                .any(|(label, value)| label == "One-bar altitude"
+                    && value.contains("above boundary"))
+        );
+        assert!(
+            info.rows().any(
+                |(label, value)| label == "Atmosphere model" && value.contains("dense-gas EOS")
+            )
+        );
+        for id in [
+            "atmosphere.pressure",
+            "atmosphere.one_bar_altitude",
+            "atmosphere.model_limits",
+        ] {
+            assert!(info.fields.iter().any(|field| field.id == id));
+        }
     }
 }

@@ -10,7 +10,7 @@ use glam::DVec3;
 use space_shared::{PlanetEnvironment, Star, StarSystem};
 use std::f64::consts::TAU;
 
-mod partition;
+pub(crate) mod partition;
 
 /// SI Stefan-Boltzmann constant (rounded).
 const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
@@ -55,6 +55,11 @@ pub(crate) fn populate(bodies: &mut Bodies, age_gyr: f64) {
         hosted.environment = Some(
             generate(&mut rng, &mut hosted.body, heating, age_gyr)
                 .expect("generated atmospheric inputs and columns must be finite and valid"),
+        );
+        crate::system::generation::retention::refresh_spin(
+            &mut hosted.body,
+            &id,
+            system.member_mass(0, &hosted.host),
         );
     }
     // Formation masses were used during spacing; retained masses can only fall.
@@ -178,9 +183,17 @@ fn generate(
     // No greenhouse, internal-heat or climate solution yet. Floor the column
     // estimate at 20 K rather than extending an ideal gas to absolute zero.
     let temperature = equilibrium_temperature_k.max(20.0);
+    let (structure, budget, atmosphere) = crate::system::structure::boundary::resolve(
+        &body.budget,
+        heating.flux,
+        age_gyr,
+        temperature,
+    )?;
+    body.radius_km = structure.radius_m() / 1e3;
+    body.structure = structure;
+    body.budget = budget;
     let gm = body.mass_earth * EARTH_SOLAR * SUN_GM;
     let radius = body.radius_km * 1e3;
-    let atmosphere = partition::atmosphere(body, temperature)?;
     let atmosphere = atmosphere.map(|air| air.to_data(gm, radius)).transpose()?;
     Ok(PlanetEnvironment {
         irradiation_w_m2: heating.flux,

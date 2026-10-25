@@ -78,8 +78,11 @@ ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 Planet facts include generated all-star mean heating, equilibrium temperature
 with assumed albedo, atmospheric composition, reference pressure, column
 temperature/density, scale height and operational extent. Estimates and
-extended-column warnings are labelled. A giant's 1 bar reference level is
-not ground. These are simulation data, independent of debug atmosphere sliders;
+extended-column warnings are labelled. Supported condensed boundaries show
+approximate boundary pressure and the one-bar altitude above it; composition
+flags unresolved deep boundaries, which are not proof that ground is absent.
+A giant's 1 bar reference level is not ground. Every gas column states its
+ideal-gas, dilute-optics, greenhouse and phase limitations. These are simulation data, independent of debug atmosphere sliders;
 they now drive each planet's atmosphere rendering unless that selected planet
 has a debug override enabled. See [physical atmospheres](../../simulation/atmospheres.md).
 

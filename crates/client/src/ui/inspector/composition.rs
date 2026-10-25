@@ -52,15 +52,35 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
         "Radius meaning",
         None,
         match data.radius_reference {
-            RadiusReference::SolidSurface => "Nominal solid surface (volume-equivalent radius)",
+            RadiusReference::SolidSurface | RadiusReference::UnresolvedVolatileBoundary
+                if data
+                    .approximations
+                    .iter()
+                    .any(|a| a == "deep_boundary_unresolved") =>
+            {
+                "Unresolved condensed proxy (not a located ground/phase boundary)"
+            }
+            RadiusReference::SolidSurface => "Approximate condensed boundary (nominal dry ground)",
             RadiusReference::UnresolvedVolatileBoundary => {
-                "Unresolved volatile boundary (no ocean/phase solution)"
+                "Approximate condensed boundary (water phases unresolved)"
             }
             RadiusReference::OneBar => {
-                "One-bar envelope reference (not solid ground or a cloud deck)"
+                "One-bar envelope reference (deep boundary unresolved, not ground/clouds)"
             }
         },
     );
+    if data
+        .approximations
+        .iter()
+        .any(|a| a == "deep_boundary_unresolved")
+    {
+        info.field(
+            "composition.boundary",
+            "Deep boundary",
+            None,
+            "Unresolved: outside thin boundary model, not proof that ground is absent",
+        );
+    }
     for p in &data.materials {
         info.field(
             &format!("composition.material.{}", p.material),

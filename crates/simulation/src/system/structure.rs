@@ -2,6 +2,7 @@
 //! Population generation reconciles these against retained material inventories.
 //! Prescriptions, provenance and domains: docs/simulation/planet-composition.md.
 
+pub(crate) mod boundary;
 pub mod parameters;
 mod radius;
 
@@ -30,6 +31,9 @@ pub enum Approximation {
     EnvelopeFitInputsBounded,
     /// Thin gas cannot support a one-bar column at the condensed boundary.
     SubBarEnvelope,
+    ThinBoundaryColumn,
+    BoundaryReferenceTransition,
+    DeepBoundaryUnresolved,
 }
 
 impl Approximation {
@@ -42,6 +46,9 @@ impl Approximation {
             Self::EnvelopeSurrogate => "envelope_surrogate",
             Self::EnvelopeFitInputsBounded => "envelope_fit_inputs_bounded",
             Self::SubBarEnvelope => "sub_bar_envelope",
+            Self::ThinBoundaryColumn => "thin_boundary_column",
+            Self::BoundaryReferenceTransition => "boundary_reference_transition",
+            Self::DeepBoundaryUnresolved => "deep_boundary_unresolved",
         }
     }
 }
@@ -65,7 +72,8 @@ impl Structure {
     pub fn radius_m(&self) -> f64 {
         self.radius_m
     }
-    /// Cold heavy-material proxy, not an envelope bottom or resolved core radius.
+    /// Cold heavy-material proxy. The environmental correction promotes this to
+    /// an approximate boundary only with `ThinBoundaryColumn`, never a core EOS.
     pub fn condensed_radius_m(&self) -> f64 {
         self.condensed_radius_m
     }

@@ -336,6 +336,10 @@ cloud/deep-envelope proxy at the reference radius, shaded with the existing
 composition reflectance proxy and atmosphere tables, not a generated cloud deck or a solid
 surface. It has no terrain chunks. This rendering choice changes neither
 collision nor flight mechanics, and does not model descent below that radius.
+Supported [condensed-boundary atmospheres](../simulation/planet-composition.md#supported-approximate-condensed-boundaries)
+instead draw ground at the boundary, with gas density and scattering scaled by
+the full boundary pressure, so a dense column is optically thicker rather than
+only relabelled. No cloud deck is inferred from that pressure.
 
 At the point/disc hand-over the shell's scattered light and opacity and the
 surface's atmospheric table lighting fade from zero to full between one and

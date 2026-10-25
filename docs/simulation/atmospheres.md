@@ -30,7 +30,10 @@ Pressure and temperature refer to a defined level:
 
 - **Surface:** a condensed-boundary column, before terrain corrections. Water-rich
   boundaries have unresolved phase, not necessarily landable solid ground. Tiny
-  H/He inventories that cannot support one bar also use this reference. Pressure
+  H/He inventories that cannot support one bar also use this reference. Supported
+  thin-atmosphere worlds use their approximate condensed boundary even above one
+  bar, with the [bounded domain and handoff](planet-composition.md#supported-approximate-condensed-boundaries)
+  determining reference semantics, never their descriptive class. Pressure
   can be any positive finite value.
 - **One bar:** a chosen reference level for envelope worlds. Pressure must
   equal `ONE_BAR_PA` (100,000 Pa). This is not solid ground, necessarily a
@@ -38,8 +41,9 @@ Pressure and temperature refer to a defined level:
 
 The caller supplies GM in m³/s² and the radius of that level in metres.
 For spheroids use the existing volume-equivalent mean radius; the column
-currently ignores latitude, rotation and atmospheric self-gravity. The new
-column model does not independently change radii, geometry or collision behaviour.
+currently ignores latitude, rotation and atmospheric self-gravity. The column does
+not independently choose geometry. Generation resolves the environmental reference
+first and gives the same final radius to geometry, column, optics and clearance.
 
 The reference temperature is a representative **isothermal gas-column
 temperature**, not an equilibrium-temperature calculation or a solved
@@ -70,13 +74,25 @@ with no detached cloud layer, size distribution, optical coefficients or
 condensation solver yet. Its mass does not enter gas molecular mass/density.
 Omit the layer for clear air rather than assigning it zero density.
 
-Operational extent is **12.5 times the larger of gas and aerosol scale
-heights**, above the reference level. It matches the renderer's exponential
-cutoff convention and now sets the rendered extent, but not flight clearance.
+Operational gas extent is **`H × [12.5 + max(ln(p / 1 bar), 0)]`**, above
+the reference level. Thus a dense boundary column includes the height to one bar
+plus the same 12.5 scale heights above it as a one-bar reference column. Its top
+pressure is about 0.373 Pa. Below one bar the extent remains 12.5 gas scale heights,
+so tenuous atmospheres are not discarded. Prescribed aerosol extent remains 12.5
+aerosol scale heights; the larger gas/aerosol extent sets the rendered shell.
+This preserves the upper column when changing a dense atmosphere's lower reference
+within the same constant-gravity model, rather than truncating it at a much denser
+level. There is no claim of reference invariance after recomputing gravity at a
+different radius. Extent does not set flight clearance.
 It is not an exobase, escape boundary or physical end of the atmosphere.
 `Column::density_at` extends the same exponential profile above it, which the
 [navigation clearance](craft.md#navigation-clearance) uses to find a
 maintenance-free orbit height, typically about three times the visible extent.
+
+`GasAtmosphere::pressure_level_altitude_m` gives `H ln(p_reference / p_level)`
+for positive pressure levels at or above the reference. A deeper level returns
+`None`, not a negative altitude or evidence that ground is absent. This is a
+column diagnostic only, not an integration into an unresolved deep envelope.
 
 An extent greater than 0.1 reference radii is flagged `Extended`, not clamped
 or rejected. This is an explicit engineering threshold: gravity has already
@@ -96,8 +112,9 @@ does not validate their density profile or the underlying escape prescription.
 Each atmospheric draw uses its planet ID plus `:atmosphere:v1`, independently
 of the orbit/spin streams. Stellar system age is obtained from the same draw
 as companion generation, using a cloned RNG so no existing draws are consumed.
-Retention updates physical bodies before partition; partition changes only reservoir
-allocations and atmosphere records, never orbital elements or bulk structure.
+Retention updates physical bodies before the environmental reference correction
+and partition. The correction can change radius/inertia/spin, never retained mass,
+source/escape accounting or orbital elements.
 
 1. **Heating from all stars.** Add bolometric `L / (4πd²)` for every star,
    including companions outside the planet's host. Average 32 deterministic
@@ -129,7 +146,10 @@ allocations and atmosphere records, never orbital elements or bulk structure.
    water partial pressures; the remainder stays in `CondensedVolatiles`. This is
    cold trapping, not a solved phase diagram. Pressure and molecular fractions
    are solved consistently with the actual gas masses, not clipped independently.
-   No aerosols or clouds are inferred from the transferred mass.
+    No aerosols or clouds are inferred from the transferred mass.
+    Test the bounded thin-boundary domain and reconcile its geometric reference
+    before exporting the final atmosphere. Unsupported deep envelopes retain a
+    one-bar reference; no giant interior is inferred from a cold heavy proxy.
 6. **Absence and columns.** Boundary pressure below 0.1 Pa is treated as
    absent/trace for this population model. This cutoff is not a physical ban
    on exospheres. Validate the physical state and derive its column. Retain
@@ -225,6 +245,10 @@ conversion and recompute columns from GM/radius. Do not trust cached derived
 snapshot fields as physical inputs. The inspector reads generated facts, not
 the debug override, and labels the 1 bar level as non-ground. Its developer
 readout exports the same rows. Atmosphere search predicates remain future work.
+Boundary columns show approximate boundary pressure and the isothermal altitude of
+one bar (or that it is not above a sub-bar boundary). Shared composition facts flag
+unresolved deep boundaries. All displayed gas columns disclose ideal-gas/dilute-optics,
+dense-gas, greenhouse and phase limitations, independent of pressure or class.
 
 ## Scope and checks
 

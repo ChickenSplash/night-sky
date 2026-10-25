@@ -87,8 +87,10 @@ error rather than silently treating arbitrary bulk material as water.
 
 Water-bearing results are flagged as cold-water proxies. Their radius is not
 evidence of liquid water, a particular ice phase, an exposed ocean or solid ground.
-An H/He planet's heavy-material radius is only a cold structural proxy, not a
-located core/envelope discontinuity. Dissolved H₂/He is currently unsupported.
+An H/He planet's heavy-material radius starts as a cold structural proxy, not a
+located core/envelope discontinuity. The bounded environmental correction below
+can promote it to an approximate thin-atmosphere boundary. Dissolved H₂/He is
+currently unsupported.
 
 ## Light envelopes and the giant transition
 
@@ -270,7 +272,8 @@ All retained H₂ and He remain in `Gas`; other molecules not in gas remain in
 `CondensedVolatiles`, including newly cold-trapped material. This reservoir name
 does not assert a resolved phase, ocean or exposed ice layer. Atomic reservoir
 transfers preserve authoritative retained/escaped totals, so partition does not
-change bulk mass, structure or spin. Sub-precision gas transfers are omitted, not
+change bulk mass. The environmental reference correction below updates radius,
+inertia and spin together, without feeding back into escape. Sub-precision gas transfers are omitted, not
 manufactured. Trace gas below the 0.1 Pa display cutoff remains accounted for.
 
 Boundary-column pressure is `p=M_gas g/(4πR²)`. One-bar envelopes instead use
@@ -284,6 +287,59 @@ radius proxy, with no steam-envelope expansion or greenhouse feedback. These
 limitations are explicit rather than silently imposing an arbitrary pressure cap.
 Emitted columns are checked against saturation and one-bar supply with a 1e-9
 relative roundoff allowance; failure is explicit rather than a fabricated column.
+
+### Supported approximate condensed boundaries
+
+After escape, `structure/boundary.rs` tests a column at the cold heavy-material
+radius using the actual generated isothermal temperature and the same conserved
+cold-trap solve. The supported domain requires all of:
+
+- Gas reservoir at most **1% of retained mass**, limiting neglected self-gravity.
+- Water at most **1% of retained mass**, limiting use of an unresolved cold-water
+  radius in place of a thermal, phase-dependent hydrosphere.
+- Pressure-aware optical extent at most **0.1 boundary radii**, the existing
+  constant-gravity geometry bound, including the height to one bar.
+- Heavy material at most **20 Earth masses**, within the direct compressed fit.
+
+These are declared engineering validity bounds, not observed divisions between
+planet classes. No pressure threshold removes ground. Dense columns still use
+unvalidated ideal-gas/dilute optics and must not be mistaken for solved climates.
+Within the domain, the reference radius becomes the approximate condensed boundary,
+pressure is the weight of the partitioned gas above it, and the column covers the
+height to one bar plus the upper atmosphere. Even trace water keeps phase/ground
+semantics unresolved. Dry inputs have nominal ground, not a solved geology.
+Airless/trace inventory remains conserved even when no visible column is emitted.
+
+Let `s` be the maximum of the four ratios to these domain bounds. At `s<=1`,
+use the boundary column. At `s>=2`, retain the original structural reference and
+mark `deep_boundary_unresolved`. Obviously excessive H₂/He, water or heavy mass
+bypasses the candidate solve entirely: do not test a thin column deep inside a
+giant. For original one-bar structures with `1<s<2`, a flagged engineering handoff
+uses `t=s-1`, `w=t²(3-2t)`: blend the candidate's **one-bar radius**
+`R_boundary + H ln(p_boundary / 1 bar)` towards the original one-bar proxy,
+and blend per-species gas allocations towards the one-bar partition. Transfers
+remain within conserved reservoirs; both endpoint mixtures obey the one-bar
+saturation caps. This compares like pressure levels rather than blending a
+boundary and a one-bar radius as if they were the same quantity. Equivalent
+one-bar radius and gas allocations are continuous across both handoff endpoints.
+The stored radius changes its meaning at the support boundary, so its numerical
+value alone is not a continuity diagnostic. Recomputed gravity, scale height and
+inertia remain reference-level approximations, not a variable-gravity interior.
+
+Non-envelope cold proxies that lack a supported boundary retain their original
+unresolved reference, rather than inventing a one-bar level or integrating deep
+into a water-rich body. This exception includes tenuous extended columns with
+less than one bar of gas. Their pressure is at a cold proxy, not a located ground.
+The inspector explicitly marks the unresolved boundary/model limits.
+
+This correction does **not** rerun escape against a newly shrunken reference radius.
+The original formation/escape radius is a fixed prescribed surrogate; coupling a
+thermal atmosphere to evolution is deferred. Masses, formation inventories, orbital
+spacing, retained/escaped totals and class labels therefore do not change. Final
+inertia and deterministic spin are rebuilt at the corrected geometric reference.
+Partition work remains bounded: at most two 64-step cold-trap solves, after the
+unchanged at-most-40-step retention solve. Geometry, gas optics and flight clearance
+all receive that same final radius and column, with no class-based overrides.
 
 ## Inertia and spin
 
@@ -316,15 +372,20 @@ class fallback; malformed new records use a neutral factor, never their label.
 interior, condensed and whole-gas masses, plus reference structure and stable
 approximation IDs. It is optional: absent means unknown, not zero inventory.
 `system/physical` reconstructs validated inventories/budgets, re-derives structure
-at transported irradiation/age and checks all duplicated facts, radius semantics
+and boundary partition at transported irradiation/age/column temperature and checks
+all duplicated facts, radius semantics
 and caveats (1e-10 relative roundoff tolerance). Escaped-mass comparisons also
 allow eight machine epsilons of that constituent's source mass: summing split
 reservoirs then subtracting from a much larger source can move a tiny loss by
 one ulp. This allowance is species-local, never scaled to total planet mass;
 reservoir budget validation still forbids overspending, and negative/nonfinite
 escaped masses are refused. Unknown/duplicate/missing materials,
-nonfinite values and inconsistent records are refused explicitly. This bounded
-algebraic check does not repeat stellar heating or retention iteration.
+nonfinite values and inconsistent records are refused explicitly. Partition checks
+also allow species-local source-scale roundoff after reservoir subtraction, while
+the atmospheric mixture must match the actual transported gas reservoir. Pressure,
+temperature and reference level are checked against that inventory and geometry,
+so a pressure-only label edit is rejected. This bounded check does not repeat
+stellar heating or retention iteration.
 
 Generated systems and task overlays use one conversion. Their physical records
 must match for the same body ID; task metadata never alters them. New reflectance
@@ -387,7 +448,7 @@ histories. Do not tune mixtures to force exact Solar System matches.
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Mass (Earth) | 0.002199 | 0.002200 | 0.1282 | 11.303 | 2,854.901 |
 | Radius (Earth) | 0.1231 | 0.1518 | 0.5349 | 3.8537 | 11.4125 |
-| Density (kg/m³) | 249 | 721 | 4,668 | 6,963 | 11,285 |
+| Density (kg/m³) | 249 | 723 | 4,700 | 7,055 | 12,018 |
 | Water (retained mass %) | <0.000001 | 0.0001 | 3.692 | 50.646 | 59.986 |
 | Metal (retained mass %) | 0.054 | 11.678 | 34.207 | 63.925 | 69.962 |
 | H₂/He (retained mass %) | 0 | 0 | <0.0001 | 10.084 | 99.598 |
@@ -398,13 +459,13 @@ histories. Do not tune mixtures to force exact Solar System matches.
 | Rocky | 8,482 | 43.63% | 0.427 |
 | Metal-rich | 3,851 | 19.81% | 0.399 |
 | Water-rich | 3,971 | 20.43% | 0.453 |
-| Sub-Neptune | 2,158 | 11.10% | 2.161 |
+| Sub-Neptune | 2,158 | 11.10% | 2.109 |
 | Envelope world | 467 | 2.40% | 4.620 |
 | Gas giant | 511 | 2.63% | 9.653 |
 
 Mass-bin counts for edges `[0.01,0.1,1,10,100,1000]` Earth masses are
 `[3958,5208,4903,4236,923,204,8]`; radius-bin counts for
-`[0.2,0.5,1,2,4,8,12]` Earth radii are `[2941,6289,4492,3349,1437,521,411,0]`.
+`[0.2,0.5,1,2,4,8,12]` Earth radii are `[2941,6289,4494,3458,1326,521,411,0]`.
 Bins include their lower edge, with unbounded first/last bins. All description
 populations appear, with no empty intermediate mass/radius bin at this resolution.
 This is not a measurement of the exoplanet radius valley or observational completeness.
@@ -447,25 +508,35 @@ those artificial age/mass combinations.
 - **Giant turnover:** the largest radius is 11.4125 Earth at 781.7 Earth masses
   (`composition-calibration:ThinDisc:209/4`). The concentration near a Jupiter-sized
   radius and high-mass density rise follow the smooth self-compression surrogate,
-  not a class-based clamp. The densest planet, 11,285 kg/m³, is a 2,854.9-Earth-mass
-  H₂/He-dominated giant (`composition-calibration:Arms:173/8`), not a dense rocky
-  body. No hot-Jupiter inflation or true brown-dwarf cooling is modelled.
+  not a class-based clamp. No hot-Jupiter inflation or true brown-dwarf cooling
+  is modelled.
+- **Dense boundary worlds:** the densest planet is now 12,018 kg/m³, a
+  10.68-Earth-mass, 68.5%-metal body with 0.098% H₂/He and a 1.70-Earth-radius
+  condensed boundary (`composition-calibration:Nucleus:33#B/4`). Its density uses
+  the cold compressed proxy without the gas column's volume, unlike its former
+  one-bar reference. Previously the densest was a 2,854.9-Earth-mass giant at
+  11,285 kg/m³ (`composition-calibration:Arms:173/8`), which is unchanged.
 - **Low-density tail:** the minimum is 249 kg/m³ at 2.32 Earth masses, 3.72 Earth
   radii and 27.2% H₂/He (`composition-calibration:ThinDisc:133#AB/5`, age 0.417 Gyr).
   Such a low-mass, substantial-envelope case is explicitly an envelope surrogate,
   not a validated low-density-world prediction. It remains finite and passes
   one-bar supply, optical conversion and navigation-clearance checks.
 - **Atmospheric reliability:** 3,183 planets (16.37%) have absent/trace displayed
-  air, while 7,275 (37.42% of all planets, 44.75% of displayed atmospheres) have
+  air, while 7,257 (37.33% of all planets, 44.64% of displayed atmospheres) have
   extended constant-gravity columns. These frequently involve small low-gravity
   bodies or light gas. They are accepted *flagged approximations*, not evidence
   that escape, density profiles or drag-clearance heights are accurate there.
   The largest optical extent is 3.10 reference radii at only 0.207 Pa
   (`composition-calibration:Bulge:103#B/0`), a heated small body. It is explicitly
   extended, well outside the reliable constant-gravity regime; finite geometry
-  must not be mistaken for a bound hydrostatic atmosphere. The largest reference
-  pressure is 24.19 MPa (`composition-calibration:Halo:16/1`). That column is
-  geometrically thin, but its ideal-gas treatment is not a validated dense-gas EOS.
+  must not be mistaken for a bound hydrostatic atmosphere. The largest boundary
+  pressure is about 119,000 bar (11.9 GPa) under a 0.95% H₂/He envelope on a
+  9.73-Earth-mass body (`composition-calibration:ThinDisc:21/1`). It is within the
+  declared thin-boundary domain (extent 0.048 radii), and such pressures are
+  plausible orders of magnitude beneath percent-level envelopes. Its ideal-gas
+  density and dilute optics are certainly not valid there: this is a weight-of-gas
+  estimate, not a dense-gas EOS, supercritical-phase or interior solution. No
+  pressure cap removes its boundary.
 - **Outside-fit usage:** 8,607 of 10,274 H₂/He-bearing structures bound at least
   one thin-envelope fit input; 96 use the high-heavy-mass continuation. All
   sampled bodies contain some water and secondary molecules, so all carry the
@@ -479,6 +550,16 @@ The actual defect found was an overly strict *relative-to-loss* transport check:
 a retained reservoir split moved a tiny escaped remainder by source-scale roundoff.
 The species-local subtraction allowance above fixes that case without changing
 generated masses, reservoirs, radii or descriptions.
+
+Checkpoint 5b's boundary correction was rerun over the same 19,440 planets.
+2,955 use a supported `thin_boundary_column`, 763 the flagged
+`boundary_reference_transition` and 16,485 retain `deep_boundary_unresolved`
+references (including dry and water-bearing cold proxies outside the domain, not
+only giants). Supported boundaries occur in rocky, metal-rich and sub-Neptune
+descriptions; no water-rich, envelope-world or giant planet qualifies. Masses,
+inventories, escape and descriptions are unchanged. Extended columns fall from
+7,275 at checkpoint 5 to 7,257, and the maximum extent/radius is unchanged.
+Corrected radii move about 110 planets from the 2–4 into the 1–2 Earth-radius bin.
 
 Every census planet passes transport reconstruction, species conservation,
 spin/shape bounds, optical conversion (when air is present), and finite ordered

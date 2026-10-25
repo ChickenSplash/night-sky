@@ -115,7 +115,8 @@ fn reference_world_columns_have_sensible_physical_values() {
         assert_eq!(column.validity, ColumnValidity::Thin);
         close(
             column.extent_m,
-            EXTENT_SCALE_HEIGHTS * column.scale_height_m,
+            (EXTENT_SCALE_HEIGHTS + (pressure.ln() - ONE_BAR_PA.ln()).max(0.0))
+                * column.scale_height_m,
             1e-14,
         );
     }
@@ -143,6 +144,81 @@ fn ideal_gas_and_hydrostatic_scalings_are_not_independent_slider_draws() {
         base.density_kg_m3 * base.gravity_m_s2 * base.scale_height_m,
         ONE_BAR_PA,
         1e-14,
+    );
+}
+
+#[test]
+fn dense_boundary_preserves_the_column_above_one_bar() {
+    let gm = SUN_GM * EARTH_SOLAR;
+    let radius = 6.371e6;
+    let base = nitrogen(ONE_BAR_PA, 280.0).column(gm, radius).unwrap();
+    for bars in [1.0, 92.0, 700.0, 1_000.0, 10_000.0] {
+        let atmosphere = nitrogen(bars * ONE_BAR_PA, 280.0);
+        let column = atmosphere.column(gm, radius).unwrap();
+        let one_bar_height = atmosphere
+            .pressure_level_altitude_m(ONE_BAR_PA, gm, radius)
+            .unwrap()
+            .unwrap();
+        assert!((one_bar_height - base.scale_height_m * bars.ln()).abs() < 1e-8);
+        close(column.extent_m - one_bar_height, base.extent_m, 1e-13);
+        close(
+            column.density_at(one_bar_height).unwrap(),
+            base.density_kg_m3,
+            1e-13,
+        );
+        close(
+            column.density_at(column.extent_m).unwrap(),
+            base.density_at(base.extent_m).unwrap(),
+            1e-13,
+        );
+        // More gas increases optical column mass, not merely the extent label.
+        close(
+            column.density_kg_m3 * column.scale_height_m,
+            bars * base.density_kg_m3 * base.scale_height_m,
+            1e-13,
+        );
+    }
+}
+
+#[test]
+fn pressure_levels_respect_the_reference_and_validate_inputs() {
+    let gm = SUN_GM * EARTH_SOLAR;
+    let radius = 6.371e6;
+    let thin = nitrogen(600.0, 210.0);
+    assert_eq!(
+        thin.pressure_level_altitude_m(ONE_BAR_PA, gm, radius),
+        Ok(None)
+    );
+    assert_eq!(
+        thin.pressure_level_altitude_m(600.0, gm, radius),
+        Ok(Some(0.0))
+    );
+    assert!(
+        thin.pressure_level_altitude_m(60.0, gm, radius)
+            .unwrap()
+            .unwrap()
+            > 0.0
+    );
+    let column = thin.column(gm, radius).unwrap();
+    assert_eq!(
+        column.extent_m,
+        EXTENT_SCALE_HEIGHTS * column.scale_height_m
+    );
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(thin.pressure_level_altitude_m(bad, gm, radius).is_err());
+        assert!(
+            thin.pressure_level_altitude_m(ONE_BAR_PA, bad, radius)
+                .is_err()
+        );
+        assert!(thin.pressure_level_altitude_m(ONE_BAR_PA, gm, bad).is_err());
+    }
+    // Logarithmic evaluation remains finite even when p_reference/p_level
+    // would overflow. This is numerical coverage, not a physical domain claim.
+    assert!(
+        thin.pressure_level_altitude_m(f64::from_bits(1), gm, radius)
+            .unwrap()
+            .unwrap()
+            .is_finite()
     );
 }
 

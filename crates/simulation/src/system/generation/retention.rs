@@ -174,6 +174,10 @@ pub(crate) fn finalise(
     body.budget = budget;
     body.structure = structure;
     body.retention_solve = solve;
+    refresh_spin(body, id, host_mass);
+}
+
+pub(crate) fn refresh_spin(body: &mut Body, id: &str, host_mass: f64) {
     body.spin = planet_spin(&mut Rng::new(&format!("{id}:spin:v2")), body, host_mass);
 }
 

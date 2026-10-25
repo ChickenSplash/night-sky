@@ -74,6 +74,66 @@ fn wire_derived_values_are_recomputed_and_invalid_inputs_do_not_reach_gpu() {
 }
 
 #[test]
+fn dense_boundary_pressure_changes_optics_and_preserves_the_upper_column() {
+    let thin = planet(Gas::Nitrogen);
+    let mut dense = thin.clone();
+    dense
+        .environment
+        .as_mut()
+        .unwrap()
+        .atmosphere
+        .as_mut()
+        .unwrap()
+        .pressure_pa = 700e5;
+    let base = atmosphere(&thin).unwrap();
+    let thick = atmosphere(&dense).unwrap();
+    let extra_height = base.rayleigh_height * 700.0_f64.ln();
+    assert!((thick.top - base.top - extra_height).abs() < 1e-8);
+    assert_eq!(thick.rayleigh_height, base.rayleigh_height);
+    assert!((thick.rayleigh / base.rayleigh - DVec3::splat(700.0)).length() < 1e-9);
+    assert!(!envelope(&dense));
+    assert!(for_planet(&dense, false, None, 6.371e6).is_some());
+}
+
+#[test]
+fn motivating_generated_boundary_reaches_renderer_and_is_not_an_envelope_proxy() {
+    let system =
+        space_simulation::system::generated_system("g13b6ffffcfeba.2.1", [0.0; 3]).unwrap();
+    let world = system
+        .planets
+        .iter()
+        .find(|p| p.id.ends_with("/1"))
+        .unwrap();
+    let data = world
+        .environment
+        .as_ref()
+        .unwrap()
+        .atmosphere
+        .as_ref()
+        .unwrap();
+    assert!(!envelope(world));
+    assert!(data.pressure_pa > 100e5);
+    let generated = atmosphere(world).unwrap();
+    assert!((generated.top - data.extent_m).abs() < 1e-8);
+    assert!(for_planet(world, false, None, world.radius_km * 1e3).is_some());
+    let mut reference = world.clone();
+    reference
+        .environment
+        .as_mut()
+        .unwrap()
+        .atmosphere
+        .as_mut()
+        .unwrap()
+        .pressure_pa = 1e5;
+    let one_bar = atmosphere(&reference).unwrap();
+    assert!(generated.top > one_bar.top);
+    assert!(
+        (generated.rayleigh / one_bar.rayleigh - DVec3::splat(data.pressure_pa / 1e5)).length()
+            < 1e-8
+    );
+}
+
+#[test]
 fn debug_optical_changes_enable_override_but_quality_changes_do_not() {
     let mut tuning = AtmosphereTuning::default();
     assert!(!tuning.enabled);

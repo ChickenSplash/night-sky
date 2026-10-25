@@ -16,6 +16,10 @@ pub const HEAVY_INERTIA_BASE: f64 = 0.36;
 pub const METAL_INERTIA_REDUCTION: f64 = 0.08;
 pub const ENVELOPE_INERTIA: f64 = 0.25;
 pub const MIN_INERTIA: f64 = 0.12;
+/// Environmental boundary model: percent-level gas self-gravity and cold-water
+/// radius contributions only. Neither limit is a classification/pressure cutoff.
+pub const MAX_BOUNDARY_GAS_FRACTION: f64 = 0.01;
+pub const MAX_BOUNDARY_WATER_FRACTION: f64 = 0.01;
 
 // Lopez & Fortney (2014), equation 4. Applied to envelope thickness only.
 pub const ENVELOPE_THICKNESS_EARTH: f64 = 2.06;

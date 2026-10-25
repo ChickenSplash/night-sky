@@ -1,17 +1,34 @@
 //! Well-mixed reservoir partition, with explicit cold-trap mass accounting.
 use super::*;
 use crate::system::{
-    composition::{CompositionError, Inventory, Material, Reservoir},
+    composition::{Budget, CompositionError, Inventory, Material, Reservoir},
     generation::retention::accessible_fraction,
-    structure::RadiusReference,
 };
 use std::f64::consts::PI;
 
+#[cfg(test)]
 pub(super) fn atmosphere(
     body: &mut crate::system::Body,
     temperature: f64,
 ) -> Result<Option<GasAtmosphere>, AtmosphereError> {
-    let budget = &body.budget;
+    let (budget, air) = solve(
+        &body.budget,
+        temperature,
+        body.structure.mass_kg(),
+        body.structure.radius_m(),
+        body.structure.reference() == crate::system::structure::RadiusReference::OneBar,
+    )?;
+    body.budget = budget;
+    Ok(air)
+}
+
+pub(crate) fn solve(
+    budget: &Budget,
+    temperature: f64,
+    mass_kg: f64,
+    radius_m: f64,
+    one_bar: bool,
+) -> Result<(Budget, Option<GasAtmosphere>), AtmosphereError> {
     let available = Inventory::new(&Gas::ALL.map(|gas| {
         let material = Material::from_gas(gas);
         let retained = budget.retained().mass_kg(material);
@@ -27,11 +44,10 @@ pub(super) fn atmosphere(
     }))
     .map_err(|_| AtmosphereError::InvalidValue("available gas inventory"))?;
     if available.total_mass_kg() == 0.0 {
-        return Ok(None);
+        return Ok((*budget, None));
     }
-    let one_bar = body.structure.reference() == RadiusReference::OneBar;
     let weight_per_area =
-        body.structure.reference_gravity_m_s2() / (4.0 * PI * body.structure.radius_m().powi(2));
+        crate::units::GRAVITATIONAL_CONSTANT * mass_kg / (4.0 * PI * radius_m.powi(4));
     // p_i = C m_i / mu_i. For a boundary column C = mean_mu g / area;
     // at one bar C = p / sum(m_i/mu_i). The latter samples an entire envelope
     // without estimating its mass from a thin one-bar column.
@@ -122,8 +138,7 @@ pub(super) fn atmosphere(
         .map_err(|_| AtmosphereError::InvalidValue("partitioned gas mixture"))?;
     // Trace gas remains accounted for, even when no rendered column is emitted.
     if pressure < MIN_PRESSURE_PA || mixture.is_none() {
-        body.budget = partitioned;
-        return Ok(None);
+        return Ok((partitioned, None));
     }
     let mixture = mixture.unwrap();
     for species in Gas::ALL {
@@ -147,6 +162,5 @@ pub(super) fn atmosphere(
         temperature,
         None,
     )?;
-    body.budget = partitioned;
-    Ok(Some(atmosphere))
+    Ok((partitioned, Some(atmosphere)))
 }

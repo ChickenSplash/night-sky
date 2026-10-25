@@ -93,8 +93,68 @@ pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str
             return Err("inconsistent material totals");
         }
     }
-    let s = structure::derive(&budget, env.irradiation_w_m2, env.age_gyr)
-        .map_err(|_| "invalid reference structure")?;
+    if !env.equilibrium_temperature_k.is_finite() || env.equilibrium_temperature_k < 0.0 {
+        return Err("invalid boundary temperature");
+    }
+    let (s, partitioned, atmosphere) = structure::boundary::resolve(
+        &budget,
+        env.irradiation_w_m2,
+        env.age_gyr,
+        env.equilibrium_temperature_k.max(20.0),
+    )
+    .map_err(|_| "invalid reference structure")?;
+    for p in &data.materials {
+        let material = Material::from_id(&p.material).unwrap();
+        // Repartitioning near a protected reservoir can lose source-scale ulps.
+        let allowance = 8.0 * f64::EPSILON * p.source_kg;
+        for (actual, expected) in [
+            (
+                p.gas_kg,
+                partitioned.reservoir(Reservoir::Gas).mass_kg(material),
+            ),
+            (
+                p.condensed_kg,
+                partitioned
+                    .reservoir(Reservoir::CondensedVolatiles)
+                    .mass_kg(material),
+            ),
+        ] {
+            if (actual - expected).abs() > allowance + 1e-10 * actual.max(expected) {
+                return Err("inconsistent boundary partition");
+            }
+        }
+    }
+    // Compare molecular fractions to the actual transported reservoir, not a
+    // second subtraction of tiny cold-trapped traces from protected supplies.
+    let mixture = budget
+        .reservoir(Reservoir::Gas)
+        .gas_composition()
+        .map_err(|_| "invalid boundary mixture")?;
+    match (&env.atmosphere, &atmosphere) {
+        (None, None) => {}
+        (Some(actual), Some(expected)) => {
+            use super::atmosphere::{Gas, GasAtmosphere, ONE_BAR_PA, ReferenceLevel};
+            let actual =
+                GasAtmosphere::try_from(actual).map_err(|_| "invalid boundary atmosphere")?;
+            let mixture = mixture.ok_or("missing boundary gas")?;
+            let pressure = if actual.reference_level() == ReferenceLevel::OneBar {
+                ONE_BAR_PA
+            } else {
+                budget.reservoir(Reservoir::Gas).total_mass_kg() * s.reference_gravity_m_s2()
+                    / (4.0 * std::f64::consts::PI * s.radius_m().powi(2))
+            };
+            if actual.reference_level() != expected.reference_level()
+                || !close(actual.pressure_pa(), pressure)
+                || !close(actual.temperature_k(), expected.temperature_k())
+                || !Gas::ALL
+                    .iter()
+                    .all(|&gas| close(actual.composition().fraction(gas), mixture.fraction(gas)))
+            {
+                return Err("inconsistent boundary atmosphere");
+            }
+        }
+        _ => return Err("inconsistent boundary atmosphere"),
+    }
     if ![
         (data.retained_mass_kg, s.mass_kg()),
         (data.reference_radius_m, s.radius_m()),
