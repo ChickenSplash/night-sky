@@ -550,7 +550,7 @@ fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport()
             );
         }
         if stage == 1 {
-            for prefix in ["Overview", "Composition", "Retained mass"] {
+            for prefix in ["Overview", "Composition", "Mean density"] {
                 let shape = output
                     .shapes
                     .iter()
@@ -573,6 +573,13 @@ fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport()
                     "{prefix} is clipped: {shape:?}"
                 );
             }
+            assert!(
+                !output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Text(text)
+                    if text.galley.job.text.starts_with("Structure caveats"))
+                }),
+                "model details must start collapsed"
+            );
         }
         if stage == 2 {
             let area = ctx

@@ -26,9 +26,15 @@ pub struct AtmosphereData {
     pub mean_molecular_mass_kg: f64,
     pub reference_density_kg_m3: f64,
     pub scale_height_m: f64,
+    #[serde(default)]
+    pub reference_radius_m: f64,
     pub extent_m: f64,
-    /// Constant-gravity column exceeds its documented geometric validity limit.
+    /// Geometric extent exceeds 10% of the reference radius, not a validity warning.
     pub extended: bool,
+    /// A static spherical column cannot reach its cutoff below its sonic radius.
+    /// An explicitly approximate exponential fallback is used, not a wind solution.
+    #[serde(default)]
+    pub hydrostatic_unresolved: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

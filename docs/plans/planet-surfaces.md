@@ -2,6 +2,33 @@
 
 A proposal, not a description of the current application.
 
+## Current status (2026-10-25)
+
+- **Accepted:** checkpoints 1 and 2 (shape and smooth ground).
+- **Implemented elsewhere:** atmospheric ground lighting and generated air,
+  covered by the closed [atmospheres plan](atmospheres.md).
+- **Still unfinished:** checkpoint 3 (surface rotation frame), 4 (near plane by
+  ground height) and 5 (landing floor and approach-speed easing).
+- **Giant descent implemented, awaiting user live acceptance:** no opaque
+  one-bar surface on bulk H/He envelopes, free-camera descent through approximate
+  deeper air into black. A one-bar reference alone does not qualify: low-gas
+  rocky bodies retain their condensed boundary, inventory-weight pressure and
+  extended-column warning rather than becoming groundless.
+  The user chose **no pressure stop**, superseding the original pressure limit
+  below. See [the rendering guide](../client/rendering.md#giant-descent) for the
+  approximation, limits and `set_debug giant_descent false` comparison.
+- **Deferred, not completed:** terrain/geology, oceans, ice and climate. These
+  need their own agreed scope; completing giant descent does not close this plan.
+
+Live check for giant descent: choose a generated bulk H/He one-bar envelope, leave the
+selected-planet override off, descend through the reference radius, turn around
+and continue until black. Check ascent reverses it without a surface flash,
+including with lookup tables disabled and while tables are building. Compare
+`giant_descent false` above the reference, and confirm condensed-boundary rocky
+worlds retain their ground. On 2026-10-25 the user explicitly authorised committing
+and merging the current work; this supersedes the earlier commit hold without
+claiming all visual checks have been completed.
+
 Comes before the rest of [atmospheres](atmospheres.md) stage 2: lighting the
 ground from the sky (atmospheres 4c) belongs in a ground shader this plan
 replaces, and geology and water depend on the simulated air (atmospheres
@@ -48,8 +75,8 @@ and heights as well as the air's extent.
 4. **Geology, water and climate,** planned with the user together with
    atmospheres stage 3: temperature and pressure decide whether there are
    oceans, ice or erosion.
-5. **Giants:** no floor; sink through the air until it is black, down to a
-   pressure where the descent ends.
+5. **Giants:** no floor; sink through the air until it is black. The user chose
+   unrestricted free-camera descent on 2026-10-25, replacing the pressure stop.
 
 Not planned yet: moons (they reuse all of this as another body), tidally
 stretched three-axis shapes, rings, clouds.
@@ -254,7 +281,7 @@ scale.
 - Eye height when landed: about 1.7 m standing, or a higher hover?
 - Does the craft land too, now or with flight-sim's later "crashing into
   bodies"?
-- Giants: at what pressure does the descent end?
+- Giants: resolved 2026-10-25, no pressure stop for the free camera.
 
 ## Working notes
 

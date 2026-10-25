@@ -124,8 +124,11 @@ false` draws every body as the sphere of its mean radius, to compare.
 
 ### Planet ground
 
-A planet's disc is drawn as its ground (`render/ground.rs`, `ground.wgsl`,
-shaded by `body.wgsl`); stars keep the sphere mesh.
+A condensed-boundary planet's disc is drawn as its ground (`render/ground.rs`,
+`ground.wgsl`, shaded by `body.wgsl`); stars keep the sphere mesh. Bulk H/He
+envelope worlds instead use the traversable atmosphere described below.
+Other unresolved one-bar references retain an opaque reference proxy, not
+terrain or a claim of a located solid surface.
 
 - **Cube-sphere quadtree.** The six faces of a cube bent onto the spheroid,
   each a quadtree of chunks of 32 × 32 cells. The map is equi-angular (equal
@@ -180,9 +183,9 @@ limb and the planet's shadow stay exact and the tables stay spherical; heights
 in the air and path lengths are off by at most the flattening near the poles
 (0.3% on Earth, 10% on Saturn), and phase angles use the true directions. At each of 16 view steps (by default), light
 from every star is attenuated on its way in (none where the planet is in the
-way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase). Densities fall exponentially with height; an
+way) and scattered by gas (Rayleigh phase) and haze (Cornette-Shanks phase). Generated gas follows the selected spherical hydrostatic profile (or explicit unresolved exponential fallback), while haze falls exponentially with height; an
 absorbing layer in debug presets, such as ozone, falls linearly either side of
-its peak. Generated gas absorption instead follows the exponential gas profile. For
+its peak. Generated gas absorption instead follows the same gas density profile. For
 extinction coefficient $\sigma_t$, scattering $\sigma_s$, phase $p(\mu)$ and
 star flux $F$:
 
@@ -210,25 +213,29 @@ finely. Every ray spreads its steps over its own path through the air.
 
 **Stopping where opaque.** A ray ends where the air between the camera and
 the point reaches optical depth 10 in its least dimmed channel (less than
-1/20,000 of the light gets through), whether or not ground lies beyond. The
-depth between two points on a ray is the difference of their depths to the
-top of the air from the transmittance table, taken forwards along the ray,
-or backwards for a ray that reaches the ground, as its backward line never
-meets the ground; about ten halvings, one table read each, find the point
-(a test checks it lands between optical depths 9 and 13 on Venus). What lies
-behind is still dimmed by the whole ray's optical depth from the table. The
-ground includes its own lost sunlight in its surface lighting; while that
-table is building, or with surface lighting off, the shell dims the ground's
-sunlight instead. Otherwise even 1/20,000 of an undimmed surface outshone
-Venus's scattered light and showed the distant ground through the haze.
-In thick air (Venus) rays either side of the horizon, or of the ground's
-limb from above, then end alike in the haze and meet without a seam, the
-ground is hidden where it should be, and all the steps go where light is
-seen. Earth's air is that thick only along the limb. Without it, rays that
-reach the ground and rays that pass it are stepped over very different
-lengths and the edge between them shows in thick air. It needs the table, so
-does nothing while the table builds or with it off;
-`set_debug atmosphere_stop_opaque false` compares.
+1/20,000 of the light gets through), whether or not ground lies beyond. A
+deterministic foreground prepass integrates positive local extinction directly.
+Adaptive midpoint steps limit radial profile changes and tangent curvature,
+using one quarter of the shortest active profile height and at most about one
+optical depth per step in the least dimmed channel. Twelve local halvings refine
+the crossing step. Scattering samples cover the resulting visible interval,
+including the last step's light. Distances are relative to the ray entry to keep
+sub-f32-radius mean free paths representable in dense air.
+
+Once opaque, transmission behind the shell is set to zero, deliberately dropping
+the less-than-1/20,000 remainder so bright ground and rim sprites cannot leak
+through. Otherwise background attenuation uses the directly integrated depth,
+independent of scattering jitter. `set_debug atmosphere_stop_opaque false`
+distributes scattering samples over the old full interval for comparison, but
+retains the same foreground attenuation. Neither path needs lookup-table
+readiness. The prepass is bounded to 1,024 steps; on budget exhaustion it falls
+back to the unshortened view march and its attenuation, without claiming opacity.
+
+This replaces subtraction of large interpolated table depths, which produced
+premature/late stops and dark rings on extreme columns such as
+`g1e0024924b.2.113#A/1`. f32 foreground regressions compare against fine f64
+integration across its ground limb, preset atmospheres, inside cameras and a
+rebased deep column. Incoming starlight still uses the transmittance table.
 
 **Jitter.** Each step takes its sample at a point within the step that
 differs from pixel to pixel (interleaved gradient noise, Jimenez 2014), not
@@ -244,8 +251,10 @@ optical depth from any height, in any direction, to the top of the air,
 256 x 64 texels in Bruneton's parametrisation (by the distance to the top
 of the air between its shortest and the horizon's, and by height as
 $\sqrt{r^2 - 1}$), so the horizon, where the depth changes fastest, gets the
-most texels. It holds RGB optical depth rather than transmittance, as depth
-interpolates smoothly between texels, in `Rgba16Float`. Rays towards the
+most texels. It holds `log2(1 + RGB optical depth)` in `Rgba16Float`, avoiding
+clipping at 65,504 on extreme columns. The shader loads and decodes the four
+neighbouring texels before interpolating the linear optical depths. Thinned
+starlight tables use the same encoding; sky/flow radiance stays linear. Rays towards the
 ground read the horizon's value; the planet's shadow stays the analytic test.
 The table depends only on the air in planet radii, so it is built on the CPU
 in a background task (about 0.1 s, 512 steps per texel) when the air
@@ -330,12 +339,13 @@ prescribed submicron aerosols currently fail optical conversion rather than
 being silently given micron-particle optics. See the
 [physical optics assumptions](../simulation/atmospheres.md#visible-optical-conversion).
 
-Extended columns retain the constant-gravity estimate and inspector warning,
-without a radius clamp. A one-bar envelope's lower opaque sphere is a simple
-cloud/deep-envelope proxy at the reference radius, shaded with the existing
-composition reflectance proxy and atmosphere tables, not a generated cloud deck or a solid
-surface. It has no terrain chunks. This rendering choice changes neither
-collision nor flight mechanics, and does not model descent below that radius.
+Supported extended columns account for weakening spherical gravity. CPU optical
+tables, multiple scattering and WGSL use the same profile; the table cache key
+includes its spherical/exponential choice. Unresolved escape cases retain the
+explicitly flagged exponential approximation, without a radius clamp.
+A bulk H/He envelope has no opaque sphere at its reference
+radius, no terrain chunks and no airless disc-rim sprites. Its atmosphere continues
+below that level using the [deep-descent approximation](#giant-descent) below.
 Supported [condensed-boundary atmospheres](../simulation/planet-composition.md#supported-approximate-condensed-boundaries)
 instead draw ground at the boundary, with gas density and scattering scaled by
 the full boundary pressure, so a dense column is optically thicker rather than
@@ -370,6 +380,47 @@ original airless photometry; points have no atmosphere. Ground tables assume
 a smooth, uniform Lambertian surface, not slopes, terrain shadows or local
 albedo variations. See
 [the plan](../plans/atmospheres.md).
+
+### Giant descent
+
+`set_debug giant_descent true` (default) replaces the false one-bar surface
+with traversable air **only for bulk H/He envelopes**: both the physical radius
+and atmosphere must use a one-bar reference, and the retained H/He mass fraction
+must be at least 2%, the upper end of the condensed-boundary inventory handoff.
+This is a conservative rendering eligibility bound, not a physical assertion
+that a 2% envelope has no core. It does not use a gas/ice-giant label. One bar
+alone is merely a pressure reference, not evidence that ground is absent.
+Low-inventory rock-dominated bodies retain their approximate condensed boundary
+and inventory-weight atmospheric pressure even when the column is extended.
+Other unresolved references retain the old opaque proxy. With atmospheres disabled, or with
+`giant_descent false`, the old opaque reference sphere remains for comparison.
+Missing or invalid optical data also retains that fallback rather than an invisible
+body. Free-camera movement is unchanged: there is no pressure stop or collision
+at either the one-bar reference or the optical lower boundary. Craft safety rules
+are unchanged.
+
+This is a **visual continuation, not a giant-interior model**. The selected gas
+column is rebased six active scale heights below the reference, limited to 20%
+of the equatorial radius. The shortest nonzero gas/haze profile sets that depth
+to keep coefficient growth bounded. Heights and coefficients are transformed
+together, preserving the upper column and outer shell within f32 precision.
+For spherical gas rebased to `R'=sR`, the density multiplier is
+`exp[(1-s)/(s H/R)]` and the dimensionless scale height becomes `s H/R`.
+Exponential debug/fallback gas instead uses multiplier `exp[(1-s)/(H/R)]`
+and scale height `(H/R)/s`. Haze remains exponential in both cases.
+Absorbing layers retain their original position. The optical lower boundary has
+zero reflecting albedo, not a cloud deck or exposed core. The existing spherical
+tables and spheroidal approximation apply at the rebased radius.
+
+In the final two gas scale heights (or the entire resolved depth when shorter),
+the camera's view eases to opaque black. Below that boundary it stays black in
+all directions, including at the centre and before tables finish building. This
+deliberate unresolved-interior treatment avoids extrapolating ideal gas to
+unbounded densities, or letting stars show through the planet. The camera can
+continue moving and can emerge on the opposite side. No crushing, pressure/thermal
+evolution, nonideal equation of state, internal glow, clouds or banding is implied.
+Distant point photometry remains the existing composition reflectance proxy;
+table readiness and point/disc brightness matching remain limitations.
 
 ### Physical model versus presentation
 

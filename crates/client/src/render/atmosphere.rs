@@ -1,6 +1,8 @@
 //! Planetary atmospheres: a scattering shell around a planet's disc
 //! (`atmosphere.wgsl`). The shell mesh only chooses which pixels run the
 //! shader; the shader finds the ground and the top of the air itself.
+#[cfg(test)]
+mod foreground_tests;
 pub mod generated;
 mod multiple;
 #[cfg(test)]
@@ -60,6 +62,8 @@ pub const HAZE_ABSORBED: RangeInclusive<f64> = 1e-4..=0.5;
 /// A planet's air, physical: coefficients per metre, heights in metres.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Atmosphere {
+    /// Generated spherical hydrostatic gas; debug presets remain exponential.
+    pub spherical: bool,
     /// Height of the top of the air, above which it is taken as empty.
     pub top: f64,
     /// Rayleigh scattering by gas at the ground, per channel, and its scale height.
@@ -86,6 +90,8 @@ impl Atmosphere {
         let per = |v: DVec3| (v * radius).as_vec3();
         let over = |h: f64| (h / radius) as f32;
         Air {
+            spherical: self.spherical,
+            radius_scale: 1.0,
             top: 1.0 + over(self.top),
             rayleigh: per(self.rayleigh).extend(over(self.rayleigh_height)),
             mie: per(self.mie).extend((self.mie_absorption * radius) as f32),
@@ -216,6 +222,7 @@ impl AirSettings {
         let colour = DVec3::from_array(self.haze_colour);
         let tallest = self.scale_height_km.max(self.haze_height_km);
         Atmosphere {
+            spherical: false,
             top: (tallest * TOP_HEIGHTS).max(self.layer_km + self.layer_width_km) * 1e3,
             rayleigh: AIR_PER_BAR * self.gas * self.pressure_bar,
             rayleigh_height: self.scale_height_km * 1e3,
@@ -391,6 +398,11 @@ impl AtmosphereTuning {
 /// An atmosphere in units of its planet's radius.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Air {
+    pub spherical: bool,
+    /// Optical lower radius / physical reference radius. Below one for a
+    /// freely traversable envelope, whose unresolved interior is rendered black.
+    /// Geometry metadata only; tables already use the rebased coefficients.
+    pub radius_scale: f32,
     /// Radius of the top of the air.
     pub top: f32,
     /// Rayleigh scattering, and its scale height.
@@ -564,12 +576,20 @@ impl Shell {
             .filter(|_| switches[2]);
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
-            steps: Vec4::new(self.air.top, steps.0 as f32, steps.1 as f32, 0.0),
+            steps: Vec4::new(
+                self.air.top,
+                steps.0 as f32,
+                steps.1 as f32,
+                1.0 / self.air.radius_scale - 1.0,
+            ),
             rayleigh: self.air.rayleigh,
             mie: self.air.mie,
             shape: self.air.shape,
             absorption: self.air.absorption.extend(0.0),
-            gas_absorption: self.air.gas_absorption.extend(0.0),
+            gas_absorption: self
+                .air
+                .gas_absorption
+                .extend(u8::from(self.air.spherical) as f32),
             switches: Vec4::new(jitter, opaque, f32::from(u8::from(switches[3])), self.fade),
             pole: self.pole.extend(1.0 / (1.0 - self.flattening)),
             lights: self.lights,

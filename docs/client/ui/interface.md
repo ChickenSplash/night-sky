@@ -45,7 +45,7 @@ to `crates/client/src/`.
   camera/tracking. Missing tabs fall back to selected leaf, or current location
   with no selection.
 - The inspector keeps its borderless halo text, with Overview, Composition,
-  Orbit, Rotation and Atmosphere sections for planets. A shared-kit vertical
+  Atmosphere, Orbit and rotation, and collapsed Model details sections for planets. A shared-kit vertical
   scroll area bounds long content to the viewport, reserving the bottom HUD
   inset; wheel/scrollbar input reaches all facts and actions. Its top stays
   anchored at the shared HUD inset. Facts are cached
@@ -75,10 +75,28 @@ radius meaning and model caveats. Missing legacy composition and invalid new
 records are visibly unknown, never zero-filled. Water-rich boundaries make no
 ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 
+The player-facing order is Overview, Composition, Atmosphere, Orbit and rotation,
+then Model details (closed by default). Overview identifies the surface/radius
+meaning and gives atmospheric pressure without a separate present/absent row.
+An absent/sub-cutoff model has unknown pressure, not an invented exact zero.
+Composition groups bulk gas species separately from rock, metal and water;
+both their total and species breakdown use whole-planet retained mass. This is a
+material inventory, not a claim that all those species are in the atmosphere.
+Short section explanations distinguish it from atmospheric percentages by molecule.
+The normal atmosphere section contains mixture, estimated temperature and scale
+height. Reservoir bookkeeping, structure/reflectance assumptions, heating,
+operational extent and model limitations live in Model details. Important pressure
+uncertainty remains beside the main measurement. Developer exports retain all
+fields, including the collapsed details, with the same section assignments.
+
 Planet facts include generated all-star mean heating, equilibrium temperature
 with assumed albedo, atmospheric composition, reference pressure, column
-temperature/density, scale height and operational extent. Estimates and
-extended-column warnings are labelled. Supported condensed boundaries show
+temperature/density, scale height and operational extent. Pressure displays
+use bar, switching to mbar below 0.01 bar (scientific notation
+for trace columns rather than rounding positive pressure to zero). Physical
+records retain pascals. Estimates and unresolved escape/thermal structure are
+labelled; supported spherical columns do not inherit the old extended-column
+uncertainty warning. Supported condensed boundaries show
 approximate boundary pressure and the one-bar altitude above it; composition
 flags unresolved deep boundaries, which are not proof that ground is absent.
 A giant's 1 bar reference level is not ground. Every gas column states its

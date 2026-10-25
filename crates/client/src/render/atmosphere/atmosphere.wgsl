@@ -17,7 +17,8 @@
 struct Air {
     // The planet's centre from the camera, in render units, and its radius.
     centre: vec4<f32>,
-    // Top of the air in radii, and steps along the view and towards a star.
+    // Top, view/light steps, and depth of an envelope's reference above its
+    // black optical lower boundary (zero for real ground).
     steps: vec4<f32>,
     // Coefficients per radius. Rayleigh scattering and its scale height; Mie
     // scattering and absorption; Mie scale height and asymmetry, then the
@@ -28,7 +29,7 @@ struct Air {
     absorption: vec4<f32>,
     gas_absorption: vec4<f32>,
     // 1 to jitter the view steps; 1 to end each ray where the air turns
-    // opaque (with TABLES only); 1 when the ground already includes its air lighting.
+    // opaque; 1 when the ground already includes its air lighting.
     switches: vec4<f32>,
     // The pole, and the stretch along it that makes the planet round.
     pole: vec4<f32>,
@@ -58,6 +59,21 @@ const MULTIPLE_SIZE: f32 = 32.0;
 // than 1/20,000 of the light.
 const OPAQUE: f32 = 10.0;
 
+// Depth textures store log2(1 + depth), avoiding half-float overflow. Decode
+// before interpolation: interpolating logarithms would bias transmission.
+fn sample_depth(table: texture_2d<f32>, uv: vec2<f32>) -> vec3<f32> {
+    let size = vec2<i32>(textureDimensions(table));
+    let p = clamp(uv * vec2<f32>(size) - 0.5, vec2(0.0), vec2<f32>(size - 1));
+    let lo = vec2<i32>(floor(p));
+    let hi = min(lo + 1, size - 1);
+    let f = fract(p);
+    let a = exp2(textureLoad(table, lo, 0).rgb) - 1.0;
+    let b = exp2(textureLoad(table, vec2(hi.x, lo.y), 0).rgb) - 1.0;
+    let c = exp2(textureLoad(table, vec2(lo.x, hi.y), 0).rgb) - 1.0;
+    let d = exp2(textureLoad(table, hi, 0).rgb) - 1.0;
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 struct Medium {
     rayleigh: f32,
     mie: f32,
@@ -65,7 +81,9 @@ struct Medium {
 }
 
 fn medium(height: f32) -> Medium {
-    let rayleigh = exp(-max(height, 0.0) / air.rayleigh.w);
+    let above = max(height, 0.0);
+    let potential_height = above / (1.0 + air.gas_absorption.w * above);
+    let rayleigh = exp(-potential_height / air.rayleigh.w);
     let mie = exp(-max(height, 0.0) / air.shape.x);
     let layer = max(0.0, 1.0 - abs(height - air.shape.z) / air.shape.w);
     let extinction = (air.rayleigh.rgb + air.gas_absorption.rgb) * rayleigh + (air.mie.rgb + air.mie.w) * mie
@@ -117,10 +135,10 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32, thin: bool) -> vec4<
     let uv = transmittance_uv(r, b / r, top);
 #ifdef MULTIPLE
     if thin {
-        return vec4(textureSampleLevel(thinned, transmittance_sampler, uv, 0.0).rgb, 1.0);
+        return vec4(sample_depth(thinned, uv), 1.0);
     }
 #endif
-    return vec4(textureSampleLevel(transmittance, transmittance_sampler, uv, 0.0).rgb, 1.0);
+    return vec4(sample_depth(transmittance, uv), 1.0);
 #else
     let far = -b + sqrt(max(b * b - r2 + top * top, 0.0));
     let count = air.steps.z;
@@ -134,46 +152,60 @@ fn towards_star(p: vec3<f32>, towards: vec3<f32>, top: f32, thin: bool) -> vec4<
 #endif
 }
 
-#ifdef TABLES
-// Optical depth from `p` along `way` to the top of the air.
-fn to_top(p: vec3<f32>, way: vec3<f32>, top: f32) -> vec3<f32> {
-    let r = length(p);
-    let uv = transmittance_uv(r, dot(p, way) / r, top);
-    return textureSampleLevel(transmittance, transmittance_sampler, uv, 0.0).rgb;
-}
-
-// Optical depth from `start` to `t` along the ray: the difference of the
-// two points' depths to the top of the air, taken forwards, or backwards
-// for a ray that reaches the ground, whose backward line never meets it.
-// `base` is `start`'s depth that way.
-fn depth_to(nearest: vec3<f32>, dir: vec3<f32>, t: f32, base: vec3<f32>, reaches: bool, top: f32) -> vec3<f32> {
-    let p = nearest + dir * t;
-    return select(base - to_top(p, dir, top), to_top(p, -dir, top) - base, reaches);
-}
-
 fn least(depth: vec3<f32>) -> f32 {
     return min(depth.r, min(depth.g, depth.b));
 }
 
-// Where the air between `start` and the point turns opaque in its least
-// dimmed channel, found by halving, given `whole`, the depth to `end`.
-fn opaque_at(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32, base: vec3<f32>, whole: vec3<f32>, reaches: bool, top: f32) -> f32 {
-    if least(whole) < OPAQUE {
-        return end;
-    }
-    var low = start;
-    var high = end;
-    for (var i = 0; i < 10; i++) {
-        let mid = 0.5 * (low + high);
-        if least(depth_to(nearest, dir, mid, base, reaches, top)) < OPAQUE {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    return high;
+struct Foreground {
+    end: f32,
+    depth: vec3<f32>,
+    opaque: bool,
+    complete: bool,
 }
-#endif
+
+// Integrate only positive local extinction, never differences of large table
+// depths. Limit radial profile changes and tangent curvature to resolve both
+// sides of the limb identically. Independent of jitter and table readiness.
+fn foreground(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32) -> Foreground {
+    var scale = air.rayleigh.w;
+    if any(air.mie.rgb > vec3(0.0)) || air.mie.w > 0.0 {
+        scale = min(scale, air.shape.x);
+    }
+    if any(air.absorption.rgb > vec3(0.0)) {
+        scale = min(scale, air.shape.w);
+    }
+    let span = end - start;
+    var t = 0.0;
+    var depth = vec3(0.0);
+    for (var i = 0; i < 1024 && t < span; i++) {
+        let along = start + t;
+        let r = length(nearest + dir * along);
+        let rate = max(abs(along) / r, sqrt(scale / r));
+        let local_extinction = medium(r - 1.0).extinction;
+        let ds = min(min(span - t, 0.25 * scale / rate), 1.0 / max(least(local_extinction), 1e-30));
+        let x = medium(length(nearest + dir * (along + 0.5 * ds)) - 1.0).extinction * ds;
+        if least(depth + x) >= OPAQUE {
+            var low = 0.0;
+            var high = ds;
+            for (var j = 0; j < 12; j++) {
+                let mid = 0.5 * (low + high);
+                let local = medium(length(nearest + dir * (along + 0.5 * mid)) - 1.0).extinction * mid;
+                if least(depth + local) < OPAQUE {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            let local = medium(length(nearest + dir * (along + 0.5 * high)) - 1.0).extinction * high;
+            return Foreground(t + high, depth + local, true, true);
+        }
+        depth += x;
+        t += ds;
+    }
+    // If the safety budget is exhausted, do not claim an opaque stop or use
+    // an incomplete foreground depth for transmission; retain the view march.
+    return Foreground(span, depth, false, t >= span);
+}
 
 #ifdef MULTIPLE
 // Where the multiple scattering table holds radius `r` under a star at
@@ -215,7 +247,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let top = air.steps.x;
     // Underground nothing is seen, not even the air beyond the far side.
     if dot(eye, eye) < 1.0 {
-        return vec4(0.0);
+        return vec4(0.0, 0.0, 0.0, select(0.0, air.switches.w, air.steps.w > 0.0));
     }
     // Distance along the ray to its closest approach, and that point.
     let closest = -dot(eye, dir);
@@ -244,31 +276,24 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // ground or not, so the march ends there. Rays either side of the
     // horizon then end alike in thick air, and every step goes where light
     // can be seen. What lies behind is still dimmed by the whole ray's air.
-    var stopped = false;
-    var whole = vec3(0.0);
-#ifdef TABLES
-    if air.switches.y != 0.0 {
-        let base = to_top(nearest + dir * start, select(dir, -dir, reaches), top);
-        whole = depth_to(nearest, dir, end, base, reaches, top);
-        let opaque = opaque_at(nearest, dir, start, end, base, whole, reaches, top);
-        stopped = opaque < end;
-        end = opaque;
+    let front = foreground(nearest, dir, start, end);
+    var span = end - start;
+    if air.switches.y != 0.0 && front.opaque {
+        span = front.end;
     }
-#endif
     // Steps bunch up near a camera low in the air; from the top of the air
     // and above they are even.
     let count = air.steps.y;
     let height = clamp((length(eye) - 1.0) / (top - 1.0), 0.0, 1.0);
     let power = mix(2.0, 1.0, height);
-    let span = end - start;
     let offset = jitter(in.position.xy);
-    var last = start;
+    var last = 0.0;
     var depth = vec3(0.0);
     var light = vec3(0.0);
-    for (var i = 0.0; i < count && last < end; i += 1.0) {
-        let to = min(start + span * pow((i + 1.0) / count, power), end);
+    for (var i = 0.0; i < count && last < span; i += 1.0) {
+        let to = min(span * pow((i + 1.0) / count, power), span);
         let ds = to - last;
-        let p = nearest + dir * mix(last, to, offset);
+        let p = nearest + dir * (start + mix(last, to, offset));
         last = to;
         let m = medium(length(p) - 1.0);
         // Light scattered across the step, dimmed by the air in front of
@@ -313,8 +338,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Without surface table lighting the ground was lit with undimmed starlight, so dim it by the
     // air between it and the stars as well, weighted by each star's share
     // of its light.
-    if stopped {
-        depth = whole;
+    if front.opaque {
+        // Everything beyond this deliberately unresolved tail is hidden. This
+        // also prevents bright surface/rim light leaking through e^-10.
+        depth = vec3(1e3);
+    } else if front.complete {
+        depth = front.depth;
     }
     var sunlit = 1.0;
     if reaches && air.switches.z == 0.0 {
@@ -337,6 +366,17 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             sunlit = lit / total;
         }
     }
-    let through = dot(exp(-depth), vec3(1.0 / 3.0)) * sunlit;
+    var through = dot(exp(-depth), vec3(1.0 / 3.0)) * sunlit;
+    if air.steps.w > 0.0 {
+        // No solid surface: the unresolved deep envelope absorbs the view,
+        // including before tables are ready. Ease into darkness before crossing
+        // its optical boundary, without restricting free-camera movement.
+        let resolved = smoothstep(0.0, min(2.0 * air.rayleigh.w, air.steps.w), length(eye) - 1.0);
+        light *= resolved;
+        through *= resolved;
+        if reaches {
+            through = 0.0;
+        }
+    }
     return vec4(encode(light * air.switches.w), (1.0 - through) * air.switches.w);
 }

@@ -1,6 +1,7 @@
 //! One borderless readout shared by both breadcrumb trails.
 mod atmosphere;
 mod composition;
+mod planet_layout;
 mod presentation;
 use crate::{
     Navigation,
@@ -25,6 +26,7 @@ use space_simulation::{
 pub struct Cache {
     key: Option<(ObjectRef, Option<DVec3>)>,
     info: Info,
+    model_details_open: bool,
 }
 
 impl Cache {
@@ -242,7 +244,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                     format!("{:.0} km", planet.radius_km),
                 );
                 composition::facts(&mut info, planet);
-                info.section = Section::Rotation;
+                info.section = Section::Orbit;
                 info.field(
                     "rotation.flattening",
                     "Flattening",
@@ -270,7 +272,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                     Some("fraction"),
                     format!("{:.3}", planet.orbit.eccentricity),
                 );
-                info.section = Section::Rotation;
+                info.section = Section::Orbit;
                 info.field(
                     "rotation.period",
                     "Rotation",
@@ -309,6 +311,7 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                     );
                 }
                 atmosphere::facts(&mut info, planet.environment.as_ref());
+                planet_layout::organise(&mut info, planet);
                 info.section = Section::Overview;
                 if let Some(task) = &planet.task {
                     info.field("task.name", "Task", None, task.name.clone());
@@ -688,7 +691,31 @@ pub fn show(
             }
             if matches!(object, ObjectRef::Planet { .. }) {
                 ui.add_space(HUD_LINE_GAP);
+                if section == Section::ModelDetails {
+                    let label = if cache.model_details_open {
+                        "▾ Model details"
+                    } else {
+                        "▸ Model details"
+                    };
+                    if halo_text(ui, label, egui::Sense::click(), |response| {
+                        if response.hovered() { HOVER } else { LINK }
+                    }).clicked() {
+                        cache.model_details_open = !cache.model_details_open;
+                    }
+                    if !cache.model_details_open {
+                        continue;
+                    }
+                } else {
                 halo_wrapped_text(ui, section.label(), width, LINK);
+                }
+                let explanation = match section {
+                    Section::Composition => Some("Whole planet · % by mass. Materials may be in the interior or atmosphere; phases are not resolved."),
+                    Section::Atmosphere => Some("Atmospheric mixture · % by molecule, not % of planet mass."),
+                    _ => None,
+                };
+                if let Some(text) = explanation {
+                    halo_wrapped_text(ui, text, width, LINK);
+                }
             }
             for field in fields {
                 ui.horizontal(|ui| {

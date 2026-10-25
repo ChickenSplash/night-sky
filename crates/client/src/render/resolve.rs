@@ -564,12 +564,16 @@ pub fn resolve(
                 let colour = DVec3::from_array(photometry.colour(l.kelvin));
                 *sun = hdr_colour(colour, exposure.value(l.flux) * balance).extend(0.0);
             }
-            let ground = (surface * planet.surface.albedo).min(DVec3::ONE).as_vec3();
+            let ground = if air.radius_scale < 1.0 {
+                Vec3::ZERO
+            } else {
+                (surface * planet.surface.albedo).min(DVec3::ONE).as_vec3()
+            };
             let index = frame.shells.len();
             frame.shells.push(Shell {
                 fade: ((planet.pixels / POINT_PIXELS - 1.0) / 3.0).clamp(0.0, 1.0),
                 centre: planet.centre,
-                radius: planet.radius,
+                radius: planet.radius * air.radius_scale,
                 pole: planet.spin * Vec3::Y,
                 flattening: planet.flattening,
                 air: Air { ground, ..air },
@@ -578,6 +582,11 @@ pub fn resolve(
             });
             index
         });
+        // An envelope has no opaque reference sphere or its airless limb
+        // sprites. The scattering shell provides both radiance and occultation.
+        if planet.air.is_some_and(|air| air.radius_scale < 1.0) {
+            continue;
+        }
         frame.bodies.push(Shaded {
             centre: planet.centre,
             radius: planet.radius,

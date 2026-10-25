@@ -43,6 +43,125 @@ fn world(mass: f64, light: f64, water: f64, nitrogen: f64, carbon: f64) -> Budge
 }
 
 #[test]
+fn selected_e_and_f_conserve_spherical_shell_mass_without_legacy_warning() {
+    let system = crate::system::generated_system("g1e01000000.2.299", [0.0; 3]).unwrap();
+    for id in ["g1e01000000.2.299/3", "g1e01000000.2.299/4"] {
+        let planet = system.planets.iter().find(|p| p.id == id).unwrap();
+        let physical = physical::validate(planet).unwrap().unwrap();
+        let air = planet
+            .environment
+            .as_ref()
+            .unwrap()
+            .atmosphere
+            .as_ref()
+            .unwrap();
+        assert!(air.extended);
+        assert!(!air.hydrostatic_unresolved);
+        assert_eq!(air.reference_level, AtmosphereReference::Surface);
+        let radius = physical.reference_radius_m;
+        let dh = air.extent_m / 100_000.0;
+        // Independent physical-radius quadrature, not the production z integral.
+        let mass: f64 = (0..100_000)
+            .map(|i| {
+                let h = (i as f64 + 0.5) * dh;
+                let density = air.reference_density_kg_m3
+                    * (-h / (air.scale_height_m * (1.0 + h / radius))).exp();
+                4.0 * PI * (radius + h).powi(2) * density * dh
+            })
+            .sum();
+        let inventory: f64 = physical.materials.iter().map(|m| m.gas_kg).sum();
+        assert!(
+            (mass / inventory - 1.0).abs() < 1e-6,
+            "{id}: {mass} vs {inventory}"
+        );
+        let planar = inventory * physical.reference_gravity_m_s2 / (4.0 * PI * radius.powi(2));
+        assert!(air.pressure_pa < planar);
+    }
+}
+
+#[test]
+fn selected_rocky_planet_keeps_its_boundary_with_an_extended_atmosphere() {
+    let system = crate::system::generated_system("g1e0024924b.2.231", [0.0; 3]).unwrap();
+    let planet = system
+        .planets
+        .iter()
+        .find(|p| p.id == "g1e0024924b.2.231#B/4")
+        .unwrap();
+    assert_eq!(planet.class, "Rocky planet");
+    let data = physical::validate(planet).unwrap().unwrap();
+    assert!(data.h_he_mass_fraction < 1e-4);
+    assert_eq!(data.reference_radius_m, data.condensed_radius_m);
+    assert_ne!(data.radius_reference, space_shared::RadiusReference::OneBar);
+    assert!(
+        data.approximations
+            .iter()
+            .any(|a| a == "extended_boundary_column")
+    );
+    assert!(
+        !data
+            .approximations
+            .iter()
+            .any(|a| a == "deep_boundary_unresolved")
+    );
+    let air = planet
+        .environment
+        .as_ref()
+        .unwrap()
+        .atmosphere
+        .as_ref()
+        .unwrap();
+    assert_eq!(air.reference_level, AtmosphereReference::Surface);
+    assert!(air.extended);
+    let gas_mass: f64 = data.materials.iter().map(|p| p.gas_kg).sum();
+    let expected = gas_mass * data.reference_gravity_m_s2
+        / (4.0 * PI * data.reference_radius_m.powi(2))
+        / GasAtmosphere::try_from(air)
+            .unwrap()
+            .column(
+                GRAVITATIONAL_CONSTANT * data.retained_mass_kg,
+                data.reference_radius_m,
+            )
+            .unwrap()
+            .profile
+            .mass_factor(air.pressure_pa);
+    assert!((air.pressure_pa / expected - 1.0).abs() < 1e-12);
+    assert!(air.pressure_pa > ONE_BAR_PA && air.pressure_pa < 20.0 * ONE_BAR_PA);
+    assert!(Policy::default().planet(planet).is_ok());
+    eprintln!(
+        "selected rocky boundary: radius={:.3} km, pressure={:.4} bar, extent={:.3} km",
+        data.reference_radius_m / 1e3,
+        air.pressure_pa / ONE_BAR_PA,
+        air.extent_m / 1e3
+    );
+}
+
+#[test]
+fn column_geometry_warning_does_not_remove_a_condensed_body() {
+    let budget = world(0.31, 1.2e-5, 0.0, 0.0, 0.0);
+    for temperature in [100.0, 280.0, 435.0, 1000.0] {
+        let (s, b, air) = resolve(&budget, 10470.0, 4.5, temperature).unwrap();
+        assert_eq!(s.reference(), RadiusReference::SolidSurface);
+        assert_eq!(s.radius_m(), s.condensed_radius_m());
+        let air = air.unwrap();
+        assert_eq!(air.reference_level(), ReferenceLevel::Surface);
+        for material in Material::ALL {
+            assert_eq!(
+                budget.retained().mass_kg(material),
+                b.retained().mass_kg(material)
+            );
+        }
+        let column = air
+            .column(GRAVITATIONAL_CONSTANT * s.mass_kg(), s.radius_m())
+            .unwrap();
+        assert_eq!(
+            s.approximations()
+                .contains(&Approximation::ExtendedBoundaryColumn),
+            column.extent_m / s.radius_m() > MAX_THIN_EXTENT_RATIO
+        );
+    }
+}
+
+#[test]
 fn motivating_catalogue_planet_has_inventory_backed_boundary_not_one_bar() {
     let system = crate::system::generated_system("g13b6ffffcfeba.2.1", [0.0; 3]).unwrap();
     let planet = system
@@ -68,8 +187,17 @@ fn motivating_catalogue_planet_has_inventory_backed_boundary_not_one_bar() {
     assert!(air.pressure_pa < 2000.0 * ONE_BAR_PA);
     assert_eq!(data.reference_radius_m, data.condensed_radius_m);
     let gas_mass: f64 = data.materials.iter().map(|p| p.gas_kg).sum();
-    let expected =
-        gas_mass * data.reference_gravity_m_s2 / (4.0 * PI * data.reference_radius_m.powi(2));
+    let expected = gas_mass * data.reference_gravity_m_s2
+        / (4.0 * PI * data.reference_radius_m.powi(2))
+        / GasAtmosphere::try_from(air)
+            .unwrap()
+            .column(
+                GRAVITATIONAL_CONSTANT * data.retained_mass_kg,
+                data.reference_radius_m,
+            )
+            .unwrap()
+            .profile
+            .mass_factor(air.pressure_pa);
     assert!((air.pressure_pa / expected - 1.0).abs() < 1e-12);
     let physical_air = GasAtmosphere::try_from(air).unwrap();
     let gm = GRAVITATIONAL_CONSTANT * data.retained_mass_kg;

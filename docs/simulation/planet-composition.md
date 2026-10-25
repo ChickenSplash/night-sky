@@ -276,13 +276,15 @@ change bulk mass. The environmental reference correction below updates radius,
 inertia and spin together, without feeding back into escape. Sub-precision gas transfers are omitted, not
 manufactured. Trace gas below the 0.1 Pa display cutoff remains accounted for.
 
-Boundary-column pressure is `p=M_gas g/(4πR²)`. One-bar envelopes instead use
+Boundary-column pressure is normalised to the finite spherical gas shell,
+`p=M_gas g/(4πR² F)`, with the [profile mass factor and weak-binding fallback](atmospheres.md#pressure-and-cold-trap-solve).
+One-bar envelopes instead use
 the complete gas reservoir's molecular mixture at a fixed reference pressure;
 that column is never inverted to infer total giant mass. Both obey partial-pressure
 cold caps with explicit mass-to-mole conversion. The partition uses a fixed
-64-step scalar bisection, not a deep atmosphere integration. Constant gravity,
-ideal gas and well-mixed bulk gas are prescriptions, especially unreliable for
-dense secondary air and extended columns. Heavy vapour still uses the cold bulk
+64-step scalar bisection, not a deep atmosphere integration. Ideal gas and
+well-mixed bulk gas remain prescriptions, especially unreliable for
+dense secondary air and escape-dominated columns. Heavy vapour still uses the cold bulk
 radius proxy, with no steam-envelope expansion or greenhouse feedback. These
 limitations are explicit rather than silently imposing an arbitrary pressure cap.
 Emitted columns are checked against saturation and one-bar supply with a 1e-9
@@ -292,31 +294,41 @@ relative roundoff allowance; failure is explicit rather than a fabricated column
 
 After escape, `structure/boundary.rs` tests a column at the cold heavy-material
 radius using the actual generated isothermal temperature and the same conserved
-cold-trap solve. The supported domain requires all of:
+cold-trap solve. The condensed-boundary inventory domain requires all of:
 
 - Gas reservoir at most **1% of retained mass**, limiting neglected self-gravity.
 - Water at most **1% of retained mass**, limiting use of an unresolved cold-water
   radius in place of a thermal, phase-dependent hydrosphere.
-- Pressure-aware optical extent at most **0.1 boundary radii**, the existing
-  constant-gravity geometry bound, including the height to one bar.
 - Heavy material at most **20 Earth masses**, within the direct compressed fit.
 
 These are declared engineering validity bounds, not observed divisions between
-planet classes. No pressure threshold removes ground. Dense columns still use
+planet classes. No pressure or atmospheric-height threshold removes ground. Dense columns still use
 unvalidated ideal-gas/dilute optics and must not be mistaken for solved climates.
 Within the domain, the reference radius becomes the approximate condensed boundary,
-pressure is the weight of the partitioned gas above it, and the column covers the
+pressure is normalised to the partitioned gas above it, and the column covers the
 height to one bar plus the upper atmosphere. Even trace water keeps phase/ground
 semantics unresolved. Dry inputs have nominal ground, not a solved geology.
 Airless/trace inventory remains conserved even when no visible column is emitted.
 
-Let `s` be the maximum of the four ratios to these domain bounds. At `s<=1`,
+The column is marked `thin_boundary_column` only when pressure-aware optical
+extent is at most **0.1 boundary radii**, including the height to one bar. A
+larger extent instead carries `extended_boundary_column` and informational
+`Extended` geometry. It retains the approximate condensed radius,
+inventory-normalised boundary pressure and actual gas reservoir. Supported columns
+use weakening spherical gravity; cases outside the profile's sonic-radius guard
+retain an explicitly unresolved exponential fallback. Extent alone is not evidence
+that the condensed body is absent. Geometry, atmosphere,
+optics and clearance all use that same declared reference. Neither case solves
+greenhouse heating, atmospheric escape or water phases.
+
+Let `s` be the maximum of the three inventory ratios to these domain bounds. At `s<=1`,
 use the boundary column. At `s>=2`, retain the original structural reference and
 mark `deep_boundary_unresolved`. Obviously excessive H₂/He, water or heavy mass
 bypasses the candidate solve entirely: do not test a thin column deep inside a
-giant. For original one-bar structures with `1<s<2`, a flagged engineering handoff
+giant. Atmospheric extent is not part of this handoff. For original one-bar structures with `1<s<2`, a flagged engineering handoff
 uses `t=s-1`, `w=t²(3-2t)`: blend the candidate's **one-bar radius**
-`R_boundary + H ln(p_boundary / 1 bar)` towards the original one-bar proxy,
+`R_boundary + h(ln(p_boundary / 1 bar))` using the selected hydrostatic profile,
+towards the original one-bar proxy,
 and blend per-species gas allocations towards the one-bar partition. Transfers
 remain within conserved reservoirs; both endpoint mixtures obey the one-bar
 saturation caps. This compares like pressure levels rather than blending a
@@ -444,6 +456,13 @@ histories. Do not tune mixtures to force exact Solar System matches.
 
 ### Population summary
 
+The numerical tables below are the calibration snapshot from before the
+extended-boundary correction. Low-inventory extended-atmosphere bodies now keep
+their condensed radius instead of falling back to a one-bar radius, so radius,
+density, reference and column distributions can differ. The commands above
+produce the current census; the retained inventories and description thresholds
+are unchanged by that correction.
+
 | Quantity | Minimum | 5th percentile | Median | 95th percentile | Maximum |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Mass (Earth) | 0.002199 | 0.002200 | 0.1282 | 11.303 | 2,854.901 |
@@ -521,7 +540,9 @@ those artificial age/mass combinations.
   Such a low-mass, substantial-envelope case is explicitly an envelope surrogate,
   not a validated low-density-world prediction. It remains finite and passes
   one-bar supply, optical conversion and navigation-clearance checks.
-- **Atmospheric reliability:** 3,183 planets (16.37%) have absent/trace displayed
+- **Historical atmospheric reliability (before spherical profiles):** these
+  figures describe the earlier constant-gravity census, not current output.
+  3,183 planets (16.37%) have absent/trace displayed
   air, while 7,257 (37.33% of all planets, 44.64% of displayed atmospheres) have
   extended constant-gravity columns. These frequently involve small low-gravity
   bodies or light gas. They are accepted *flagged approximations*, not evidence

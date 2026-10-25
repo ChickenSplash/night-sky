@@ -723,7 +723,18 @@ fn fly_trip(
 fn a_route_to_another_system_waits_for_it_then_enters_on_the_slowdown_on_time() {
     let star = star();
     let (candidate, system) = neighbour(&star);
-    let target = system.planets[1].id.clone();
+    let field = Field::new(system.clone(), 0);
+    let target = system
+        .planets
+        .iter()
+        .find(|p| {
+            field
+                .target(&p.id, 0.0)
+                .is_some_and(|t| t.standoff().is_ok())
+        })
+        .expect("a planet with room for atmospheric clearance")
+        .id
+        .clone();
     let mut voyage = in_system(&star, [AU, 0.0, 0.0]);
     let start = voyage.field.clone();
     voyage.order(0, warp_to(&target, true, Some(40.0))).unwrap();

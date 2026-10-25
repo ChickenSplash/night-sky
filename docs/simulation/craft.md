@@ -582,12 +582,15 @@ stops use them; future collision and approach assists should too.
 
   ρ(h) extends the [atmosphere column](atmospheres.md#derived-column) past
   its visible extent, with any aerosol mass counted as gas. The height is
-  never below the visible shell; found by bisection.
+  never below the visible shell; found by bisection. Supported spherical profiles
+  apply up to the sonic radius. Beyond it a navigation-only exponential
+  continuation matches density and local slope, keeping routing bounded without
+  claiming a solved wind/exosphere. Such clearances carry a warning.
 - **Airless and unknown:** a generated airless planet has no atmosphere
   height. A planet with no generated environment, or invalid air, has no
   clearance, and routes near it are refused rather than treated as airless.
-- **Limits:** the clearance is only as good as the isothermal,
-  constant-gravity column, which has no hot thermosphere: an Earth-like
+- **Limits:** the clearance is only as good as the isothermal column and its
+  explicitly unresolved fallback/extrapolation, with no hot thermosphere: an Earth-like
   generated world clears at a few hundred km, below the real Earth's
   maintenance-free heights. Extended columns are flagged in
   `clearance_warning`, not clamped. The reference ship stands in until craft

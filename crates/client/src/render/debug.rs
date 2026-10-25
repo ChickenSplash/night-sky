@@ -43,6 +43,8 @@ pub enum DebugSwitch {
     /// Light the surface with filtered sunlight and skylight from the ground
     /// row of the scattering table. Needs the tables, independently of sky multiple scattering.
     AtmosphereGround,
+    /// Continue envelope air below the one-bar radius, without a false surface.
+    GiantDescent,
     /// Draw bodies flattened by their spin, rather than as spheres.
     Oblateness,
     /// Draw planets' ground as chunks refined near the camera, rather than as
@@ -97,6 +99,9 @@ impl DebugSwitch {
             Self::AtmosphereGround => {
                 "Light the ground with filtered sunlight and diffuse sky light, including its colour, from the atmosphere's scattering table. Applies to chunks and the sphere fallback once the table is ready. Needs atmospheres and lookup tables, independently of the sky's multiple-scattering switch. Turn off for the old grey surface dimming."
             }
+            Self::GiantDescent => {
+                "Remove the opaque one-bar sphere on envelope worlds and continue air below it, fading into an unresolved black interior without a pressure stop. Turn off to compare the old reference sphere. This is a visual approximation, not deep-envelope physics."
+            }
             Self::Oblateness => {
                 "Draw stars and planets flattened at the poles by their spin, with their air following the same shape. Turn off to draw every body as a sphere of its mean radius."
             }
@@ -126,6 +131,7 @@ pub struct RenderDebug {
     pub atmosphere_stop_opaque: bool,
     pub atmosphere_multiple: bool,
     pub atmosphere_ground: bool,
+    pub giant_descent: bool,
     pub oblateness: bool,
     pub ground: bool,
     pub ground_levels: bool,
@@ -148,6 +154,7 @@ impl Default for RenderDebug {
             atmosphere_stop_opaque: true,
             atmosphere_multiple: true,
             atmosphere_ground: true,
+            giant_descent: true,
             oblateness: true,
             ground: true,
             ground_levels: false,
@@ -156,7 +163,7 @@ impl Default for RenderDebug {
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 17] = [
+    pub const SWITCHES: [(DebugSwitch, &str); 18] = [
         (DebugSwitch::FreezeStream, "Freeze star streaming"),
         (DebugSwitch::GalacticPoints, "Galactic star points"),
         (DebugSwitch::PointPixels, "Shade point pixels"),
@@ -177,6 +184,7 @@ impl RenderDebug {
             "Atmosphere multiple scattering",
         ),
         (DebugSwitch::AtmosphereGround, "Atmosphere ground lighting"),
+        (DebugSwitch::GiantDescent, "Giant atmosphere descent"),
         (DebugSwitch::Oblateness, "Flattened bodies"),
         (DebugSwitch::Ground, "Ground chunks"),
         (DebugSwitch::GroundLevels, "Ground chunk levels"),
@@ -198,6 +206,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereStopOpaque => self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => self.atmosphere_multiple,
             DebugSwitch::AtmosphereGround => self.atmosphere_ground,
+            DebugSwitch::GiantDescent => self.giant_descent,
             DebugSwitch::Oblateness => self.oblateness,
             DebugSwitch::Ground => self.ground,
             DebugSwitch::GroundLevels => self.ground_levels,
@@ -220,6 +229,7 @@ impl RenderDebug {
             DebugSwitch::AtmosphereStopOpaque => &mut self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => &mut self.atmosphere_multiple,
             DebugSwitch::AtmosphereGround => &mut self.atmosphere_ground,
+            DebugSwitch::GiantDescent => &mut self.giant_descent,
             DebugSwitch::Oblateness => &mut self.oblateness,
             DebugSwitch::Ground => &mut self.ground,
             DebugSwitch::GroundLevels => &mut self.ground_levels,

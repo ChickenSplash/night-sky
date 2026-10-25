@@ -39,8 +39,10 @@ impl GasAtmosphere {
             mean_molecular_mass_kg: column.molecular_mass_kg,
             reference_density_kg_m3: column.density_kg_m3,
             scale_height_m: column.scale_height_m,
+            reference_radius_m: radius_m,
             extent_m: column.extent_m,
             extended: column.validity == ColumnValidity::Extended,
+            hydrostatic_unresolved: !column.profile.spherical,
         })
     }
 }

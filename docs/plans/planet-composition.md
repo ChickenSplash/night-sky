@@ -8,14 +8,18 @@ condensates share that budget. Derived labels, validated composition transport
 and the sectioned, bounded inspector are implemented. Calibration and regression
 review are recorded in the composition guide. Checkpoint 5b, the approved
 condensed-boundary atmosphere correction, is implemented and checked. Checkpoint
-5c (descent into deep envelopes) is approved and not started. Final visual review
-and integration remain checkpoint 6.
+5c (descent into deep envelopes) is implemented with the revised scope below.
+Variable-gravity columns, inventory-normalised pressure, opacity corrections
+and the revised inspector also pass automated checks. On 2026-10-25 the user
+authorised integration into `main` and continued work on this branch. This does
+not claim exhaustive visual or scientific validation.
 Physical prescriptions and limitations are in the
 [composition guide](../simulation/planet-composition.md).
 Work on `refactor/planet-composition`,
 branched from checked and pushed `main` including flight clearance. The abandoned
 galactic-dust and HTML UI branches are excluded. The user will visually test the
-finished implementation before it is merged into `main`.
+implementation during development; the latest explicit integration request
+supersedes the earlier hold on merging.
 
 Replace class-first generation with explicit material inventories and approximate
 physical structure. A planet's class becomes a summary of its properties, never
@@ -327,7 +331,18 @@ reserved for checkpoint 6.
 
 ### 5c. Descent into deep envelopes
 
-Approved by the user after 5b; not started. Worlds without a supported condensed
+Implemented with revised scope on 2026-10-25. The user chose unrestricted
+free-camera descent, not a pressure stop. Bulk H/He envelopes have no opaque
+one-bar surface; rendering continues approximately downward and fades to black.
+This is not an adiabatic interior solve, a resolved deep boundary or a newly
+modelled gas inventory. Rocky bodies retain their condensed boundaries. Current
+behaviour and limits are canonical in the
+[rendering guide](../client/rendering.md#giant-descent).
+
+The original proposal below is retained as history, not an outstanding checklist
+or a claim that its adiabatic profile, pressure limit and UI were implemented.
+
+Original motivation: worlds without a supported condensed
 boundary (giants, envelope worlds and planets with `deep_boundary_unresolved`)
 still render an opaque sphere at their one-bar radius, and navigation treats that
 radius as a hard exclusion. The column describes no gas below one bar, so there
@@ -385,6 +400,13 @@ Cost stays bounded. No further user modelling decision is required to begin.
 - [ ] Commit and push the refactor branch for review. Keep `main` at the tested
   baseline until the user approves integration.
 - [ ] After approval, merge into `main`, rerun checks as needed and push `main`.
+
+Integration update (2026-10-25): the user explicitly requested merging the current
+branch into `main` and then continuing on `refactor/planet-composition`.
+`./scripts/check.sh` and all three atmosphere shader variants pass before merge.
+The request authorises integration; unchecked visual-review items above remain
+unverified, rather than being marked complete by inference. Remote publication
+is separate from the local merge.
 
 ## Decisions and completion boundary
 

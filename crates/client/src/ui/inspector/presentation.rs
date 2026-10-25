@@ -7,25 +7,25 @@ pub enum Section {
     #[default]
     Overview,
     Composition,
-    Orbit,
-    Rotation,
     Atmosphere,
+    Orbit,
+    ModelDetails,
 }
 
 impl Section {
     pub const ALL: [Self; 5] = [
         Self::Overview,
         Self::Composition,
-        Self::Orbit,
-        Self::Rotation,
         Self::Atmosphere,
+        Self::Orbit,
+        Self::ModelDetails,
     ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
             Self::Composition => "Composition",
-            Self::Orbit => "Orbit",
-            Self::Rotation => "Rotation",
+            Self::Orbit => "Orbit and rotation",
+            Self::ModelDetails => "Model details",
             Self::Atmosphere => "Atmosphere",
         }
     }

@@ -29,12 +29,21 @@ const MAX_RESIDENT: usize = 32;
 /// Extinction at `height` above the ground, as `medium` in `atmosphere.wgsl`.
 pub(super) fn extinction(air: &Air, height: f64) -> DVec3 {
     let above = height.max(0.0);
-    let rayleigh = (-above / f64::from(air.rayleigh.w)).exp();
+    let rayleigh = gas_density(air, above);
     let mie = (-above / f64::from(air.shape.x)).exp();
     let layer = (1.0 - (height - f64::from(air.shape.z)).abs() / f64::from(air.shape.w)).max(0.0);
     (air.rayleigh.truncate() + air.gas_absorption).as_dvec3() * rayleigh
         + (air.mie.truncate().as_dvec3() + f64::from(air.mie.w)) * mie
         + air.absorption.as_dvec3() * layer
+}
+
+pub(super) fn gas_density(air: &Air, height: f64) -> f64 {
+    let potential = if air.spherical {
+        height / (1.0 + height)
+    } else {
+        height
+    };
+    (-potential / f64::from(air.rayleigh.w)).exp()
 }
 
 fn distance_to_top(top: f64, r: f64, mu: f64) -> f64 {
@@ -126,14 +135,24 @@ pub(super) fn image(size: [usize; 2], texels: &[DVec3]) -> Image {
     image
 }
 
+/// Optical depths need much more range than radiance/flow. The shader decodes
+/// each texel before bilinear interpolation; sky/flow images remain linear.
+pub(super) fn depth_image(texels: &[DVec3]) -> Image {
+    let encoded: Vec<_> = texels
+        .iter()
+        .map(|d| d.map(|c| c.max(0.0).ln_1p() / std::f64::consts::LN_2))
+        .collect();
+    image(SIZE, &encoded)
+}
+
 /// An air, bit for bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Key([u32; 22]);
+struct Key([u32; 23]);
 
 impl Key {
     fn new(air: &Air) -> Self {
-        let mut bits = [0; 22];
-        let values = [air.top]
+        let mut bits = [0; 23];
+        let values = [air.top, u8::from(air.spherical) as f32]
             .into_iter()
             .chain(air.rayleigh.to_array())
             .chain(air.mie.to_array())
@@ -228,7 +247,7 @@ impl AtmosphereTables {
         if self.building.is_none()
             && let Some(&(key, air)) = self.wanted.iter().find(|w| !self.ready.contains_key(&w.0))
         {
-            let task = pool.spawn(async move { image(SIZE, &depths(&air)) });
+            let task = pool.spawn(async move { depth_image(&depths(&air)) });
             self.building = Some((key, task));
         }
         if self.building_multiple.is_none()
@@ -334,6 +353,21 @@ mod tests {
         cache.trim();
         assert_eq!(cache.ready.len(), CACHED);
         assert!(cache.ready.contains_key(keys.last().unwrap()));
+    }
+
+    #[test]
+    fn spherical_profile_changes_density_depth_and_cache_identity() {
+        let exponential = air(Preset::Earth);
+        let spherical = Air {
+            spherical: true,
+            ..exponential
+        };
+        assert_ne!(Key::new(&exponential), Key::new(&spherical));
+        let height = 0.01;
+        let expected = (-height / ((1.0 + height) * f64::from(spherical.rayleigh.w))).exp();
+        assert!((gas_density(&spherical, height) / expected - 1.0).abs() < 1e-12);
+        assert!(gas_density(&spherical, height) > gas_density(&exponential, height));
+        assert!(optical_depth(&spherical, 1.0, 1.0).x > optical_depth(&exponential, 1.0, 1.0).x);
     }
 
     #[test]

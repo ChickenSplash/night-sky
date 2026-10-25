@@ -2,6 +2,20 @@
 use super::{Info, Section};
 use space_shared::{AtmosphereReference, PlanetEnvironment};
 
+fn pressure_display(pressure_pa: f64) -> (&'static str, String) {
+    if pressure_pa < 1e3 {
+        let mbar = pressure_pa / 100.0;
+        let value = if mbar > 0.0 && mbar < 0.0001 {
+            format!("{mbar:.3e} mbar")
+        } else {
+            format!("{mbar:.4} mbar")
+        };
+        ("mbar", value)
+    } else {
+        ("bar", format!("{:.4} bar", pressure_pa / 1e5))
+    }
+}
+
 pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
     info.section = Section::Atmosphere;
     let Some(environment) = environment else {
@@ -57,20 +71,19 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
             .collect::<Vec<_>>()
             .join(", "),
     );
+    let (pressure_unit, pressure_value) = if air.reference_level == AtmosphereReference::OneBar {
+        ("bar", "1 bar (reference level, not ground)".into())
+    } else {
+        pressure_display(air.pressure_pa)
+    };
     info.field(
         "atmosphere.pressure",
         match air.reference_level {
             AtmosphereReference::Surface => "Boundary pressure (approx.)",
             AtmosphereReference::OneBar => "Reference pressure",
         },
-        Some(if air.pressure_pa < 100.0 { "Pa" } else { "bar" }),
-        if air.reference_level == AtmosphereReference::OneBar {
-            "1 bar (reference level, not ground)".into()
-        } else if air.pressure_pa < 100.0 {
-            format!("{:.2} Pa", air.pressure_pa)
-        } else {
-            format!("{:.4} bar", air.pressure_pa / 1e5)
-        },
+        Some(pressure_unit),
+        pressure_value,
     );
     if air.reference_level == AtmosphereReference::Surface {
         info.field(
@@ -80,7 +93,14 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
             if air.pressure_pa >= 1e5 {
                 format!(
                     "{:.1} km above boundary (isothermal estimate)",
-                    air.scale_height_m * (air.pressure_pa.ln() - 1e5_f64.ln()) / 1e3
+                    space_simulation::system::atmosphere::profile::Profile {
+                        radius_m: air.reference_radius_m,
+                        scale_height_m: air.scale_height_m,
+                        spherical: !air.hydrostatic_unresolved && air.reference_radius_m > 0.0,
+                    }
+                    .height_for_drop(air.pressure_pa.ln() - 1e5_f64.ln())
+                    .unwrap_or(f64::NAN)
+                        / 1e3
                 )
             } else {
                 "Not above boundary (sub-bar column)".into()
@@ -123,12 +143,12 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
         Some("km"),
         format!("{:.1} km (operational cutoff)", air.extent_m / 1e3),
     );
-    if air.extended {
+    if air.hydrostatic_unresolved {
         info.field(
             "atmosphere.validity",
             "Column validity",
             None,
-            "Extended: constant-gravity estimate unreliable",
+            "Static spherical column unsupported below sonic limit; exponential fallback, wind/thermal structure unresolved",
         );
     }
 }
@@ -136,6 +156,20 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pressure_uses_bar_or_millibar_without_rounding_trace_columns_to_zero() {
+        for (pa, unit, value) in [
+            (12.79, "mbar", "0.1279 mbar"),
+            (999.0, "mbar", "9.9900 mbar"),
+            (1000.0, "bar", "0.0100 bar"),
+            (100_000.0, "bar", "1.0000 bar"),
+            (0.00001, "mbar", "1.000e-7 mbar"),
+            (0.0, "mbar", "0.0000 mbar"),
+        ] {
+            assert_eq!(pressure_display(pa), (unit, value.into()));
+        }
+    }
 
     #[test]
     fn unknown_and_airless_are_distinct_and_temperature_is_labelled_as_an_estimate() {
@@ -219,6 +253,33 @@ mod tests {
     }
 
     #[test]
+    fn extended_rocky_boundary_uses_spherical_gravity_without_legacy_warning() {
+        let system =
+            space_simulation::system::generated_system("g1e0024924b.2.231", [0.0; 3]).unwrap();
+        let world = system
+            .planets
+            .iter()
+            .find(|p| p.id == "g1e0024924b.2.231#B/4")
+            .unwrap();
+        let mut info = Info::default();
+        facts(&mut info, world.environment.as_ref());
+        super::super::composition::facts(&mut info, world);
+        assert!(
+            info.rows()
+                .any(|(label, _)| label == "Boundary pressure (approx.)")
+        );
+        assert!(!info.rows().any(|(label, _)| label == "Reference pressure"));
+        assert!(!info.rows().any(|(label, _)| label == "Column validity"));
+        assert!(
+            info.rows()
+                .any(|(label, value)| label == "Boundary pressure model"
+                    && value.contains("Inventory-normalised"))
+        );
+        assert!(info.rows().any(|(label, value)| label == "Radius meaning"
+            && value.contains("Approximate condensed boundary")));
+    }
+
+    #[test]
     fn motivating_boundary_exports_pressure_height_and_model_limits() {
         let system =
             space_simulation::system::generated_system("g13b6ffffcfeba.2.1", [0.0; 3]).unwrap();
@@ -229,11 +290,9 @@ mod tests {
             .unwrap();
         let mut info = Info::default();
         facts(&mut info, world.environment.as_ref());
-        assert!(
-            info.rows()
-                .any(|(label, value)| label == "Boundary pressure (approx.)"
-                    && value.starts_with("729."))
-        );
+        assert!(info.rows().any(
+            |(label, value)| label == "Boundary pressure (approx.)" && value.ends_with(" bar")
+        ));
         assert!(
             info.rows()
                 .any(|(label, value)| label == "One-bar altitude"

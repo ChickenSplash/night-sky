@@ -1,6 +1,6 @@
 //! Physical atmospheric states, independent of generation, climate and optics.
-//! An ideal-gas, well-mixed, isothermal column uses constant spherical gravity
-//! at a supplied reference radius. Derived extent is an operational cutoff,
+//! An ideal-gas, well-mixed, isothermal column uses central-field gravity,
+//! with an explicit weak-binding fallback. Derived extent is an operational cutoff,
 //! not an exobase. See docs/simulation/atmospheres.md for conventions and limits.
 
 use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K};
@@ -8,13 +8,14 @@ use std::fmt;
 
 pub mod generation;
 pub mod optics;
+pub mod profile;
 mod wire;
 
 /// One bar in SI pascals.
 pub const ONE_BAR_PA: f64 = 100_000.0;
 /// Minimum exponential-column depth, and depth above one bar for denser columns.
 pub const EXTENT_SCALE_HEIGHTS: f64 = 12.5;
-/// Operational warning threshold, not a physical atmospheric boundary.
+/// Informational geometric threshold, not a validity or atmospheric boundary.
 /// At this height/radius, spherical gravity has fallen by about 17%.
 pub const MAX_THIN_EXTENT_RATIO: f64 = 0.1;
 
@@ -243,7 +244,7 @@ impl GasAtmosphere {
         self.aerosol.as_ref()
     }
 
-    /// Height of a pressure level in the same constant-gravity isothermal model.
+    /// Height of a pressure level in the selected isothermal profile.
     /// `None` means below the supplied reference, not absence of physical ground.
     /// This does not locate a boundary inside an unresolved deep envelope.
     pub fn pressure_level_altitude_m(
@@ -258,7 +259,10 @@ impl GasAtmosphere {
             return Ok(None);
         }
         // Difference of logs avoids overflowing the pressure ratio.
-        let altitude = column.scale_height_m * (self.pressure_pa.ln() - pressure_pa.ln());
+        let altitude = column
+            .profile
+            .height_for_drop(self.pressure_pa.ln() - pressure_pa.ln())
+            .ok_or(AtmosphereError::InvalidValue("unbound pressure level"))?;
         if !altitude.is_finite() {
             return Err(AtmosphereError::InvalidValue("pressure level altitude"));
         }
@@ -267,7 +271,8 @@ impl GasAtmosphere {
 
     /// GM in m³/s², reference radius in metres (use the volume-equivalent
     /// radius for a spheroid). No rotation or latitude dependence yet.
-    /// Extended columns are returned with an explicit warning, not clamped.
+    /// Extended geometry and unsupported hydrostatic regimes remain explicit,
+    /// not clamped.
     pub fn column(&self, gm_m3_s2: f64, radius_m: f64) -> Result<Column, AtmosphereError> {
         positive("gravitational parameter", gm_m3_s2)?;
         positive("reference radius", radius_m)?;
@@ -281,7 +286,10 @@ impl GasAtmosphere {
         // reference from one bar to its boundary. Below one bar keep the former
         // relative cutoff, rather than discarding tenuous atmospheres.
         let extra_heights = (self.pressure_pa.ln() - ONE_BAR_PA.ln()).max(0.0);
-        let gas_extent = (EXTENT_SCALE_HEIGHTS + extra_heights) * scale_height_m;
+        let profile = profile::Profile::new(radius_m, scale_height_m, self.pressure_pa);
+        let gas_extent = profile
+            .height_for_drop(EXTENT_SCALE_HEIGHTS + extra_heights)
+            .ok_or(AtmosphereError::InvalidValue("unbound column cutoff"))?;
         let extent_m = gas_extent.max(EXTENT_SCALE_HEIGHTS * aerosol_height);
         for value in [gravity_m_s2, density_kg_m3, scale_height_m, extent_m] {
             positive("derived column quantity", value)?;
@@ -298,21 +306,23 @@ impl GasAtmosphere {
             scale_height_m,
             extent_m,
             validity,
+            profile,
         })
     }
 }
 
-/// Approximation status, not an atmospheric-retention or climate verdict.
+/// Legacy geometric classification, not hydrostatic validity or a climate verdict.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColumnValidity {
     Thin,
-    /// Constant-gravity estimates only. A future consumer must choose how to
-    /// handle this explicitly before using the extent for rendering/clearance.
+    /// Extent exceeds 10% of the reference radius. The selected profile accounts
+    /// for gravity separately; extended geometry alone is not a failure.
     Extended,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Column {
+    pub profile: profile::Profile,
     pub molecular_mass_kg: f64,
     pub gravity_m_s2: f64,
     pub density_kg_m3: f64,
@@ -324,7 +334,7 @@ pub struct Column {
 
 impl Column {
     /// Gas mass density above the reference level, including beyond the optical
-    /// cutoff. This extrapolates the isothermal constant-gravity model, not a
+    /// cutoff. This extrapolates the selected isothermal profile, not a
     /// thermosphere/exosphere solution. Underflow to zero is valid.
     pub fn density_at(&self, altitude_m: f64) -> Result<f64, AtmosphereError> {
         if !altitude_m.is_finite() || altitude_m < 0.0 {
@@ -332,7 +342,7 @@ impl Column {
         }
         positive("column density", self.density_kg_m3)?;
         positive("column scale height", self.scale_height_m)?;
-        Ok(self.density_kg_m3 * (-altitude_m / self.scale_height_m).exp())
+        Ok(self.density_kg_m3 * self.profile.log_relative_density(altitude_m).exp())
     }
 }
 

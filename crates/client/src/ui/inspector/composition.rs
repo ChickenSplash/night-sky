@@ -81,6 +81,18 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
             "Unresolved: outside thin boundary model, not proof that ground is absent",
         );
     }
+    if data
+        .approximations
+        .iter()
+        .any(|a| a == "extended_boundary_column")
+    {
+        info.field(
+            "composition.boundary_column",
+            "Boundary pressure model",
+            None,
+            "Inventory-normalised column at condensed boundary; see atmosphere validity for unresolved escape cases",
+        );
+    }
     for p in &data.materials {
         info.field(
             &format!("composition.material.{}", p.material),
@@ -133,7 +145,7 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
     );
 }
 
-fn percent(fraction: f64) -> String {
+pub(super) fn percent(fraction: f64) -> String {
     let p = 100.0 * fraction;
     if p > 0.0 && p < 0.01 {
         format!("{p:.2e}%")

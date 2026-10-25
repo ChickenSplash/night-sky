@@ -113,13 +113,18 @@ The Bevy/egui client in `crates/client`:
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 - Atmospheres use approximate generated columns and visible optics,
   not solved climate or atmospheric evolution. No generated clouds/aerosols or
-  greenhouse solution yet; extended columns retain constant-gravity estimates.
+  greenhouse solution yet. Supported columns use spherical variable gravity;
+  weak-binding cases retain an explicitly unresolved exponential fallback.
   Bulk mass/radius, atmospheric gas and cold condensates now share conserved
   inventories. Descriptive labels never select physical properties; composition
   and reference facts are validated in transport and visible in the inspector.
   Table-readiness pop-in, grey view-path transmission and airless point/rim
-  photometry remain. Envelope lower boundaries are opaque proxies, not solid
-  ground or simulated deep descent. See [physical assumptions](simulation/atmospheres.md)
+   photometry remain (traversable envelopes omit the airless disc rims). Bulk H/He
+   envelopes allow free-camera descent into approximate opaque darkness without
+   a pressure stop, not physically simulated interiors. One-bar pressure references
+   alone do not enable descent. Low-gas rocky bodies keep their approximate ground
+    and inventory-normalised boundary pressure even with extended geometry.
+   See [physical assumptions](simulation/atmospheres.md)
   and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   Nothing stops the camera at the ground, and close up the near plane cuts it

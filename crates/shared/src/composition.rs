@@ -27,8 +27,9 @@ pub struct PlanetPhysical {
     pub materials: Vec<MaterialBudget>,
     pub retained_mass_kg: f64,
     pub reference_radius_m: f64,
-    /// Cold heavy-material proxy. Only `thin_boundary_column` promotes it to an
-    /// approximate atmospheric boundary; never an unconditionally resolved core.
+    /// Cold heavy-material proxy. `thin_boundary_column` or
+    /// `extended_boundary_column` promotes it to an approximate atmospheric
+    /// boundary; never an unconditionally resolved core.
     pub condensed_radius_m: f64,
     pub mean_density_kg_m3: f64,
     pub reference_gravity_m_s2: f64,

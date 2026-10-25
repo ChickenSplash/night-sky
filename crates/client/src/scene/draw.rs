@@ -173,6 +173,7 @@ struct Canvas<'a> {
     air: Option<render::atmosphere::Atmosphere>,
     /// Bodies flattened by their spin (`RenderDebug::oblateness`).
     oblate: bool,
+    giant_descent: bool,
 }
 
 impl Canvas<'_> {
@@ -226,8 +227,11 @@ impl Canvas<'_> {
     /// Render units per logical pixel at a point's depth, on or off screen.
     fn per_pixel(&self, centre: Vec3) -> Option<f32> {
         let eye = self.view.translation();
-        let probe = centre.distance(eye) * 0.01;
-        let ahead = eye + self.view.forward() * centre.distance(eye);
+        // Keep a valid projection even at a body's exact centre, where a
+        // traversable envelope must still cover the view with black.
+        let distance = centre.distance(eye).max(1.0);
+        let probe = distance * 0.01;
+        let ahead = eye + self.view.forward() * distance;
         let pixels = self
             .screen(ahead)?
             .distance(self.screen(ahead + self.view.right() * probe)?);
@@ -610,7 +614,16 @@ impl Canvas<'_> {
                     surface: space_simulation::light::planet_surface(planet),
                     air: render::atmosphere::generated::for_planet(
                         planet, selected, self.air, radius,
-                    ),
+                    )
+                    .map(|air| {
+                        if self.giant_descent
+                            && render::atmosphere::generated::deep_envelope(planet)
+                        {
+                            render::atmosphere::generated::descending(air)
+                        } else {
+                            air
+                        }
+                    }),
                     // Envelope lower boundary is an opaque cloud proxy, not terrain.
                     ground: (!render::atmosphere::generated::envelope(planet))
                         .then(|| ground_key(&planet.id, &shape)),
@@ -783,6 +796,7 @@ pub fn draw(
         frame_ly: rig.frame_ly,
         air: tuning.enabled.then(|| tuning.air.atmosphere()),
         oblate: debug.oblateness,
+        giant_descent: debug.giant_descent && debug.atmospheres,
     };
     let markers = &mut markers.0;
     if nav.overlays && nav.presentation_mode == PresentationMode::Constellation {

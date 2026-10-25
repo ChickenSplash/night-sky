@@ -134,7 +134,7 @@ pub(super) fn images(air: Air) -> [Image; 3] {
     let mut sky = table.sky;
     sky.extend(table.ground);
     [
-        image(super::tables::SIZE, &thin),
+        super::tables::depth_image(&thin),
         image([SIZE, SIZE + 1], &sky),
         image([SIZE, SIZE], &table.up),
     ]
@@ -231,7 +231,7 @@ pub(super) fn multiple(air: &Air, depths: &[DVec3]) -> Multiple {
                 last += ds;
                 let height = p.length() - 1.0;
                 let rayleigh = air.rayleigh.truncate().as_dvec3()
-                    * (-height.max(0.0) / f64::from(air.rayleigh.w)).exp();
+                    * super::tables::gas_density(air, height.max(0.0));
                 let mie = air.mie.truncate().as_dvec3()
                     * (-height.max(0.0) / f64::from(air.shape.x)).exp();
                 let reduced = extinction(air, height) - mie * g;
@@ -394,8 +394,8 @@ pub(super) fn seen(
         let x = p + d * (last + 0.5 * ds);
         last = t;
         let height = x.length() - 1.0;
-        let rayleigh = air.rayleigh.truncate().as_dvec3()
-            * (-height.max(0.0) / f64::from(air.rayleigh.w)).exp();
+        let rayleigh =
+            air.rayleigh.truncate().as_dvec3() * super::tables::gas_density(air, height.max(0.0));
         let mie = air.mie.truncate().as_dvec3() * (-height.max(0.0) / f64::from(air.shape.x)).exp();
         let total = extinction(air, height);
         let once = (rayleigh * rayleigh_phase(mu) + mie * mie_phase(mu, g))

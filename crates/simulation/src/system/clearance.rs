@@ -151,7 +151,19 @@ impl Policy {
             let factor = self.duration_s / self.ballistic_coefficient_kg_m2
                 * (gm * r).sqrt()
                 * (1.0 + omega * r / vc).powi(2);
-            let gas_log = column.density_kg_m3.ln() - h / column.scale_height_m;
+            let profile = column.profile;
+            // Beyond the sonic radius the adopted hydrostatic guard is exceeded.
+            // Preserve a bounded navigation-only exponential extrapolation,
+            // matched in value/slope, and flag the resulting clearance below.
+            // This is not exported as a physical atmospheric profile.
+            let limit_height = profile.sonic_height_m();
+            let gas_drop = if profile.spherical && h > limit_height {
+                let local_height = column.scale_height_m * (1.0 + limit_height / radius).powi(2);
+                profile.log_relative_density(limit_height) - (h - limit_height) / local_height
+            } else {
+                profile.log_relative_density(h)
+            };
+            let gas_log = column.density_kg_m3.ln() + gas_drop;
             let aerosol_log = gas.aerosol().map_or(f64::NEG_INFINITY, |a| {
                 a.reference_density_kg_m3().ln() - h / a.scale_height_m()
             });
@@ -185,6 +197,8 @@ impl Policy {
             shape,
             high,
             column.validity == ColumnValidity::Extended
+                || !column.profile.spherical
+                || high > column.profile.sonic_height_m()
                 || high / radius > super::atmosphere::MAX_THIN_EXTENT_RATIO,
         )
     }

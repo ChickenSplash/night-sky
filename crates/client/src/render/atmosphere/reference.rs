@@ -137,7 +137,7 @@ impl Reference {
     fn medium(&self, height: f64) -> (f64, f64, f64) {
         let (air, c) = (&self.air, self.channel);
         let above = height.max(0.0);
-        let rayleigh = f64::from(air.rayleigh[c]) * (-above / f64::from(air.rayleigh.w)).exp();
+        let rayleigh = f64::from(air.rayleigh[c]) * super::tables::gas_density(air, above);
         let mie = f64::from(air.mie[c]) * (-above / f64::from(air.shape.x)).exp();
         (rayleigh, mie, extinction(air, height)[c])
     }

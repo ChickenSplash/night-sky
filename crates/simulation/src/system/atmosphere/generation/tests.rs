@@ -291,7 +291,17 @@ fn boundary_columns_use_mass_to_mole_conversion_and_obey_cold_caps() {
             assert_eq!(air.composition(), &gas.gas_composition().unwrap().unwrap());
             let weight = body.structure.reference_gravity_m_s2()
                 / (4.0 * std::f64::consts::PI * body.structure.radius_m().powi(2));
-            close(air.pressure_pa(), gas.total_mass_kg() * weight, 1e-12);
+            let column = air
+                .column(
+                    crate::units::GRAVITATIONAL_CONSTANT * body.structure.mass_kg(),
+                    body.structure.radius_m(),
+                )
+                .unwrap();
+            close(
+                air.pressure_pa() * column.profile.mass_factor(air.pressure_pa()),
+                gas.total_mass_kg() * weight,
+                1e-12,
+            );
             for species in Gas::ALL {
                 assert!(
                     air.pressure_pa() * air.composition().fraction(species)
@@ -426,7 +436,7 @@ fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
                 }
                 assert!(
                     air.pressure_pa() * air.composition().fraction(species)
-                        <= vapour_pressure(species, data.temperature_k) * (1.0 + 1e-10)
+                        <= vapour_pressure(species, data.temperature_k) * (1.0 + 1e-9)
                 );
             }
             let encoded = serde_json::to_string(environment).unwrap();

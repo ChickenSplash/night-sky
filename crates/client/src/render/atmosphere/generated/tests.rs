@@ -2,6 +2,45 @@ use super::*;
 use space_shared::PlanetEnvironment;
 use space_simulation::system::atmosphere::{Composition, Gas, ReferenceLevel};
 
+#[test]
+fn descent_rebases_the_column_without_moving_its_top_or_changing_upper_gas() {
+    for preset in [Preset::HydrogenGiant, Preset::Earth, Preset::Venus] {
+        let original = AirSettings::preset(preset).atmosphere().scaled(7e7);
+        let deep = descending(original);
+        let scale = f64::from(deep.radius_scale);
+        assert!((0.8..1.0).contains(&deep.radius_scale));
+        assert!((deep.top * deep.radius_scale - original.top).abs() < 2e-7);
+        assert_eq!(deep.ground, Vec3::ZERO);
+        for altitude in [0.0, 0.5 * f64::from(original.top - 1.0)] {
+            let rebased_height = (1.0 + altitude) / scale - 1.0;
+            let old = super::super::tables::extinction(&original, altitude);
+            let new = super::super::tables::extinction(&deep, rebased_height) / scale;
+            assert!((new - old).length() / old.length() < 0.002, "{preset:?}");
+        }
+    }
+}
+
+#[test]
+fn descent_remains_finite_for_extended_columns_and_short_haze_profiles() {
+    for radius in [1e3, 7e7, 1e10] {
+        let air = AirSettings::preset(Preset::Earth)
+            .atmosphere()
+            .scaled(radius);
+        let deep = descending(air);
+        assert!(deep.radius_scale >= 0.8);
+        assert!(deep.top.is_finite());
+        assert!(deep.rayleigh.is_finite());
+        assert!(deep.mie.is_finite());
+        assert!(deep.shape.is_finite());
+        assert!(deep.gas_absorption.is_finite());
+    }
+    let mut extreme = AirSettings::preset(Preset::HydrogenGiant)
+        .atmosphere()
+        .scaled(7e7);
+    extreme.rayleigh.x = f32::MAX;
+    assert_eq!(descending(extreme), extreme);
+}
+
 fn planet(gas: Gas) -> Planet {
     let physical = GasAtmosphere::new(
         Composition::new(&[(gas, 1.0)]).unwrap(),
@@ -87,8 +126,10 @@ fn dense_boundary_pressure_changes_optics_and_preserves_the_upper_column() {
         .pressure_pa = 700e5;
     let base = atmosphere(&thin).unwrap();
     let thick = atmosphere(&dense).unwrap();
-    let extra_height = base.rayleigh_height * 700.0_f64.ln();
-    assert!((thick.top - base.top - extra_height).abs() < 1e-8);
+    assert!(base.spherical && thick.spherical);
+    let drop = 12.5 + 700.0_f64.ln();
+    let expected = drop * base.rayleigh_height / (1.0 - drop * base.rayleigh_height / 6.371e6);
+    assert!((thick.top - expected).abs() < 1e-8);
     assert_eq!(thick.rayleigh_height, base.rayleigh_height);
     assert!((thick.rayleigh / base.rayleigh - DVec3::splat(700.0)).length() < 1e-9);
     assert!(!envelope(&dense));
@@ -169,7 +210,73 @@ fn one_bar_reference_marks_an_envelope_boundary_not_solid_terrain() {
         .unwrap();
     data.reference_level = AtmosphereReference::OneBar;
     assert!(envelope(&world));
+    assert!(!deep_envelope(&world));
     assert!(atmosphere(&world).is_some());
+}
+
+#[test]
+fn rocky_boundary_and_bulk_envelope_descent_are_distinct_and_label_independent() {
+    let system = space_simulation::system::generated_system("g1e0024924b.2.231", [0.0; 3]).unwrap();
+    let world = system
+        .planets
+        .iter()
+        .find(|p| p.id == "g1e0024924b.2.231#B/4")
+        .unwrap();
+    assert!(!envelope(world));
+    assert!(!deep_envelope(world));
+    let air = atmosphere(world).unwrap();
+    let data = world
+        .environment
+        .as_ref()
+        .unwrap()
+        .atmosphere
+        .as_ref()
+        .unwrap();
+    assert!(data.pressure_pa > 1e5);
+    assert!(data.extended);
+    assert_eq!(air.scaled(world.radius_km * 1e3).radius_scale, 1.0);
+
+    // A different pressure-reference label must not turn trace gas into a giant.
+    let mut unresolved = world.clone();
+    unresolved
+        .environment
+        .as_mut()
+        .unwrap()
+        .atmosphere
+        .as_mut()
+        .unwrap()
+        .reference_level = AtmosphereReference::OneBar;
+    unresolved.physical.as_mut().unwrap().radius_reference = space_shared::RadiusReference::OneBar;
+    assert!(envelope(&unresolved));
+    assert!(!deep_envelope(&unresolved));
+
+    let giants =
+        space_simulation::system::generated_system("g13b6ffffdda21.2.0", [0.0; 3]).unwrap();
+    let mut giant = giants
+        .planets
+        .iter()
+        .find(|p| p.id.ends_with("/6"))
+        .unwrap()
+        .clone();
+    assert!(deep_envelope(&giant));
+    giant.class = "Rocky planet".into();
+    assert!(deep_envelope(&giant));
+}
+
+#[test]
+fn spherical_rebasing_preserves_gas_extinction_above_the_reference() {
+    let air = for_planet(&planet(Gas::Nitrogen), false, None, 6.371e6).unwrap();
+    assert!(air.spherical);
+    let deep = descending(air);
+    for height in [0.0, 0.005, 0.01] {
+        let rebased_height = (1.0 + height) / f64::from(deep.radius_scale) - 1.0;
+        let original =
+            air.rayleigh.truncate().as_dvec3() * super::super::tables::gas_density(&air, height);
+        let rebased = deep.rayleigh.truncate().as_dvec3()
+            * super::super::tables::gas_density(&deep, rebased_height)
+            / f64::from(deep.radius_scale);
+        assert!((rebased / original - DVec3::ONE).abs().max_element() < 1e-4);
+    }
 }
 
 #[test]

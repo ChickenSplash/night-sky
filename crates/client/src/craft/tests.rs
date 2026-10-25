@@ -666,7 +666,14 @@ fn a_route_to_another_system_flies_through_the_command_path() {
         .find_map(|star| {
             let candidate = neighbourhood::candidate(&mut sky, &star.id)?;
             let generated = voyage::generated_arrival(&candidate);
-            let planet = generated.field.system().planets.first()?;
+            // Extended atmospheres can now exceed a small body's orbital reach.
+            // This test exercises travel, so choose a physically reachable target.
+            let planet = generated.field.system().planets.iter().find(|p| {
+                generated
+                    .field
+                    .target(&p.id, 0.0)
+                    .is_some_and(|t| t.standoff().is_ok())
+            })?;
             Some(planet.id.clone())
         })
         .expect("a neighbour with a planet");

@@ -48,7 +48,7 @@ pub(crate) fn solve(
     }
     let weight_per_area =
         crate::units::GRAVITATIONAL_CONSTANT * mass_kg / (4.0 * PI * radius_m.powi(4));
-    // p_i = C m_i / mu_i. For a boundary column C = mean_mu g / area;
+    // p_i = C m_i / mu_i. At a boundary C includes spherical shell mass;
     // at one bar C = p / sum(m_i/mu_i). The latter samples an entire envelope
     // without estimating its mass from a thin one-bar column.
     let allocated = |coefficient: f64| -> Inventory {
@@ -73,15 +73,14 @@ pub(crate) fn solve(
             ONE_BAR_PA / light_moles,
         )
     } else {
-        let min = Gas::ALL
-            .iter()
-            .map(|g| g.molecular_mass_u())
-            .fold(f64::INFINITY, f64::min);
         let max = Gas::ALL
             .iter()
             .map(|g| g.molecular_mass_u())
             .fold(0.0, f64::max);
-        (min * weight_per_area, max * weight_per_area)
+        (
+            0.0,
+            max * weight_per_area / (1.0 - (-EXTENT_SCALE_HEIGHTS).exp()),
+        )
     };
     // Fixed bounded bisection, molecular masses give the boundary-column bracket.
     // No unsolved iterative clipping of mole fractions after condensation.
@@ -92,7 +91,13 @@ pub(crate) fn solve(
         let below = if one_bar {
             coefficient * moles < ONE_BAR_PA
         } else {
-            coefficient * moles < gas.total_mass_kg() * weight_per_area
+            let pressure = coefficient * moles;
+            let mean_mass = gas.total_mass_kg() / moles * crate::units::ATOMIC_MASS_KG;
+            let height = crate::units::BOLTZMANN_J_K * temperature
+                / mean_mass
+                / (crate::units::GRAVITATIONAL_CONSTANT * mass_kg / radius_m.powi(2));
+            let profile = super::super::profile::Profile::new(radius_m, height, pressure);
+            pressure * profile.mass_factor(pressure) < gas.total_mass_kg() * weight_per_area
         };
         if below {
             low = coefficient;
@@ -131,7 +136,13 @@ pub(crate) fn solve(
     let pressure = if one_bar {
         ONE_BAR_PA
     } else {
-        gas.total_mass_kg() * weight_per_area
+        let mean_mass = gas.total_mass_kg() / mole_weight(gas) * crate::units::ATOMIC_MASS_KG;
+        super::super::profile::Profile::boundary_pressure(
+            gas.total_mass_kg(),
+            crate::units::GRAVITATIONAL_CONSTANT * mass_kg,
+            radius_m,
+            crate::units::BOLTZMANN_J_K * temperature / mean_mass,
+        )
     };
     let mixture = gas
         .gas_composition()

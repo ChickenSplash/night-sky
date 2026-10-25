@@ -31,10 +31,12 @@ Pressure and temperature refer to a defined level:
 - **Surface:** a condensed-boundary column, before terrain corrections. Water-rich
   boundaries have unresolved phase, not necessarily landable solid ground. Tiny
   H/He inventories that cannot support one bar also use this reference. Supported
-  thin-atmosphere worlds use their approximate condensed boundary even above one
-  bar, with the [bounded domain and handoff](planet-composition.md#supported-approximate-condensed-boundaries)
+   low-gas condensed worlds use their approximate boundary even above one
+   bar, with the [bounded domain and handoff](planet-composition.md#supported-approximate-condensed-boundaries)
   determining reference semantics, never their descriptive class. Pressure
-  can be any positive finite value.
+   can be any positive finite value.
+    Extended geometry retains this boundary and its inventory-normalised pressure,
+    not a switch to a groundless one-bar planet.
 - **One bar:** a chosen reference level for envelope worlds. Pressure must
   equal `ONE_BAR_PA` (100,000 Pa). This is not solid ground, necessarily a
   visible cloud top, or a promise that every measured giant radius uses it.
@@ -62,10 +64,19 @@ reference density  = pressure × mean molecular mass / (kB × temperature)
 gas scale height   = kB × temperature / (mean molecular mass × gravity)
 ```
 
-These follow the ideal-gas law and isothermal hydrostatic balance with
-constant gravity. They imply gas pressure and density proportional to
-exp(-height / scale height). Molecular masses use fixed representative
-isotope abundances; this is not a chemical-equilibrium calculation.
+These define reference values, not constant gravity throughout the column.
+`atmosphere/profile.rs` owns the central-field hydrostatic geometry and shell-mass
+normalisation, separately from partition chemistry and optical conversion.
+For `H=H₀` at radius `R`, the spherical isothermal profile is:
+
+```text
+g(h) = GM / (R+h)²
+ln[p(h)/p₀] = ln[ρ(h)/ρ₀] = -h / [H₀(1+h/R)]
+h(z) = H₀ z / (1-z H₀/R), where z = ln(p₀/p)
+```
+
+Molecular masses use fixed representative isotope abundances; this is not a
+chemical-equilibrium calculation.
 
 One optional prescribed aerosol profile is separate from the gas mixture:
 material, reference aerosol mass density, exponential scale height and a
@@ -74,31 +85,33 @@ with no detached cloud layer, size distribution, optical coefficients or
 condensation solver yet. Its mass does not enter gas molecular mass/density.
 Omit the layer for clear air rather than assigning it zero density.
 
-Operational gas extent is **`H × [12.5 + max(ln(p / 1 bar), 0)]`**, above
-the reference level. Thus a dense boundary column includes the height to one bar
-plus the same 12.5 scale heights above it as a one-bar reference column. Its top
-pressure is about 0.373 Pa. Below one bar the extent remains 12.5 gas scale heights,
-so tenuous atmospheres are not discarded. Prescribed aerosol extent remains 12.5
-aerosol scale heights; the larger gas/aerosol extent sets the rendered shell.
-This preserves the upper column when changing a dense atmosphere's lower reference
-within the same constant-gravity model, rather than truncating it at a much denser
-level. There is no claim of reference invariance after recomputing gravity at a
-different radius. Extent does not set flight clearance.
-It is not an exobase, escape boundary or physical end of the atmosphere.
-`Column::density_at` extends the same exponential profile above it, which the
-[navigation clearance](craft.md#navigation-clearance) uses to find a
-maintenance-free orbit height, typically about three times the visible extent.
+Operational gas extent uses the potential drop
+**`z_cut = 12.5 + max(ln(p₀ / 1 bar), 0)`**, converted to height by `h(z_cut)`.
+A dense boundary column therefore ends at about 0.373 Pa; sub-bar columns retain
+12.5 logarithmic density drops. Rebasing a spherical column at another pressure
+level preserves the upper profile when its local gravity/scale height is recomputed.
+Prescribed aerosol extent remains 12.5 aerosol scale heights; the larger extent
+sets the rendered shell. This cutoff is neither an exobase nor a physical end.
+`Column::density_at` can evaluate above it, but validity is not guaranteed there.
+[Navigation clearance](craft.md#navigation-clearance) is calculated separately.
 
-`GasAtmosphere::pressure_level_altitude_m` gives `H ln(p_reference / p_level)`
+`GasAtmosphere::pressure_level_altitude_m` inverts this profile
 for positive pressure levels at or above the reference. A deeper level returns
 `None`, not a negative altitude or evidence that ground is absent. This is a
 column diagnostic only, not an integration into an unresolved deep envelope.
 
 An extent greater than 0.1 reference radii is flagged `Extended`, not clamped
-or rejected. This is an explicit engineering threshold: gravity has already
-fallen about 17% at that height. The returned numbers remain constant-gravity
-estimates; future consumers must decide how to handle the warning. `Thin`
-only passes this geometry check, not every possible physical validity check.
+or rejected. This is informational geometry, not a constant-gravity warning:
+the spherical profile already accounts for weakening gravity.
+
+An isothermal spherical profile tends to nonzero density at infinity, so it
+cannot supply a finite total atmosphere without an operational cutoff or a
+different outer model. Use it only when that cutoff lies below the isothermal
+Parker sonic radius `r_s=GM/(2c_s²)`, equivalent to `R/H₀ > z_cut+2`.
+This is an engineering guard, not a solved wind or proof of hydrostatic validity.
+Otherwise retain the legacy exponential profile and planar inventory pressure,
+explicitly flagged `hydrostatic_unresolved`. The inspector discloses unresolved
+escape/thermal structure rather than silently hiding the limitation.
 Invalid inputs and nonfinite/nonpositive derived values return errors.
 
 The [composition census](planet-composition.md#calibration-census-and-regression-scope)
@@ -153,7 +166,8 @@ source/escape accounting or orbital elements.
 6. **Absence and columns.** Boundary pressure below 0.1 Pa is treated as
    absent/trace for this population model. This cutoff is not a physical ban
    on exospheres. Validate the physical state and derive its column. Retain
-   extended-column warnings in the snapshot, without silently shrinking it.
+    geometric extent and unresolved-hydrostatic diagnostics in the snapshot,
+    without silently shrinking it.
 
 No oxygen, aerosols or cloud cover are generated yet. Supported materials in
 the data model are not a claim that this recipe already predicts them.
@@ -162,12 +176,27 @@ prescribed aerosols remain an extension point rather than random haze sliders.
 
 ### Pressure and cold-trap solve
 
-At a condensed boundary, use `p=M_gas g/(4πR²)`. With molecular masses `μ_i`
-in common units, set `p_i=C m_i/μ_i`, where `C=mean_μ g/(4πR²)`.
+At a condensed boundary, conserve the represented spherical shell mass:
+
+```text
+M_gas = (4πR²/g₀) p₀ F
+F = ∫₀^z_cut exp(-z) / (1-z H₀/R)^4 dz
+```
+
+The Jacobian includes both weakening gravity and expanding shell area. Fixed
+256-panel Simpson quadrature in potential-drop coordinates resolves thin and
+extended columns without integrating over badly scaled physical radii; negligible
+tails beyond 64 drops are omitted. The unresolved exponential fallback uses `F=1`
+and explicitly retains legacy planar inventory pressure, not exact spherical mass.
+
+With molecular masses `μ_i` in common units, set `p_i=C m_i/μ_i`.
 For each trial `C`, allocate `m_i=min(supply_i, p_sat_i μ_i/C)`, then reconcile
-the implied mean molecular mass with a 64-step bisection bracketed by the
-catalogue's minimum and maximum molecular masses. This is the well-mixed,
-constant-gravity column approximation, not independent species scale heights.
+`p₀ F` with inventory weight using the resulting mixture and temperature.
+A fixed 64-step bisection uses zero and a molecular-mass-based upper bound.
+After reservoir transfers, recompute pressure from the actual stored gas mass
+and mixture, avoiding cancellation errors in trace allocations. Check residual
+saturation caps with the declared 1e-9 relative roundoff allowance. This is a
+well-mixed column, not independent species scale heights.
 
 When structure supplies a one-bar reference, use the **entire** envelope reservoir
 but solve `C Σ(m_i/μ_i)=100000 Pa` instead. The brackets use all offered molecules
@@ -177,9 +206,9 @@ already guarantees at least a one-bar column. Most giant gas lies deeper than
 the represented column and is never counted a second time.
 
 No arbitrary pressure cap truncates the inventory. Very dense boundary columns
-retain the declared ideal-gas limitations; no steam expansion, greenhouse or
-variable-gravity correction is invented. Extended-column warnings, validating
-wire conversion and optics remain unchanged. Flight clearance keeps its hard
+retain the declared ideal-gas limitations; no steam expansion or greenhouse
+solution is invented. Validating wire conversion and optics use the same profile.
+Flight clearance keeps its hard
 exclusion and swept safety stop; its preferred wrapping margin now includes
 atmospheric clearance height, avoiding a near-zero steering gap around thick air.
 Pressure alone never reclassifies a planet.
@@ -188,7 +217,7 @@ Pressure alone never reclassifies a planet.
 
 Optics remain independent of generation and Bevy. `GasAtmosphere::optics`
 derives a column and reference coefficients per metre. All gas coefficients
-follow its exponential scale height, while prescribed aerosols have their own
+follow its selected density profile, while prescribed aerosols have their own
 profile. The client performs radius scaling; it never fits debug slider presets
 to a generated mixture.
 
@@ -198,7 +227,7 @@ to a generated mixture.
   and depolarisation, with dispersion reduced to the fourth-power law.
   Earth-like clear gas agrees with the existing reference coefficients within
   8%. This is not spectral RGB integration or a dense-gas dielectric model.
-- **Visible absorption:** a separate exponential gas term uses methane's
+- **Visible absorption:** a separate gas-profile term uses methane's
   mole fraction and tunable effective colour-band cross sections
   `[2e-29, 4e-30, 0] m²/molecule`. These are deliberately rough appearance
   prescriptions, not measured line-by-line spectra, validated band means,
@@ -216,8 +245,9 @@ to a generated mixture.
   is only approximate. Smaller particles return an explicit unsupported-size
   error, rather than applying geometric optics to Rayleigh-sized particles.
   Generation still creates no aerosol loading or cloud deck.
-- **Validity:** extended columns remain marked and are rendered with their
-  original constant-gravity estimate, not truncated at an artificial radius.
+- **Validity:** supported extended columns use spherical gravity in both CPU
+  tables and WGSL. Unresolved cases retain their explicitly flagged exponential
+  fallback, not an artificial radius or pressure reduction.
   Ideal-gas and dilute optical approximations remain unreliable for very
   dense, dissociating or ionised gas. Invalid/nonfinite conversions are rejected;
   input validation is not proof of accuracy in these regimes.
@@ -227,9 +257,15 @@ hydrogen-rich inputs. They check clear-gas coefficients and physical scaling,
 not equality to the old hand-tuned haze presets. Those presets include clouds,
 dust or ozone that cannot be inferred from bulk gas composition alone.
 
-The renderer's one-bar lower boundary is an opaque cloud/deep-envelope proxy,
-not landable ground and not an inferred physical cloud altitude. It changes no
-simulation radius or collision rule. Deep-envelope descent remains future work.
+For bulk H/He envelopes the renderer allows free-camera descent below the one-bar reference using an
+explicit [visual continuation into darkness](../client/rendering.md#giant-descent).
+This changes no simulation radius, column diagnostic or collision rule. There is
+no pressure-imposed camera floor; physically resolved deep-envelope descent remains
+future work. In particular, negative heights are not added to the validated
+pressure-level diagnostic by this rendering approximation.
+One-bar pressure semantics alone never enable this descent: unresolved
+water-rich/trace-gas references and reference-handoff worlds are not proof of a
+groundless bulk envelope.
 
 ## Transport and inspection
 
@@ -254,7 +290,8 @@ dense-gas, greenhouse and phase limitations, independent of pressure or class.
 
 Tests cover Earth-, Mars- and Jupiter-like example columns, gas-mixture
 validation, ideal-gas/hydrostatic scaling, reference levels, aerosol extent
-and extended-column warnings. Generation tests cover isolated-star flux,
+and hydrostatic fallback diagnostics. Independent radial quadrature checks shell
+mass; derivative and inversion tests check the spherical profile. Generation tests cover isolated-star flux,
 eccentric-orbit averages, stellar and circumbinary hosts, nested companions,
 initial-phase independence, activity/retention trends, cold condensation,
 wire validation and deterministic population diversity. Inspector tests cover
@@ -269,7 +306,7 @@ can lie inside newly generated air; the clearance refusal policy is unchanged.
 Not modelled: physical escape rates, atmospheric evolution, chemical equilibrium,
 resolved phase diagrams/hydrospheres, greenhouse heating, nonideal dense gases,
 dissociation/ionisation, upper-air
-temperature structure, winds or variable-gravity envelopes. Physically
+temperature structure, winds or resolved deep envelopes. Physically
 valid input ranges are not evidence that these approximations hold in every
 regime. In particular, dense/hot atmospheres and deep giant envelopes will
 need better treatment. Optical conversion remains separate:

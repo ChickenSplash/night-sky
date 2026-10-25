@@ -67,6 +67,38 @@ fn brightness(body: &Shaded) -> f32 {
 }
 
 #[test]
+fn descending_envelopes_have_only_a_shell_not_a_false_surface_or_rim() {
+    use atmosphere::{AirSettings, Preset, generated::descending};
+    let mut lights = lights();
+    lights.stars.clear();
+    lights.planets.truncate(2);
+    let air = AirSettings::preset(Preset::HydrogenGiant)
+        .atmosphere()
+        .scaled(7e7);
+    lights.planets[0].air = Some(descending(air));
+    let frame = resolve(&lights, &Photometry::default(), -10.0, 1.0, PSF_SIGMA_PX);
+    assert_eq!(frame.bodies.len(), 1);
+    assert_eq!(frame.bodies[0].centre, lights.planets[1].centre);
+    assert_eq!(frame.rims.len(), 1);
+    assert_eq!(frame.shells.len(), 1);
+    assert_eq!(frame.shells[0].air.ground, Vec3::ZERO);
+    assert_eq!(
+        frame.shells[0].radius,
+        lights.planets[0].radius * descending(air).radius_scale
+    );
+
+    // The A/B path retains the original sphere. Distant points also remain.
+    lights.planets[0].air = Some(air);
+    let old = resolve(&lights, &Photometry::default(), -10.0, 1.0, PSF_SIGMA_PX);
+    assert_eq!(old.bodies.len(), 2);
+    lights.planets[0].air = Some(descending(air));
+    lights.planets[0].pixels = POINT_PIXELS * 0.5;
+    let far = resolve(&lights, &Photometry::default(), -10.0, 1.0, PSF_SIGMA_PX);
+    assert_eq!(far.points.len(), 1);
+    assert!(far.shells.is_empty());
+}
+
+#[test]
 fn multiple_planets_keep_distinct_shells_and_airless_bodies_have_no_shell_index() {
     use atmosphere::{AirSettings, Preset};
     let mut lights = lights();

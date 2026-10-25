@@ -1,4 +1,4 @@
-//! Bounded thin-column boundary correction, after the escape prescription.
+//! Inventory-bounded condensed-boundary correction, after escape.
 //! Never feeds a class label or an inferred column mass back into formation.
 use super::*;
 use crate::system::atmosphere::{
@@ -30,7 +30,7 @@ pub(crate) fn resolve(
     let water_fraction = budget.retained().mass_kg(Material::Water) / mass;
     let heavy_mass = mass * (1.0 - structure.h_he_mass_fraction());
     // These bounds do not depend on cold trapping. Do not run a fictional
-    // thin-column solve at the heavy proxy inside an obvious deep envelope.
+    // boundary-column solve at the heavy proxy inside an obvious deep envelope.
     let inventory_score = (structure.h_he_mass_fraction() / MAX_BOUNDARY_GAS_FRACTION)
         .max(water_fraction / MAX_BOUNDARY_WATER_FRACTION)
         .max(heavy_mass / EARTH_MASS_KG / parameters::CONDENSED_FIT_LIMIT_EARTH);
@@ -44,15 +44,20 @@ pub(crate) fn resolve(
         .transpose()?
         .map_or(0.0, |column| column.extent_m);
     let gas_fraction = boundary_budget.reservoir(Reservoir::Gas).total_mass_kg() / mass;
-    let score = (gas_fraction / MAX_BOUNDARY_GAS_FRACTION)
-        .max(extent / radius / MAX_THIN_EXTENT_RATIO)
-        .max(inventory_score);
+    // Geometric thickness limits the accuracy of the column, not the existence
+    // of the condensed body. An extended light atmosphere must not turn a
+    // rock-dominated inventory into a groundless one-bar envelope.
+    let score = (gas_fraction / MAX_BOUNDARY_GAS_FRACTION).max(inventory_score);
     if score <= 1.0 {
         set_radius(&mut structure, radius, budget);
         structure.reference = condensed_reference(budget.retained().mass_kg(Material::Water));
         structure
             .approximations
-            .push(Approximation::ThinBoundaryColumn);
+            .push(if extent / radius <= MAX_THIN_EXTENT_RATIO {
+                Approximation::ThinBoundaryColumn
+            } else {
+                Approximation::ExtendedBoundaryColumn
+            });
         return Ok((structure, boundary_budget, boundary_air));
     }
     // Non-envelope legacy proxies cannot acquire a fictional one-bar level.

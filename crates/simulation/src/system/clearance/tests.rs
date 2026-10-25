@@ -38,7 +38,10 @@ fn density_extends_smoothly_beyond_the_optical_cutoff() {
     let c = gas.column(EARTH_SOLAR * SUN_GM, 6.371e6).unwrap();
     assert_eq!(c.density_at(0.0).unwrap(), c.density_kg_m3);
     assert!(
-        (c.density_at(c.scale_height_m).unwrap() / c.density_kg_m3 - (-1.0f64).exp()).abs() < 1e-14
+        (c.density_at(c.scale_height_m).unwrap() / c.density_kg_m3
+            - (-1.0 / (1.0 + c.scale_height_m / 6.371e6)).exp())
+        .abs()
+            < 1e-14
     );
     assert!(c.density_at(2.0 * c.extent_m).unwrap() > 0.0);
     assert_eq!(c.density_at(1e300).unwrap(), 0.0);

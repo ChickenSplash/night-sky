@@ -115,8 +115,10 @@ fn reference_world_columns_have_sensible_physical_values() {
         assert_eq!(column.validity, ColumnValidity::Thin);
         close(
             column.extent_m,
-            (EXTENT_SCALE_HEIGHTS + (pressure.ln() - ONE_BAR_PA.ln()).max(0.0))
-                * column.scale_height_m,
+            column
+                .profile
+                .height_for_drop(profile::Profile::cutoff_drop(pressure))
+                .unwrap(),
             1e-14,
         );
     }
@@ -159,8 +161,12 @@ fn dense_boundary_preserves_the_column_above_one_bar() {
             .pressure_level_altitude_m(ONE_BAR_PA, gm, radius)
             .unwrap()
             .unwrap();
-        assert!((one_bar_height - base.scale_height_m * bars.ln()).abs() < 1e-8);
-        close(column.extent_m - one_bar_height, base.extent_m, 1e-13);
+        let expected_height = column.profile.height_for_drop(bars.ln()).unwrap();
+        assert!((one_bar_height - expected_height).abs() < 1e-8);
+        let upper = nitrogen(ONE_BAR_PA, 280.0)
+            .column(gm, radius + one_bar_height)
+            .unwrap();
+        close(column.extent_m - one_bar_height, upper.extent_m, 1e-12);
         close(
             column.density_at(one_bar_height).unwrap(),
             base.density_kg_m3,
@@ -202,7 +208,10 @@ fn pressure_levels_respect_the_reference_and_validate_inputs() {
     let column = thin.column(gm, radius).unwrap();
     assert_eq!(
         column.extent_m,
-        EXTENT_SCALE_HEIGHTS * column.scale_height_m
+        column
+            .profile
+            .height_for_drop(EXTENT_SCALE_HEIGHTS)
+            .unwrap()
     );
     for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert!(thin.pressure_level_altitude_m(bad, gm, radius).is_err());
@@ -309,7 +318,10 @@ fn extended_gas_columns_are_flagged_without_silent_clamping() {
     assert!(column.extent_m > MAX_THIN_EXTENT_RATIO * 6e6);
     assert_eq!(
         column.extent_m,
-        EXTENT_SCALE_HEIGHTS * column.scale_height_m
+        column
+            .profile
+            .height_for_drop(EXTENT_SCALE_HEIGHTS)
+            .unwrap()
     );
     // Exercise both sides of the documented operational threshold.
     for (ratio, expected) in [
@@ -317,7 +329,7 @@ fn extended_gas_columns_are_flagged_without_silent_clamping() {
         (0.1001, ColumnValidity::Extended),
     ] {
         let radius = 6e6;
-        let height = ratio * radius / EXTENT_SCALE_HEIGHTS;
+        let height = ratio * radius / ((1.0 + ratio) * EXTENT_SCALE_HEIGHTS);
         let gravity =
             BOLTZMANN_J_K * 1000.0 / atmosphere.composition().mean_molecular_mass_kg() / height;
         assert_eq!(

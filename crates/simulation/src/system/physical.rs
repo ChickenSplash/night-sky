@@ -142,6 +142,14 @@ pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str
             } else {
                 budget.reservoir(Reservoir::Gas).total_mass_kg() * s.reference_gravity_m_s2()
                     / (4.0 * std::f64::consts::PI * s.radius_m().powi(2))
+                    / actual
+                        .column(
+                            s.mass_kg() * crate::units::GRAVITATIONAL_CONSTANT,
+                            s.radius_m(),
+                        )
+                        .map_err(|_| "invalid boundary column")?
+                        .profile
+                        .mass_factor(actual.pressure_pa())
             };
             if actual.reference_level() != expected.reference_level()
                 || !close(actual.pressure_pa(), pressure)

@@ -32,6 +32,8 @@ pub enum Approximation {
     /// Thin gas cannot support a one-bar column at the condensed boundary.
     SubBarEnvelope,
     ThinBoundaryColumn,
+    /// Condensed boundary retained outside constant-gravity column geometry.
+    ExtendedBoundaryColumn,
     BoundaryReferenceTransition,
     DeepBoundaryUnresolved,
 }
@@ -47,6 +49,7 @@ impl Approximation {
             Self::EnvelopeFitInputsBounded => "envelope_fit_inputs_bounded",
             Self::SubBarEnvelope => "sub_bar_envelope",
             Self::ThinBoundaryColumn => "thin_boundary_column",
+            Self::ExtendedBoundaryColumn => "extended_boundary_column",
             Self::BoundaryReferenceTransition => "boundary_reference_transition",
             Self::DeepBoundaryUnresolved => "deep_boundary_unresolved",
         }
@@ -73,7 +76,8 @@ impl Structure {
         self.radius_m
     }
     /// Cold heavy-material proxy. The environmental correction promotes this to
-    /// an approximate boundary only with `ThinBoundaryColumn`, never a core EOS.
+    /// an approximate boundary with `ThinBoundaryColumn` or
+    /// `ExtendedBoundaryColumn`, never a core EOS.
     pub fn condensed_radius_m(&self) -> f64 {
         self.condensed_radius_m
     }
