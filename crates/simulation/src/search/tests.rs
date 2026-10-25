@@ -319,7 +319,13 @@ fn filters_hold_on_their_results() {
 
 #[test]
 fn threads_and_slicing_change_nothing() {
-    for text in [QUERIES[0], QUERIES[1], QUERIES[4]] {
+    for text in [
+        QUERIES[0],
+        QUERIES[1],
+        QUERIES[4],
+        "kind=planet planet_class=metal_rich,water_rich within_ly=15 limit=1000",
+        "kind=planet planet_class=sub_neptune,envelope_world,gas_giant within_ly=15 limit=1000",
+    ] {
         let (_, whole) = run(request(text), u64::MAX, 1);
         for (budget, threads) in [(5_000, 1), (u64::MAX, 4), (20_000, 3)] {
             let (progress, results) = run(request(text), budget, threads);

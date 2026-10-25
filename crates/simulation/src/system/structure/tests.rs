@@ -45,6 +45,77 @@ fn radius(budget: &Budget) -> f64 {
 }
 
 #[test]
+fn prescribed_reference_worlds_have_broad_declared_structure_ranges() {
+    // These are prescribed budgets, not reconstructions of Solar System formation
+    // or measurements of bulk water/envelope composition. Radius ranges in Earth
+    // units accommodate mixture/reference-level errors; they are not confidence intervals.
+    let mercury = budget(0.0553, &[(Material::Metal, 0.7), (Material::Silicate, 0.3)]);
+    let cases = [
+        (
+            "Mercury-like",
+            mercury,
+            1361.0 / 0.387_f64.powi(2),
+            0.323..0.443,
+            4000.0..8000.0,
+        ),
+        (
+            "Earth-like",
+            world(1.0, 0.0, 0.0),
+            1361.0,
+            0.9..1.1,
+            4500.0..6500.0,
+        ),
+        (
+            "Water-rich",
+            world(1.0, 0.5, 0.0),
+            1361.0,
+            1.1..1.6,
+            1500.0..4000.0,
+        ),
+        (
+            "Neptune-like",
+            world(17.0, 0.6, 0.15),
+            1.5,
+            3.0..6.0,
+            400.0..3500.0,
+        ),
+        (
+            "Saturn-like",
+            world(95.0, 0.0, 0.75),
+            15.0,
+            8.0..12.0,
+            300.0..1500.0,
+        ),
+        (
+            "Jupiter-like",
+            world(318.0, 0.0, 0.9),
+            50.0,
+            10.0..12.0,
+            900.0..1800.0,
+        ),
+    ];
+    eprintln!("reference | mass_E | radius_E | density_kg_m3 | gravity_m_s2 | reference");
+    for (name, input, flux, radii, densities) in cases {
+        let s = derive(&input, flux, 4.5).unwrap();
+        let r = s.radius_m() / EARTH_REFERENCE_RADIUS_M;
+        eprintln!(
+            "{name} | {:.5} | {r:.5} | {:.2} | {:.3} | {:?}",
+            s.mass_kg() / EARTH_MASS_KG,
+            s.mean_density_kg_m3(),
+            s.reference_gravity_m_s2(),
+            s.reference()
+        );
+        assert!(radii.contains(&r), "{name}: {r}");
+        assert!(densities.contains(&s.mean_density_kg_m3()), "{name}: {s:?}");
+    }
+    assert!(radius(&world(1.0, 0.5, 0.0)) > radius(&world(1.0, 0.0, 0.0)));
+    // At fixed giant composition, self-compression must turn over, not allow
+    // indefinite M^(1/3) growth or a discontinuity at a display-class threshold.
+    assert!(radius(&world(318.0, 0.0, 0.9)) > radius(&world(95.0, 0.0, 0.9)));
+    assert!(radius(&world(4000.0, 0.0, 0.9)) < radius(&world(1000.0, 0.0, 0.9)));
+}
+
+#[test]
 fn pure_materials_and_mixtures_follow_compression_trends() {
     for mass in [0.002, 0.055, 1.0, 10.0, 20.0, 100.0] {
         let metal = radius(&budget(mass, &[(Material::Metal, 1.0)]));
@@ -165,6 +236,48 @@ fn invalid_and_unsupported_physics_return_errors() {
     let dissolved =
         Budget::new(source, source, Inventory::default(), Inventory::default()).unwrap();
     assert!(derive(&dissolved, 1361.0, 1.0).is_err());
+}
+
+#[test]
+fn declared_domain_edges_are_inclusive_but_not_silent_extrapolations() {
+    for mass in [MIN_MASS_EARTH, MAX_CONDENSED_MASS_EARTH] {
+        assert!(derive(&world(mass, 0.0, 0.0), 0.0, 1.0).is_ok());
+    }
+    for mass in [MIN_MASS_EARTH * 0.99, MAX_CONDENSED_MASS_EARTH * 1.01] {
+        assert!(derive(&world(mass, 0.0, 0.0), 0.0, 1.0).is_err());
+    }
+    for mass in [MIN_ENVELOPE_MASS_EARTH, MAX_MASS_EARTH] {
+        for helium in [MIN_HELIUM_SHARE, MAX_HELIUM_SHARE] {
+            let input = budget(
+                mass,
+                &[
+                    (Material::Hydrogen, 1.0 - helium),
+                    (Material::Helium, helium),
+                ],
+            );
+            assert!(derive(&input, 0.0, 1.0).is_ok());
+        }
+    }
+    for helium in [MIN_HELIUM_SHARE - 1e-6, MAX_HELIUM_SHARE + 1e-6] {
+        let input = budget(
+            1.0,
+            &[
+                (Material::Hydrogen, 1.0 - helium),
+                (Material::Helium, helium),
+            ],
+        );
+        assert!(derive(&input, 0.0, 1.0).is_err());
+    }
+    let limit = budget(
+        1.0,
+        &[(Material::Silicate, 0.99), (Material::Nitrogen, 0.01)],
+    );
+    assert!(derive(&limit, 0.0, 1.0).is_ok());
+    let excessive = budget(
+        1.0,
+        &[(Material::Silicate, 0.989), (Material::Nitrogen, 0.011)],
+    );
+    assert!(derive(&excessive, 0.0, 1.0).is_err());
 }
 
 #[test]

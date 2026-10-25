@@ -78,8 +78,17 @@ pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str
     };
     for p in &data.materials {
         let m = Material::from_id(&p.material).unwrap();
+        // Reservoir transfers preserve authoritative escaped mass, but summing
+        // split retained reservoirs can move one ulp. Re-subtracting a tiny loss
+        // from its much larger source magnifies that roundoff relative to loss.
+        // Scale only this subtraction allowance to the same species' source,
+        // never total planet mass; it cannot create reservoir supply.
+        let escaped = budget.escaped().mass_kg(m);
+        let loss_roundoff = 8.0 * f64::EPSILON * p.source_kg;
         if !close(p.retained_kg, budget.retained().mass_kg(m))
-            || !close(p.escaped_kg, budget.escaped().mass_kg(m))
+            || !p.escaped_kg.is_finite()
+            || p.escaped_kg < 0.0
+            || (p.escaped_kg - escaped).abs() > loss_roundoff + 1e-10 * p.escaped_kg.max(escaped)
         {
             return Err("inconsistent material totals");
         }
@@ -123,6 +132,55 @@ pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_escaped_remainders_allow_species_local_subtraction_roundoff_only() {
+        // Cold partition splits a retained molecule across gas/condensate. Its
+        // recombined mass differs by one ulp, larger than 1e-10 of its tiny loss.
+        let system = crate::galactic_bodies(
+            "composition-calibration:Halo:239",
+            crate::galaxy::Component::Halo,
+        );
+        let p = system
+            .planets
+            .iter()
+            .find(|p| p.id().ends_with("/8"))
+            .unwrap();
+        let mut planet = crate::demo_galaxy().systems[0].planets[0].clone();
+        planet.mass_earth = p.body.mass_earth;
+        planet.radius_km = p.body.radius_km;
+        planet.environment = p.environment.clone();
+        planet.inertia_factor = Some(p.body.structure.inertia_factor());
+        planet.physical = Some(to_data(&p.body));
+        validate(&planet).unwrap().unwrap();
+        let round_trip: Planet =
+            serde_json::from_str(&serde_json::to_string(&planet).unwrap()).unwrap();
+        validate(&round_trip).unwrap().unwrap();
+        for value in [-1.0, f64::NAN, f64::INFINITY, 1e20] {
+            let mut corrupt = planet.clone();
+            corrupt
+                .physical
+                .as_mut()
+                .unwrap()
+                .materials
+                .iter_mut()
+                .find(|p| p.material == "methane")
+                .unwrap()
+                .escaped_kg = value;
+            assert!(validate(&corrupt).is_err());
+        }
+        // An absent species cannot borrow tolerance from the massive planet.
+        planet
+            .physical
+            .as_mut()
+            .unwrap()
+            .materials
+            .iter_mut()
+            .find(|p| p.material == "oxygen")
+            .unwrap()
+            .escaped_kg = 1e-100;
+        assert!(validate(&planet).is_err());
+    }
 
     #[test]
     fn generated_and_overlay_records_round_trip_and_labels_do_not_drive_consumers() {

@@ -2,11 +2,13 @@
 
 ## Status and goal
 
-Checkpoints 1 through 4 implemented. Generation draws inventories, accounts for
+Checkpoints 1 through 5 implemented. Generation draws inventories, accounts for
 escape and reconciles retained structure at final orbits. Atmospheres and cold
 condensates share that budget. Derived labels, validated composition transport
-and the sectioned, bounded inspector are implemented. Calibration and final visual
-review remain checkpoints 5 and 6.
+and the sectioned, bounded inspector are implemented. Calibration and regression
+review are recorded in the composition guide. The approved condensed-boundary
+atmosphere correction is planned as checkpoint 5b, before final visual review and
+integration in checkpoint 6. Checkpoint 5b is not implemented yet.
 Physical prescriptions and limitations are in the
 [composition guide](../simulation/planet-composition.md).
 Work on `refactor/planet-composition`,
@@ -226,27 +228,100 @@ checkpoint approval, not final approval to integrate into `main`.
 
 ### 5. Calibration, regression checks and documentation
 
-- [ ] Use prescribed Mercury/Earth-like, water-rich, Neptune-like, Saturn-like and
+- [x] Use prescribed Mercury/Earth-like, water-rich, Neptune-like, Saturn-like and
   Jupiter-like inputs to check sensible structure trends. Declare broad justified
   tolerances and model domains, not exact matches or formation reconstructions.
-- [ ] Test mass conservation, radius/density trends, envelope-stripping limits,
+- [x] Test mass conservation, radius/density trends, envelope-stripping limits,
   threshold continuity, convergence/fallbacks and invalid/extreme inputs.
-- [ ] Sample deterministic populations across host masses, ages and multiplicity.
+- [x] Sample deterministic populations across host masses, ages and multiplicity.
   Record mass, radius, density, material/envelope fractions and class frequencies;
   look for implausible spikes, missing populations and pathological outliers.
-- [ ] Verify that each stable ID regenerates reproducibly regardless of generation
+- [x] Verify that each stable ID regenerates reproducibly regardless of generation
   order, cache state and supported search slicing/threading.
-- [ ] Verify spin/shape, atmospheric optics, warp clearance, normal/overlay
+- [x] Verify spin/shape, atmospheric optics, warp clearance, normal/overlay
   transport and inspector regressions. Run `./scripts/check.sh`.
-- [ ] Update the canonical planetary-system and atmosphere guides, plus relevant
+- [x] Update the canonical planetary-system and atmosphere guides, plus relevant
   search/interface documentation. Clearly separate implemented limits from plans.
 
 Exit: automated checks pass and reviewable population summaries explain the change.
 
+Checkpoint 5 samples 1,792 systems and 19,440 planets, grouped by all seven
+galactic components, host mass, age, multiplicity and class. Reference-world
+tables, quantiles, class counts, histograms, reviewed outliers and known artefacts
+are in the [calibration census](../simulation/planet-composition.md#calibration-census-and-regression-scope).
+An 800-case formation/retention grid checks supported extreme forcing and repeat
+evaluation; full wire records are compared under reverse-order/four-thread
+regeneration, with additional class-filter search slicing/threading checks.
+Every census planet passes conservation, physical transport, spin/shape, optical
+conversion and navigation-bound checks. No physics coefficients were retuned.
+The detected defect was a transport check that amplified source-scale roundoff
+relative to a tiny escaped remainder after partition. A species-local subtraction
+allowance fixes it, with negative/nonfinite/corrupt/absent-species regressions.
+Existing route, overlay and inspector regressions remain covered by the full check.
+
+### 5b. Condensed-boundary atmospheres and deep-envelope references
+
+The user approved one focused model-correction checkpoint before checkpoint 6.
+A heavy-material-dominated planet can retain a substantial atmosphere while still
+being described as rocky. Reporting and rendering only the column above its
+one-bar radius hides the pressure and optical depth above its condensed boundary.
+This is a physical-reference correction, not a pressure-label substitution.
+
+- [ ] Define and document a bounded, class-independent criterion for supporting
+  an approximate condensed boundary beneath a low-mass, geometrically thin
+  atmosphere. Use physical inventory/structure and column-validity inputs, not
+  a displayed planet class or an arbitrary pressure threshold. Explicitly treat
+  unsupported deep boundaries as unresolved, not as proof that ground is absent.
+- [ ] Derive approximate boundary radius and pressure consistently from retained
+  gas inventory, gravity and reservoir partition. Keep mass conservation, molecular
+  identity, cold trapping and escape accounting intact. Do not extrapolate a thin
+  column into a full giant-interior model or hard-code the motivating estimate.
+- [ ] Distinguish condensed-boundary radius, atmospheric pressure levels and
+  apparent/rendered extent. Preserve one-bar references for unresolved deep
+  envelopes; where supported, expose both boundary pressure and the altitude of
+  the one-bar level. A threshold of 1,000 or 10,000 bar must not make physical
+  ground disappear; any future depth limit must be labelled as a modelling limit.
+- [ ] Align body geometry, gas-density/optical profiles, atmosphere rendering and
+  navigation clearance with the chosen reference. Increased pressure must affect
+  optical depth, not just the readout. Do not invent clouds from pressure alone.
+  Review transition behaviour and avoid artificial physical jumps when reference
+  semantics or approximation regimes change; keep retention solves bounded.
+- [ ] Update the left inspector, object-browser details and developer exports
+  consistently. Clearly label approximate boundary pressure, reference pressure,
+  unresolved deep boundaries and dense-gas/column limitations. Keep shared facts
+  separate from physical records; section/tab layout changes are not required
+  for this physical correction.
+- [ ] Add regressions for the motivating selected planet
+  `g13b6ffffcfeba.2.1/1` (TS 13b6ffffcfeba-2-1 c), plus airless/trace cases,
+  thin hydrogen-bearing rocky worlds, thick secondary atmospheres, water-bearing
+  unresolved boundaries and deep envelopes/giants. The earlier roughly 700-bar
+  weight-over-area estimate is a diagnostic, not an exact expected result.
+- [ ] Test reference transitions, inventory/pressure consistency, finite optical
+  conversion, geometry/clearance safety, transport validation, normal/overlay
+  parity and reproducibility. Rerun affected calibration summaries and reference
+  checks; document changed results rather than preserving obsolete census values.
+- [ ] Update the canonical composition, atmosphere and relevant client guides;
+  run `./scripts/check.sh`. Prepare reproducible boundary-atmosphere and giant
+  examples for the user's checkpoint 6 visual review, without launching benchmarks.
+
+Scope remains an explicitly approximate boundary/column model. Full deep-interior
+integration, dense-gas equations of state, greenhouse climate, resolved water/rock
+phase boundaries and generated clouds are deferred. High-pressure estimates must
+carry those limitations rather than claim a solved surface climate or solid ground.
+
+Exit: supported condensed-boundary worlds report and render their inventory-backed
+atmospheres above a consistent approximate boundary; deep envelopes retain explicit
+reference-level semantics. Automated checks pass, limitations and changed population
+results are documented, and examples are ready for checkpoint 6. No further user
+modelling decision is required to begin; final visual/integration approval is still
+reserved for checkpoint 6.
+
 ### 6. User visual review and integration
 
 - [ ] Provide launch instructions and reproducible sample IDs covering airless
-  rock, water-rich bodies, small envelopes and giants across representative hosts.
+  rock, water-rich bodies, small envelopes and giants across representative hosts,
+  including checkpoint 5b's high-pressure condensed-boundary regression example
+  and a deep-envelope one-bar reference for comparison.
 - [ ] User checks physical sizes, flattening, atmosphere appearance, inspector
   facts and craft clearance. Agents do not launch performance benchmarks.
 - [ ] Fix issues and rerun the affected tests and full check script.

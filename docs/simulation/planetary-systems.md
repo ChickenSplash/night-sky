@@ -189,6 +189,11 @@ pull on orbits ($J_2$).
 
 ## Atmospheric foundation
 
+The [composition calibration census](planet-composition.md#calibration-census-and-regression-scope)
+records reproducible reference structures, population distributions and known
+artefacts, including the imposed lower-mass pile-up and approximate giant turnover.
+It is not an observational occurrence fit or proof of resolved interior physics.
+
 After the full stellar hierarchy and stable planetary orbits are known,
 the [physical atmosphere model](atmospheres.md) assigns each planet an approximate
 environment: all-star mean heating, atmospheric retention, gas mixtures,

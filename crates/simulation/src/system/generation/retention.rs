@@ -227,4 +227,58 @@ mod tests {
         assert!(reconcile(&initial, -1.0, 1361.0, 4.5).is_err());
         assert!(reconcile(&initial, 1361.0, 1361.0, 0.0).is_err());
     }
+
+    #[test]
+    fn formation_domain_grid_converges_without_fallback_or_compounded_escape() {
+        let mut solved = 0;
+        let mut absent = 0;
+        for host in [0.08, 0.2, 1.0, 3.0, 20.0] {
+            for location in [0.01, 0.1, 1.0, 10.0, 100.0] {
+                for seed in 0..8 {
+                    let formation = materials::draw(
+                        &mut Rng::new(&format!("retention-grid:{seed}")),
+                        location * 2.7,
+                        2.7,
+                        host,
+                        false,
+                    );
+                    for (flux, loss, age) in [
+                        (0.0, 0.0, 0.001),
+                        (1.0, 10.0, 0.1),
+                        (1361.0, 13610.0, 4.5),
+                        (1e8, 1e10, 13.0),
+                    ] {
+                        let (budget, physical, status) =
+                            reconcile(&formation, flux, loss, age).unwrap();
+                        assert_eq!(
+                            reconcile(&budget, flux, loss, age).unwrap(),
+                            (budget, physical.clone(), status)
+                        );
+                        match status {
+                            RetentionSolve::NoEnvelope => absent += 1,
+                            RetentionSolve::Converged { steps } => {
+                                solved += 1;
+                                assert!(steps <= MAX_STEPS);
+                                let light = |i: &Inventory| {
+                                    i.mass_kg(Material::Hydrogen) + i.mass_kg(Material::Helium)
+                                };
+                                let survival = light(budget.retained()) / light(budget.source());
+                                assert!(
+                                    (survival - hydrogen_survival(&physical, flux, loss)).abs()
+                                        < 3.0 * SURVIVAL_TOLERANCE
+                                );
+                            }
+                        }
+                        for m in Material::ALL {
+                            let source = budget.source().mass_kg(m);
+                            let accounted =
+                                budget.retained().mass_kg(m) + budget.escaped().mass_kg(m);
+                            assert!((source - accounted).abs() <= source * 1e-14);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(solved > 0 && absent > 0);
+    }
 }

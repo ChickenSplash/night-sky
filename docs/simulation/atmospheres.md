@@ -85,6 +85,12 @@ estimates; future consumers must decide how to handle the warning. `Thin`
 only passes this geometry check, not every possible physical validity check.
 Invalid inputs and nonfinite/nonpositive derived values return errors.
 
+The [composition census](planet-composition.md#calibration-census-and-regression-scope)
+records how often generated columns are extended, including their distribution
+across classes, hosts and ages. Extended columns are common, not a rare numerical
+corner case. Passing optical conversion and conservative route-clearance checks
+does not validate their density profile or the underlying escape prescription.
+
 ## Inventory-backed generation
 
 Each atmospheric draw uses its planet ID plus `:atmosphere:v1`, independently

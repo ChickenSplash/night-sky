@@ -184,7 +184,7 @@ radii for a prescribed Neptune-like input, 8–12 for Saturn-like and 10–12 fo
 Jupiter-like. These are regression guardrails, **not measured error bars**.
 The mixture/giant approximations have no established statistical uncertainty;
 temperature, differentiation, entropy and phase errors can be substantial.
-Population calibration remains future work.
+The deterministic calibration census and its limits are recorded below.
 
 ## Formation priors and retained structure
 
@@ -317,7 +317,12 @@ interior, condensed and whole-gas masses, plus reference structure and stable
 approximation IDs. It is optional: absent means unknown, not zero inventory.
 `system/physical` reconstructs validated inventories/budgets, re-derives structure
 at transported irradiation/age and checks all duplicated facts, radius semantics
-and caveats (1e-10 relative roundoff tolerance). Unknown/duplicate/missing materials,
+and caveats (1e-10 relative roundoff tolerance). Escaped-mass comparisons also
+allow eight machine epsilons of that constituent's source mass: summing split
+reservoirs then subtracting from a much larger source can move a tiny loss by
+one ulp. This allowance is species-local, never scaled to total planet mass;
+reservoir budget validation still forbids overspending, and negative/nonfinite
+escaped masses are refused. Unknown/duplicate/missing materials,
 nonfinite values and inconsistent records are refused explicitly. This bounded
 algebraic check does not repeat stellar heating or retention iteration.
 
@@ -330,6 +335,161 @@ and shape compatibility; invalid new reflectance uses a neutral proxy. Geometry,
 surface boundary semantics and atmospheric optics do not inspect class strings.
 Search consumes descriptions only. The [typed inspector](../client/ui/interface.md#breadcrumbs-and-inspector)
 and developer export share presentation fields, separate from these physical records.
+
+## Calibration census and regression scope
+
+Reproduce the diagnostic census and prescribed reference-world table from the
+repository root (CPU tests, not graphical/performance benchmarks):
+
+```sh
+cargo test -p space-simulation deterministic_population_census -- --nocapture
+cargo test -p space-simulation prescribed_reference_worlds -- --nocapture
+```
+
+The census uses `composition-calibration:{component:?}:{index}` for indices
+0 through 255 in each of all seven galactic components: **1,792 systems and
+19,440 planets**. Components are sampled equally, **not** weighted by the galaxy's
+stellar counts, survey detectability or observed exoplanet occurrence. These are
+internal diagnostic seeds, not navigable galactic catalogue IDs. Generated ages,
+stellar hierarchies and host masses are retained, not redrawn to improve a result.
+Percentiles use the sorted element at `floor((N-1)q)`, without interpolation.
+
+### Prescribed reference structures
+
+At 4.5 Gyr, use the named *prescribed* budgets with local bolometric fluxes of
+9,087, 1,361, 1,361, 1.5, 15 and 50 W/m² respectively. The dry Earth mixture is
+32.5% metal and 67.5% silicate; Mercury uses 70%/30%. Water-rich replaces 50% of
+the Earth mixture with H₂O. Neptune-like uses 60% H₂O and 15% H₂/He, while
+Saturn-/Jupiter-like use 75%/90% H₂/He and no water. Remaining heavy mass uses
+the Earth metal/silicate proportions. H₂/He is always 75%/25% by mass.
+
+| Prescribed input | Mass (Earth) | Radius (Earth) | Density (kg/m³) | Accepted radius range (Earth) |
+| --- | ---: | ---: | ---: | --- |
+| Mercury-like | 0.0553 | 0.352 | 6,996 | 0.323–0.443 |
+| Earth-like | 1 | 0.960 | 6,237 | 0.9–1.1 |
+| Water-rich | 1 | 1.222 | 3,023 | 1.1–1.6 |
+| Neptune-like | 17 | 4.758 | 870 | 3–6 |
+| Saturn-like | 95 | 10.005 | 523 | 8–12 |
+| Jupiter-like | 318 | 11.200 | 1,248 | 10–12 |
+
+The tolerances allow unresolved layering, thermal state, composition and radius
+reference errors, not statistical uncertainty. Tests additionally bound density
+broadly and check increasing water radius, condensed compression, stripping,
+blend continuity, thermal trends and giant-radius turnover. The dry Earth radius
+is about 4% low; the Neptune-like prescribed radius is about 23% larger than
+Neptune's nominal radius. These are substantial biases, not precision calibration.
+The last three inputs do not reconstruct actual giant compositions or formation
+histories. Do not tune mixtures to force exact Solar System matches.
+
+### Population summary
+
+| Quantity | Minimum | 5th percentile | Median | 95th percentile | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Mass (Earth) | 0.002199 | 0.002200 | 0.1282 | 11.303 | 2,854.901 |
+| Radius (Earth) | 0.1231 | 0.1518 | 0.5349 | 3.8537 | 11.4125 |
+| Density (kg/m³) | 249 | 721 | 4,668 | 6,963 | 11,285 |
+| Water (retained mass %) | <0.000001 | 0.0001 | 3.692 | 50.646 | 59.986 |
+| Metal (retained mass %) | 0.054 | 11.678 | 34.207 | 63.925 | 69.962 |
+| H₂/He (retained mass %) | 0 | 0 | <0.0001 | 10.084 | 99.598 |
+| Escaped/source mass (%) | <0.000001 | <0.000001 | 0.0008 | 4.836 | 91.868 |
+
+| Description | Planets | Share | Median radius (Earth) |
+| --- | ---: | ---: | ---: |
+| Rocky | 8,482 | 43.63% | 0.427 |
+| Metal-rich | 3,851 | 19.81% | 0.399 |
+| Water-rich | 3,971 | 20.43% | 0.453 |
+| Sub-Neptune | 2,158 | 11.10% | 2.161 |
+| Envelope world | 467 | 2.40% | 4.620 |
+| Gas giant | 511 | 2.63% | 9.653 |
+
+Mass-bin counts for edges `[0.01,0.1,1,10,100,1000]` Earth masses are
+`[3958,5208,4903,4236,923,204,8]`; radius-bin counts for
+`[0.2,0.5,1,2,4,8,12]` Earth radii are `[2941,6289,4492,3349,1437,521,411,0]`.
+Bins include their lower edge, with unbounded first/last bins. All description
+populations appear, with no empty intermediate mass/radius bin at this resolution.
+This is not a measurement of the exoplanet radius valley or observational completeness.
+
+The census prints full per-component, age, host-mass, multiplicity and class
+quantiles, fractions, caveat frequencies and histograms. Selected strata:
+
+| Stratum | Planets | Median mass (Earth) | Median radius (Earth) | Radius p95 (Earth) |
+| --- | ---: | ---: | ---: | ---: |
+| Host <0.5 solar masses | 14,944 | 0.146 | 0.558 | 3.580 |
+| Host 0.5–1.5 solar masses | 4,293 | 0.082 | 0.461 | 4.285 |
+| Host ≥1.5 solar masses | 203 | 0.214 | 0.657 | 5.133 |
+| Age <0.2 Gyr | 3,036 | 0.154 | 0.556 | 4.816 |
+| Age 0.2–5 Gyr | 2,423 | 0.116 | 0.519 | 4.147 |
+| Age ≥5 Gyr | 13,981 | 0.125 | 0.534 | 3.456 |
+| Single-star system | 14,097 | 0.123 | 0.530 | 3.832 |
+| Binary system | 3,978 | 0.122 | 0.524 | 3.658 |
+| Triple system | 926 | 0.175 | 0.579 | 4.030 |
+| Quadruple system | 439 | 0.247 | 0.662 | 4.564 |
+
+System multiplicities are 1,324 singles, 368 binaries, 74 triples and 26 quadruples,
+including systems with no surviving planet slots. Host mass means summed stellar
+mass for a circumbinary host. These strata are correlated: high host masses are
+sparsely sampled, and young stars mostly come from arms. Their differences alone
+do not establish causal age, metallicity or multiplicity trends. A separate 800-case
+formation/retention grid spans hosts 0.08–20 solar masses, formation distances
+0.01–100 snow-line units, ages 0.001–13 Gyr, fluxes 0–1e8 W/m² and loss forcing
+0–1e10 W/m². It checks the supported heuristic domain, conservation, bounded root
+residuals and non-compounded escape, not self-consistent stellar evolution at all
+those artificial age/mass combinations.
+
+### Outlier review and known population artefacts
+
+- **Lower-mass pile-up:** 1,100 planets (5.66%) have source mass at the imposed
+  0.0022-Earth floor. Low feeding and compact retries create this artificial
+  population edge; accessible escape can lower retained mass slightly below it.
+  There are no sampled source masses at the 3,900-Earth cap. The floor and cap
+  are declared formation priors, not physical discoveries. The diagnostic flags
+  a floor share above 25%; it does not hide the current pile-up with random scatter.
+- **Giant turnover:** the largest radius is 11.4125 Earth at 781.7 Earth masses
+  (`composition-calibration:ThinDisc:209/4`). The concentration near a Jupiter-sized
+  radius and high-mass density rise follow the smooth self-compression surrogate,
+  not a class-based clamp. The densest planet, 11,285 kg/m³, is a 2,854.9-Earth-mass
+  H₂/He-dominated giant (`composition-calibration:Arms:173/8`), not a dense rocky
+  body. No hot-Jupiter inflation or true brown-dwarf cooling is modelled.
+- **Low-density tail:** the minimum is 249 kg/m³ at 2.32 Earth masses, 3.72 Earth
+  radii and 27.2% H₂/He (`composition-calibration:ThinDisc:133#AB/5`, age 0.417 Gyr).
+  Such a low-mass, substantial-envelope case is explicitly an envelope surrogate,
+  not a validated low-density-world prediction. It remains finite and passes
+  one-bar supply, optical conversion and navigation-clearance checks.
+- **Atmospheric reliability:** 3,183 planets (16.37%) have absent/trace displayed
+  air, while 7,275 (37.42% of all planets, 44.75% of displayed atmospheres) have
+  extended constant-gravity columns. These frequently involve small low-gravity
+  bodies or light gas. They are accepted *flagged approximations*, not evidence
+  that escape, density profiles or drag-clearance heights are accurate there.
+  The largest optical extent is 3.10 reference radii at only 0.207 Pa
+  (`composition-calibration:Bulge:103#B/0`), a heated small body. It is explicitly
+  extended, well outside the reliable constant-gravity regime; finite geometry
+  must not be mistaken for a bound hydrostatic atmosphere. The largest reference
+  pressure is 24.19 MPa (`composition-calibration:Halo:16/1`). That column is
+  geometrically thin, but its ideal-gas treatment is not a validated dense-gas EOS.
+- **Outside-fit usage:** 8,607 of 10,274 H₂/He-bearing structures bound at least
+  one thin-envelope fit input; 96 use the high-heavy-mass continuation. All
+  sampled bodies contain some water and secondary molecules, so all carry the
+  cold-water and trace-volatile caveats, even when they are labelled rocky.
+  No generated label establishes a dry exposed surface. The model is intentionally
+  approximate for these populations, not validated against an occurrence catalogue.
+
+No formation or structure coefficients were retuned for this census. Its review
+does not justify an observational population fit, nor hiding the known artefacts.
+The actual defect found was an overly strict *relative-to-loss* transport check:
+a retained reservoir split moved a tiny escaped remainder by source-scale roundoff.
+The species-local subtraction allowance above fixes that case without changing
+generated masses, reservoirs, radii or descriptions.
+
+Every census planet passes transport reconstruction, species conservation,
+spin/shape bounds, optical conversion (when air is present), and finite ordered
+navigation bounds. Separate tests compare complete physical wire records after
+reverse-order and four-thread regeneration, and search tests compare new-class
+results under different thread counts/work slices and fresh per-search caches.
+Existing normal/overlay parity, cold-partition, clearance/route and typed-inspector
+regressions remain part of `./scripts/check.sh`. Domain-edge tests check explicit
+acceptance/refusal, rather than substituting fallback worlds. No convergence
+failure was observed; the census maximum was 27 of the allowed 40 bisection steps.
+These checks supplement, rather than replace, final user visual review.
 
 ## Sources
 

@@ -18,6 +18,8 @@ use crate::{period_seconds, stable_hash};
 use space_shared::{MAX_PLANETS, MIN_PLANETS, Orbit, Spin};
 use std::f64::consts::{PI, TAU};
 
+#[cfg(test)]
+mod calibration;
 mod materials;
 pub(crate) mod retention;
 use super::{
