@@ -4,8 +4,13 @@
 
 Layered checkpoints 1–4 are complete within their declared headless domains;
 generation still uses the earlier approximate structure model. Checkpoints 5–12
-are the replacement roadmap below. Historical progress entries later in this
-file do not reopen completed checkpoints.
+are the replacement roadmap below. Checkpoint 5's
+[coverage audit and thermodynamic specification](planet-coverage.md) is complete
+under the user-approved readiness-review scope, not a claim of full physical
+coverage. Its frozen handoff assigns missing physics to later checkpoints and
+defines the finite dry-host protected-trace slice (6a), now complete headlessly.
+The remainder of checkpoint 6 is still open. Historical
+progress entries later in this file do not reopen completed checkpoints.
 
 The [composition architecture review](planet-composition.md#architecture-review--extensible-materials-and-boundaries)
 owns the additional future contracts: one shared material-capability catalogue,

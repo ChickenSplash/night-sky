@@ -958,6 +958,38 @@ pub(crate) fn companion_light(draws: &mut Rng, primary: &Primary) -> (f64, f64) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_age_endpoints_are_not_limited_to_galactic_thirteen_gyr() {
+        let mut rng = Rng::new("coverage:age-endpoints");
+        for (stage, birth_mass, kelvin, expected_ceiling) in [
+            (Stage::Main, 0.08, 2600.0, 10.0),
+            (Stage::Giant, 0.9, 3500.0, 14.4),
+            (Stage::WhiteDwarf, 1.0, 4500.0, 18.3),
+        ] {
+            let primary = Primary {
+                origin: Origin {
+                    stage,
+                    birth_mass,
+                    age_gyr: None,
+                    component: Component::ThinDisc,
+                },
+                mass_solar: birth_mass,
+                luminosity: 1.0,
+                radius_solar: 1.0,
+                kelvin,
+            };
+            for _ in 0..64 {
+                let age = primary.age(&mut rng);
+                assert!(age >= 0.0 && age < expected_ceiling);
+                if stage != Stage::Main {
+                    assert!(age > 13.0);
+                }
+            }
+        }
+        assert!(star::lifetime_gyr(0.9) * (1.0 + GIANT_SHARE) < 14.4);
+        assert!(11.0 + star::cooling_gyr(4500.0) < 18.3);
+    }
     use crate::galaxy::Component;
 
     #[test]

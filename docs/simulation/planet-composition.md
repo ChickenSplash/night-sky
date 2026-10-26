@@ -18,6 +18,8 @@ than resolved into individual polymorphs. The standalone
 Lai ice-VII branch remains separate, not used by the radial solver.
 Checkpoint 4 adds opt-in [condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling),
 without switching generation or consumers to the radial models.
+Checkpoint 6a adds [protected secondary traces in dry hosts](#headless-protected-traces-in-dry-hosts),
+also headless and opt-in.
 
 ## Conserved inventory, not a classification
 
@@ -202,6 +204,71 @@ measure numerical consistency, not scientific error bars.
 
 These diagnostic fixtures use vacuum outer pressure and are not exact matches to
 the named Solar System bodies. No coefficients were tuned to match them.
+
+## Headless protected traces in dry hosts
+
+`system::structure::dry::protected::solve(&host, &protected, outer_pressure_pa,
+Controls)` extends the cold dry machinery without changing `dry::solve` or any
+generated planet. The caller supplies **separate** metal/silicate host and protected
+CO₂/N₂/CH₄/O₂/Ar inventories. Water and H/He are refused, as are secondary origins
+in the host argument or refractory origins in the protected argument. No API
+argument accepts exchangeable supply. Protection is a caller-supplied allocation,
+not inferred from an `Inventory`'s molecular identity: passing exchangeable material
+as protected violates the contract and cannot be detected from those masses alone.
+The imposed load has no atmospheric inventory.
+
+The approximation `entrained_secondary_host_volume_v1` assigns each trace origin
+proportionally to host mass: `dm_i=(M_i/M_host) dm_host`. Every host parcel is
+integrated with its **full** mass and `dV=(dm_host+Σdm_i)/ρ_host(P)`. This is neither
+zero-volume ballast nor a repaired massless-host profile. The kernel's internal
+metal/silicate route masses include their entrained supply; returned immutable
+region inventories instead retain the original host and every secondary origin.
+No trace shell is created. The returned `DryStructure` reports the entrainment
+`model_id()` and the separate Seager `host_density_model_id()`.
+
+This is an explicit local mechanical approximation, **not** a solubility law or
+secondary-fluid EOS. Host and trace phase, temperature and chemical binding remain
+unresolved. It establishes no molecular survival, stable condensate, exposure,
+entropy, melting state or landing permission. It does not assign host entropy to
+traces. Water hosts, pure/exposed secondary material and atmosphere partition remain
+unsupported on this path.
+
+Require positive host mass and `f=M_trace/(M_host+M_trace)≤0.00301`. The total parcel
+mass must be 0.0001–20 Earth masses and every host pressure 0–10¹³ Pa. As for the
+dry solver, some mass/load combinations cannot be bracketed within the pressure
+ceiling and are explicitly refused. The same work ceilings and pressure-residual
+policy apply. All supplied origins close to relative 10⁻¹²; region mass resolution
+remains 10⁻⁸. Proportional allocations and differently grouped total sums can differ
+by floating-point roundoff. An allocation that underflows a positive origin to zero
+or an unrepresentable host interval is rejected, never silently dropped.
+
+Seven regressions cover the six frozen acceptance groups: zero-trace recovery;
+five origins individually at trace/host ratios 10⁻¹², 10⁻⁷ and 0.003; the mixed
+f=0.00301 endpoint with shares (CO₂,N₂,CH₄,Ar)=(0.49,0.49,0.01,0.01); reversed input
+order and repeatability; independent closure/refinement; density sensitivity;
+invalid/domain/work refusals. Additional edge checks cover pure hosts, total mass
+endpoints and unrepresentable allocations. Zero traces recover dry mechanics
+exactly. All 17 fixed fixtures match the reference with host masses scaled by
+`(M_host+M_trace)/M_host` to relative 10⁻¹² in radius, inertia and central pressure,
+without relabelling returned origins. Independent radial Gaussian quadrature
+checks total/per-origin mass, inertia and hydrostatic pressure drop, using the
+same stricter numerical targets as dry validation.
+
+Measured fixed-fixture residual maxima: region mass 1.44×10⁻¹⁰, pressure drop
+1.82×10⁻¹⁰ and inertia 1.44×10⁻¹⁰. Fourfold step/tolerance refinement changes radius
+by at most 1.32×10⁻¹³ and dimensionless inertia by 8.19×10⁻¹³, with at most 292,023
+EOS calls in a refined request. These measure numerical consistency, not physical
+accuracy. The mixed nominal result is R=6151.807097 km and I/(MR²)=0.3425255896.
+
+The test-only sensitivity audit substitutes
+`ρ_parcel=ρ_host/[1-f+f/λ]` for λ=0.5/1/2. Maximum radius change is 0.1184% and
+dimensionless-inertia change 0.00994%, below the frozen 1%/2% gates. λ is not a
+runtime parameter or evidence that actual unknown trace densities lie within that
+range. Reproduce the fixed tests and measured diagnostics with:
+
+```sh
+cargo test -p space-simulation system::structure::dry::protected -- --nocapture
+```
 
 ## Headless restricted water-shell solver
 

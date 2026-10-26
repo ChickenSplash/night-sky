@@ -14,6 +14,101 @@ use std::collections::BTreeMap;
 const SYSTEMS_PER_COMPONENT: usize = 256;
 
 #[derive(Default)]
+struct CoverageSample {
+    values: BTreeMap<String, Vec<(f64, String)>>,
+    planets: usize,
+    protected_secondary: usize,
+}
+
+impl CoverageSample {
+    fn add(&mut self, p: &Hosted) {
+        let b = &p.body;
+        let env = p.environment.as_ref().unwrap();
+        let retained = b.budget.retained();
+        let mass = retained.total_mass_kg();
+        let source = b.budget.source();
+        let mut record = |name: String, value: f64| {
+            assert!(value.is_finite() && value >= 0.0, "{} {name}", p.id());
+            self.values.entry(name).or_default().push((value, p.id()));
+        };
+        for (name, value) in [
+            ("retained_mass_E", mass / EARTH_MASS_KG),
+            ("source_mass_E", source.total_mass_kg() / EARTH_MASS_KG),
+            (
+                "retained_heavy_mass_E",
+                Material::ALL
+                    .into_iter()
+                    .filter(|m| !matches!(m, Material::Hydrogen | Material::Helium))
+                    .map(|m| retained.mass_kg(m))
+                    .sum::<f64>()
+                    / EARTH_MASS_KG,
+            ),
+            ("equilibrium_temperature_K", env.equilibrium_temperature_k),
+            (
+                "column_temperature_floor_K",
+                env.equilibrium_temperature_k.max(20.0),
+            ),
+            ("age_Gyr", env.age_gyr),
+            ("flux_W_m2", env.irradiation_w_m2),
+            ("bond_albedo", env.assumed_bond_albedo),
+        ] {
+            record(name.to_owned(), value);
+        }
+        let mut protected_secondary = 0.0;
+        for m in Material::ALL {
+            let accessible = retention::accessible_fraction(m);
+            let protected = if accessible > 0.0 {
+                source.mass_kg(m) * (1.0 - accessible)
+            } else {
+                0.0
+            };
+            record(
+                format!("retained_fraction:{}", m.id()),
+                retained.mass_kg(m) / mass,
+            );
+            if accessible > 0.0 {
+                record(format!("protected_fraction:{}", m.id()), protected / mass);
+                assert!(
+                    retained.mass_kg(m) >= protected * (1.0 - 1e-13),
+                    "{} {m:?}: protected material lost",
+                    p.id()
+                );
+                if m != Material::Water {
+                    protected_secondary += protected;
+                }
+            }
+        }
+        let host = retained.mass_kg(Material::Metal)
+            + retained.mass_kg(Material::Silicate)
+            + source.mass_kg(Material::Water) * (1.0 - retention::ACCESSIBLE_WATER_FRACTION);
+        assert!(host > 0.0);
+        let fraction = protected_secondary / (host + protected_secondary);
+        record("protected_secondary_host_fraction".to_owned(), fraction);
+        assert!(fraction <= 0.00301, "{}: trace host fraction", p.id());
+        self.planets += 1;
+        self.protected_secondary += usize::from(protected_secondary > 0.0);
+    }
+
+    fn report(&mut self) {
+        eprintln!(
+            "replacement coverage: n={} protected_secondary={}; sampled extrema, not domain bounds",
+            self.planets, self.protected_secondary
+        );
+        for (name, values) in &mut self.values {
+            values.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            let quantiles = [0.0, 0.05, 0.5, 0.95, 1.0]
+                .map(|q| format!("{:.9e}", values[((values.len() - 1) as f64 * q) as usize].0))
+                .join(", ");
+            eprintln!(
+                "  {name}: min/p05/p50/p95/max=[{quantiles}] min_id={} max_id={}",
+                values.first().unwrap().1,
+                values.last().unwrap().1
+            );
+        }
+    }
+}
+
+#[derive(Default)]
 struct Sample {
     // Mass, radius, density, water, metal, H/He, escaped/source.
     values: Vec<[f64; 7]>,
@@ -151,6 +246,7 @@ fn check(p: &Hosted) {
 
 #[test]
 fn deterministic_population_census() {
+    let mut coverage = CoverageSample::default();
     let mut samples = BTreeMap::<String, Sample>::new();
     let mut extremes = BTreeMap::<&str, (f64, String)>::new();
     let mut system_counts = [0; 4];
@@ -161,6 +257,7 @@ fn deterministic_population_census() {
             system_counts[system.stars.len() - 1] += 1;
             for p in &system.planets {
                 check(p);
+                coverage.add(p);
                 let mass = system.mass(&p.host);
                 let age = p.environment.as_ref().unwrap().age_gyr;
                 for group in [
@@ -226,6 +323,8 @@ fn deterministic_population_census() {
         }
     }
     eprintln!("systems by 1/2/3/4 stars: {system_counts:?}; extremes={extremes:?}");
+    coverage.report();
+    assert_eq!(coverage.planets, coverage.protected_secondary);
     for (name, sample) in &samples {
         sample.report(name);
     }

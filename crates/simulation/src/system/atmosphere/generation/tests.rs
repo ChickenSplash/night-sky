@@ -92,6 +92,56 @@ fn isolated_sun_at_earth_distance_and_inverse_square_heating() {
 }
 
 #[test]
+fn source_surface_flux_bounds_all_heating_samples_including_hot_remnants() {
+    // Conservative generator bound, not a likely planetary irradiation or a
+    // physical permission to put planets inside stars. Heating floors distance
+    // at each emitter's radius, so a convex average cannot exceed this sum.
+    let max_surface = light::flux(
+        (100_000.0 / crate::star::SUN_TEMPERATURE_K).powi(4),
+        crate::SUN_RADIUS_METRES,
+    );
+    let mut stars = Vec::new();
+    for id in ["A", "B", "C", "D"] {
+        let mut emitter = star(id, 0.6, 1.0);
+        emitter.radius_solar = crate::star::white_dwarf_radius(0.6);
+        emitter.temperature_k = 100_000.0;
+        emitter.luminosity_solar =
+            crate::star::surface_light(emitter.radius_solar, emitter.temperature_k);
+        stars.push(emitter);
+    }
+    // An intentionally nonphysical compact hierarchy exercises the distance
+    // floor in all four contributions, independent of orbital stability priors.
+    let pairs = [("AB", "A", "B"), ("ABC", "AB", "C"), ("ABCD", "ABC", "D")]
+        .into_iter()
+        .map(|(id, a, b)| Barycentre {
+            id: id.into(),
+            page: 0,
+            component: id.into(),
+            members: [a.into(), b.into()],
+            orbit: orbit_at(1e-10),
+        })
+        .collect();
+    let system = system(stars, pairs);
+    let got = heating(
+        &system,
+        &stellar_samples(&system),
+        "A",
+        orbit_at(1e-12),
+        18.3,
+    );
+    close(got.flux, 4.0 * max_surface, 1e-12);
+    assert!(got.loss_flux <= got.flux * (18.3 / 0.48) * 30.0 * (1.0 + 1e-12));
+    let temperature = (got.flux * 0.9 / (4.0 * STEFAN_BOLTZMANN)).powf(0.25);
+    assert!(temperature < 100_000.0);
+    eprintln!(
+        "source-derived forcing ceilings: flux={} W/m2 T_eq={} K loss_flux={} W/m2",
+        4.0 * max_surface,
+        temperature,
+        4.0 * max_surface * (18.3 / 0.48) * 30.0
+    );
+}
+
+#[test]
 fn eccentric_orbit_average_uses_mean_anomaly_not_uniform_true_anomaly() {
     let system = system(vec![star("sun", 1.0, 1.0)], vec![]);
     let mut orbit = orbit_at(1.0);

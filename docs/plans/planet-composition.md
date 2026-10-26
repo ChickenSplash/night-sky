@@ -4,7 +4,11 @@
 
 **Current layered-refactor status:** checkpoints 1–4 of the
 [next-phase roadmap](#checkpoints-and-acceptance-gates) are complete as opt-in
-headless models. Checkpoints 5–12 remain planned. Generated planets still use the
+headless models. Checkpoint 5's [coverage audit](planet-coverage.md) is complete as
+a user-approved scoped readiness review, not full physical coverage. Checkpoints
+6a, protected traces in dry hosts, is complete as an opt-in headless slice.
+The rest of checkpoint 6 and checkpoints 7–12 remain planned.
+Generated planets still use the
 earlier approximate structure path. The completed checkpoints 1–5/5b/5c below
 belong to the **original inventory foundation**, not the layered replacement.
 The [architecture review](#architecture-review--extensible-materials-and-boundaries)
@@ -634,10 +638,13 @@ it as liquid, including thin-shell and freeze/evaporation transitions.
 
 #### Finite scientific acceptance map
 
-Checkpoint 5 turns these cases into fixed numerical requests/domains before
-implementation. They supplement, rather than replace, the existing numerical
-acceptance gates. Unsupported cases must name the missing capability; replacement
-completion still requires coverage of the agreed generated population.
+Checkpoint 5 freezes these case requests and assigns unresolved inputs/models to
+later owners in its [scoped handoff](planet-coverage.md#scope-reset-and-frozen-handoff).
+Each implementation slice must fix its own numerical inputs/domains before coding;
+not every planet request is already a complete solvable fixture. They supplement,
+rather than replace, existing numerical acceptance gates. Unsupported cases must
+name the missing capability; replacement completion still requires coverage of the
+agreed generated population.
 
 | Case | Required distinction / test | Owning checkpoints |
 | --- | --- | --- |
@@ -764,27 +771,24 @@ modules and a small explicit public API. Add files as real responsibilities arri
    with a suitable EOS and thermal prescription; until then identify the existing
    envelope approximation explicitly. Preserve unrestricted free-camera descent.
     Exit: no duplicated gas inventory or independently chosen surface pressure.
-5. **Replacement coverage and thermodynamic contract.** Specify a finite coverage
-    matrix for every existing material: metal, silicate, water, hydrogen, helium,
-    nitrogen, carbon dioxide, methane, oxygen and argon. Audit the actual formation,
-    retention and final-orbit temperature/mass ranges, including protected traces,
-    nearly pure endpoints, irradiated worlds and the upper giant-mass range.
-    Select bounded, cited EOS/phase/mixture/thermal prescriptions and check source
-    versions, licences, SI conversions and reproducible data delivery. Record which
-    quantities are thermodynamically consistent and which are approximate joins.
-    Define conserved constituent-origin bookkeeping for EOS dissociation/ionisation:
-    internal hydrogen states must not create extra hydrogen, electrons or mass in
-    the inventory. Do not claim cross-material chemistry without a separate
-    conservation extension. Set finite test fixtures, numerical targets, work and
-    data-size budgets before implementation; source selection is bounded work, not
-     an open-ended literature survey.
-     Include the [review's capability, boundary and fixture contracts](#architecture-review--extensible-materials-and-boundaries):
-     shared material ownership, exposed/protected supply, mixture support and an
-     explicit material-extension checklist. Do not defer boundary semantics until
-     UI integration.
-    Exit: a reviewed coverage matrix with a replacement route for every generated
-    regime and explicit exclusions. Any necessary generation-domain change needs
-    a documented physical rationale and user agreement, not a way to hide gaps.
+5. **Replacement readiness review and thermodynamic contract. Complete under the
+    user-approved scope reset, 2026-10-26.** Freeze the finite material/regime map,
+    generated-input audit, origin/region/boundary contracts, existing source findings,
+    fixture requests and proposed numerical/data budgets. Classify each route as
+    ready to implement, needing a decision or deferred; assign unresolved physics
+    and fixture completion to later checkpoints with concrete acceptance conditions.
+    Define one bounded implementation slice using already selected physics.
+    The [coverage specification and frozen handoff](planet-coverage.md#scope-reset-and-frozen-handoff)
+    is authoritative. This replaces the earlier requirement to select every
+    EOS/phase/mixture/thermal route before implementation. Source pins and successful
+    algebra audits do not establish physical coverage. No further research or
+    audit-tool expansion is required to close this checkpoint.
+    Exit met: reviewed readiness map, fixed requirements and request list, owned
+    gaps and finite checkpoint 6a. Later slices must select their own missing models,
+    domains and finite inputs before implementing the affected routes. Full generated
+    coverage still gates checkpoint 10; integration and legacy deletion still gate
+    checkpoint 11. Generation-domain changes require physical rationale and user
+    agreement, never suppression of unsupported draws.
 6. **Secondary volatiles and condensed mixtures.** Implement the selected local
     density and approximate phase prescriptions for CO₂, N₂, CH₄, O₂ and Ar,
     including protected material, gas/condensed transitions and trace allocations.
@@ -799,6 +803,14 @@ modules and a small explicit public API. Add files as real responsibilities arri
     Exit: cold/warm secondary-volatile and mixed-water fixtures, including the
     actual generated trace pattern, conserve every material and pass independent
     mass/inertia/hydrostatic, domain, seam, refinement and budget-failure tests.
+    **6a: protected traces in dry hosts is complete**, with its fixed acceptance set and
+    stop condition are in the [handoff](planet-coverage.md#next-implementation-slice-checkpoint-6a).
+    This is one headless end-to-end slice, not all of checkpoint 6. Water-host traces,
+    exposed condensates, solid/sublimation routes and mixture partition remain
+    separate follow-on work; each needs its own bounded implementation inputs and
+    any missing model decisions. Do not hold 6a open for those routes or claim
+    checkpoint 6 complete from 6a alone. Deep/hot component extensions belong to 8;
+    complete atmosphere/planet matching belongs to 9.
 7. **Dense hydrogen, helium and H/He mixtures.** Implement the selected nonideal
     local EOS with density and the thermal quantities needed for adiabatic paths,
     not an ideal-gas continuation or a whole-body giant radius fit. Include pure-H,

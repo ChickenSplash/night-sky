@@ -10,6 +10,8 @@ use super::super::{
 use crate::units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT};
 use std::{f64::consts::PI, fmt};
 
+pub mod protected;
+
 pub const MODEL_ID: &str = "cold_differentiated_seager_2007_v1";
 
 /// Ceilings may be reduced for callers/tests, never increased past the contract.
@@ -116,6 +118,7 @@ pub struct Diagnostics {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DryStructure {
+    model_id: &'static str,
     regions: Vec<Region>,
     mass_kg: f64,
     inertia_kg_m2: f64,
@@ -124,7 +127,10 @@ pub struct DryStructure {
 
 impl DryStructure {
     pub fn model_id(&self) -> &'static str {
-        MODEL_ID
+        self.model_id
+    }
+    pub fn host_density_model_id(&self) -> &'static str {
+        cold::MODEL_ID
     }
     pub fn regions(&self) -> &[Region] {
         &self.regions
@@ -254,7 +260,7 @@ fn solve_with_policy(
     retained: &Inventory,
     outer_pressure_pa: f64,
     controls: Controls,
-    eos: Density,
+    eos: impl Fn(Material, f64) -> Result<f64, cold::ColdEosError>,
     policy: radial::Policy,
 ) -> Result<DryStructure, SolveError> {
     controls.validate()?;
@@ -302,6 +308,7 @@ fn solve_with_policy(
         // above, so the EOS never evaluates a negative physical pressure.
         if residual <= boundary_tolerance.unwrap_or_else(|| 1.0_f64.max(1e-8 * high)) {
             let result = DryStructure {
+                model_id: MODEL_ID,
                 regions: high_trial.regions,
                 mass_kg: mass,
                 inertia_kg_m2: high_trial.inertia_kg_m2,

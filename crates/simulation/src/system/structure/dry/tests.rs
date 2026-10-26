@@ -83,7 +83,10 @@ fn differentiated_constant_density_sphere_matches_independent_solution() {
 // Independent radial quadrature, not a sum of solver mass coordinates or I.
 // Cubic Hermite pressure interpolation uses physical dP/dr at saved endpoints;
 // eight-point Gaussian integration evaluates the EOS at new radial locations.
-fn quadrature(region: &Region, eos: Density) -> (f64, f64, f64) {
+pub(super) fn quadrature(
+    region: &Region,
+    eos: impl Fn(Material, f64) -> Result<f64, cold::ColdEosError>,
+) -> (f64, f64, f64) {
     const NODES: [f64; 4] = [
         0.1834346424956498,
         0.525532409916329,

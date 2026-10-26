@@ -30,7 +30,8 @@ seed helpers, object identities and photometry stay at the crate root; see
   gas mixtures, reference pressure levels, isothermal columns and their limits.
 - [Material inventories and structure](simulation/planet-composition.md): conserved
   formation/retained budgets, approximate generated radii, bounded H/He retention
-   and separate headless dry/water radial solvers and atmosphere coupling.
+   and separate headless dry/water radial solvers, protected dry-host traces
+   and atmosphere coupling.
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.
@@ -98,6 +99,9 @@ The Bevy/egui client in `crates/client`:
   and classifications derived afterwards, followed by user visual validation.
 - [Layered structure contract](plans/planet-structure.md): proposed region ownership,
   first dry-interior EOS, numerical acceptance and water/envelope extension gates.
+- [Replacement readiness review](plans/planet-coverage.md): scoped checkpoint-5
+  completion, population ranges, pinned sources, contracts, owned coverage gaps
+  and the completed headless dry-host trace slice, not full replacement physics.
 
 ## Current limitations
 
@@ -134,7 +138,9 @@ The Bevy/egui client in `crates/client`:
   and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   The cold layered dry-body solver is headless only, not used by generation,
-  transport or presentation. Local water physics, including compressed liquid,
+  transport or presentation. Its opt-in protected-trace extension conserves
+  CO₂/N₂/CH₄/O₂/Ar in dry hosts without resolving their chemistry or phase.
+  Local water physics, including compressed liquid,
   is independently tested. A separate headless solver supports restricted
   liquid/ice-Ih shells and their narrow supported phase-interface overlap, but
   effective compressed deep ice now enables the 300 K water-rich fixture.
