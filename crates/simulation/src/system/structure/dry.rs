@@ -222,6 +222,41 @@ fn solve_with_eos(
     controls: Controls,
     eos: Density,
 ) -> Result<DryStructure, SolveError> {
+    solve_with_policy(
+        retained,
+        outer_pressure_pa,
+        controls,
+        eos,
+        radial::Policy::default(),
+    )
+}
+
+/// Boundary matching needs an absolute residual, independent of core pressure.
+pub(super) fn solve_loaded(
+    retained: &Inventory,
+    outer_pressure_pa: f64,
+    controls: Controls,
+) -> Result<DryStructure, SolveError> {
+    solve_with_policy(
+        retained,
+        outer_pressure_pa,
+        controls,
+        cold::density_kg_m3,
+        radial::Policy {
+            boundary_tolerance_pa: Some(super::water::BOUNDARY_TOLERANCE_PA),
+            pressure_error_scale_pa: Some(1e8),
+            ..radial::Policy::default()
+        },
+    )
+}
+
+fn solve_with_policy(
+    retained: &Inventory,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    eos: Density,
+    policy: radial::Policy,
+) -> Result<DryStructure, SolveError> {
     controls.validate()?;
     for material in Material::ALL {
         if !matches!(material, Material::Metal | Material::Silicate)
@@ -240,13 +275,8 @@ fn solve_with_eos(
     }
     let density =
         |material, pressure, _, _: &mut Work, _| eos(material, pressure).map_err(SolveError::Eos);
-    let mut solver = radial::Solver::new(
-        retained,
-        outer_pressure_pa,
-        controls,
-        &density,
-        radial::Policy::default(),
-    );
+    let boundary_tolerance = policy.boundary_tolerance_pa;
+    let mut solver = radial::Solver::new(retained, outer_pressure_pa, controls, &density, policy);
     let mut low = outer_pressure_pa;
     // Ambient-density sphere is only an initial bracket scale, never a radius fallback.
     let mut high = (low + solver.pressure_scale()).min(cold::MAX_PRESSURE_PA);
@@ -270,7 +300,7 @@ fn solve_with_eos(
         let residual = high_trial.regions.last().unwrap().outer().pressure_pa - outer_pressure_pa;
         // Require the converged solution to approach the requested boundary from
         // above, so the EOS never evaluates a negative physical pressure.
-        if residual <= 1.0_f64.max(1e-8 * high) {
+        if residual <= boundary_tolerance.unwrap_or_else(|| 1.0_f64.max(1e-8 * high)) {
             let result = DryStructure {
                 regions: high_trial.regions,
                 mass_kg: mass,

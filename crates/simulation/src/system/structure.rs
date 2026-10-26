@@ -4,6 +4,7 @@
 //! Prescriptions, provenance and domains: docs/simulation/planet-composition.md.
 
 pub(crate) mod boundary;
+pub mod coupled;
 pub mod dry;
 pub mod parameters;
 mod radial;

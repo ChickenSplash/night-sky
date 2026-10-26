@@ -467,6 +467,16 @@ The user subsequently authorised checkpoint 4 and requested committing the
 checkpoint-3 baseline first. Push, merge and checkpoint-5 integration remain
 unauthorised.
 
+Checkpoint 4's opt-in atmosphere/condensed-body coupling is complete within its
+restricted domain and passes the full check script;
+model, limits and acceptance fixtures are in the
+[canonical coupling guide](../simulation/planet-composition.md#headless-atmosphere-and-condensed-boundary-coupling).
+It matches finite gas inventory, partition and pressure loading to dry/water
+radial structures. Unsupported dense/weakly bound columns and non-water
+condensates fail explicitly. Existing generated H/He envelopes remain labelled
+surrogates, not ideal-gas giant interiors. Generation, transport, consumers and
+unrestricted free-camera descent are unchanged. Checkpoint 5 remains separate.
+
 ### Ownership and scope
 
 - Retained inventory is the conserved input, with source and escaped masses

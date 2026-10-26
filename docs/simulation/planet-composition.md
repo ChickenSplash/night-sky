@@ -16,6 +16,8 @@ effective deep-ice compression model. The mandatory Earth-mass, 30%-water fixtur
 solves at both 250 K and 300 K. Cold deep ice is explicitly approximate rather
 than resolved into individual polymorphs. The standalone
 Lai ice-VII branch remains separate, not used by the radial solver.
+Checkpoint 4 adds opt-in [condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling),
+without switching generation or consumers to the radial models.
 
 ## Conserved inventory, not a classification
 
@@ -372,7 +374,123 @@ discarding any water inventory.
 **Checkpoint 3 is complete under its plausibility-focused scope.** Atmosphere
 coupling, generation/consumer migration and thermal evolution remain later work.
 
+## Headless atmosphere and condensed-boundary coupling
+
+`system::structure::coupled::solve(&Request, Controls)` implements layered
+checkpoint 4 as an opt-in API. **Generation, transport, inspector, clearance and
+rendering still use their previous paths.** No camera restriction is introduced.
+The model is `loaded_condensed_spherical_isothermal_column_v1`.
+
+The immutable request supplies retained inventory, a subset eligible for gas
+exchange, column temperature and (when needed) water temperature. Exchangeable
+supply is an explicit exposure prescription, not an extra allocation. Source and
+escaped bookkeeping stays with the caller. Formation/accessibility priors are
+not run inside this API. Gas is partitioned using the same approximate cold-trap
+caps as generation. The remainder belongs to radial condensed regions; neither
+a mutable reservoir copy nor a second column owns any mass. Unsupported
+condensed molecules are refused, not replaced by water. Sub-precision exchange
+that cannot debit its condensed source is refused.
+
+The fixed-point iteration matches three quantities:
+
+1. Solve supply-limited mixture and finite spherical column mass at a trial
+   boundary radius and condensed mass.
+2. Apply its inventory-derived base pressure to the dry or water radial solver,
+   using the remaining metal/silicate/water inventory.
+3. Re-evaluate pressure and partition at that solved radius and mass. Repeat
+   until pressure differs by at most **0.01 Pa** and each gas constituent's
+   allocation differs by at most relative **10⁻⁹**, scaled to that constituent's
+   gas allocation, not planet mass.
+
+The ambient-density radius is only an iteration seed, never a returned fit or
+fallback. Accepted gas pressure is normalised to actual gas allocation at the
+final radius. The radial unshifted residual is also at most 0.01 Pa, giving an
+interface mismatch of at most **0.02 Pa**. The dry solver uses a coupling-only
+absolute-pressure policy; its standalone API keeps its original policy. No
+pressure-profile translation repairs a solve. Region plus gas allocations derive
+retained totals with species-local relative 10⁻¹⁰ closure.
+
+Total inertia includes the condensed integral and spherical gas integral
+`I_gas=(8π/3)∫ρr⁴dr`. Its inertia factor uses total retained mass and the
+**condensed boundary radius**, not one bar or optical extent. One bar is located
+only if it exists above the boundary; otherwise it is absent. Boundary pressure
+is never a request input. Airless differs from trace gas: this API has no 0.1 Pa
+display cutoff.
+
+### Coupling domain and explicit approximations
+
+- Total and condensed masses must both fit the radial 0.0001–20 Earth-mass domain.
+  Supported condensed materials are metal, silicate and checkpoint-3 water.
+- Gas is at most **1% of retained mass**. Self-gravity is neglected: column
+  normalisation and pressure profile consistently use `GM_condensed`, not a
+  point mass containing the outer shell. This is an engineering restriction,
+  not a planet classification.
+- Column temperature is prescribed within **50–1,000 K**. Base ideal-gas density
+  cannot exceed **10 kg/m³**, an engineering mask, not an established nonideal
+  error bound. Neither dense CO₂ nor dense H/He is solved here.
+- The existing spherical sonic-radius guard must pass. Weak binding returns an
+  unsupported error instead of accepting the legacy exponential fallback as a
+  coupled solution. Extended columns are not rejected solely for their height.
+- The entire gas allocation normalises the operational finite shell described in
+  [atmospheres](atmospheres.md#pressure-and-cold-trap-solve). No additional tail
+  mass is inferred. Its cutoff is a prescription, not an exobase.
+- Water keeps all checkpoint-3 bounds, including **1,000 Pa minimum outer
+  pressure**. Exposed cold water with only lower-pressure vapour can therefore
+  be unsupported. No pressure floor is invented. Gas and water temperatures are
+  independent imposed anchors: unequal values describe mechanical loading,
+  not thermal or evaporation equilibrium.
+- Cold-trap caps are approximate, not matched Gibbs or chemical equilibrium.
+  Non-water molecules can be gas, but any positive condensed remainder needs
+  its own EOS and is refused. Protected water is supported; protected secondary
+  condensates are not.
+
+Dense envelopes retain the explicitly identified existing `EnvelopeSurrogate`
+generation model. A failed coupled solve never automatically becomes a successful
+surrogate. A future dense-mixture EOS and thermal prescription can replace that
+approximation. No resolved metallic hydrogen, helium core or giant entropy
+profile is claimed.
+
+### Numerical work and acceptance
+
+At most **32 coupling iterations**, each with two 64-step partition evaluations
+and finite-column pressure bisections, are permitted. The aggregate ceiling is
+**16,000,000 radial EOS evaluations**, including nested work and retries. Each
+radial call retains its existing 2,000,000 maximum and other ceilings. Remaining
+aggregate budget limits each subsequent call; a failed call terminates the
+request, never retries with reset work. Controls can lower ceilings, not raise
+them. Nonconvergence is explicit.
+
+```sh
+cargo test -p space-simulation system::structure::coupled -- --nocapture
+```
+
+Ten tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+and absent gas, mixed N₂/CO₂, thin H/He, stripping, deterministic repeats,
+refinement, exact aggregate-work success/failure and unsupported inputs/regimes.
+Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
+and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
+pressure and water allocation by less than relative 10⁻⁷. These are numerical
+targets, not scientific error bars.
+
+The nitrogen fixture (0.325 metal, 0.674999 silicate and 0.000001 nitrogen Earth
+masses at 250 K) takes three iterations to reach **6,113.588 km** and
+**134,987.088 Pa**, using 1,002,398 radial EOS evaluations. Replacing 0.3 Earth
+masses of silicate with exchangeable water gives **7,179.896 km / 70,950.716 Pa**
+at 250 K and **7,170.596 km / 73,548.551 Pa** at 300 K. Both take three iterations,
+using 1,085,619 and 2,793,870 radial evaluations respectively. These are prescribed
+test compositions, not reconstructions of observed planets.
+
+The cold fixture exposed a round-trip floating-point error: `(P/scale)*scale`
+could lie one ulp beyond an outward EOS branch. The shared kernel now recognises
+**exact equality** to a prescribed event's dimensionless coordinate and evaluates
+the original endpoint pressure. No tolerance band, pressure offset, density
+blend or EOS-domain extension is used.
+
 ## Light envelopes and the giant transition
+
+The following describes the existing **generation approximation**, not a dense
+H/He radial solution. Checkpoint 4's opt-in coupling API above does not silently
+substitute this approximation when its supported column domain is exceeded.
 
 The input is retained H₂+He mass fraction `f`, total mass `M`, current bolometric
 flux `F` and age, not class or surface pressure. Helium must be 15–35% of the

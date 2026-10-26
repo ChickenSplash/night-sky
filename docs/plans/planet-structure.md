@@ -113,6 +113,30 @@ adiabatic interiors, climate and heat transport; atmosphere/envelope coupling;
 generation/consumer migration and visual acceptance. The last three remain the
 separate later checkpoints, not claims made by completing this headless solver.
 
+## Checkpoint 4 implementation
+
+The user authorised atmosphere/envelope coupling after completing checkpoint 3,
+then requested committing the checkpoint-3 baseline before starting changes.
+Baseline commit: `fc1dd43`; no push or merge was requested.
+
+The opt-in `structure::coupled` API matches dry/water boundary radius, load and
+finite atmospheric inventory, with immutable exchangeable supply and disjoint
+allocation ownership. It shares cold-trap prescriptions, not generation priors.
+The [canonical coupling guide](../simulation/planet-composition.md#headless-atmosphere-and-condensed-boundary-coupling)
+owns domains, tolerances, bounded work, acceptance fixtures and limitations.
+Dense H/He remains the existing explicit envelope surrogate, not a new ideal-gas
+interior. Unsupported condensates and weak-binding columns return typed failures.
+No generation/consumer migration or camera behaviour change is part of this step.
+
+**Checkpoint 4 is complete within this restricted coupling scope.** Verification:
+`./scripts/check.sh` passes formatting, workspace tests and strict Clippy.
+Simulation: 352 passed, 2 ignored; client: 363 passed, 4 ignored. Ten new coupling
+tests include independent shell mass/inertia/hydrostatic quadrature and exact
+aggregate-budget failure checks. All 57 structure tests pass.
+Documentation file links and `git diff --check` pass. Full output is recorded in
+`data/checkpoint-4-check.log`. Checkpoint-4 changes remain uncommitted for review;
+checkpoint 5, push and merge are not included.
+
 ## Original contract and implementation history
 
 Checkpoint 1 of the [composition plan's next phase](planet-composition.md#next-phase--layered-planetary-structure).

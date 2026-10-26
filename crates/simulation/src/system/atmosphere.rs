@@ -6,6 +6,7 @@
 use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K};
 use std::fmt;
 
+pub(crate) mod condensation;
 pub mod generation;
 pub mod optics;
 pub mod profile;

@@ -110,13 +110,25 @@ impl<'a> Solver<'a> {
     }
 
     fn sample(&mut self, material: Material, x: f64, y: [f64; 3]) -> Result<Sample, SolveError> {
-        let pressure_pa = y[1] * self.pressure_scale;
+        let pressure_pa = self.physical_pressure(material, y[1]);
         Ok(Sample {
             radius_m: y[0].cbrt() * self.radius_scale,
             enclosed_mass_kg: x.powi(3) * self.mass,
             pressure_pa,
             density_kg_m3: self.density(material, pressure_pa)?,
         })
+    }
+
+    /// Recover an exactly imposed event endpoint after nondimensionalisation.
+    /// Multiplying P/scale back by scale can round one ulp onto the wrong EOS
+    /// branch. Only exact coordinate equality is recognised, never a tolerance
+    /// band, pressure offset or an extrapolated state.
+    fn physical_pressure(&self, material: Material, coordinate: f64) -> f64 {
+        self.policy
+            .interfaces
+            .iter()
+            .find(|i| i.material == material && i.pressure_pa / self.pressure_scale == coordinate)
+            .map_or(coordinate * self.pressure_scale, |i| i.pressure_pa)
     }
 
     /// None means central pressure is too low, not a valid partial structure.
@@ -352,16 +364,17 @@ impl<'a> Solver<'a> {
                 mass_fraction: x.powi(3),
             });
         }
-        if y[1] * self.pressure_scale < self.policy.pressure_floor_pa || y[0] <= 0.0 {
+        let pressure = self.physical_pressure(material, y[1]);
+        if pressure < self.policy.pressure_floor_pa || y[0] <= 0.0 {
             return Ok(None);
         }
         if self
             .next_interface
-            .is_some_and(|i| y[1] * self.pressure_scale < i.pressure_pa)
+            .is_some_and(|i| pressure < i.pressure_pa)
         {
             return Ok(None);
         }
-        let rho = self.density(material, y[1] * self.pressure_scale)?;
+        let rho = self.density(material, pressure)?;
         Ok(Some([
             3.0 * x.powi(2) * 4100.0 / rho,
             -x.powi(5) / y[0].powf(4.0 / 3.0),

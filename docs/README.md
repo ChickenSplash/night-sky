@@ -30,7 +30,7 @@ seed helpers, object identities and photometry stay at the crate root; see
   gas mixtures, reference pressure levels, isothermal columns and their limits.
 - [Material inventories and structure](simulation/planet-composition.md): conserved
   formation/retained budgets, approximate generated radii, bounded H/He retention
-   and the separate headless dry-body radial solver.
+   and separate headless dry/water radial solvers and atmosphere coupling.
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.
@@ -141,7 +141,10 @@ The Bevy/egui client in `crates/client`:
   Cold 250 K deep water also solves using explicitly labelled approximations.
   Pressure-melted liquid gaps are covered by a labelled density approximation.
   Exact deep-ice polymorphs, precise supercooled-liquid physics and dense
-  envelopes remain unresolved.
+   envelopes remain unresolved.
+   Headless atmosphere coupling matches supported dilute gas inventories to
+   radial condensed boundaries; it does not yet migrate generated planets or
+   resolve dense envelopes or unsupported condensed molecules.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.
 

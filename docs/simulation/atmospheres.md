@@ -18,6 +18,13 @@ formation inventories, IDs, orbits or resonances. See the
 
 ## State and reference level
 
+Layered checkpoint 4 also supplies a separate headless
+[condensed-boundary coupling API](planet-composition.md#headless-atmosphere-and-condensed-boundary-coupling).
+It matches inventory, base pressure and radial structure within a restricted
+spherical-column domain. It does not yet replace generation or consumer paths
+described in this guide. Cold-trap caps are shared, but generation's accessibility
+priors and weak-binding fallback are not adopted as solved interior physics.
+
 An atmosphere is explicitly airless or contains a gas atmosphere. Absence
 is not zero pressure or the renderer's minimum slider value. A gas mixture
 stores mole fractions, not mass fractions, for N₂, CO₂, H₂, He, H₂O, CH₄,

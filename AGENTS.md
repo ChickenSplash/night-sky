@@ -22,6 +22,7 @@ for implementation details.
 | Pure-water EOS, phase domains and scientific reference checks | Simulation `system/materials/water.rs` | [Water physics](docs/simulation/water-physics.md) |
 | Headless dry/water radial solvers, effective deep ice and shared numerical kernel | Simulation `system/structure/{dry,water,radial}.rs` | [Composition foundation](docs/simulation/planet-composition.md#headless-dry-body-solver) |
 | Physical atmosphere model | Simulation `system/atmosphere.rs` | [Atmospheres](docs/simulation/atmospheres.md) |
+| Headless atmosphere/interior boundary coupling | Simulation `system/structure/coupled.rs` | [Coupling model and limits](docs/simulation/planet-composition.md#headless-atmosphere-and-condensed-boundary-coupling) |
 | Orbital motion, units and clock | Simulation `orbit/`, `units.rs`, `clock.rs` | [Orbits](docs/simulation/orbits.md) |
 | Craft model, gravity, integration and live craft | `crates/simulation/src/craft.rs`, client `craft.rs` | [Craft](docs/simulation/craft.md) |
 | Object registry, queries and search | `crates/simulation/src/search`, client `search/` | [Search](docs/simulation/search.md) |
