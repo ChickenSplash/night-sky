@@ -153,7 +153,8 @@ Keep it in step with Bevy upgrades.
 ./scripts/check.sh
 ```
 
-It runs the `ns` CLI tests and offline ice-VI/H-He/secondary-fluid reference-audit regressions, then
+It runs the `ns` CLI tests and offline ice-VI/H-He/secondary-fluid reference-audit
+and methane-inversion regressions, then
 checks formatting, workspace unit tests and strict Clippy.
 Python checks disable bytecode writes, keeping generated caches out of `scripts/`.
 The optional reference-only `scripts/audit-revised-aqua.py` checks a separately
@@ -167,17 +168,17 @@ It is not part of runtime generation or the standard check's dependencies.
 The reference-only `scripts/audit-hhe-reference.py` checks separately downloaded,
 pinned original CMS19/CD21 and HG23 tables. It reports numerical hazards and
 unit/reference comparisons, not a physical validity mask or a runtime EOS. See
-the [checkpoint-5 audit](plans/planet-coverage.md#independent-hhe-reference-audit)
+the [H/He reference audit](simulation/planet-composition-reference.md#independent-hhe-reference-audit)
 for reproduction, hashes and limits. Its small synthetic parser/math regressions
 run offline in the standard check without those downloads.
 Likewise `scripts/audit-secondary-reference.py` checks pinned secondary-fluid
 coefficient files at supplied density/temperature states, independently checking
 pressure and same-temperature Gibbs equality without installing CoolProp. It is
 not a structure/phase solver or a caloric validation. See the
-[secondary reference audit](plans/planet-coverage.md#independent-secondary-fluid-reference-audit)
+[secondary reference audit](simulation/planet-composition-reference.md#independent-secondary-fluid-reference-audit)
 for primary domains, source discrepancies and reproduction; its synthetic
 regressions also run offline without downloaded files.
-The same suite checks checkpoint-5 mixture/lever-rule algebra with synthetic
+The same suite checks mixture/lever-rule algebra with synthetic
 states, including H/He block normalisation and liquid pressure-work units. These
 checks do not implement a runtime mixture or phase-equilibrium solver.
 Tests cover orbital and clock invariants, deterministic generation, multiple

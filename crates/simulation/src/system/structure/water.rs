@@ -9,6 +9,8 @@ use super::{dry, radial};
 use crate::units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT};
 use std::f64::consts::PI;
 
+pub mod protected;
+
 pub use dry::{Controls, Diagnostics, Sample, SolveError, Work, WorkLimit};
 
 pub const MODEL_ID: &str = "cold_refractories_isothermal_iapws_effective_ice_v4";
@@ -44,12 +46,27 @@ impl Region {
     pub fn outer(&self) -> Sample {
         self.profile.outer()
     }
+    /// Prescribed host temperature only. Entrained-origin thermal states are unknown.
     pub fn temperature_k(&self) -> Option<f64> {
         self.temperature_k
     }
+    /// Host phase only, never a phase assignment to entrained secondary origins.
     pub fn phase(&self) -> PhaseKnowledge {
         self.phase
     }
+    pub fn origin_phase(&self, material: Material) -> Option<PhaseKnowledge> {
+        (self.inventory().mass_kg(material) > 0.0).then_some({
+            if matches!(
+                material,
+                Material::Metal | Material::Silicate | Material::Water
+            ) {
+                self.phase
+            } else {
+                PhaseKnowledge::Unresolved
+            }
+        })
+    }
+    /// Host density route; the structure model records any entrainment prescription.
     pub fn density_model_id(&self) -> &'static str {
         self.density_model_id
     }
@@ -72,6 +89,7 @@ impl Region {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WaterStructure {
+    model_id: &'static str,
     regions: Vec<Region>,
     inertia_kg_m2: f64,
     diagnostics: Diagnostics,
@@ -79,6 +97,9 @@ pub struct WaterStructure {
 
 impl WaterStructure {
     pub fn model_id(&self) -> &'static str {
+        self.model_id
+    }
+    pub fn host_model_id(&self) -> &'static str {
         MODEL_ID
     }
     pub fn regions(&self) -> &[Region] {
@@ -129,6 +150,22 @@ pub fn solve(
     water_temperature_k: f64,
     outer_pressure_pa: f64,
     controls: Controls,
+) -> Result<WaterStructure, SolveError> {
+    solve_with_volume_factor(
+        retained,
+        water_temperature_k,
+        outer_pressure_pa,
+        controls,
+        1.0,
+    )
+}
+
+fn solve_with_volume_factor(
+    retained: &Inventory,
+    water_temperature_k: f64,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    volume_factor: f64,
 ) -> Result<WaterStructure, SolveError> {
     controls.validate()?;
     for material in Material::ALL {
@@ -294,6 +331,12 @@ pub fn solve(
                 .density_kg_m3,
         )
     };
+    // All parcel mass gravitates and displaces volume during integration. The
+    // audit-only factor changes density, not host masks, event pressures or work.
+    let host_density = density;
+    let density = |material, pressure, side, work: &mut Work, limit| {
+        host_density(material, pressure, side, work, limit).map(|rho| rho / volume_factor)
+    };
     if controls.max_eos_evaluations == 0 {
         return Err(SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations));
     }
@@ -352,6 +395,7 @@ pub fn solve(
             if (0.0..=BOUNDARY_TOLERANCE_PA).contains(&residual) {
                 let trial = upper.take().unwrap();
                 let result = WaterStructure {
+                    model_id: MODEL_ID,
                     regions: trial
                         .regions
                         .into_iter()

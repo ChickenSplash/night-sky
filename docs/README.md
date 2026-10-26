@@ -30,11 +30,14 @@ seed helpers, object identities and photometry stay at the crate root; see
   gas mixtures, reference pressure levels, isothermal columns and their limits.
 - [Material inventories and structure](simulation/planet-composition.md): conserved
   formation/retained budgets, approximate generated radii, bounded H/He retention
-   and separate headless dry/water radial solvers, protected dry-host traces
-   and atmosphere coupling.
+  and separate headless dry/water radial solvers, protected traces in dry and
+  water-bearing hosts, and atmosphere coupling.
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.
+- [Composition scientific reference](simulation/planet-composition-reference.md):
+  generated-input bounds, selected/candidate physics, source pins, unresolved
+  scientific issues, fixed acceptance requests and proposed extension budgets.
 - [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
@@ -94,14 +97,9 @@ The Bevy/egui client in `crates/client`:
   per-planet rendering work, validation history and explicitly deferred follow-ups.
 - [Planet surfaces](plans/planet-surfaces.md): bodies flattened by their spin,
   landing on the ground, then geology, water and giants' depths.
-- [Planet composition](plans/planet-composition.md): staged implementation plan for
-  conserved material inventories, approximate structure, atmosphere integration
-  and classifications derived afterwards, followed by user visual validation.
-- [Layered structure contract](plans/planet-structure.md): proposed region ownership,
-  first dry-interior EOS, numerical acceptance and water/envelope extension gates.
-- [Replacement readiness review](plans/planet-coverage.md): scoped checkpoint-5
-  completion, population ranges, pinned sources, contracts, owned coverage gaps
-  and the completed headless dry-host trace slice, not full replacement physics.
+- [Planet composition replacement](plans/planet-composition.md): the active roadmap,
+  completed headless foundation, region/boundary contract, remaining blockers and
+  gates for generated coverage, migration and legacy deletion.
 
 ## Current limitations
 

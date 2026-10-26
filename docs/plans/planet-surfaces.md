@@ -69,7 +69,7 @@ and heights as well as the air's extent.
 2. **Landing** (checkpoints 2 to 5): a smooth spheroid ground that matches the
    shape exactly (checkpoint 2, done), the
    surface frame, the near plane by height, and the floor.
-3. **Light on the ground:** [atmospheres 4c](atmospheres.md#4c-light-on-the-ground),
+3. **Light on the ground:** [atmospheres 4c](atmospheres.md#4c--light-on-the-ground),
    written into the new ground shader. Then atmospheres checkpoint 5 (every
    planet with air).
 4. **Geology, water and climate,** planned with the user together with

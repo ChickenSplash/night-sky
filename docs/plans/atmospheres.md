@@ -268,7 +268,7 @@ Clippy).
 
 Implemented initial recipe and inspector data; automated checks and runnable
 workspace build passed, and the user accepted the inspector check. See
-the [generation assumptions](../simulation/atmospheres.md#initial-generation-recipe).
+the [generation assumptions](../simulation/atmospheres.md#inventory-backed-generation).
 All system stars contribute to phase-averaged bolometric heating; activity and
 loss are explicit heuristics. Class supplies only a replaceable envelope prior.
 Bulk composition, self-consistent radius/envelope mass and classification from

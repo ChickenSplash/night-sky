@@ -20,7 +20,7 @@ for implementation details.
 | Planet generation, shape and ground | `crates/simulation/src/system/` | [Planetary systems](docs/simulation/planetary-systems.md) |
 | Material budgets, material physics, structure and physical transport | Simulation `system/composition.rs`, `system/materials.rs`, `system/structure.rs`, `system/physical.rs` | [Composition foundation](docs/simulation/planet-composition.md) |
 | Pure-water EOS, phase domains and scientific reference checks | Simulation `system/materials/water.rs` | [Water physics](docs/simulation/water-physics.md) |
-| Headless dry/water radial solvers, effective deep ice and shared numerical kernel | Simulation `system/structure/{dry,water,radial}.rs` | [Composition foundation](docs/simulation/planet-composition.md#headless-dry-body-solver) |
+| Headless dry/water radial solvers, protected traces, effective deep ice and shared numerical kernel | Simulation `system/structure/{dry,water,radial}.rs`, `{dry,water}/protected.rs` | [Composition foundation](docs/simulation/planet-composition.md#headless-dry-body-solver) |
 | Physical atmosphere model | Simulation `system/atmosphere.rs` | [Atmospheres](docs/simulation/atmospheres.md) |
 | Headless atmosphere/interior boundary coupling | Simulation `system/structure/coupled.rs` | [Coupling model and limits](docs/simulation/planet-composition.md#headless-atmosphere-and-condensed-boundary-coupling) |
 | Orbital motion, units and clock | Simulation `orbit/`, `units.rs`, `clock.rs` | [Orbits](docs/simulation/orbits.md) |

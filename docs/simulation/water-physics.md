@@ -6,6 +6,9 @@ It implements part of layered-structure checkpoint 3. A separate
 now uses its low-pressure model for water shells and supported ice-Ih/liquid
 interfaces, the separate compressed-liquid model to 1 GPa within its mask and
 the [effective deep-ice approximation](#effective-high-pressure-ice-for-the-game).
+The separate [protected-trace API](planet-composition.md#headless-protected-traces-in-water-bearing-hosts)
+also uses these host routes without assigning water phase/chemistry to entrained
+secondary origins or asserting an equilibrium solution.
 It changes no generated body, reservoir, atmosphere,
 transport, inspector or rendering. The [dry radial solver](planet-composition.md#headless-dry-body-solver)
 still refuses every positive water inventory.
@@ -319,18 +322,18 @@ latent heat, salinity, or precise intermediate polymorphs. There are no density
 offsets or pressure repairs to force models to agree. Local `water::state` and
 `dense_liquid::state` retain their original domains and coexistence refusals.
 
-## Thermal assumptions and earlier integration gates
+## Thermal assumptions and radial integration
 
 This module takes **local prescribed temperature**, not irradiation or equilibrium
 temperature. It supplies no climate, greenhouse, convection, entropy or cooling
 model. Refractory temperatures and phases remain unresolved in the cold solver.
 
-The first restricted water-bearing radial API prescribes an **isothermal
+The restricted water-bearing radial API prescribes an **isothermal
 pure-water region** and an absolute outer pressure. This is a conditional static
 benchmark, not a prediction of planetary heat transport. Refractories retain
-their named cold density proxies. External pressure initially represents a load
-with no hidden atmospheric mass; inventory-backed atmosphere matching remains
-checkpoint 4.
+their named cold density proxies. External pressure represents a load with no
+hidden atmospheric mass. Inventory-backed atmosphere matching is implemented in
+the separate [coupling API](planet-composition.md#headless-atmosphere-and-condensed-boundary-coupling).
 
 The restricted solver reuses the bounded kernel, conserves water allocations,
 preserves one-sided composition-interface samples and tests independent shell
@@ -339,14 +342,14 @@ a 0.01 Pa outer residual and a central-pressure-independent local pressure scale
 rather than the dry solver's `max(1 Pa, 10⁻⁸ P_c)` residual. Supported ice-Ih/liquid
 crossings are now located with disjoint phase-region allocations and separate
 endpoint densities. Their common density coverage is only 273.15–273.16 K,
-restricted further by the 1,000 Pa floor. Colder stable liquid remains unsupported.
+restricted further by the 1,000 Pa floor. These local IAPWS branches do not supply
+colder stable-liquid density; the radial model uses the explicitly approximate
+[pressure-melted liquid prescription](#pressure-melted-subfreezing-liquid) above.
 See the [solver guide](planet-composition.md#headless-restricted-water-shell-solver)
 for exact scope and numerical checks.
 
-The following were the earlier research-complete gates, superseded for game
-checkpoint 3 by the effective-ice scope above. They remain relevant only to a
-future resolved-polymorph model. The solver already reused the bounded kernel and independently tested local
-ice-Ih/liquid interfaces. Broader water-rich radial requests still require:
+The implemented effective-ice model does not resolve individual deep polymorphs.
+A future resolved-polymorph extension would require:
 
 1. Validated density coverage and equilibrium matching for deeper/cooler phases,
    rather than widening the current masks or joining unmatched fits.
@@ -356,7 +359,7 @@ ice-Ih/liquid interfaces. Broader water-rich radial requests still require:
    A single supported outer state does not certify its deeper structure.
 
 The one-Earth-mass, 30%-water fixtures in the
-[structure contract](../plans/planet-structure.md#example-requests-and-expected-coverage)
+[solver acceptance results](planet-composition.md#effective-deep-ice-and-checkpoint-3-acceptance)
 now have solved approximate 300 K and 250 K results. They are not validated
 shallow-water worlds or a resolved cold phase diagram.
 

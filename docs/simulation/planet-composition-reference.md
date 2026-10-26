@@ -1,162 +1,15 @@
-# Replacement coverage · checkpoint 5
+# Planet composition · scientific reference
 
-## Status
+This is supporting evidence and specification, **not another roadmap**. The
+[active plan](../plans/planet-composition.md) owns status, work sequencing, blockers
+and exit gates. The [implemented-model guide](planet-composition.md) owns runtime
+APIs, physical domains and measured numerical results.
 
-**Complete as a scoped readiness review, 2026-10-26.** The user approved replacing
-the all-routes-selected upfront gate with the bounded review below. This is
-specification/audit for layered checkpoint 5, not completed replacement physics,
-a new solver or a generation change. The
-[roadmap](planet-composition.md#checkpoints-and-acceptance-gates) owns numbering;
-the [architecture contract](planet-composition.md#architecture-review--extensible-materials-and-boundaries)
-owns catalogue, inventory, region and boundary semantics.
-
-The audit now establishes conservative forcing/age bounds, reproducible population
-and original H/He diagnostics, pinned source candidates and a selected protected
-trace mechanical prescription. A further pass selects the pure secondary-fluid
-equations and inventory/volume coexistence closure below. The mixture pass selects
-a density-only additive-volume contract and critical-resolution policy, without
-mistaking either for mixture phase equilibrium. Cold dense H/He, deep secondary
-constituents and thermal closure still need explicit replacement prescriptions.
-Those gaps now have later owners and acceptance conditions, rather than blocking
-this review. Checkpoint 6a below is now implemented headlessly. Do not delete
-legacy physics or claim full coverage from this audit. No generation-domain
-reduction is proposed.
-
-## Scope reset and frozen handoff
-
-**User-approved scope change:** checkpoint 5 ends with an honest readiness map,
-fixed requirements/fixture requests, assigned gaps and one implementable slice.
-It no longer promises to select and validate every replacement model before any
-implementation. This section supersedes earlier upfront-selection requirements;
-scientific findings and contracts below remain evidence, not implementation claims.
-
-### Definition of done for checkpoint 5
-
-- [x] Record the generated population and conservative input envelope, distinguishing
-  sampled extrema from bounds.
-- [x] Freeze ten constituent origins, conservation, region ownership and boundary
-  semantics. No molecular/electron double counting or pressure-triggered ground.
-- [x] Preserve selected models, source pins, limitations and reproducible audits.
-- [x] Classify remaining routes with owners and acceptance conditions below.
-- [x] Freeze requests B1–B12 plus B3w and proposed numerical/data budgets. These
-  requests are not all complete planet inputs or passing implementation tests.
-- [x] Define checkpoint 6a's finite inputs, outputs, exclusions and stop condition.
-
-No additional source survey, model selection or audit-tool expansion belongs to
-checkpoint 5. New findings become specific blockers for their owning work item,
-not an automatic reopening of this review. Changes to this frozen scope require
-an explicit rationale and user agreement. This closure does not authorise commits,
-push, merge, broad runtime migration or starting every later checkpoint at once.
-
-### Readiness and remaining ownership
-
-**Ready** means ready within the stated restricted scope, not population-ready.
-**Needs a decision** blocks the named route, not unrelated implementation.
-**Deferred** means intentionally left to a later gate, never waived for replacement.
-
-| Route / deliverable | Readiness | Owner | Concrete acceptance condition |
-| --- | --- | --- | --- |
-| Existing dry and restricted water/coupled paths | Ready, already implemented headlessly | 2–4 complete | Keep existing regression and domain refusals; no widened support claim. |
-| Protected secondary traces in dry hosts | Implemented headlessly | 6a complete | The finite slice below passes, including gravity, per-origin allocation and sensitivity; see the canonical solver guide. |
-| Protected traces in water hosts | Deferred from first slice | 6 remainder | Extend the same contract to valid water regions; preserve phase events and B1/B5 allocation/refinement tests. |
-| Pure secondary fluid equations / local coexistence algebra | Equations ready; physical masks need a decision before phase support | 6 remainder | Implement inversion/stable branch selection within explicitly established masks; pass reference and one-sided B4/B10 fluid tests without substituting ancillary saturation. |
-| Secondary solids/sublimation/freezing edges and deep/hot routes | Needs a decision | 6 (cold/solid); 8 (deep/hot extensions) | Select bounded cited or explicitly approximate routes; resolve or conservatively exclude O₂/Ar uncertain edges; satisfy B3/B4/B5 cold requests and required generated paths before migration. |
-| Generated volatile arrangement, exposure and partition | Needs a decision | 6 (local policy); 9 (planet closure) | Specify protected/exchangeable allocation and mixed-interface masks; close atmosphere/condensate mass together for B3/B3w/B9, not arbitrary fractions. |
-| Additive-volume and H/He-block density algebra | Ready for supplied supported component states only | 6/7 local; 9 integration | Implement B11/B12 and pure/trace limits; no inferred mixture phase or double-counted mass/corrections. |
-| H/He masks, interpolation, cold-dense/dilute joins | Needs a decision | 7 | Establish physical masks and interpolation conventions; pass B6 including rejected cold He and supported warm neighbour, joins and bounded failures. |
-| Thermal anchors, age/internal heat, hot water and refractory extensions | Needs a decision | 8 | Choose labelled prescriptions accepting age zero and the forcing envelope; demonstrate cold/hot/young/old paths stay within selected masks, with explicit refractory phase knowledge. |
-| Complete planet fixtures and unified matching | Deferred | 9 | Complete finite masses, thermal and outer/partition inputs for B1–B10/B3w; pass independent conservation, hydrostatic/inertia, stripping, seam and refinement checks. |
-| Full generated envelope, retention and numerical/data cost | Deferred | 10 | Exercise sampled extrema and source bounds including B7/B8; no unexplained generated coverage holes; measure nested work/memory and validate delivered data within agreed budgets. |
-| Generated readout, liquid geometry, legacy deletion and visual acceptance | Deferred | 11–12 | All runtime callers migrate only after coverage readiness; preserve phase/unknowns and liquid-top semantics; prove no legacy fallback and obtain user visual acceptance. |
-
-Every material in the matrix below is covered by these assignments: metal/silicate
-extensions belong to 8; water to 6/8; H/He to 7; all five secondary species to 6/8.
-Every frozen fixture also has an owner: B1/B2/B7–B9 need 8/9, B3/B3w/B4/B5/B10
-need 6/9 (hot paths also 8), B6 needs 7, B11/B12 need 6/7. Checkpoint 10 reviews
-the whole generated population and budget targets. Local owners must fix concrete
-reference/domain failures before claiming their affected route supported.
-
-### Next implementation slice: checkpoint 6a
-
-**Completed, 2026-10-26.** The frozen specification below is retained as its
-acceptance record. `dry::protected::solve` implements this slice with seven
-regressions covering all six groups and numerical edge cases. The
-[canonical API/model guide](../simulation/planet-composition.md#headless-protected-traces-in-dry-hosts)
-records the numerical measurements and limits. Checkpoint 6 as a whole remains
-open; this does not authorise appending follow-on routes to 6a.
-
-Validation: `./scripts/check.sh` passes formatting, reference suites, 361 simulation
-tests (2 ignored), 363 client tests (4 ignored), remaining workspace tests and
-strict Clippy. Local logs are `data/checkpoint-6a-check.log` and
-`data/checkpoint-6a-fixtures.log`. No generation migration, commit or push is part
-of this slice.
-
-**Deliverable:** an opt-in headless dry-host trace solve, reusing the existing cold
-EOS and radial kernel. The caller explicitly supplies protected secondary masses;
-this API does not infer that all retained secondary material is protected.
-
-- Inputs: metal/silicate host inventory, separately identified protected
-  CO₂/N₂/CH₄/O₂/Ar origin masses, imposed outer pressure and bounded solver controls.
-  Apply `entrained_secondary_host_volume_v1` with positive host mass, f≤0.00301,
-  total mass within the existing dry solver's [0.0001,20] Earth-mass scope and host
-  pressures within 0–10¹³ Pa. No atmospheric inventory is implied by the load.
-- Allocate each trace proportionally across existing host regions, include all
-  allocated mass in the integrated gravity/volume/inertia, and return immutable
-  region-owned per-origin inventories and model provenance. Keep host and trace
-  phase knowledge unresolved as specified; do not manufacture a trace shell or a
-  solid/landing claim. Existing dry-only API behaviour must remain unchanged.
-- Reuse current solver machinery incrementally. Do not build a general plugin
-  framework, rewrite the full region engine or convert legacy generation inputs.
-
-**Fixed acceptance set** (masses below use Earth masses):
-
-1. Host metal=0.3, silicate=0.7, outer load=1e5 Pa, no traces: recover the existing
-   dry solution and pure-host inventories within its current regression tolerances.
-2. Same host/load; each of the five secondary origins individually with
-   `M_trace/M_host`=1e-12, 1e-7 and 0.003. Preserve every positive origin, including
-   manual O₂, in disjoint host allocations; unprovided origins stay zero.
-3. Same host/load; mixed protected traces at f=0.00301 with trace mass shares
-   (CO₂,N₂,CH₄,Ar)=(0.49,0.49,0.01,0.01). Set
-   `M_trace=f M_host/(1-f)`. Reverse input construction order with identical results.
-4. For cases 1–3, independently check region/total mass, hydrostatic balance and
-   inertia, and tightened-control radius/inertia convergence against the budgets
-   below, retaining stricter existing tests. At λ=1 compare to a dry reference with
-   each host mass scaled by `(M_host+M_trace)/M_host`: mechanics should agree while
-   returned origin inventories must not be relabelled as metal/silicate.
-5. For the mixed endpoint, test λ=0.5/1/2 against the selected ≤1% radius and ≤2%
-   dimensionless-inertia sensitivity gates. λ is an audit variation, not a new
-   generated parameter or a measured uncertainty range.
-6. Refuse missing hosts, f above the ceiling, unsupported positive water/H/He or
-   exchangeable supply, and invalid/domain-exiting inputs without partial results.
-   Exercise deterministic work exhaustion and preserve existing dry regressions.
-
-**Stop:** when these tests, canonical API/model documentation and
-`./scripts/check.sh` pass, close 6a and report measured results. It is a completed
-headless slice, not all of checkpoint 6 or an observable change to generated worlds.
-Do not append exposed methane, water hosts, phase research, dense envelopes,
-generation/transport/rendering or a population rerun to this slice. If a concrete
-blocker prevents these tests, report that blocker rather than expand the work item.
-
-Resumed-pass verification: `./scripts/check.sh` passes formatting, workspace tests
-and strict Clippy (`data/checkpoint-5-resumed-check.log`): 354 simulation tests
-passed, 2 ignored; 363 client tests passed, 4 ignored. Ten offline H/He audit
-regressions pass without source downloads. Two full pinned-source audit runs
-produce byte-identical JSON. The population census also checks every sampled
-planet against the selected protected-trace concentration limit. Runtime physics,
-generation draws, transport and rendering are unchanged; checkpoint-5 work remains
-uncommitted and nothing has been pushed.
-
-Secondary-fluid pass verification: `./scripts/check.sh` also passes with ten new
-offline secondary-reference regressions (`data/checkpoint-5-secondary-check.log`),
-the same Rust pass/ignore counts, formatting and strict Clippy. Two complete
-secondary-source audit runs produce byte-identical JSON. All checks use supplied
-reference states or synthetic inputs, not a new runtime solver.
-
-Mixture-pass verification: `./scripts/check.sh` passes with 19 secondary-reference
-regressions (`data/checkpoint-5-mixture-check.log`), unchanged Rust pass/ignore
-counts, formatting and strict Clippy. Two full audits again produce byte-identical
-JSON, now including the finite 95.63445009399886 K methane lever-rule fixture.
-No runtime EOS, partition, generation or rendering behaviour changes in this pass.
+This reference preserves generated-input bounds, selected/candidate prescriptions,
+source pins and fixed acceptance requests. Equations and offline audits do not
+establish complete physical coverage. Cold dense H/He, secondary solid/deep/hot
+routes, generated partition and thermal closure remain unresolved where stated.
+No generation-domain reduction or runtime data import is implied.
 
 ## Generated inputs: measurements versus bounds
 
@@ -309,8 +162,10 @@ Mixtures require separate capabilities:
 
 Select `entrained_secondary_host_volume_v1` for the protected portions of
 CO₂/N₂/CH₄/O₂/Ar. This is a **new modelling approximation, not a measured material
-constant or solubility law**. Checkpoint 6a implements only its dry-host route;
-water-host support remains unimplemented.
+constant or solubility law**. The headless
+[dry-host](planet-composition.md#headless-protected-traces-in-dry-hosts) and
+[water-bearing-host](planet-composition.md#headless-protected-traces-in-water-bearing-hosts)
+APIs implement this mechanical prescription only, not exposed secondary phases.
 It closes one important generated-domain gap without inventing pure trace shells:
 
 1. Host mass `M_h` is retained metal + silicate + protected water. Exposed water,
@@ -688,7 +543,7 @@ citations and ancillary curves do not confer unrestricted physical validity.
 Keep fitted gas constants/molar masses for equation checks, not substituted
 modern constants. Melting curves supply no solid EOS. This is not a licence audit
 of every future CoolProp dependency. Revised AQUA's separate hash/schema/phase
-audit remains in the [water guide](../simulation/water-physics.md#revised-aqua-2026-distributable-candidate-not-interface-ready).
+audit remains in the [water guide](water-physics.md#revised-aqua-2026-distributable-candidate-not-interface-ready).
 
 ### Independent secondary-fluid reference audit
 
@@ -707,7 +562,7 @@ This audits pressure and same-T Gibbs differences, **not u/s/cp/cv or the comple
 phase diagram**. At the same T the ideal T-only Helmholtz terms cancel, leaving
 `Δg/(R T)=Δ[ln δ+αʳ+1+δ αʳ_δ]`.
 
-The mixture pass extends this suite to 19 offline regressions, including synthetic
+The suite contains 19 offline regressions, including synthetic
 additive-volume/H-He grouping checks, unclipped lever-rule endpoints/interiors,
 critical contrast/error-bound rejection and molar liquid pressure-work units. The full audit
 also recovers five methane vapour mass fractions from the pinned local coexistence
@@ -754,28 +609,66 @@ Result: select the bounded pure-fluid equations and closure above, but **do not
 mark secondary coverage complete**. Cryogenic solids, sublimation, freezing-edge
 uncertainty, dense/exposed mixtures and deep/hot chemistry remain separate gates.
 
-## Thermodynamic and origin contract
+### Methane inversion and coexistence numerical gate
 
-- Inventory remains kilograms of ten stable constituent origins. Dense-EOS
-  hydrogen is total origin mass: internal H₂/H/H⁺/electrons do not add entries
-  or mass. Dissociated water/methane remain their respective origin allocations.
-- Shared elements do not permit transfers between water-, methane- and primordial
-  hydrogen origins. Cross-origin chemistry needs a separate elemental/reaction
-  contract. Molecular gas/optics adapters cannot describe ionised states as
-  unchanged molecules.
-- Regions own per-origin mass, arrangement/exposure and model provenance. Their
-  sums equal retained supply per origin; retained plus escaped equals source.
-  Planet-scale tolerances must not permit trace deletion.
-- Density-only models promise no entropy/cp/adiabat. Helmholtz derivatives are
-  consistent only on validated stable branches. Independent interpolation and
-  EOS joins remain approximate unless a shared-potential/consistency test says more.
-- Do not average unaligned entropy/energy zeros across seams or call their
-  difference latent heat. Thermal jumps need explicit conditions. P/T alone do
-  not determine coexistence fractions: arrangement/inventory or energy/entropy
-  must close them.
-- Prefer entropy-contour adiabats where valid, checking `d ln T/d ln P|S`
-  independently. A gradient proxy needs a selected value, anchor, mask and
-  provenance. No age/entropy law is selected yet; T_eq is not central temperature.
+`scripts/secondary-inversion.py` is a separate **offline** numerical gate. It
+imports the pressure/Gibbs transcription above, differentiates power/Gaussian
+terms analytically through second density order, and solves for molar density on
+supplied branch brackets. CO₂ nonanalytic second derivatives are deliberately
+unsupported. It neither ships coefficients to Rust nor changes any runtime route.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-secondary-inversion.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/secondary-inversion.py data/composition-sources > data/checkpoint-6c-inversion.json
+```
+
+The coefficient-backed gate verifies the methane and licence hashes. The finite
+reference window is 95–172 K / 1e4–3e6 Pa, independently screened against the pinned
+methane melting correlation. It is not a full physical mask or a generation-domain
+restriction. Each of the three supplied source temperatures starts from ancillary
+vapour/liquid densities ±10% and ancillary pressure ±2%. Neither the source answer
+nor an ancillary density is returned as the solved state. The bisections enforce
+equal EOS pressure and same-T Gibbs energy. Root selection below/above saturation
+compares Gibbs energy among all **supplied** candidates, not density ordering.
+At a Gibbs tie (≤1e-8 in RT units), selecting a bulk phase without volume closure
+fails explicitly. No arbitrary saturated bulk density or 50:50 split is supplied.
+
+Every evaluated branch point must have positive analytic `dP/dn`; a 17-point
+bracket screen also rejects detected branch crossing/nonmonotonicity. **Sampling
+does not prove stability everywhere or enumerate all roots.** These fixed, separated
+vapour/liquid brackets are numerical reference fixtures, not permission to use
+the same search for arbitrary input states. Global fluid-root completeness,
+critical-neighbourhood resolution and solid competition remain open.
+
+The relative pressure tolerance is 1e-9 (fourfold refinement 2.5e-10); inner
+inversions use one quarter of that tolerance and also shrink the density bracket
+to relative 1e-12. Coexistence requires pressure-bracket width within tolerance and
+`|Δg|/(RT)≤1e-10`. Each inner/outer bisection has at most 96 iterations, with a
+shared ceiling of 50,000 EOS probes across all nested density solves and rejected
+probes. Limits may only be reduced; no bracket expansion, hidden retries or
+unbounded Newton iterations occur. Failure to resolve a bracket is reported,
+not treated as evidence of a different phase. These are offline audit ceilings,
+not runtime performance promises or the later whole-planet budget.
+
+Measured against the three source rows: maximum relative errors are 8.65e-11 in
+pressure and 9.79e-11 in density; maximum Gibbs mismatch is 7.74e-11 in RT units.
+Fourfold refinement changes pressure/density by at most 1.39e-10 relative.
+Each nominal coexistence solve uses at most 3,360 EOS probes (3,645 refined).
+Independent pressure differences check the analytic compressibility derivative.
+Pressure neighbours at ±1e-4 choose vapour/liquid respectively. Repeated and reversed
+branch inputs agree, and exact shared-budget success/one-fewer failure is checked
+at every source temperature.
+
+The five mass fractions 0/0.25/0.5/0.75/1 are recovered to better than 1e-8.
+Interior volumes come from the independent source row; endpoint volumes use the
+resolved endpoints themselves, since a source endpoint can lie just outside the
+numerically resolved interval. No endpoint clipping is used. Ten dependency-free
+synthetic regressions also exercise ideal SI units, derivative differences,
+unstable/unbracketed/overlapping branches, Gibbs selection, missing bulk closure,
+lever-rule endpoints/outside volumes and contrast failure, invalid inputs and
+deterministic iteration/work refusals. These run in `./scripts/check.sh` without
+downloaded files. This closes only the finite numerical gate, **not runtime pure
+fluid inversion, exposed methane, calorics, partition or checkpoint 6 overall**.
 
 ## Finite acceptance requests
 
@@ -834,13 +727,3 @@ performance claims. Preserve stricter local tests. Count rejected/nested work.
   10; interactive benchmarks remain user-run. Distinguish invalid input, missing
   capability, physical-domain exit, weak-binding/no-static-solution, nonconvergence
   and work exhaustion. Never silently return a legacy whole-body fit.
-
-## Replacement completion remains gated
-
-The [readiness handoff](#readiness-and-remaining-ownership) assigns all remaining
-decisions. Closing checkpoint 5 does not resolve their physical uncertainties or
-make the full replacement ready. In particular, no generated material may be
-dropped, no forcing/mass domain silently narrowed and no legacy fit returned as
-an unlabelled substitute. Any necessary generation-domain change still requires
-a documented physical rationale and user agreement. Full coverage and bounded cost
-remain checkpoint-10 gates before checkpoint-11 migration and legacy deletion.

@@ -4,7 +4,7 @@
 No network, dependencies, density inversion or phase selection. Evaluate only
 supplied (T,rhomolar) reference states. Pressure and same-temperature Gibbs
 differences need residual Helmholtz energy only; this does NOT audit calorics.
-Sources, masks and limitations: docs/plans/planet-coverage.md.
+Sources, masks and limitations: docs/simulation/planet-composition-reference.md.
 """
 
 import argparse

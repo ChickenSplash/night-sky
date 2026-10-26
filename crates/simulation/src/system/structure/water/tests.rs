@@ -444,7 +444,7 @@ fn approximate_liquid_boundary_loads_and_work_remain_explicit() {
     );
 }
 
-fn inventory(mass: f64, water: f64) -> Inventory {
+pub(super) fn inventory(mass: f64, water: f64) -> Inventory {
     Inventory::from_mass_fractions(
         mass * EARTH_MASS_KG,
         &[
@@ -565,6 +565,13 @@ fn liquid_and_ice_shells_conserve_inventory_and_one_sided_interfaces() {
 // Independent Gaussian radial integrals using Hermite-interpolated pressure
 // and mass, not summation of allocated masses or the kernel's inertia state.
 fn quadrature(region: &Region) -> (f64, f64, f64) {
+    quadrature_with_volume_factor(region, 1.0)
+}
+
+pub(super) fn quadrature_with_volume_factor(
+    region: &Region,
+    volume_factor: f64,
+) -> (f64, f64, f64) {
     let material = Material::ALL
         .into_iter()
         .find(|m| region.inventory().mass_kg(*m) > 0.0)
@@ -622,6 +629,7 @@ fn quadrature(region: &Region) -> (f64, f64, f64) {
                 } else {
                     cold::density_kg_m3(material, p).unwrap()
                 };
+                let rho = rho / volume_factor;
                 let m = h[0] * a.enclosed_mass_kg
                     + h[1] * dr * 4.0 * PI * a.radius_m.powi(2) * a.density_kg_m3
                     + h[2] * b.enclosed_mass_kg

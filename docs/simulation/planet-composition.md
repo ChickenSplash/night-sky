@@ -5,21 +5,23 @@ and `system/structure.rs`. [Planet generation](planetary-systems.md) now draws
 inventories first and derives retained mass, radius and inertia from them.
 Atmospheric gas and condensed reservoirs now share the same conserved inventory;
 validated inventory/reference transport and descriptive labels feed the inspector.
-Integration checkpoints are in [the refactor plan](../plans/planet-composition.md).
-The [layered structure contract](../plans/planet-structure.md) specifies the next
-phase. Its first dry-body solver is implemented as a separate headless API,
-described below. Generation still uses the approximate reservoir/radius model;
+The [replacement plan](../plans/planet-composition.md) owns remaining work and the
+region/boundary contract; the [scientific reference](planet-composition-reference.md)
+owns input bounds, selected/candidate sources and future acceptance requests.
+Implemented radial solvers are separate headless APIs, described below.
+Generation still uses the approximate reservoir/radius model;
 no planets, snapshots, inspector fields or rendering use the new solver yet.
-Checkpoint 3 supplies a separate [water-shell solver](#headless-restricted-water-shell-solver)
-with direct [IAPWS water physics](water-physics.md) and an explicitly approximate
+The separate [water-shell solver](#headless-restricted-water-shell-solver) uses
+direct [IAPWS water physics](water-physics.md) and an explicitly approximate
 effective deep-ice compression model. The mandatory Earth-mass, 30%-water fixture
 solves at both 250 K and 300 K. Cold deep ice is explicitly approximate rather
 than resolved into individual polymorphs. The standalone
 Lai ice-VII branch remains separate, not used by the radial solver.
-Checkpoint 4 adds opt-in [condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling),
-without switching generation or consumers to the radial models.
-Checkpoint 6a adds [protected secondary traces in dry hosts](#headless-protected-traces-in-dry-hosts),
-also headless and opt-in.
+Opt-in [condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling)
+is implemented without switching generation or consumers to the radial models.
+[Protected secondary traces in dry hosts](#headless-protected-traces-in-dry-hosts)
+and [water-bearing hosts](#headless-protected-traces-in-water-bearing-hosts)
+are also headless and opt-in.
 
 ## Conserved inventory, not a classification
 
@@ -41,7 +43,7 @@ masses in `atmosphere.rs`, and approximate cold-trap curves in
 under `materials`. Methane is already drawn by formation and can enter the gas
 budget; neither methane liquids/lakes nor condensed CO₂/supercritical CO₂ are
 resolved by the new radial/coupled path. A cold-trap cap is not a phase diagram.
-The [planned capability and boundary contract](../plans/planet-composition.md#architecture-review--extensible-materials-and-boundaries)
+The [replacement contract](../plans/planet-composition.md#replacement-contract)
 describes the remaining consolidation and extensions, not current behaviour.
 
 These are material/molecular budgets, **not independent elemental inventories**.
@@ -242,6 +244,9 @@ remains 10⁻⁸. Proportional allocations and differently grouped total sums ca
 by floating-point roundoff. An allocation that underflows a positive origin to zero
 or an unrepresentable host interval is rejected, never silently dropped.
 
+The fixed fixtures use host (metal,silicate)=(0.3,0.7) Earth masses and an imposed
+outer load of 10⁵ Pa. At the mixed endpoint, set
+`M_trace=f M_host/(1-f)` before applying the stated trace shares.
 Seven regressions cover the six frozen acceptance groups: zero-trace recovery;
 five origins individually at trace/host ratios 10⁻¹², 10⁻⁷ and 0.003; the mixed
 f=0.00301 endpoint with shares (CO₂,N₂,CH₄,Ar)=(0.49,0.49,0.01,0.01); reversed input
@@ -268,6 +273,77 @@ range. Reproduce the fixed tests and measured diagnostics with:
 
 ```sh
 cargo test -p space-simulation system::structure::dry::protected -- --nocapture
+```
+
+## Headless protected traces in water-bearing hosts
+
+`system::structure::water::protected::solve(&host, &protected,
+water_temperature_k, outer_pressure_pa, Controls)` extends the same
+`entrained_secondary_host_volume_v1` approximation to metal/silicate/protected-water
+hosts. Positive water is required. The caller supplies protected
+CO₂/N₂/CH₄/O₂/Ar separately; H/He, secondary material in the host and host material
+in the trace argument are refused. As for dry traces, the API cannot identify
+exchangeable supply mislabelled by the caller. No atmosphere is assigned to the
+imposed load. Existing `water::solve` and coupling behaviour remain unchanged.
+
+Every parcel is integrated at its full host-plus-trace mass and the host's
+specific volume. Proportional entrainment spans refractory regions and every
+pressure-located water phase/model segment. The located parcel mass determines
+that segment's host and per-origin trace allocations. No trace shell, massless
+ballast, pressure shift or post-solve mechanical repair is introduced. Trace
+inventory is not added to the gravity source a second time.
+
+The returned `WaterStructure` exposes the entrainment `model_id()` and the original
+water `host_model_id()`. Each region retains its host `density_model_id()`, phase,
+temperature and approximation notes. **Region `phase()` and `temperature_k()`
+describe the host only.** `origin_phase(material)` returns absent for an absent
+origin and unresolved for each entrained secondary origin, even inside liquid
+water or identified Ih. Trace thermal/chemical states, solubility, molecular
+survival, freezing-point shifts and phase partition remain unresolved. This is a
+prescribed entrainment model, not equilibrium mixing or simulated redistribution.
+
+Require `f≤0.00301`, total mass 0.0001–20 Earth masses and all unchanged local
+host P–T masks. The water temperature selects the **host** path; it supplies no
+secondary phase law. Water event pressures and separate one-sided densities are
+preserved without smoothing. The existing 0.01 Pa unshifted outer residual and
+work ceilings apply, including every nested compressed-water EOS evaluation.
+All origins close to species-local relative 1e-12 and region mass resolution
+remains 1e-8. Unrepresentable host intervals or positive trace allocations that
+underflow are explicit failures, not deleted inventory.
+
+Seven regressions cover the frozen slice: zero-trace recovery at 250/260/300 K;
+the five individual origins at trace/host ratios 1e-12, 1e-7 and 0.003 at 300 K;
+mixed endpoint `f=0.00301` at all three temperatures; pure/thin-water hosts;
+one-sided event loads, including Ih/liquid; deterministic/reversed inputs;
+species-local conservation, independent quadrature/refinement and exact nested
+work budgets; unsupported/domain/unrepresentable requests. The main host is
+(metal,silicate,water)=(0.2,0.5,0.3) Earth masses with a 1e5 Pa load. The mixed
+shares and trace-mass conversion are the same as the dry-host fixture above.
+
+At nominal density, the profiles and event coordinates exactly match an ordinary
+water solve with all host masses scaled by total/host mass, while returned origins
+remain unchanged. Independent Gaussian radial integration closes region/per-origin
+mass and total inertia to relative 1e-8 and hydrostatic drops to 2e-4. Across the
+15 single-origin and three mixed endpoints, measured maxima are 4.66e-10 region
+mass, 4.47e-10 hydrostatic drop and 5.77e-11 total inertia.
+
+| Mixed endpoint | Radius (km) | I/(MR²) |
+| --- | ---: | ---: |
+| 250 K | 7317.751489 | 0.2873869592 |
+| 260 K | 7318.684052 | 0.2873151794 |
+| 300 K | 7308.116047 | 0.2880917845 |
+
+Fourfold step/tolerance refinement on those endpoints changes radius by at most
+1.88e-13, inertia factor by 3.86e-13 and individual region-origin allocations by
+1.88e-11 relative, with at most 1,233,333 charged EOS evaluations. The test-only
+λ=0.5/1/2 audit changes radius by at most 0.1221% and inertia factor by 0.00302%,
+below the 1%/2% sensitivity gates. These are numerical/model-sensitivity checks,
+not physical accuracy or a measured trace-density uncertainty interval.
+
+Reproduce the frozen slice tests and diagnostics:
+
+```sh
+cargo test -p space-simulation system::structure::water::protected -- --nocapture
 ```
 
 ## Headless restricted water-shell solver

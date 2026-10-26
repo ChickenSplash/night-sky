@@ -4,7 +4,7 @@
 Download the three pinned artifacts separately. Reads named archive members
 without extraction. Reports numerical warnings instead of treating a rectangular
 grid, positive derivative or heuristic phase flag as physical validity evidence.
-See docs/plans/planet-coverage.md for sources, licences and scope.
+See docs/simulation/planet-composition-reference.md for sources, licences and scope.
 """
 
 import argparse
