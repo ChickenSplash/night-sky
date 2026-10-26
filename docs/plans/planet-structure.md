@@ -1,5 +1,120 @@
 # Layered planetary structure · model contract
 
+## Revised completion scope · scientific plausibility, not research completeness
+
+**User decision, 2026-10-26:** finish checkpoint 3 using scientifically plausible,
+explicit approximations. Research-grade accuracy and a complete water phase
+diagram are not requirements. This section supersedes the stricter deep-ice
+selection/validation gates later in this document; those entries remain a record
+of the earlier work, not permission to continue open-ended source investigation.
+The user subsequently authorised resumption. **Checkpoint 3 is complete under
+this revised scope**, with acceptance results in the
+[canonical solver guide](../simulation/planet-composition.md#effective-deep-ice-and-checkpoint-3-acceptance).
+The user subsequently authorised committing checkpoint 3 before beginning
+checkpoint 4. Push and merge remain unauthorised.
+
+### Fixed scope and model choice
+
+- Keep the working dry, shallow-water and IAPWS implementations. Finish the
+  missing deep-water path, rather than restarting the solver or replacing tested
+  numerical machinery.
+- Retain prescribed isothermal pure water, cold refractory proxies and imposed
+  outer pressure. These are conditional structure models, not climate predictions.
+- Use a cited analytic compression approximation for deep water ice. The default
+  completion route is the Seager et al. (2007), equation 11/table 3 high-pressure
+  water-ice proxy, after checking the source parameters and applicable pressure
+  range. Give it a separate approximate model identity. It need not reproduce a
+  complete Gibbs potential or individual VI/VII/VIII thermodynamics.
+- Distinguish liquid water, low-pressure ice Ih and **effective high-pressure
+  ice**. Do not label an effective compression branch as a specifically resolved
+  ice polymorph. The earlier prescribed Lai VII model can remain a standalone
+  comparison; joining it into the radial solution is not a completion requirement.
+- At 300 K, use the existing IAPWS VI melting correlation as the approximate
+  liquid/deep-ice boundary. An independently selected compression proxy and an
+  empirical phase boundary are an explicit approximate composite model, not a
+  claim of Gibbs-energy matching. Preserve its physical density discontinuity.
+- At 250 K, use a documented approximate low-pressure/high-pressure ice boundary
+  from a cited phase diagram, with deeper ice represented effectively. Exact
+  intermediate II/III/V/VI/VIII shell sequences are out of scope. If a regime
+  genuinely cannot be represented plausibly, return an explicit unsupported
+  outcome and document it; do not restart phase-diagram research to unblock it.
+- Source checking is limited to what is necessary to implement the selected
+  equations, units, domains and attribution correctly. Do not add another EOS
+  survey, dataset audit or independent experimental campaign. A material problem
+  with the selected proxy must be surfaced as a specific implementation blocker,
+  not silently expand the research scope.
+
+### Implementation sequence when resumed
+
+1. **Add the effective deep-ice material prescription.** Check the selected
+   published parameters once; implement bounded density evaluation, explicit
+   domains and approximate-phase/model metadata. Test transcription, finite
+   positive density, compression trends and domain refusals. Do not require
+   independent experimental validation across the whole domain.
+2. **Integrate the water profile end to end.** Generalise the kernel's current
+   single pressure-event support to the ordered events needed for the liquid
+   model seam and approximate ice boundaries. Locate events, retain one-sided
+   samples and allocate disjoint region inventories. Never integrate a density
+   jump as a smooth mixture or repair pressure afterwards.
+3. **Pass the finite acceptance suite below.** Fix numerical or accounting
+   failures directly. Keep deterministic work limits, including failed/nested
+   work; optimise inversions if necessary. Any control/tolerance change needs a
+   documented numerical rationale and regression coverage, not hidden extra work.
+4. **Close checkpoint 3.** Update canonical model/domain/limitation documentation,
+   run the full checks, report the acceptance results and mark this scoped
+   checkpoint complete. Do not delay closure for optional source research or
+   begin checkpoints 4–6 within this work item.
+
+### Definition of done
+
+- [x] The one-Earth-mass inventory (metal 0.2, silicate 0.5, water 0.3 Earth masses)
+  solves at 300 K and an imposed 1 bar, locating a liquid outer boundary and
+  plausible compressed deep ice. This warm fixture is mandatory, not merely a
+  local density test or a deliberately unsupported result.
+- [x] The matching 250 K fixture resolves an ice outer boundary with an explicitly
+  approximate deep-ice treatment. The user's follow-up explicitly requests
+  approximate cold coverage rather than the former unsupported exception.
+  Exact cold polymorph coverage is not a checkpoint-completion blocker.
+- [x] Region inventories reproduce retained inventory without double counting;
+  independently checked shell mass, hydrostatic balance and inertia close.
+- [x] Pressure, enclosed mass and radius are continuous at located interfaces;
+  one-sided density jumps and approximate phase/model identities remain explicit.
+- [x] Refinement meets the established radius/inertia convergence target on the
+  mandatory warm fixture. Profiles are finite, ordered and within declared model
+  domains; failures and work exhaustion are deterministic and visible.
+- [x] Existing dry, shallow-water, interface and budget regressions pass. Add
+  representative deep-water loading, inventory-fraction/compression trend,
+  out-of-domain and budget-failure tests. Exact Earth reconstruction or laboratory
+  error-bar agreement is not required.
+- [x] `./scripts/check.sh` passes and canonical guides describe the implemented
+  approximation honestly. Generation, transport, rendering and inspector remain
+  unchanged in checkpoint 3.
+
+Completion verification: `data/checkpoint-3-completion-check.log` records the
+passing full formatting, workspace-test and strict-Clippy run. The selected
+effective-ice prescription, ordered pressure events and mandatory warm fixture
+are implemented. The user's follow-up completion pass replaces the cold fixture's
+unsupported result with a labelled intermediate-ice compression approximation,
+rounded cold phase boundaries and an explicitly identified Ih pressure extension.
+Pressure-melted liquid uses existing melting curves and a labelled density proxy,
+so the Earth-mass acceptance inventory now solves across 250–300 K rather than
+only at isolated warm/cold temperatures. Region metadata exposes approximation
+notes. Cold and subfreezing profiles pass independent closure, refinement,
+loading and budget checks without another source investigation. The canonical
+guides record the assumptions, not claims of precise polymorph thermodynamics.
+Follow-up cold/subfreezing completion verification is recorded in
+`data/checkpoint-3-cold-completion-check.log`.
+
+### Explicitly deferred, not hidden completion gates
+
+Complete cold-water polymorph sequences; independently matched VI/VII/VIII Gibbs
+surfaces; phonon-based thermal ice EOS; full experimental EOS calibration;
+adiabatic interiors, climate and heat transport; atmosphere/envelope coupling;
+generation/consumer migration and visual acceptance. The last three remain the
+separate later checkpoints, not claims made by completing this headless solver.
+
+## Original contract and implementation history
+
 Checkpoint 1 of the [composition plan's next phase](planet-composition.md#next-phase--layered-planetary-structure).
 Specification prepared 2026-10-25; the user subsequently authorised checkpoint 2
 after discussing its dry/cold scope and headless tests. The separate dry solver
@@ -281,3 +396,150 @@ visual acceptance, and does not establish scientific accuracy of the cold proxie
 Verification: `./scripts/check.sh` passes formatting, workspace tests and strict
 Clippy. Simulation: 298 passed, 2 ignored (9 new dry-solver tests). Client:
 363 passed, 4 ignored. Documentation file links and `git diff --check` pass.
+
+## Checkpoint 3 implementation, in progress
+
+User authorised starting checkpoint 3 after the checkpoint-2 commit. The first
+material-physics baseline is implemented; this does **not** complete checkpoint 3.
+Selection, pinned source releases, permissions, masks and candidate issues are
+canonical in [pure-water physics](../simulation/water-physics.md).
+
+- [x] Evaluate AQUA source/version/licence and reported entropy/interpolation issues.
+- [x] Implement direct IAPWS liquid and ice-Ih density equations, bounded stable-phase
+  selection and explicit coexistence/unsupported-density outcomes.
+- [x] Verify against published reference densities, specific volumes and pressure
+  curves; test domains, compression, freezing and deterministic failures.
+- [x] Declare the first planned thermal closure: prescribed isothermal pure water,
+  cold refractory proxies and explicit external load, not a climate prediction.
+- [x] Implement and reference-test standalone IAPWS melting branches Ih/III/V/VI/VII,
+  without widening the density or equilibrium-phase mask.
+- [x] Audit pinned SeaFreeze source/licence/units and probe reference densities,
+  melting comparisons and VI/VII Gibbs matching on the intended isotherms.
+- [x] Implement a separate direct IAPWS95 compressed-liquid density API to 1 GPa,
+  with melting masks, bounded inversion and published reference verification.
+- [x] Evaluate corrected AQUA (2026), pin its CC-BY-4.0 dataset and audit phase
+  labels, interpolation/extrapolation flags and cold/warm interface-cell coverage.
+- [x] Implement and test the prescribed Lai et al. (2023) ice-VII compression
+  branch at exactly 300 K and 3.5–20 GPa, with accountable bounded inversion;
+  distinguish this from equilibrium selection and reject colder requests.
+- [x] Check primary ice-VIII compression isotope coverage and Journaux thermal
+  model inputs, without importing D₂O fits as H₂O or omitting phonon pressure.
+- [ ] Select/validate high-pressure water and ice models for the water-rich fixtures.
+- [x] Reuse the bounded radial kernel for restricted single-phase liquid/ice-Ih
+  shells, with a 0.01 Pa outer residual and central-pressure-independent pressure
+  error scaling, without changing generation or widening dry input coverage.
+- [x] Test restricted water-bearing mass/inertia/hydrostatic closure independently,
+  imposed loading, trace conservation, composition interfaces and refinement.
+- [x] Locate low-pressure Ih/liquid interfaces where both densities exist,
+  using pressure-coordinate endpoint integration without crossing density jumps.
+- [x] Test disjoint phase allocations, one-sided endpoint states, independent
+  closure, refinement, coexistence outer boundaries and bounded interface work.
+- [x] Integrate compressed liquid to 1 GPa within its mask, locate the unforced
+  IF97/IAPWS95 model boundary, debit nested inversion work including failures,
+  and test conservation, one-sided states, independent closure and refinement.
+- [ ] Extend interface matching and independent closure/refinement acceptance to
+  high-pressure water-rich fixtures once validated density/phase coverage exists.
+
+The original local API covers 250–623.15 K, 1,000–100,000,000 Pa, with ice Ih
+and stable liquid density at ≥273.15 K. Colder pressure-stabilised liquid is
+identified but has no enabled density EOS. This limited baseline must not be
+represented as a solution of the contract's 30%-water, Earth-mass examples.
+Generation, transport, inspector, rendering and dry radial behaviour are unchanged.
+
+The continuation selected direct IAPWS high-pressure melting references and a
+separate compressed-liquid density API over 100–1,000 MPa and 273.16–623.15 K,
+restricted by the melting curves. A separate prescribed 300 K ice-VII density
+branch is now available; no matched deep-ice equilibrium density or solid/solid
+selection is enabled. Corrected AQUA offers a distributable candidate, but its
+flagged density interpolation crosses some stored phase interfaces and does not
+resolve cold ice VIII. SeaFreeze remains reference-only: GPL-3 distribution
+terms require resolution, and its direct VI/VII-X Gibbs models did not bracket
+equality in their shared pressure domain on either prescribed 250/300 K path.
+Quantitative results and the remaining source/matching gate are canonical in
+the [water guide](../simulation/water-physics.md#seafreeze-evaluated-reference-not-an-imported-eos).
+
+Baseline verification: `./scripts/check.sh` passes formatting, workspace tests
+and strict Clippy. Simulation: 304 passed, 2 ignored (6 new water-material tests).
+Client: 363 passed, 4 ignored. Documentation file links and `git diff --check`
+pass. Local output: `data/checkpoint-3-water-baseline-check.log`. No commit,
+merge or publication is implied by this implementation step.
+
+Continuation verification: `./scripts/check.sh` passes formatting, workspace tests
+and strict Clippy. Simulation: 308 passed, 2 ignored (4 additional melting-curve
+tests). Client: 363 passed, 4 ignored. `git diff --check` passes. Local output:
+`data/checkpoint-3-melting-check.log`. Checkpoint 3 remains incomplete.
+
+Compressed-liquid/revised-AQUA continuation verification: `./scripts/check.sh`
+passes formatting, workspace tests and strict Clippy. Simulation: 312 passed,
+2 ignored (4 additional compressed-liquid tests). Client: 363 passed, 4 ignored.
+The pinned dataset structural audit passes and rejects an incorrect source hash.
+Documentation file links and `git diff --check` pass. Local output:
+`data/checkpoint-3-dense-liquid-check.log`. This still does not complete
+high-pressure ice physics, radial integration or checkpoint 3.
+
+Prescribed ice-VII continuation verification: `./scripts/check.sh` passes
+formatting, workspace tests and strict Clippy. Simulation: 316 passed, 2 ignored;
+client: 363 passed, 4 ignored. Four new branch-density tests cover numerical
+reference evaluation, published lattice-fit deviations, pressure closure and
+bounded work/failures. Documentation file links and `git diff --check` pass.
+Local output: `data/checkpoint-3-ice-vii-check.log`. No VI/VII/VIII equilibrium
+matching or water-bearing radial integration is claimed by this continuation.
+
+The subsequent restricted radial continuation is implemented and described in the
+[water-shell solver guide](../simulation/planet-composition.md#headless-restricted-water-shell-solver).
+Its first version rejected phase crossings and the Earth-mass 30%-water fixtures.
+Six initial tests
+cover analytic three-layer mechanics, independent radial closure, conservation,
+loading/refinement and explicit physical/numerical failures. The nine dry solver
+regressions remain unchanged and pass against the shared numerical kernel.
+
+Restricted radial verification: `./scripts/check.sh` passes formatting, workspace
+tests and strict Clippy. Simulation: 322 passed, 2 ignored; client: 363 passed,
+4 ignored. Local output: `data/checkpoint-3-water-radial-check.log`.
+
+The supported Ih/liquid interface extension now uses one-sided named densities
+and a pressure-coordinate endpoint step, preserving a common radius, enclosed
+mass and nominal melting pressure without pressure repair. Four additional radial
+tests and one material test cover analytic event location, independent closure,
+phase allocations/refinement, coexistence endpoints and work limits. Cold liquid,
+deep ice and the Earth-mass 30%-water fixtures remain unsupported, so checkpoint 3
+is still incomplete. Numerical scope and tolerances remain canonical in the
+[solver guide](../simulation/planet-composition.md#headless-restricted-water-shell-solver).
+
+Interface-extension verification: `./scripts/check.sh` passes formatting,
+workspace tests and strict Clippy. Simulation: 327 passed, 2 ignored; client:
+363 passed, 4 ignored. Local output:
+`data/checkpoint-3-water-interfaces-check.log`.
+
+The compressed-liquid radial continuation now joins the separate liquid models
+at a located 100 MPa model boundary, not a phase change or forced density match.
+Three additional radial tests and one material-budget test cover the extension.
+The existing request ceiling is preserved; the loaded pure-water stress fixture
+explicitly exhausts it. Scientific and numerical scope is canonical in the
+[solver guide](../simulation/planet-composition.md#headless-restricted-water-shell-solver).
+Deep ice, cold liquid and the Earth-mass 30%-water fixtures remain unsupported.
+Checkpoint 3 is not complete; generation and presentation remain unchanged.
+
+Compressed-liquid radial verification: `./scripts/check.sh` passes formatting,
+workspace tests and strict Clippy. Simulation: 331 passed, 2 ignored; client:
+363 passed, 4 ignored. Local output: `data/checkpoint-3-dense-radial-check.log`.
+
+The next deep-ice continuation prepares a reproducible independent H₂O ice-VI
+density reference from Chodkiewicz et al. (2022). The hash-pinned source audit
+separates isotope samples, counts the two pure-H₂O refinements as one observation,
+and preserves its actual 293(2) K temperature and 1.5(1) GPa pressure. Five offline
+regressions now run in `scripts/check.sh`. Source details and the discovered
+formula/density metadata trap are canonical in the
+[water guide](../simulation/water-physics.md#independent-ice-vi-density-reference-isotope-metadata-must-be-audited).
+This is research/validation infrastructure only: no new runtime EOS or deep-water
+profile is enabled. Distributable density coverage and supported VI/VII matching
+remain open, and checkpoint 3 is still incomplete.
+
+Reference-audit verification: both pinned-source hashes and the structural audit
+pass, including the H₂O density calculation. `./scripts/check.sh` passes five
+offline audit regressions, formatting, workspace tests and strict Clippy.
+Simulation: 331 passed, 2 ignored; client: 363 passed, 4 ignored. Local output:
+`data/checkpoint-3-ice-vi-reference-check.log`. A local SeaFreeze comparison at
+the measurement's actual P–T is documented as a diagnostic, not an equilibrium
+validation or a statistical accuracy claim. No generation/presentation changes,
+commit, merge or publication are implied.

@@ -1,11 +1,14 @@
 //! Planet structure: fast approximate generated radii and a separate headless
-//! `dry` radial solver. Generation still uses the approximate inventory model.
+//! `dry` and restricted `water` radial solvers. Generation still uses the
+//! approximate inventory model.
 //! Prescriptions, provenance and domains: docs/simulation/planet-composition.md.
 
 pub(crate) mod boundary;
 pub mod dry;
 pub mod parameters;
+mod radial;
 mod radius;
+pub mod water;
 
 use super::composition::{Budget, Material, Reservoir};
 use crate::units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT};

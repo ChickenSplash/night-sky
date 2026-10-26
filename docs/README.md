@@ -30,7 +30,10 @@ seed helpers, object identities and photometry stay at the crate root; see
   gas mixtures, reference pressure levels, isothermal columns and their limits.
 - [Material inventories and structure](simulation/planet-composition.md): conserved
   formation/retained budgets, approximate generated radii, bounded H/He retention
-  and the separate headless dry-body radial solver.
+   and the separate headless dry-body radial solver.
+- [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
+  compressed-liquid extension, prescribed 300 K ice-VII compression, melting
+  curves, reference audits and deep-ice gates.
 - [Orbits and time](simulation/orbits.md): orbital elements, Kepler's equations,
   worked examples, nested barycentres, units and clock behaviour.
 - [Object search](simulation/search.md): registry, query syntax, relationships,
@@ -131,7 +134,14 @@ The Bevy/egui client in `crates/client`:
   and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   The cold layered dry-body solver is headless only, not used by generation,
-  transport or presentation; water phases and dense envelopes remain unsolved.
+  transport or presentation. Local water physics, including compressed liquid,
+  is independently tested. A separate headless solver supports restricted
+  liquid/ice-Ih shells and their narrow supported phase-interface overlap, but
+  effective compressed deep ice now enables the 300 K water-rich fixture.
+  Cold 250 K deep water also solves using explicitly labelled approximations.
+  Pressure-melted liquid gaps are covered by a labelled density approximation.
+  Exact deep-ice polymorphs, precise supercooled-liquid physics and dense
+  envelopes remain unresolved.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.
 

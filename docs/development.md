@@ -50,8 +50,8 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     atmosphere/      Seeded generation, visible optics and validated wire conversion
     clearance.rs     Navigation clearance: bulge, maintenance-free air height and margins
     composition.rs   Conserved material inventories, gas/fit adapters and reservoir budgets
-    materials.rs     Shared material identities and local cold density EOS
-    structure.rs     Approximate generated radii; separate headless dry radial solver
+    materials.rs     Shared identities, cold density EOS and bounded pure-water P-T physics
+    structure.rs     Approximate generated radii; headless dry/restricted-water solvers
     physical.rs      Validated composition/structure wire conversion for both system paths
     generation.rs    Natural planetary formation, independent of list/task placement
     overlay.rs       Optional task slots, pages and assigned-star placement
@@ -153,8 +153,16 @@ Keep it in step with Bevy upgrades.
 ./scripts/check.sh
 ```
 
-It runs the `ns` CLI tests, then checks formatting, workspace unit tests and
-strict Clippy.
+It runs the `ns` CLI tests and offline ice-VI reference-audit regressions, then
+checks formatting, workspace unit tests and strict Clippy.
+The optional reference-only `scripts/audit-revised-aqua.py` checks a separately
+downloaded, pinned water dataset; provenance and reproduction are in the
+[water guide](simulation/water-physics.md#revised-aqua-2026-distributable-candidate-not-interface-ready).
+The separate `scripts/audit-ice-vi-reference.py` checks pinned, separately
+downloaded crystallographic supplements without importing an EOS. Its source
+metadata and limitations are also in the
+[water guide](simulation/water-physics.md#independent-ice-vi-density-reference-isotope-metadata-must-be-audited).
+It is not part of runtime generation or the standard check's dependencies.
 Tests cover orbital and clock invariants, deterministic generation, multiple
 systems, streaming, persistent task slots, presentation layout and camera flights.
 UI regressions cover long presses, window movement/resizing, title alignment,

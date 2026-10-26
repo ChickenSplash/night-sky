@@ -1,0 +1,515 @@
+//! Prescribed-isothermal water shell over cold Fe/MgSiO3 proxies.
+//! Opt-in only: no atmosphere or climate. Deep ice is an explicit approximation.
+
+use super::super::{
+    composition::Inventory,
+    materials::{Material, cold, water as eos},
+};
+use super::{dry, radial};
+use crate::units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT};
+use std::f64::consts::PI;
+
+pub use dry::{Controls, Diagnostics, Sample, SolveError, Work, WorkLimit};
+
+pub const MODEL_ID: &str = "cold_refractories_isothermal_iapws_effective_ice_v4";
+pub const BOUNDARY_TOLERANCE_PA: f64 = 0.01;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhaseKnowledge {
+    /// Cold refractory compression establishes neither temperature nor phase.
+    Unresolved,
+    Water(eos::Phase),
+    /// Compression proxy, not an identified high-pressure polymorph.
+    EffectiveHighPressureIce,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    profile: dry::Region,
+    temperature_k: Option<f64>,
+    phase: PhaseKnowledge,
+    density_model_id: &'static str,
+}
+
+impl Region {
+    pub fn inventory(&self) -> &Inventory {
+        self.profile.inventory()
+    }
+    pub fn samples(&self) -> &[Sample] {
+        self.profile.samples()
+    }
+    pub fn inner(&self) -> Sample {
+        self.profile.inner()
+    }
+    pub fn outer(&self) -> Sample {
+        self.profile.outer()
+    }
+    pub fn temperature_k(&self) -> Option<f64> {
+        self.temperature_k
+    }
+    pub fn phase(&self) -> PhaseKnowledge {
+        self.phase
+    }
+    pub fn density_model_id(&self) -> &'static str {
+        self.density_model_id
+    }
+    /// Physical-model limitations, not numerical error bars.
+    pub fn approximation_notes(&self) -> &'static [&'static str] {
+        match self.density_model_id {
+            eos::cold_ice::INTERMEDIATE_MODEL_ID => eos::cold_ice::APPROXIMATION_NOTES,
+            eos::cold_ice::IH_MODEL_ID => {
+                &["Ice-Ih pressure domain extended beyond the original 100 MPa mask"]
+            }
+            eos::subfreezing_liquid::MODEL_ID => eos::subfreezing_liquid::APPROXIMATION_NOTES,
+            eos::deep_ice::MODEL_ID => &[
+                "Effective high-pressure ice compression; individual polymorphs unresolved",
+                "No ice thermal-expansion correction or matched Gibbs potentials",
+            ],
+            _ => &[],
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WaterStructure {
+    regions: Vec<Region>,
+    inertia_kg_m2: f64,
+    diagnostics: Diagnostics,
+}
+
+impl WaterStructure {
+    pub fn model_id(&self) -> &'static str {
+        MODEL_ID
+    }
+    pub fn regions(&self) -> &[Region] {
+        &self.regions
+    }
+    pub fn retained_inventory(&self) -> Inventory {
+        self.regions.iter().fold(Inventory::default(), |a, r| {
+            a.checked_add(r.inventory()).unwrap()
+        })
+    }
+    pub fn mass_kg(&self) -> f64 {
+        self.retained_inventory().total_mass_kg()
+    }
+    /// Outer condensed-material boundary at the imposed pressure, not a
+    /// predicted surface pressure, atmospheric reference level or landable rock.
+    pub fn radius_m(&self) -> f64 {
+        self.regions.last().unwrap().outer().radius_m
+    }
+    pub fn mean_density_kg_m3(&self) -> f64 {
+        self.mass_kg() / (4.0 * PI / 3.0 * self.radius_m().powi(3))
+    }
+    pub fn reference_gravity_m_s2(&self) -> f64 {
+        GRAVITATIONAL_CONSTANT * self.mass_kg() / self.radius_m().powi(2)
+    }
+    pub fn inertia_kg_m2(&self) -> f64 {
+        self.inertia_kg_m2
+    }
+    pub fn inertia_factor(&self) -> f64 {
+        self.inertia_kg_m2 / (self.mass_kg() * self.radius_m().powi(2))
+    }
+    pub fn diagnostics(&self) -> Diagnostics {
+        self.diagnostics
+    }
+}
+
+/// Differentiate metal, silicate, then pure water. Water temperature
+/// is imposed only on water, not inferred for the cold refractory proxies.
+/// All positive unsupported allocations are refused, including gas traces.
+/// Ih/liquid interfaces, the 100 MPa liquid-model seam and the approximate
+/// deep-ice melting boundary are located with separate one-sided densities.
+/// Effective deep ice supports 250..=300 K, not resolved polymorphs. Intermediate
+/// cold ice, pressure-melted subfreezing liquid and extended Ih density masks
+/// carry explicit approximation notes. Original local IAPWS APIs are unchanged.
+/// Unsupported high shooting trials bound the search;
+/// they never become truncated or extrapolated successful structures.
+pub fn solve(
+    retained: &Inventory,
+    water_temperature_k: f64,
+    outer_pressure_pa: f64,
+    controls: Controls,
+) -> Result<WaterStructure, SolveError> {
+    controls.validate()?;
+    for material in Material::ALL {
+        if !matches!(
+            material,
+            Material::Metal | Material::Silicate | Material::Water
+        ) && retained.mass_kg(material) > 0.0
+        {
+            return Err(SolveError::UnsupportedMaterial(material));
+        }
+    }
+    if retained.mass_kg(Material::Water) == 0.0 {
+        return Err(SolveError::InvalidInput(
+            "positive water allocation required; use dry::solve",
+        ));
+    }
+    let mass = retained.total_mass_kg();
+    if !super::in_domain(mass / EARTH_MASS_KG, 0.0001, 20.0) {
+        return Err(SolveError::OutsideMassDomain(mass));
+    }
+    let deep_boundary = eos::deep_ice::boundary_pressure_pa(water_temperature_k).ok();
+    let cold_path = eos::cold_ice::supports_temperature(water_temperature_k);
+    let subfreezing_path =
+        !cold_path && water_temperature_k > 251.165 && water_temperature_k < 273.15;
+    let surface_phase =
+        if (cold_path || subfreezing_path) && outer_pressure_pa >= eos::MAX_PRESSURE_PA {
+            eos::Phase::IceIh // Only used on the low-pressure branch.
+        } else if outer_pressure_pa >= eos::MAX_PRESSURE_PA && water_temperature_k >= 273.15 {
+            // Used only for the liquid branches. The explicit deep-ice branch
+            // takes precedence where available; density validation follows below.
+            eos::Phase::Liquid
+        } else {
+            eos::phase(outer_pressure_pa, water_temperature_k).map_err(SolveError::Water)?
+        };
+    // At a coexistence outer boundary, the inward one-sided limit is liquid.
+    // No zero-mass ice skin or mixture is introduced.
+    let phase = if surface_phase == eos::Phase::IceIhLiquidCoexistence {
+        eos::Phase::Liquid
+    } else {
+        surface_phase
+    };
+    let mut boundaries = Vec::new();
+    let mut branches = Vec::new();
+    let liquid = PhaseKnowledge::Water(eos::Phase::Liquid);
+    let ih = PhaseKnowledge::Water(eos::Phase::IceIh);
+    let effective_ice = PhaseKnowledge::EffectiveHighPressureIce;
+    if cold_path {
+        boundaries.extend([
+            eos::cold_ice::DEEP_BOUNDARY_PA,
+            eos::cold_ice::IH_BOUNDARY_PA,
+            eos::MAX_PRESSURE_PA,
+        ]);
+        branches.extend([
+            (effective_ice, eos::deep_ice::MODEL_ID),
+            (effective_ice, eos::cold_ice::INTERMEDIATE_MODEL_ID),
+            (ih, eos::cold_ice::IH_MODEL_ID),
+            (ih, eos::MODEL_ID),
+        ]);
+    } else if subfreezing_path {
+        let low = eos::melting_pressure_ih_pa(water_temperature_k).map_err(SolveError::Water)?;
+        let high = eos::subfreezing_liquid::high_boundary_pa(water_temperature_k)
+            .map_err(SolveError::Water)?;
+        boundaries.extend([eos::cold_ice::DEEP_BOUNDARY_PA, high, low]);
+        branches.extend([
+            (effective_ice, eos::deep_ice::MODEL_ID),
+            (effective_ice, eos::cold_ice::INTERMEDIATE_MODEL_ID),
+            (liquid, eos::subfreezing_liquid::MODEL_ID),
+        ]);
+        if low > eos::MAX_PRESSURE_PA {
+            boundaries.push(eos::MAX_PRESSURE_PA);
+            branches.push((ih, eos::cold_ice::IH_MODEL_ID));
+        }
+        branches.push((ih, eos::MODEL_ID));
+    } else {
+        if let Some(p) = deep_boundary {
+            boundaries.push(p);
+            branches.push((effective_ice, eos::deep_ice::MODEL_ID));
+        }
+        if water_temperature_k >= 273.15 && water_temperature_k.is_finite() {
+            boundaries.push(eos::MAX_PRESSURE_PA);
+            let model = if water_temperature_k >= eos::dense_liquid::MIN_TEMPERATURE_K {
+                eos::dense_liquid::MODEL_ID
+            } else {
+                eos::subfreezing_liquid::MODEL_ID
+            };
+            branches.push((liquid, model));
+        }
+        if let Some(p) = eos::melting_pressure_ih_pa(water_temperature_k)
+            .ok()
+            .filter(|p| {
+                water_temperature_k >= 273.15
+                    && *p >= eos::MIN_PRESSURE_PA
+                    && *p <= eos::MAX_PRESSURE_PA
+            })
+        {
+            boundaries.push(p);
+            branches.push((liquid, eos::MODEL_ID));
+            branches.push((ih, eos::MODEL_ID));
+        } else {
+            branches.push((PhaseKnowledge::Water(phase), eos::MODEL_ID));
+        }
+    }
+    let branch_at = |pressure: f64| boundaries.partition_point(|p| pressure < *p);
+    let branch_phase = |branch: usize| branches[branch].0;
+    let branch_model = |branch: usize| branches[branch].1;
+    let density = |material, pressure, side, work: &mut Work, limit| {
+        if material != Material::Water {
+            return cold::density_kg_m3(material, pressure).map_err(SolveError::Eos);
+        }
+        let branch = match side {
+            radial::DensitySide::Branch(i) => i,
+            radial::DensitySide::Equilibrium => branch_at(pressure),
+        };
+        let model = branch_model(branch);
+        if model == eos::deep_ice::MODEL_ID {
+            return eos::deep_ice::density_kg_m3(pressure, water_temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if matches!(
+            model,
+            eos::cold_ice::INTERMEDIATE_MODEL_ID | eos::cold_ice::IH_MODEL_ID
+        ) {
+            return eos::cold_ice::density_kg_m3(pressure, water_temperature_k, model)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::subfreezing_liquid::MODEL_ID {
+            return eos::subfreezing_liquid::density_kg_m3(pressure, water_temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::dense_liquid::MODEL_ID {
+            let result = eos::dense_liquid::liquid_limit_with_budget(
+                pressure,
+                water_temperature_k,
+                limit - work.eos_evaluations,
+            );
+            work.eos_evaluations += match &result {
+                Ok(s) => s.eos_evaluations,
+                Err(e) => e.eos_evaluations,
+            };
+            return result.map(|s| s.state.density_kg_m3).map_err(|e| {
+                if e.reason == eos::dense_liquid::Failure::EvaluationLimit {
+                    SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations)
+                } else {
+                    SolveError::DenseWater(e)
+                }
+            });
+        }
+        let expected = match branch_phase(branch) {
+            PhaseKnowledge::Water(p) => p,
+            _ => unreachable!(),
+        };
+        let actual = eos::phase(pressure, water_temperature_k).map_err(SolveError::Water)?;
+        if actual != expected && actual != eos::Phase::IceIhLiquidCoexistence {
+            return Err(SolveError::WaterPhaseCrossing {
+                pressure_pa: pressure,
+                expected,
+                actual,
+            });
+        }
+        Ok(
+            eos::condensed_state(pressure, water_temperature_k, expected)
+                .map_err(SolveError::Water)?
+                .density_kg_m3,
+        )
+    };
+    if controls.max_eos_evaluations == 0 {
+        return Err(SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations));
+    }
+    let mut initial_work = Work {
+        eos_evaluations: 1,
+        ..Work::default()
+    };
+    density(
+        Material::Water,
+        outer_pressure_pa,
+        radial::DensitySide::Equilibrium,
+        &mut initial_work,
+        controls.max_eos_evaluations,
+    )?;
+    let policy = radial::Policy {
+        pressure_floor_pa: outer_pressure_pa,
+        boundary_tolerance_pa: Some(BOUNDARY_TOLERANCE_PA),
+        // Absolute pressure error scale, including the refractory interior.
+        // Do not let a large central pressure weaken shallow-shell accuracy.
+        pressure_error_scale_pa: Some(eos::MAX_PRESSURE_PA),
+        interfaces: boundaries
+            .iter()
+            .map(|p| radial::PressureInterface {
+                material: Material::Water,
+                pressure_pa: *p,
+            })
+            .collect(),
+    };
+    let mut solver = radial::Solver::new(retained, outer_pressure_pa, controls, &density, policy);
+    solver.work = initial_work;
+    let mut low = outer_pressure_pa;
+    let mut high = (low + solver.pressure_scale()).min(cold::MAX_PRESSURE_PA);
+    let mut upper = loop {
+        let trial = solver.trial(high);
+        match trial {
+            Ok(None) => {
+                low = high;
+                if high == cold::MAX_PRESSURE_PA {
+                    return Err(SolveError::Unbracketed {
+                        maximum_central_pressure_pa: high,
+                    });
+                }
+                if solver.work.bracket_expansions == controls.max_bracket_expansions {
+                    return Err(SolveError::WorkBudgetExhausted(WorkLimit::Bracketing));
+                }
+                solver.work.bracket_expansions += 1;
+                high = (outer_pressure_pa + 2.0 * (high - outer_pressure_pa))
+                    .min(cold::MAX_PRESSURE_PA);
+            }
+            _ => break classify_upper(trial)?,
+        }
+    };
+    loop {
+        if let Some(trial) = upper.as_ref() {
+            let residual = trial.regions.last().unwrap().outer().pressure_pa - outer_pressure_pa;
+            if (0.0..=BOUNDARY_TOLERANCE_PA).contains(&residual) {
+                let trial = upper.take().unwrap();
+                let result = WaterStructure {
+                    regions: trial
+                        .regions
+                        .into_iter()
+                        .zip(trial.density_sides)
+                        .map(|(profile, side)| {
+                            let is_water = profile.inventory().mass_kg(Material::Water) > 0.0;
+                            let branch = match side {
+                                radial::DensitySide::Branch(i) => i,
+                                radial::DensitySide::Equilibrium => {
+                                    branch_at(profile.inner().pressure_pa)
+                                }
+                            };
+                            Region {
+                                profile,
+                                temperature_k: is_water.then_some(water_temperature_k),
+                                density_model_id: if !is_water {
+                                    cold::MODEL_ID
+                                } else {
+                                    branch_model(branch)
+                                },
+                                phase: if is_water {
+                                    branch_phase(branch)
+                                } else {
+                                    PhaseKnowledge::Unresolved
+                                },
+                            }
+                        })
+                        .collect(),
+                    inertia_kg_m2: trial.inertia_kg_m2,
+                    diagnostics: Diagnostics {
+                        central_pressure_pa: high,
+                        boundary_residual_pa: residual,
+                        work: solver.work,
+                    },
+                };
+                validate(&result, retained)?;
+                return Ok(result);
+            }
+        }
+        if solver.work.shooting_iterations == controls.max_shooting_iterations {
+            return Err(SolveError::WorkBudgetExhausted(WorkLimit::Shooting));
+        }
+        solver.work.shooting_iterations += 1;
+        let mid = low + (high - low) * 0.5;
+        if mid == low || mid == high {
+            return Err(if upper.is_none() {
+                SolveError::UnsupportedWaterProfile
+            } else {
+                SolveError::NonConvergence {
+                    material: Material::Water,
+                    mass_fraction: 1.0,
+                }
+            });
+        }
+        match solver.trial(mid) {
+            Ok(None) => low = mid,
+            trial => {
+                high = mid;
+                upper = classify_upper(trial)?;
+            }
+        }
+    }
+}
+
+// Pressure declines outwards. Water domain/phase failures above the prescribed
+// boundary can thus serve as an upper bracket, not an excuse to use another EOS.
+// Budgets and numerical errors are never reclassified as physical brackets.
+fn classify_upper(
+    trial: Result<Option<radial::Trial>, SolveError>,
+) -> Result<Option<radial::Trial>, SolveError> {
+    match trial {
+        Err(SolveError::Water(_) | SolveError::WaterPhaseCrossing { .. }) => Ok(None),
+        Err(SolveError::DenseWater(e))
+            if matches!(
+                e.reason,
+                eos::dense_liquid::Failure::PressureDomain
+                    | eos::dense_liquid::Failure::TemperatureDomain
+                    | eos::dense_liquid::Failure::SolidDomain
+                    | eos::dense_liquid::Failure::CoexistenceDensity
+            ) =>
+        {
+            Ok(None)
+        }
+        other => other,
+    }
+}
+
+fn validate(result: &WaterStructure, requested: &Inventory) -> Result<(), SolveError> {
+    let allocated = result.retained_inventory();
+    for material in Material::ALL {
+        if (allocated.mass_kg(material) - requested.mass_kg(material)).abs()
+            > 1e-10 * requested.mass_kg(material)
+        {
+            return Err(SolveError::InvalidClosure {
+                material,
+                quantity: "inventory",
+            });
+        }
+    }
+    for region in &result.regions {
+        let material = Material::ALL
+            .into_iter()
+            .find(|m| region.inventory().mass_kg(*m) > 0.0)
+            .unwrap();
+        let fail = |quantity| SolveError::InvalidClosure { material, quantity };
+        let dm = region.outer().enclosed_mass_kg - region.inner().enclosed_mass_kg;
+        if (dm / region.inventory().total_mass_kg() - 1.0).abs() > 1e-8 {
+            return Err(fail("region mass resolution"));
+        }
+        for s in region.samples() {
+            if ![
+                s.radius_m,
+                s.enclosed_mass_kg,
+                s.pressure_pa,
+                s.density_kg_m3,
+            ]
+            .iter()
+            .all(|v| v.is_finite())
+                || s.radius_m < 0.0
+                || s.enclosed_mass_kg < 0.0
+                || s.density_kg_m3 <= 0.0
+            {
+                return Err(fail("profile domain"));
+            }
+        }
+        for pair in region.samples().windows(2) {
+            if pair[1].radius_m <= pair[0].radius_m
+                || pair[1].enclosed_mass_kg <= pair[0].enclosed_mass_kg
+                || pair[1].pressure_pa > pair[0].pressure_pa
+            {
+                return Err(fail("profile ordering"));
+            }
+        }
+    }
+    for pair in result.regions.windows(2) {
+        let a = pair[0].outer();
+        let b = pair[1].inner();
+        if a.radius_m != b.radius_m
+            || a.enclosed_mass_kg != b.enclosed_mass_kg
+            || a.pressure_pa != b.pressure_pa
+        {
+            return Err(SolveError::InvalidClosure {
+                material: Material::Water,
+                quantity: "interface continuity",
+            });
+        }
+    }
+    if !result.inertia_factor().is_finite()
+        || !(0.0..=2.0 / 3.0).contains(&result.inertia_factor())
+        || result.inertia_factor() == 0.0
+    {
+        return Err(SolveError::InvalidClosure {
+            material: Material::Water,
+            quantity: "inertia",
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

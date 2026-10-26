@@ -10,6 +10,12 @@ The [layered structure contract](../plans/planet-structure.md) specifies the nex
 phase. Its first dry-body solver is implemented as a separate headless API,
 described below. Generation still uses the approximate reservoir/radius model;
 no planets, snapshots, inspector fields or rendering use the new solver yet.
+Checkpoint 3 supplies a separate [water-shell solver](#headless-restricted-water-shell-solver)
+with direct [IAPWS water physics](water-physics.md) and an explicitly approximate
+effective deep-ice compression model. The mandatory Earth-mass, 30%-water fixture
+solves at both 250 K and 300 K. Cold deep ice is explicitly approximate rather
+than resolved into individual polymorphs. The standalone
+Lai ice-VII branch remains separate, not used by the radial solver.
 
 ## Conserved inventory, not a classification
 
@@ -184,6 +190,187 @@ measure numerical consistency, not scientific error bars.
 
 These diagnostic fixtures use vacuum outer pressure and are not exact matches to
 the named Solar System bodies. No coefficients were tuned to match them.
+
+## Headless restricted water-shell solver
+
+`system::structure::water::solve(&Inventory, water_temperature_k,
+outer_pressure_pa, Controls)` is a separate opt-in API. It uses the same bounded
+adaptive cube-root-mass kernel as the dry solver, not a second numerical
+implementation. Its model identity is
+`cold_refractories_isothermal_iapws_effective_ice_v4`. Generation, transport,
+inspector and rendering do not use it.
+
+The prescribed order is metal, silicate, water, omitting zero-mass regions.
+Region-owned inventories conserve the retained input; positive water is required,
+and every positive gas/other allocation is rejected. Total mass remains restricted
+to 0.0001–20 Earth masses. Pure water is possible only where the entire body stays
+within the supported pressure domain. Numerically unresolvable trace intervals
+fail, rather than disappearing into a neighbouring region.
+
+Water alone has a prescribed uniform temperature and resolved phase regions:
+liquid, ice Ih or explicitly effective high-pressure ice, using the
+[original low-pressure IAPWS model](water-physics.md)
+between 1,000 Pa and 100 MPa, within 250–623.15 K. Compressed liquid additionally
+uses IAPWS95 at 100–1,000 MPa and 273.16–623.15 K, restricted to its liquid mask.
+Every stage and sample must remain in its selected model's domain.
+An ice-Ih/liquid transition is supported only where **both** density
+branches exist: 273.15–273.16 K, further restricted to melting pressures inside
+the pressure mask. Pressure decreases outwards, so a crossing gives inner liquid
+and outer ice Ih. The entire water allocation may also remain in one phase.
+Vapour, ambiguous coexistence mixtures and unavailable subfreezing-liquid density
+are refused. The prescribed ice-VII branch is not joined here.
+Refractories retain cold Fe/MgSiO₃ density proxies with no assigned temperature
+or established solidity. Temperature continuity across the refractory/water
+interface is not asserted: this is a mechanical benchmark, not heat transport.
+
+The pressure load owns no atmospheric mass and is not a climate prediction.
+The returned radius is the outer condensed-material boundary at that load,
+not necessarily a one-bar radius, exposed rock or landable ground. Radius,
+enclosed mass and pressure agree exactly across composition interfaces, with
+separate one-sided densities.
+
+At 100 MPa the liquid EOS changes from inner IAPWS95 to outer IF97. This is a
+**model boundary, not a phase change**: two liquid regions carry disjoint water
+allocations and distinct density-model identities. The same pressure-coordinate
+event integration described below preserves one-sided densities without blending,
+offsets or forcing the EOS values to match. The small unforced density mismatch
+may have either sign. An outer boundary at 100 MPa uses the inward IAPWS95 limit,
+without a zero-mass IF97 skin. The supported dense-liquid and Ih-transition
+temperature masks do not overlap at supported interface pressures, so each
+earlier restricted requests needed at most one water discontinuity. The kernel
+now locates ordered pressure events, including a deep-ice boundary followed by
+the liquid-model seam. Each newly located enclosed mass starts the next disjoint
+allocation, rather than reusing the start of the whole water shell.
+
+Phase interfaces lie on the nominal IAPWS Ih melting curve. Integration approaches
+the curve from the high-pressure side, then finishes the last ≤1 Pa in pressure
+coordinates using the same embedded Runge–Kutta method. Prescribed endpoint
+pressure is the independent coordinate, not a pressure correction to a mass-step
+solution. Radius, enclosed mass and inertia evolve to that endpoint; both
+one-sided densities are evaluated there before the outward branch changes.
+No accepted step traverses the density jump and no EOS stage leaves its stable
+branch. The 1 Pa coordinate-switch threshold is numerical, not a phase tolerance
+or a physical interface offset. Embedded error, maximum mass-coordinate step and
+request work limits still apply, including rejected interface probes.
+
+The interface's enclosed mass determines the inner water allocation; the remaining
+water belongs to the outer region. There is no hidden third mixture reservoir.
+Unresolvable phase allocations fail the existing mass-resolution contract rather
+than being dropped or merged. A coexistence outer boundary uses the inward liquid
+limit, with no fabricated zero-mass ice skin. The local unconstrained `water::state`
+call still refuses a coexistence density; explicit named one-sided limits use
+`water::condensed_state`.
+
+Shooting requires an unshifted outer pressure residual between zero and
+**0.01 Pa**, independent of central pressure. Integration pressure-error scaling
+is also independent of central pressure: `relative_tolerance × 100 MPa`
+(0.01 Pa at default tolerance), including within the refractory interior.
+This is an embedded local error target, not a global error bound or a physical
+uncertainty. Defaults and work ceilings are shared with the dry solver. Unsupported
+high-pressure/phase trials constrain the upper shooting bracket but never become
+successful partial profiles. Their attempted steps and EOS calls count towards
+the request budget. Density dispatch, initial outer-state validation, the IF97
+inversion seed and every nested Helmholtz pressure probe are charged, including
+failed inversions and rejected stages. Each compressed-liquid call has a fixed
+99-evaluation ceiling (one seed and up to 98 pressure probes); dispatch costs one
+additional request evaluation. Budget exhaustion and inversion bracket/root
+failures propagate, not physical upper brackets. No work ceiling is raised.
+
+Thirteen headless tests cover an analytic three-layer constant-density benchmark,
+independent radial mass/inertia/hydrostatic quadrature, conserved liquid/ice
+shells and pure-water endpoints, deterministic repeats, imposed loading,
+refinement, one-sided interfaces, EOS/phase/domain refusals and exact EOS-budget
+exhaustion. Fixtures include 0.0001-Earth-mass bodies with 1% and 100% water and
+one-Earth-mass bodies with 10⁻⁶ water mass fraction, each at 250/300 K.
+Independent quadrature closes region mass and total inertia to relative 10⁻⁸
+and hydrostatic drops to relative 2×10⁻⁴. Tightening integration tolerance and
+maximum step by four changes radius, inertia factor and central pressure by
+less than relative 10⁻⁷, and water-shell thickness/pressure drop by less than
+relative 10⁻⁵ on these fixtures. Phase-interface tests use the same mass/fraction
+fixtures at 273.15, 273.155 and 273.159 K with 1,000 Pa outer pressure; independent
+quadrature meets the same closure targets. At 273.155 K, fourfold refinement
+changes each water-region allocation, thickness and pressure drop by less than
+relative 10⁻⁵. An independent two-density analytic sphere checks the located
+interface radius and mass, total radius and inertia to relative 10⁻⁷. Endpoint
+and budget tests include a trace phase too thin to resolve, which fails explicitly.
+Compressed-liquid tests additionally cover an Earth-mass, 0.5%-water shell at
+300 K crossing 100 MPa; loaded 0.0001-Earth-mass, 1%-water bodies at 500 K
+(100, 700 and 990 MPa loads); and a 273.16 K model-endpoint fixture. Independent
+mass, inertia and hydrostatic quadrature meets the same targets. Fourfold
+refinement of the Earth-mass crossing changes radius, inertia factor and central
+pressure by less than relative 10⁻⁷ and each region's allocation, thickness and
+pressure drop by less than 10⁻⁵. Exact-budget repeats include nested work and
+initial dense-state exhaustion. The 0.0001-Earth-mass pure-water fixture with an
+80 MPa load at 300 K exhausts the existing request EOS budget and is explicitly
+refused, not accepted with uncounted work. A 1 GPa outer load cannot support a
+positive water shell within the pressure ceiling and is also refused.
+These are numerical consistency targets only. The melting curve's 2% published
+pressure uncertainty remains, regardless of exact numerical endpoint placement.
+
+```sh
+cargo test -p space-simulation system::structure::water
+```
+
+### Effective deep ice and checkpoint-3 acceptance
+
+At **250–300 K**, deep water uses Seager et al. (2007), equation 11/table 3:
+`ρ = 1460 + 0.00311 P^0.513` in SI. Model
+`seager_2007_effective_high_pressure_ice_v1` represents compression only, not
+resolved VI/VII/VIII phases, Gibbs potentials or a thermal EOS. The independently
+selected IAPWS V/VI melting curve supplies its approximate liquid boundary
+at ≥273.15 K. Colder paths use the intermediate-ice prescription below.
+This composite prescription preserves a density jump but does not claim matched
+thermodynamic potentials or accurate ice-VI density near 1 GPa. See the
+[material limitations](water-physics.md#effective-high-pressure-ice-for-the-game).
+The application ceiling is 10¹³ Pa. All stages remain within the selected branch;
+the original local equilibrium APIs and coexistence refusals remain unchanged.
+An explicit budgeted liquid-side limit supplies the melting endpoint density.
+An outer load on a boundary uses the inward branch, with no zero-mass skin.
+
+The mandatory retained inventory is 0.2 metal, 0.5 silicate and 0.3 water in
+Earth-mass units, at 300 K and imposed 1 bar. It yields **7,301.552 km** radius,
+**322.444 GPa** central pressure and **0.28809616** inertia factor. Its five
+regions are metal, silicate, effective deep ice, IAPWS95 liquid and IF97 liquid.
+It uses 938,500 charged EOS evaluations, below the unchanged 2,000,000 ceiling.
+These numbers describe the prescribed approximation, not an observed planet.
+
+Twenty radial tests retain all shallow-water checks and add independent deep
+mass/inertia closure (relative 10⁻⁸), hydrostatic closure (2×10⁻⁴), deterministic
+repeats, fourfold refinement (radius/inertia/central pressure 10⁻⁷, region mass
+and thickness 10⁻⁵), loading through 2 GPa, water-fraction and compression trends,
+and exact-budget success/failure. No tolerances or work ceilings were relaxed.
+
+The matching **250 K fixture now also solves**, using rounded engineering ice
+boundaries at **220 MPa** and **2.1 GPa**. Ordinary IAPWS Ih is unchanged up to
+100 MPa; a separately identified pressure extension covers 100–220 MPa. Effective
+intermediate ice spans 220 MPa–2.1 GPa; deeper ice uses the same Seager proxy.
+The intermediate Murnaghan compression law is anchored to the existing
+1.5 GPa/293 K H₂O lattice density, with assumed elastic constants and omitted
+thermal corrections. It does not assert resolved II/III/V/VI/VII/VIII shells.
+Each approximate region exposes `approximation_notes()` as well as its distinct
+model identity; precision integration does not imply precise phase physics.
+
+The cold fixture yields **7,311.198 km** radius, **322.427 GPa** central pressure,
+**0.28739002** inertia factor and 360,824 charged EOS evaluations. Its six regions
+include two Ih density-model regions, not two different Ih phases. Independent
+closure, fourfold refinement, exact work accounting, pure-water/fraction fixtures,
+and boundary loads through 2.1 GPa pass the same targets as the warm path.
+The all-solid cold path covers **250–251.165 K**, below the minimum melting
+temperature, not just one isolated temperature. Above that, IAPWS Ih and III/V
+melting curves locate the pressure-melted liquid interval. A labelled approximate
+liquid-compression law supplies its density below the original IAPWS temperature
+masks. The original IF97/IAPWS95 models remain preferred wherever available;
+their local APIs are not silently extended. Tests span the former gaps and
+branch-temperature endpoints, with independent closure and a 260 K refinement
+fixture. The specified water-rich inventory now solves across **250–300 K**,
+without classifying the intervening liquid regime as ice. This does not remove
+the declared pressure/mass bounds, vapour refusal or deterministic work limits.
+Near the rounded Ih/III triple point, liquid wedges no wider than 10 kPa are
+explicitly unresolved and use the all-solid approximation. This avoids inventing
+an inverted or infinitesimal shell from rounded source endpoints, without
+discarding any water inventory.
+**Checkpoint 3 is complete under its plausibility-focused scope.** Atmosphere
+coupling, generation/consumer migration and thermal evolution remain later work.
 
 ## Light envelopes and the giant transition
 

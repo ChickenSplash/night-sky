@@ -4,6 +4,7 @@
 use super::Material;
 use std::fmt;
 
+pub const MODEL_ID: &str = "seager_2007_modified_polytrope_v1";
 pub const MAX_PRESSURE_PA: f64 = 1e13;
 
 #[derive(Clone, Copy, Debug, PartialEq)]

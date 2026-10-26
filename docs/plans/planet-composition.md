@@ -434,8 +434,38 @@ fixtures. The user authorised checkpoint 2 after discussing the cold/dry scope
 and headless numerical validation. The separate `system::structure::dry` solver
 is now implemented and numerically tested; see the
 [canonical solver guide](../simulation/planet-composition.md#headless-dry-body-solver).
-Generation, transport and presentation remain unchanged. Water/thermal phase
-physics and dense envelopes are not implemented.
+Generation, transport and presentation remain unchanged. The user has now
+authorised checkpoint 3. Its [low-pressure water material baseline](../simulation/water-physics.md)
+is implemented and tested, along with standalone high-pressure IAPWS melting
+curves, a bounded IAPWS95 compressed-liquid extension and pinned SeaFreeze/revised
+AQUA reference audits. A separate prescribed 300 K ice-VII compression branch is
+also implemented, without equilibrium selection. A restricted headless radial
+solver now conserves liquid/ice-Ih shells over cold refractories, including located
+Ih/liquid interfaces where both density branches exist, and compressed liquid
+to 1 GPa within its mask. The IF97/IAPWS95 boundary preserves separate model
+identities and one-sided densities; nested inversion work is budgeted. A matched high-pressure
+ice phase/density model and dense envelopes are not implemented.
+The subsequent effective-ice implementation completes checkpoint 3 under the
+revised scope below, not as a matched-polymorph model.
+
+**Scope revised by the user on 2026-10-26:** scientific plausibility with explicit
+approximations is the completion standard, not research-grade deep-ice accuracy.
+The authoritative [checkpoint-3 completion plan](planet-structure.md#revised-completion-scope--scientific-plausibility-not-research-completeness)
+now specifies a cited effective high-pressure ice compression proxy, approximate
+phase boundaries, a mandatory solved 300 K/30%-water fixture and finite numerical
+acceptance tests. Exact cold polymorphs and matched deep-ice Gibbs surfaces are
+deferred, not blockers. Existing conservation, one-sided interfaces, bounded work
+and honest model provenance remain required. The user subsequently authorised
+resuming and finishing this scoped checkpoint. **Checkpoint 3 is complete:** the
+300 K fixture solves with effective ice and passing independent numerical tests;
+the 250 K deep path now also solves with labelled approximate ice physics.
+The subsequent completion pass also fills the pressure-melted liquid gaps
+between the cold and warm prescriptions, with explicit approximate density
+metadata and independent numerical checks. See the
+[acceptance results](../simulation/planet-composition.md#effective-deep-ice-and-checkpoint-3-acceptance).
+The user subsequently authorised checkpoint 4 and requested committing the
+checkpoint-3 baseline first. Push, merge and checkpoint-5 integration remain
+unauthorised.
 
 ### Ownership and scope
 
@@ -463,7 +493,7 @@ physics and dense envelopes are not implemented.
 Under `crates/simulation/src/system/`, retain the domain namespaces:
 
 - `composition`: inventories and conservation bookkeeping.
-- `materials` (proposed): shared material identities, thermodynamic properties,
+- `materials`: shared material identities, thermodynamic properties,
   equations of state (EOS), phase and mixture prescriptions. Move existing
   definitions when needed, rather than creating another material catalogue.
 - `structure`: regions/layers, radial integration, thermal prescriptions and
@@ -493,13 +523,15 @@ modules and a small explicit public API. Add files as real responsibilities arri
    mass closure, pressure continuity, convergence under resolution refinement,
    inertia and gravity independently of the implementation's own identities.
    Exit: bounded, deterministic solver, not yet the generation default.
-3. **Water-bearing condensed structures.** Add supported water phases and
-   interfaces under explicit thermal assumptions, including compression and
-   overlying atmospheric load. Validate against cited reference curves and
-   benchmark inputs with declared tolerances, not visual plausibility alone.
-   Preserve an explicit unresolved state outside supported domains.
-   Exit: supported water-rich bodies have meaningful outer boundaries without
-   asserting a resolved ocean or ice shell where the model cannot distinguish them.
+3. **Water-bearing condensed structures.** Finish the headless solver using the
+   revised [plausibility-focused completion scope](planet-structure.md#revised-completion-scope--scientific-plausibility-not-research-completeness).
+   Keep explicit thermal assumptions, cited compression approximations and
+   approximate ice boundaries. Verify equation implementation, conservation,
+   hydrostatic closure, interfaces and convergence; research-complete phase
+   matching is not required. Solve the mandatory 300 K/30%-water fixture and
+   document cold-path limitations without expanding the research programme.
+   Exit: plausible water-rich condensed structures with meaningful outer
+   boundaries, explicit approximation metadata and passing bounded numerical tests.
 4. **Atmosphere/envelope coupling.** Match boundary pressure, mass and radius
    iteratively, including volatile partitioning. Do not extend the ideal-gas outer
    column into dense H/He and call it a giant interior. Add giant structure only
@@ -520,8 +552,8 @@ modules and a small explicit public API. Add files as real responsibilities arri
    performance benchmarks and visually reviews changed presentation before the
    next integration. Update canonical guides as implementation lands.
 
-Checkpoint 2 now supplies the tested headless dry-body baseline. The next phase
-is checkpoint 3's water EOS/thermal/phase selection, not switching generation over
+Checkpoint 2 supplies the tested headless dry-body baseline. Checkpoint 3 supplies
+the scoped water-bearing solver with approximate deep ice, without switching generation over
 or replacing all planet types at once. Each checkpoint should leave a tested
 usable baseline;
 an unsupported giant or water regime remains explicitly approximate until its

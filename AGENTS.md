@@ -19,6 +19,8 @@ for implementation details.
 | Star types, evolution and companions | `crates/simulation/src/star/` | [Stars](docs/simulation/stars.md) |
 | Planet generation, shape and ground | `crates/simulation/src/system/` | [Planetary systems](docs/simulation/planetary-systems.md) |
 | Material budgets, material physics, structure and physical transport | Simulation `system/composition.rs`, `system/materials.rs`, `system/structure.rs`, `system/physical.rs` | [Composition foundation](docs/simulation/planet-composition.md) |
+| Pure-water EOS, phase domains and scientific reference checks | Simulation `system/materials/water.rs` | [Water physics](docs/simulation/water-physics.md) |
+| Headless dry/water radial solvers, effective deep ice and shared numerical kernel | Simulation `system/structure/{dry,water,radial}.rs` | [Composition foundation](docs/simulation/planet-composition.md#headless-dry-body-solver) |
 | Physical atmosphere model | Simulation `system/atmosphere.rs` | [Atmospheres](docs/simulation/atmospheres.md) |
 | Orbital motion, units and clock | Simulation `orbit/`, `units.rs`, `clock.rs` | [Orbits](docs/simulation/orbits.md) |
 | Craft model, gravity, integration and live craft | `crates/simulation/src/craft.rs`, client `craft.rs` | [Craft](docs/simulation/craft.md) |

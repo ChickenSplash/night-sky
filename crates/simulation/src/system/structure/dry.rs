@@ -1,7 +1,7 @@
 //! Opt-in, spherical cold Fe/MgSiO3 structure. Never called by generation.
 //! See docs/simulation/planet-composition.md#headless-dry-body-solver.
 
-mod integrate;
+use super::radial;
 
 use super::super::{
     composition::Inventory,
@@ -38,7 +38,7 @@ impl Default for Controls {
 }
 
 impl Controls {
-    fn validate(self) -> Result<(), SolveError> {
+    pub(super) fn validate(self) -> Result<(), SolveError> {
         let valid = self.relative_tolerance.is_finite()
             && (1e-13..=1e-10).contains(&self.relative_tolerance)
             && self.max_step.is_finite()
@@ -66,8 +66,8 @@ pub struct Sample {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Region {
-    inventory: Inventory,
-    samples: Vec<Sample>,
+    pub(super) inventory: Inventory,
+    pub(super) samples: Vec<Sample>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,6 +173,15 @@ pub enum SolveError {
     UnsupportedMaterial(Material),
     OutsideMassDomain(f64),
     Eos(cold::ColdEosError),
+    Water(super::super::materials::water::WaterError),
+    DenseWater(super::super::materials::water::dense_liquid::Error),
+    WaterPhaseCrossing {
+        pressure_pa: f64,
+        expected: super::super::materials::water::Phase,
+        actual: super::super::materials::water::Phase,
+    },
+    /// No complete supported water profile was bracketed inside its EOS mask.
+    UnsupportedWaterProfile,
     Unbracketed {
         maximum_central_pressure_pa: f64,
     },
@@ -189,7 +198,7 @@ pub enum SolveError {
 
 impl fmt::Display for SolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "dry structure solve: {self:?}")
+        write!(f, "radial structure solve: {self:?}")
     }
 }
 impl std::error::Error for SolveError {}
@@ -229,7 +238,15 @@ fn solve_with_eos(
     {
         return Err(SolveError::InvalidInput("outer pressure"));
     }
-    let mut solver = integrate::Solver::new(retained, outer_pressure_pa, controls, eos);
+    let density =
+        |material, pressure, _, _: &mut Work, _| eos(material, pressure).map_err(SolveError::Eos);
+    let mut solver = radial::Solver::new(
+        retained,
+        outer_pressure_pa,
+        controls,
+        &density,
+        radial::Policy::default(),
+    );
     let mut low = outer_pressure_pa;
     // Ambient-density sphere is only an initial bracket scale, never a radius fallback.
     let mut high = (low + solver.pressure_scale()).min(cold::MAX_PRESSURE_PA);
