@@ -32,6 +32,16 @@ explicit catalogue entry and physical prescriptions, not just a density:
 | `hydrogen`, `helium` | Separate H₂ and He mass budgets; joint light envelope model |
 | `nitrogen`, `carbon_dioxide`, `methane`, `oxygen`, `argon` | N₂, CO₂, CH₄, O₂ and Ar molecular budgets |
 
+Material identity is centralised, but not all physical-property ownership has
+migrated: legacy fit/gas mappings remain in `composition/catalogue.rs`, molecular
+masses in `atmosphere.rs`, and approximate cold-trap curves in
+`atmosphere/condensation.rs`. Only cold refractory and water EOS currently live
+under `materials`. Methane is already drawn by formation and can enter the gas
+budget; neither methane liquids/lakes nor condensed CO₂/supercritical CO₂ are
+resolved by the new radial/coupled path. A cold-trap cap is not a phase diagram.
+The [planned capability and boundary contract](../plans/planet-composition.md#architecture-review--extensible-materials-and-boundaries)
+describes the remaining consolidation and extensions, not current behaviour.
+
 These are material/molecular budgets, **not independent elemental inventories**.
 The hydrogen bound in water or methane is included in that molecule's mass,
 not counted again in `hydrogen`. Likewise oxygen in rock, water and CO₂ is not

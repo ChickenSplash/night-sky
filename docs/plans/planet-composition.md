@@ -2,6 +2,14 @@
 
 ## Status and goal
 
+**Current layered-refactor status:** checkpoints 1–4 of the
+[next-phase roadmap](#checkpoints-and-acceptance-gates) are complete as opt-in
+headless models. Checkpoints 5–12 remain planned. Generated planets still use the
+earlier approximate structure path. The completed checkpoints 1–5/5b/5c below
+belong to the **original inventory foundation**, not the layered replacement.
+The [architecture review](#architecture-review--extensible-materials-and-boundaries)
+clarifies the replacement contract; this review authorises documentation only.
+
 Checkpoints 1 through 5 implemented. Generation draws inventories, accounts for
 escape and reconciles retained structure at final orbits. Atmospheres and cold
 condensates share that budget. Derived labels, validated composition transport
@@ -464,8 +472,8 @@ between the cold and warm prescriptions, with explicit approximate density
 metadata and independent numerical checks. See the
 [acceptance results](../simulation/planet-composition.md#effective-deep-ice-and-checkpoint-3-acceptance).
 The user subsequently authorised checkpoint 4 and requested committing the
-checkpoint-3 baseline first. Push, merge and checkpoint-5 integration remain
-unauthorised.
+checkpoint-3 baseline first (`fc1dd43`). Checkpoint 4 was then committed at the
+user's request as `158db7a`, after another passing full check. Nothing was pushed.
 
 Checkpoint 4's opt-in atmosphere/condensed-body coupling is complete within its
 restricted domain and passes the full check script;
@@ -475,7 +483,212 @@ It matches finite gas inventory, partition and pressure loading to dry/water
 radial structures. Unsupported dense/weakly bound columns and non-water
 condensates fail explicitly. Existing generated H/He envelopes remain labelled
 surrogates, not ideal-gas giant interiors. Generation, transport, consumers and
-unrestricted free-camera descent are unchanged. Checkpoint 5 remains separate.
+unrestricted free-camera descent are unchanged.
+
+**Plan extended by the user on 2026-10-26:** the requested generation/readout
+integration exposed a coverage blocker: formation supplies protected non-water
+volatiles on every naturally generated planet, outside the current condensed EOS
+coverage. The user chose to expand material and giant coverage rather than make
+the old model a permanent alternative. Completed checkpoints 1–4 retain their
+numbers. New checkpoints **5–10** below precede the former last two checkpoints:
+generation/transport/consumers becomes **11**, and calibration/user acceptance
+becomes **12**. This supersedes the earlier selective-migration completion target.
+The current request authorises this plan update, not implementation of all new
+checkpoints, additional commits, push or merge.
+
+The endpoint is one coherent region-owned structure system covering the declared
+generated population, followed by deletion of the obsolete whole-body radius,
+envelope and inertia approximations and their runtime adapters. Explicit local
+EOS, mixture and thermal approximations remain acceptable; a universally accurate
+EOS or research-complete phase diagram is not promised. Missing physics must not
+be concealed by dropping traces, relabelling materials or silently falling back.
+
+### Architecture review · extensible materials and boundaries
+
+Review of `refactor/planet-composition`, 2026-10-26. Preserve the working
+conservation model, independent numerical checks, one-sided interfaces and bounded
+failure handling. No restart or new generic plugin framework is recommended.
+The gaps below are extension requirements, not claims that completed restricted
+models implement them. Existing uncommitted roadmap edits remain part of this plan.
+
+#### One catalogue, one inventory, one solved allocation
+
+These are three different authorities, not one mutable global planet store:
+
+1. **Material catalogue:** what each stable constituent means and which physical
+   models support it. `materials` owns this shared knowledge, with separate files
+   for equations/tables rather than one enormous constants table.
+2. **Per-body retained inventory:** how many kilograms of each constituent exist.
+   Formation and escape determine this input; the catalogue does not choose it.
+3. **Immutable solved structure:** where those kilograms reside under specified
+   thermal, exposure and arrangement assumptions. Regions own allocations;
+   atmosphere/hydrosphere/interior summaries, boundaries and labels are projections.
+
+Today identities are centralised in `materials.rs`, but legacy fit/gas adapters
+live in `composition/catalogue.rs`, molecular masses in `atmosphere.rs`, and
+cold-trap curves in `atmosphere/condensation.rs`. This is a transitional split,
+not the completed material-physics ownership. Checkpoints 5–6 should establish
+one discoverable capability description per constituent: identity/formula and
+mass convention, EOS/phase models and their domains, required thermal quantities,
+sources/versions, approximation status and supported mixture/partition routes.
+The description references model code; constants alone cannot implement an EOS.
+Move reusable molecular/phase properties to `materials` as consumers migrate;
+keep gas conversion and atmospheric optics as downstream adapters. Do not make
+shared material physics depend on atmospheric presentation types or copy curves.
+Retire old fit-only metadata with its solver at checkpoint 11.
+
+An extension checklist must cover stable ID/serialization, inventory/gas mapping,
+domain/phase capability, mixture policy, allocation, transport and reference tests.
+An unsupported capability is explicit, not a default density or an empty phase.
+Test catalogue/mapping completeness over `Material::ALL`, so a newly added material
+cannot silently bypass accounting or claim support from its identifier alone.
+
+#### Density, phase and allocation answer different questions
+
+- A local EOS evaluates density and supported thermal properties at pressure,
+  temperature and composition. A phase model selects stable branches or reports
+  approximate/unresolved/coexisting states. Neither chooses a whole planet's
+  temperatures, accessible supply or geological arrangement.
+- The structure/partition solve couples hydrostatic balance, those local models,
+  a prescribed thermal path and an explicit exposure/mixing/differentiation rule.
+  Preserve protected versus exchangeable supply without treating protected
+  molecules as automatically exposed surface deposits. A local equilibrium
+  assumption is not global equilibration of a sealed interior with the atmosphere.
+- For dilute gas over a nearly pure condensate, partial-pressure saturation caps
+  can be a declared approximation. Dense mixtures need supported fugacity/activity
+  or an explicitly bounded substitute. Pure-component critical points and
+  vapour-pressure curves do not determine mixture phase splits. Never let a
+  mass-weighted average of critical points become a mixture phase model.
+- Specify miscible versus separate phases and where trace constituents reside.
+  A conserved trace need not create an infinitesimally thin pure shell: it can
+  occupy a declared mixed host region with an explicit density/phase approximation.
+  Do not silently delete its mass, assume solubility or sort shells by ambient
+  density. Unsupported reactions, clathrates and mineral binding remain excluded
+  or explicitly unresolved, not implied by simple volume mixing.
+- Near coexistence, supply/energy/entropy or an explicit allocation condition must
+  close phase fractions where P–T alone does not. Near a critical point, disappearing
+  density contrast must not manufacture an interface or make the solve chatter.
+  A change of EOS implementation is model provenance, not a new physical layer.
+
+The shared radial kernel currently iterates a fixed metal/silicate/water order;
+water wraps `dry` region/control/error types and dispatches its pressure events.
+This is appropriate for the tested baseline, but not yet a general region engine.
+In checkpoints 6–9, incrementally supply ordered region/mixture prescriptions to
+the existing kernel and move genuinely shared result/control concepts out of the
+dry-specific API. Support temperature-dependent event location along the selected
+P–T path, rather than assuming all phase boundaries are fixed pressure isotherms.
+Keep model selection/partition separate from numerical integration. Retain the
+current analytic, quadrature, trace and work-accounting tests during this change.
+
+#### Boundary knowledge, not a planet-class ground switch
+
+Derive a small boundary description from the solved regions. Keep independent:
+composition interfaces, phase interfaces, density-model seams, reference-pressure
+levels, optical extent and any mechanically solid boundary. Several can occur at
+different radii; some need not exist. Each reported boundary needs its physical
+meaning, radius/P/T where known and resolved/approximate/unresolved provenance.
+
+- **Air over solid:** a supported solid rock/metal/ice interface can provide a
+  physical floor even beneath 1,000 or 10,000 bar (100 MPa or 1 GPa). Test the
+  thermal/phase model there; high pressure neither removes ground nor proves it
+  remains solid. The existing cold refractory EOS leaves solidity unresolved.
+- **Air over liquid over solid:** the liquid top and submerged solid floor are
+  different boundaries. An ocean surface is not landable rock. Water or methane
+  inventory alone cannot establish either exposed liquid or a solid substrate.
+- **Continuous fluid envelope:** a gas-like to dense/supercritical-fluid path
+  need not cross a first-order phase boundary. Do not invent a gas/ocean surface
+  at the critical point or one bar. A deeper composition interface or solid core
+  may still exist independently. “Ice giant” does not assert an exposed ice floor.
+- **Model stops before an answer:** distinguish “no solid boundary within this
+  solved interval” from “boundary unresolved below this model limit”. Neither
+  means “the entire planet has no solids”. Missing phase knowledge is not a
+  negative detection. Rendering/navigation consume that distinction; collision,
+  landing and camera permissions remain separate policies.
+
+Checkpoint 5 specifies these semantics, checkpoints 6/8/9 exercise them, and
+checkpoint 11 transports them without UI/rendering reclassification. No universal
+pressure, envelope fraction or display label switches physical ground on/off.
+Spherical liquid shells are in scope; patchy methane lakes, continents and local
+ice cover need terrain, local climate and redistribution in the
+[surface plan](planet-surfaces.md). Their eventual material comes from the same
+allocation, not a second decorative liquid inventory.
+
+**User clarification, 2026-10-26: liquid surfaces before terrain.** A supported
+exposed liquid allocation may form a smooth global shell. Its outer boundary is
+the visible ground/reference surface for presentation and approach clearance,
+using the existing spheroidal geometry without requiring a separate hydrosphere
+renderer. Preserve liquid material/phase and any submerged boundary in the physical
+record; reusing ground geometry does not turn liquid into solid rock or establish
+landing support. This is a future checkpoint-11 consumer policy, not a change to
+current rendering, collision or unrestricted camera permissions.
+
+Shell thickness follows allocated liquid mass and the selected density/structure
+model, not an arbitrary minimum visual depth. A small methane supply can therefore
+produce a thin layer under the declared global-coverage approximation. Preserve
+trace accounting and explicit numerical-resolution limits. Only genuinely exposed
+liquid qualifies: protected liquid at depth and continuous supercritical envelopes
+must not acquire a fabricated surface. Waves, shorelines, patchy lakes, local
+coverage and redistribution remain later terrain/hydrosphere work. Acceptance must
+check that presentation uses the liquid-top radius while transport still identifies
+it as liquid, including thin-shell and freeze/evaporation transitions.
+
+#### Finite scientific acceptance map
+
+Checkpoint 5 turns these cases into fixed numerical requests/domains before
+implementation. They supplement, rather than replace, the existing numerical
+acceptance gates. Unsupported cases must name the missing capability; replacement
+completion still requires coverage of the agreed generated population.
+
+| Case | Required distinction / test | Owning checkpoints |
+| --- | --- | --- |
+| Dry rock, exposed ice, airless/trace gas | Known material boundary versus unresolved refractory solidity; no fabricated 1-bar radius | 5, 8, 9 |
+| Rock/ice-rich body under H/He at 100 MPa and 1 GPa | Locate an interface if supported; no pressure-triggered loss of ground; solid claim requires a phase prescription | 7–9 |
+| Water ocean above rock or deep ice | Separate liquid top, submerged boundary and atmosphere; preserve water mass through freeze/evaporation | 6, 8, 9 |
+| CH₄ at prescribed cold surface conditions near 94 K | Supply-limited vapour plus liquid where supported; frozen and evaporated neighbours; label idealised pure CH₄, not a Titan reconstruction | 6, 9 |
+| CO₂ solid, liquid, gas and supercritical fluid | Triple/critical neighbourhoods, saturation and compressed-fluid branches; no liquid below the pure-fluid triple pressure | 6, 9 |
+| N₂/O₂/Ar and actual protected traces | No missing mass, fictitious pure shells or automatic exposure; supported mixed-host policy | 6, 9 |
+| Mixed volatile and H/He-rich fluid | Pure/trace/mixture limits, declared nonideal treatment, unsupported pair detection; no pure-component critical shortcut | 6–9 |
+| Small envelope through giant | Self-gravity, thermal anchors, stripping limit, continuous fluid with independently described deep boundary | 7–9 |
+| Phase appearance/disappearance and EOS seams | Stable one-sided states, closed allocations, refinement and no invented physical jump at a model seam | 6–9 |
+| Future material registration and domain edges | Completeness checks, explicit missing capabilities and unchanged old fixtures; bounded unsupported/work failures | 5–10 |
+
+#### Public scientific starting points, not a new research programme
+
+Use measured/reference properties and published equations first; use bounded,
+labelled local approximations where the selected sources do not cover the agreed
+domain. Record a model's validity mask, not just the largest P/T its code accepts.
+Public availability is not redistribution permission. Pin selected releases/data
+and check their licences before import. These references are candidates/reference
+checks, not newly selected dependencies or extensions to current runtime physics:
+
+- [NIST CO₂ phase data](https://webbook.nist.gov/cgi/cbook.cgi?ID=C124389&Mask=4)
+  and [methane phase data](https://webbook.nist.gov/cgi/cbook.cgi?ID=C74828&Mask=4)
+  provide experimental reference points and bounded correlations. Different
+  historical measurements are not interchangeable coefficients to average blindly.
+- [Span–Wagner CO₂ via CoolProp](https://coolprop.org/fluid_properties/fluids/CarbonDioxide.html)
+  identifies a published fluid EOS (1996, DOI `10.1063/1.555991`): triple point
+  about 216.59 K/5.18 bar, critical point about 304.13 K/73.77 bar. In its stable
+  fluid domain, supercritical labelling requires both T > Tc and P > Pc;
+  exceeding critical pressure alone is insufficient. Check the solid stability
+  boundary too. The fluid EOS does not supply arbitrary deep solid CO₂ physics.
+- [Setzmann–Wagner methane via CoolProp](https://coolprop.org/fluid_properties/fluids/Methane.html)
+  identifies the 1991 fluid EOS (DOI `10.1063/1.555898`), with triple point about
+  90.69 K/0.117 bar and critical point about 190.56 K/45.99 bar. Pure methane
+  boiling near 111.7 K at roughly atmospheric pressure is not a universal lake
+  temperature; local pressure, mixture, supply and thermal assumptions matter.
+- [CoolProp mixture documentation](https://coolprop.org/fluid_properties/Mixtures.html)
+  explains the need for mixture interaction models and warns that guessed mixing
+  rules can give entirely wrong results. Use it to scope pair coverage and
+  reference fixtures, not to assume all combinations or planetary pressures work.
+  Existing IAPWS and dense-H/He candidates remain in the
+  [structure extension gates](planet-structure.md#water-atmospheres-and-giants-explicit-extension-gates).
+
+Mapping a finite declared material/regime set is feasible. Covering every possible
+composition, pressure, temperature, chemistry and history is not a completion
+promise, even with known constants. Keep structural/phase approximations honest
+and conditional on thermal/exposure assumptions; exact climates and real planetary
+interior compositions are not all known. This review does not reopen checkpoint 3
+or authorise implementing the new checkpoints.
 
 ### Ownership and scope
 
@@ -487,13 +700,16 @@ unrestricted free-camera descent are unchanged. Checkpoint 5 remains separate.
   each phase automatically needs its own shell. Numerical integration cells
   are implementation detail, not separate named geological layers.
 - Interior, condensed and atmospheric reservoir totals become derived views.
-  During migration, keep the old model behind an explicit adapter; never allow
-  both old reservoir allocations and new region allocations to be edited as truth.
+  During staged development only, keep the old model behind an explicit adapter;
+  never allow both allocations to be edited as truth. That adapter is temporary
+  and must be removed at checkpoint 11, not retained as the final unsupported path.
 - The atmospheric column describes material already allocated to the atmosphere
   or envelope. A giant's outer column is a subset of its mixed envelope, not
   additional mass. A one-bar radius is a reference within that envelope.
-- Begin with spherical, differentiated, equilibrium structure. Select and declare
-  thermal prescriptions; composition and irradiation alone do not fix an interior.
+- Begin with spherical hydrostatic structure and declared differentiation/mixing
+  prescriptions, using local phase equilibrium only where supported. Select and
+  declare thermal prescriptions; composition and irradiation alone do not fix
+  an interior.
   Retain existing spheroidal geometry as a separate approximation.
 - Do not claim real-time differentiation, convection, impacts, chemical reactions,
   climate, terrain or interior evolution. Bulk water does not imply an ocean.
@@ -547,24 +763,135 @@ modules and a small explicit public API. Add files as real responsibilities arri
    column into dense H/He and call it a giant interior. Add giant structure only
    with a suitable EOS and thermal prescription; until then identify the existing
    envelope approximation explicitly. Preserve unrestricted free-camera descent.
-   Exit: no duplicated gas inventory or independently chosen surface pressure.
-5. **Generation, transport and consumers.** Integrate with retention and final-orbit
-   forcing, with explicit convergence/failure semantics. Replace mutable reservoir
-   allocation with derived summaries along each migrated path. Validate snapshots
-   without repeating an expensive full solve for every UI/search read. Measure
-   generation/search costs and select caching or bounded approximations openly,
-   preserving deterministic results and stable IDs. Transport summaries first;
-   expose full radial profiles on demand if needed.
-6. **Calibration and user acceptance.** Check reference trends, population changes,
-   material conservation, interface continuity, stripping limits, shape/inertia,
-   clearance, rendering and inspector semantics. Run `./scripts/check.sh` and
-   affected shader checks; prepare reproducible live examples. The user runs
-   performance benchmarks and visually reviews changed presentation before the
-   next integration. Update canonical guides as implementation lands.
+    Exit: no duplicated gas inventory or independently chosen surface pressure.
+5. **Replacement coverage and thermodynamic contract.** Specify a finite coverage
+    matrix for every existing material: metal, silicate, water, hydrogen, helium,
+    nitrogen, carbon dioxide, methane, oxygen and argon. Audit the actual formation,
+    retention and final-orbit temperature/mass ranges, including protected traces,
+    nearly pure endpoints, irradiated worlds and the upper giant-mass range.
+    Select bounded, cited EOS/phase/mixture/thermal prescriptions and check source
+    versions, licences, SI conversions and reproducible data delivery. Record which
+    quantities are thermodynamically consistent and which are approximate joins.
+    Define conserved constituent-origin bookkeeping for EOS dissociation/ionisation:
+    internal hydrogen states must not create extra hydrogen, electrons or mass in
+    the inventory. Do not claim cross-material chemistry without a separate
+    conservation extension. Set finite test fixtures, numerical targets, work and
+    data-size budgets before implementation; source selection is bounded work, not
+     an open-ended literature survey.
+     Include the [review's capability, boundary and fixture contracts](#architecture-review--extensible-materials-and-boundaries):
+     shared material ownership, exposed/protected supply, mixture support and an
+     explicit material-extension checklist. Do not defer boundary semantics until
+     UI integration.
+    Exit: a reviewed coverage matrix with a replacement route for every generated
+    regime and explicit exclusions. Any necessary generation-domain change needs
+    a documented physical rationale and user agreement, not a way to hide gaps.
+6. **Secondary volatiles and condensed mixtures.** Implement the selected local
+    density and approximate phase prescriptions for CO₂, N₂, CH₄, O₂ and Ar,
+    including protected material, gas/condensed transitions and trace allocations.
+    Declare prescribed layering versus mixed-region rules; separate pure-material
+    equations alone do not solve a mixture or determine its phase fractions.
+    Preserve molecular/constituent identity rather than treating all condensates
+    as water. Extend the existing region/kernel machinery where needed, retaining
+     one-sided interface states and accountable nested work.
+     Replace heuristic cold traps with the selected phase/partition route on this
+     new path; retain a labelled dilute approximation only within its declared
+     domain. Exercise methane liquids and all CO₂ fluid states, not just gas/ice.
+    Exit: cold/warm secondary-volatile and mixed-water fixtures, including the
+    actual generated trace pattern, conserve every material and pass independent
+    mass/inertia/hydrostatic, domain, seam, refinement and budget-failure tests.
+7. **Dense hydrogen, helium and H/He mixtures.** Implement the selected nonideal
+    local EOS with density and the thermal quantities needed for adiabatic paths,
+    not an ideal-gas continuation or a whole-body giant radius fit. Include pure-H,
+    pure-He and mixed endpoints, molecular/dissociated/ionised regimes as required
+    by the agreed coverage, and honestly labelled high-pressure transition knowledge.
+    Pin interpolation/inversion conventions, no-extrapolation masks and mixture
+    rules. Heavy-material loading in envelopes must have an explicit prescription;
+    helium is not automatically a core, and helium rain is not implied.
+    Exit: published/reference equation checks, positive/compressive stable branches,
+    thermal derivative or adiabat consistency tests appropriate to the selected
+    model, dilute-limit matching, mixture limits and bounded failure tests.
+8. **Thermal profiles and hot/cold coverage.** Add prescribed convective adiabats
+    or an explicitly approximate equivalent, irradiated outer thermal anchors and
+    a documented age/entropy or internal-luminosity prescription. Entropy and energy
+    zero points must agree wherever used across EOS components. Age plus irradiation
+    is not a unique cooling history; transport the chosen assumptions. Extend water
+    to vapour, dense/hot fluid and effective deep states needed by the coverage
+    matrix, and extend refractory pressure/temperature density coverage as needed.
+    Do not infer refractory melting/solidity from a cold density proxy. Locate or
+    explicitly model thermal transitions; missing energy/coexistence constraints
+    cannot be repaired with arbitrary phase fractions.
+    Exit: finite cold/warm/strongly irradiated and young/old envelope paths spanning
+    the agreed population, with tested temperature/entropy behaviour and interface
+    conventions. No full climate, evolutionary cooling simulation or complete
+    refractory phase diagram is required.
+9. **Unified self-gravitating structures and outer matching.** Integrate dry,
+    volatile-rich, small-envelope and giant bodies using the same conservation and
+    region contract. Include envelope mass in `m(r)`, hydrostatic gravity and inertia;
+    remove the dilute coupler's 1% restriction only on the newly validated path.
+    Match the dense envelope to its outer column with continuous mass, pressure
+    and radius, explicit thermal conditions and one gas inventory owner. Define
+    finite outer/tail and weak-binding conventions without inventing a static
+    atmosphere for an escaping state. One bar is a located reference, never ground.
+    Exit: headless dry/water/secondary-volatile/sub-Neptune/giant fixtures pass
+    independent closure and refinement, EOS-seam tests, stripping limits and
+    deterministic failure tests. Broad giant mass/radius/inertia trends must be
+    plausible before generation integration, not deferred entirely to visual review.
+10. **Population readiness, retention and bounded cost.** Exercise the coverage
+    matrix over deterministic population samples before making it the default.
+    Replace the old structure dependency inside retention, including escape-speed
+    and H/He-survival evaluations, without rerunning loss history or changing stable
+    IDs/orbits inadvertently. Use deterministic reuse, interpolation or a separately
+    validated bounded accelerator if needed; no disguised legacy radius-fit path.
+    Establish total nested work/memory ceilings, cache keys/versioning, eviction,
+    concurrency and order-independent reproducibility. Lightweight snapshot checks
+    must validate transported inventories, region/interface summaries, provenance
+    and boundary semantics without trusting arbitrary derived values or repeating
+    the full solve on each read. Record cold/warm generation and search costs and
+    cache-hit behaviour; the user runs interactive performance benchmarks.
+    Exit: the representative declared population has no unresolved coverage holes,
+    unexplained solve failures or dependency on legacy structure physics, and a
+    measured cost/validation strategy is ready for integration. Budget exhaustion
+    and nonconvergence stay visible, never silently select the old model.
+11. **Generation, transport, consumers and legacy retirement (formerly 5).** Make
+    the unified model drive generated retained planets at final-orbit forcing.
+    Derive reservoir summaries from region allocations and carry consistent radius,
+    reference levels, gravity, phases/unknowns and inertia through snapshots, shape,
+    atmosphere/optics, rendering and navigation clearance. Preserve unrestricted
+    free-camera descent. Ship structured inspector/info-readout sections for model
+    and thermal assumptions, ordered layers (material, phase knowledge, mass,
+    radius bounds, pressure/temperature endpoints), atmospheric references and
+    numerical diagnostics/limitations. Mark approximate phases as approximate;
+    summaries come first, full sampled profiles may remain on demand.
+    Delete obsolete compressed-volume whole-body radius fits, envelope surrogates,
+    heuristic structure-inertia rules and temporary model-selection adapters once
+    all callers, including retention and validation, have migrated. Replace obsolete
+    tests/docs rather than keep runtime fallback code for comparison. Retain shared
+    inventories, useful tested local EOS and independent reference fixtures.
+    Missing old snapshot facts may be explicitly unknown or require regeneration;
+    compatibility must not reactivate the deleted structure solver.
+    Exit: natural planets visibly expose the new system, all consumers agree, and
+    code/dependency searches plus tests demonstrate no legacy structure runtime path
+    remains. If the new model still cannot cover generated regimes, this checkpoint
+    is incomplete: do not delete working code early or declare permanent fallback
+    to be completion.
+12. **Calibration and user acceptance (formerly 6).** Check reference trends,
+    population changes, conservation, interfaces, stripping, shape/inertia,
+    clearance, rendering and inspector semantics across all newly covered regimes.
+    Run `./scripts/check.sh` and affected shader checks. Supply reproducible natural
+    sample IDs and launch/readout instructions for airless rock, ice/liquid water,
+    secondary volatiles, small envelopes and giants, including approximate and
+    genuinely unresolved phase examples. The user runs performance benchmarks and
+    visually reviews the changed presentation. Fix regressions, update canonical
+    guides and confirm the old structure implementation is absent. Commit, push
+    and merge still require their own authorisation.
 
 Checkpoint 2 supplies the tested headless dry-body baseline. Checkpoint 3 supplies
 the scoped water-bearing solver with approximate deep ice, without switching generation over
 or replacing all planet types at once. Each checkpoint should leave a tested
-usable baseline;
-an unsupported giant or water regime remains explicitly approximate until its
-own validated model exists.
+usable baseline. The current old model remains available during development, not
+as the final solution for missing EOS. New checkpoints 5–10 establish replacement
+coverage; 11 is the integration and deletion gate; 12 is final user acceptance.
+"Complete" means coherent within a declared, tested generated domain, not an EOS
+for every physically possible planet. Outside that domain, failures remain
+explicit. This roadmap does not add real-time chemistry, convection, weather,
+terrain, helium rain or a full planetary-evolution research programme.

@@ -1,5 +1,21 @@
 # Layered planetary structure · model contract
 
+## Current roadmap and architecture review
+
+Layered checkpoints 1–4 are complete within their declared headless domains;
+generation still uses the earlier approximate structure model. Checkpoints 5–12
+are the replacement roadmap below. Historical progress entries later in this
+file do not reopen completed checkpoints.
+
+The [composition architecture review](planet-composition.md#architecture-review--extensible-materials-and-boundaries)
+owns the additional future contracts: one shared material-capability catalogue,
+per-body conserved supply, region-owned allocation, mixture/exposure rules,
+incremental kernel generalisation and boundary knowledge independent of class or
+pressure thresholds. Its finite acceptance map includes thick H/He over rock/ice,
+methane liquids, CO₂ critical/triple regimes and unresolved deep boundaries.
+Use published reference physics where supported and explicit local approximations
+elsewhere. This review changes the plan only, not the solver or completed scope.
+
 ## Revised completion scope · scientific plausibility, not research completeness
 
 **User decision, 2026-10-26:** finish checkpoint 3 using scientifically plausible,
@@ -134,8 +150,49 @@ Simulation: 352 passed, 2 ignored; client: 363 passed, 4 ignored. Ten new coupli
 tests include independent shell mass/inertia/hydrostatic quadrature and exact
 aggregate-budget failure checks. All 57 structure tests pass.
 Documentation file links and `git diff --check` pass. Full output is recorded in
-`data/checkpoint-4-check.log`. Checkpoint-4 changes remain uncommitted for review;
-checkpoint 5, push and merge are not included.
+`data/checkpoint-4-check.log`. The user subsequently requested committing this
+checkpoint before generation integration: commit `158db7a`, after another passing
+`./scripts/check.sh` run (`data/checkpoint-4-precommit-check.log`). Nothing was
+pushed or merged.
+
+## Expanded replacement roadmap · checkpoints 5–12
+
+**User decision, 2026-10-26:** extend material and giant coverage so the old
+structure implementation can ultimately be deleted, rather than permanently
+selecting it for unsupported generated planets. Every current formation inventory
+contains protected non-water volatiles, so the restricted coupler cannot yet
+replace structure for natural planets. Dense H/He also needs mixture thermodynamics,
+thermal closure and envelope self-gravity, not merely two new density functions.
+
+The authoritative sequence and acceptance gates are in the
+[composition roadmap](planet-composition.md#checkpoints-and-acceptance-gates).
+Completed checkpoints 1–4 are unchanged. The new sequence is:
+
+| Checkpoint | Scope |
+| --- | --- |
+| 5 | Full generated-domain coverage matrix and thermodynamic/accounting contract |
+| 6 | Secondary volatiles and condensed mixtures, including protected traces |
+| 7 | Dense hydrogen, helium and H/He mixture EOS |
+| 8 | Thermal profiles and hot/cold water/refractory coverage |
+| 9 | Unified self-gravitating structures and outer-column matching |
+| 10 | Population coverage, retention migration, validated summaries and bounded cost |
+| 11 (formerly 5) | Generation, transport, structured info readout, consumers and legacy deletion |
+| 12 (formerly 6) | Calibration, reproducible live examples and user acceptance |
+
+Scientific plausibility with cited, explicit local approximations remains the
+standard. Research-complete thermodynamics, phase diagrams and evolutionary
+cooling are not prerequisites. Each checkpoint must have finite fixtures and
+independent numerical gates, not an indefinite source investigation. Physical
+model gaps and numerical failures remain distinct and visible.
+
+The completion boundary now requires removing the old whole-body radius fits,
+giant envelope surrogate, heuristic structure inertia and temporary runtime
+fallbacks after their generation, retention, validation and consumer dependencies
+have migrated. Preserve reusable material/inventory/kernel code. Historical
+snapshots may report unknown facts or require regeneration, but must not keep the
+old physical solver alive. Do not delete it before replacement coverage and cost
+are demonstrated. This request updates the plan only; no new solver implementation,
+commit, push or merge is authorised by this planning step.
 
 ## Original contract and implementation history
 
@@ -170,11 +227,14 @@ first solver cannot answer them. Helium is not automatically sorted into a core.
 4. Interior, condensed and atmospheric reservoir totals are derived projections
    of those allocations. They are never a second set of mutable allocations.
 
-Use existing `Material` identities and `Inventory` validation. Material masses
-remain molecular/material budgets, not independent elemental budgets. No
-reactions, dissociation, rock-to-gas conversion or extra hydrogen extracted from
-water are implied. Later molecular dissociation requires an explicit extension
-to this accounting contract before importing an EOS that assumes it.
+Use existing `Material` identities and `Inventory` validation. The implemented
+models retain molecular/material budgets, not independent elemental budgets; no
+reactions, dissociation, rock-to-gas conversion or hydrogen extracted from water
+are currently implied. Expanded checkpoint 5 must define constituent-origin
+bookkeeping before enabling EOS-internal dissociation/ionisation. Such internal
+states need not change origin inventory, but their particle counts and thermal
+quantities must use the EOS consistently, not the dilute molecular gas adapter.
+Cross-material chemical reactions remain outside scope unless separately agreed.
 
 Regions may contain mixtures. A differentiated metal core and silicate mantle
 are a prescribed arrangement, not the result of simulating differentiation or
@@ -378,11 +438,14 @@ output closure. Errors should identify the material/region and offending state.
 No partial profile is a successful planet; diagnostics may retain it separately.
 
 Initially this solver runs only on prescribed tests, not generation or search.
-During migration, an adapter selects either the layered model or the existing
+During temporary migration, an adapter selects either the layered model or the existing
 explicitly approximate legacy model and records which supplied the entire
 result. Unsupported layered requests may use that explicit legacy path;
 unexpected convergence failures must remain visible. Do not fill failed regions
 with the legacy radius fit and present the hybrid as a solved structure.
+This is a staging policy, superseded as the final completion target by the
+expanded roadmap above: checkpoint 11 removes the legacy path only after the
+new model covers the declared generated population and all dependencies migrate.
 
 `system::composition` keeps inventory conservation. Shared identities/properties
 move to `system::materials` when the first EOS implementation needs them, with
