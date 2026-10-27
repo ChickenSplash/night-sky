@@ -2,6 +2,7 @@
 //! dense-gas EOS, climate or hidden envelope-surrogate fallback.
 
 mod column;
+mod deposit;
 #[cfg(test)]
 mod tests;
 
@@ -25,7 +26,8 @@ pub const PRESSURE_TOLERANCE_PA: f64 = 0.01;
 pub const ALLOCATION_RELATIVE_TOLERANCE: f64 = 1e-9;
 
 /// The caller specifies supply eligible for gas exchange, not mutable reservoirs.
-/// Everything else stays condensed. Non-water condensates have no radial EOS.
+/// Everything else stays condensed. Exchangeable secondaries above their cold-trap
+/// cap settle as a surface deposit; other non-water condensates have no EOS.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Request {
     pub retained: Inventory,
@@ -99,16 +101,18 @@ impl CondensedStructure {
 pub struct Diagnostics {
     pub iterations: usize,
     pub total_eos_evaluations: usize,
-    /// Actual one-sided condensed pressure minus inventory-normalised gas pressure.
+    /// Actual one-sided condensed pressure minus the gas pressure and deposit load.
     pub interface_residual_pa: f64,
     pub partition_relative_residual: f64,
 }
 
 /// Gas inventory owns the entire represented finite shell. The atmosphere and
 /// its pressure-level diagnostics borrow that allocation, never add more mass.
+/// The gas sits on the deposit, which sits on the condensed body.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoupledStructure {
     condensed: CondensedStructure,
+    deposit: deposit::Deposit,
     gas: Inventory,
     atmosphere: Option<GasAtmosphere>,
     diagnostics: Diagnostics,
@@ -124,9 +128,29 @@ impl CoupledStructure {
     pub fn gas_inventory(&self) -> &Inventory {
         &self.gas
     }
+    /// Frozen secondaries above their vapour-pressure cap, not in the gas.
+    pub fn deposit_inventory(&self) -> &Inventory {
+        self.deposit.inventory()
+    }
+    pub fn deposit_thickness_m(&self) -> f64 {
+        self.deposit.thickness_m(self.condensed.radius_m())
+    }
+    /// Top of the deposit, where the gas column starts.
+    pub fn surface_radius_m(&self) -> f64 {
+        self.deposit.top_radius_m(self.condensed.radius_m())
+    }
+    /// Gas pressure plus the deposit's weight: the condensed body's outer load.
+    pub fn condensed_load_pa(&self) -> f64 {
+        self.atmosphere.map_or(0.0, |a| a.pressure_pa())
+            + self
+                .deposit
+                .load_pa(self.condensed.mass_kg(), self.condensed.radius_m())
+    }
     pub fn retained_inventory(&self) -> Inventory {
         self.condensed
             .retained_inventory()
+            .checked_add(self.deposit.inventory())
+            .unwrap()
             .checked_add(&self.gas)
             .unwrap()
     }
@@ -136,11 +160,11 @@ impl CoupledStructure {
     /// Atmospheric gravity ignores the shell's own mass, consistently with the
     /// central-field hydrostatic prescription and its explicit <=1% mass mask.
     pub fn column_gm_m3_s2(&self) -> f64 {
-        GRAVITATIONAL_CONSTANT * self.condensed.mass_kg()
+        GRAVITATIONAL_CONSTANT * (self.condensed.mass_kg() + self.deposit.mass_kg())
     }
     pub fn column(&self) -> Result<Option<Column>, AtmosphereError> {
         self.atmosphere
-            .map(|a| a.column(self.column_gm_m3_s2(), self.condensed.radius_m()))
+            .map(|a| a.column(self.column_gm_m3_s2(), self.surface_radius_m()))
             .transpose()
     }
     /// Absent when one bar lies below the condensed boundary or there is no gas.
@@ -150,11 +174,11 @@ impl CoupledStructure {
                 a.pressure_level_altitude_m(
                     ONE_BAR_PA,
                     self.column_gm_m3_s2(),
-                    self.condensed.radius_m(),
+                    self.surface_radius_m(),
                 )
             })
             .transpose()
-            .map(|h| h.flatten().map(|h| self.condensed.radius_m() + h))
+            .map(|h| h.flatten().map(|h| self.surface_radius_m() + h))
     }
     pub fn diagnostics(&self) -> Diagnostics {
         self.diagnostics
@@ -162,9 +186,11 @@ impl CoupledStructure {
     pub fn mass_kg(&self) -> f64 {
         self.retained_inventory().total_mass_kg()
     }
-    /// Includes the finite spherical gas shell, not just the condensed body.
+    /// Includes the deposit and finite gas shells, not just the condensed body.
     pub fn inertia_kg_m2(&self) -> f64 {
-        self.condensed.inertia_kg_m2() + column::inertia_kg_m2(self)
+        self.condensed.inertia_kg_m2()
+            + self.deposit.inertia_kg_m2(self.condensed.radius_m())
+            + column::inertia_kg_m2(self)
     }
     /// Referenced to the condensed boundary, not the optical or one-bar radius.
     pub fn inertia_factor(&self) -> f64 {
@@ -175,6 +201,8 @@ impl CoupledStructure {
             "Prescribed isothermal ideal-gas mixture, not a climate solution",
             "Gas self-gravity neglected within the 1% mass mask",
             "Cold-trap caps are approximate, not full phase equilibrium",
+            "Frost is one even global layer of fixed solid density, on top by convention",
+            "Frost phase (ice or liquid) and dissolution in water are not modelled",
             "Entire gas inventory normalised to an operational finite shell",
             "Water and refractory thermal/phase limitations remain those of the radial model",
         ]
@@ -243,14 +271,22 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
     }
     // Ambient density is only an iteration seed, never a returned radius fit.
     let mut radius = (3.0 * total / (4.0 * PI * 4100.0)).cbrt();
-    let mut condensed_mass = total;
+    // Mass and radius under the gas column: condensed body plus deposit.
+    let mut base = (total, radius);
     let mut work = 0;
     for iteration in 1..=controls.max_iterations {
-        let gas = column::partition(request, condensed_mass, radius)?;
-        let inventory = subtract(&request.retained, &gas)?;
-        let gm = GRAVITATIONAL_CONSTANT * inventory.total_mass_kg();
-        let air = column::atmosphere(&gas, request.column_temperature_k, gm, radius)?;
+        let gas = column::partition(request, base.0, base.1)?;
+        let (inventory, deposit) = split(&request.retained, &gas)?;
+        let host_mass = inventory.total_mass_kg();
+        let gm = GRAVITATIONAL_CONSTANT * (host_mass + deposit.mass_kg());
+        let air = column::atmosphere(
+            &gas,
+            request.column_temperature_k,
+            gm,
+            deposit.top_radius_m(radius),
+        )?;
         let pressure = air.map_or(0.0, |a| a.pressure_pa());
+        let load = pressure + deposit.load_pa(host_mass, radius);
         let mut radial_controls = controls.radial;
         radial_controls.max_eos_evaluations = radial_controls
             .max_eos_evaluations
@@ -263,23 +299,19 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
                 .water_temperature_k
                 .ok_or(Error::InvalidInput("missing water temperature"))?;
             CondensedStructure::Water(
-                water::solve(&inventory, t, pressure, radial_controls).map_err(Error::Radial)?,
+                water::solve(&inventory, t, load, radial_controls).map_err(Error::Radial)?,
             )
         } else {
             CondensedStructure::Dry(
-                dry::solve_loaded(&inventory, pressure, radial_controls).map_err(Error::Radial)?,
+                dry::solve_loaded(&inventory, load, radial_controls).map_err(Error::Radial)?,
             )
         };
         work += condensed.diagnostics().work.eos_evaluations;
         radius = condensed.radius_m();
-        condensed_mass = condensed.mass_kg();
-        let actual_air = column::atmosphere(
-            &gas,
-            request.column_temperature_k,
-            GRAVITATIONAL_CONSTANT * condensed_mass,
-            radius,
-        )?;
-        let next_gas = column::partition(request, condensed_mass, radius)?;
+        let top = deposit.top_radius_m(radius);
+        let actual_air = column::atmosphere(&gas, request.column_temperature_k, gm, top)?;
+        base = (host_mass + deposit.mass_kg(), top);
+        let next_gas = column::partition(request, base.0, base.1)?;
         let partition_residual = Material::ALL
             .iter()
             .map(|&m| {
@@ -293,11 +325,13 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
             })
             .fold(0.0_f64, f64::max);
         let actual_pressure = actual_air.map_or(0.0, |a| a.pressure_pa());
+        let actual_load = actual_pressure + deposit.load_pa(host_mass, radius);
         if (pressure - actual_pressure).abs() <= PRESSURE_TOLERANCE_PA
+            && (load - actual_load).abs() <= PRESSURE_TOLERANCE_PA
             && partition_residual <= ALLOCATION_RELATIVE_TOLERANCE
         {
-            column::validate(&gas, actual_air.as_ref(), gm, radius)?;
-            let interface_residual = condensed.outer().pressure_pa - actual_pressure;
+            column::validate(&gas, actual_air.as_ref(), gm, top)?;
+            let interface_residual = condensed.outer().pressure_pa - actual_load;
             if !interface_residual.is_finite()
                 || interface_residual.abs() > 2.0 * PRESSURE_TOLERANCE_PA
             {
@@ -305,6 +339,7 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
             }
             let result = CoupledStructure {
                 condensed,
+                deposit,
                 gas,
                 atmosphere: actual_air,
                 diagnostics: Diagnostics {
@@ -328,9 +363,12 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
     Err(Error::NonConvergence)
 }
 
-fn subtract(total: &Inventory, gas: &Inventory) -> Result<Inventory, Error> {
+/// Condensed remainder: metal, rock and water to the radial host, cold-trapped
+/// secondaries to the surface deposit.
+fn split(total: &Inventory, gas: &Inventory) -> Result<(Inventory, deposit::Deposit), Error> {
     let inventory = Inventory::new(&Material::ALL.map(|m| (m, total.mass_kg(m) - gas.mass_kg(m))))
         .map_err(Error::Composition)?;
+    let host = |m: Material| matches!(m, Material::Metal | Material::Silicate | Material::Water);
     for m in Material::ALL {
         // A transfer below one ulp of its own species' total cannot change that
         // total in f64. Accept it: the sum still closes exactly. Larger lost
@@ -340,11 +378,17 @@ fn subtract(total: &Inventory, gas: &Inventory) -> Result<Inventory, Error> {
         {
             return Err(Error::InvalidClosure(m));
         }
-        if !matches!(m, Material::Metal | Material::Silicate | Material::Water)
-            && inventory.mass_kg(m) > 0.0
-        {
-            return Err(Error::UnsupportedCondensate(m));
-        }
     }
-    Ok(inventory)
+    let part = |keep: bool| {
+        Inventory::new(&Material::ALL.map(|m| {
+            let mass = if host(m) == keep {
+                inventory.mass_kg(m)
+            } else {
+                0.0
+            };
+            (m, mass)
+        }))
+        .map_err(Error::Composition)
+    };
+    Ok((part(true)?, deposit::Deposit::new(part(false)?)?))
 }

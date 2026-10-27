@@ -541,9 +541,10 @@ exchange, column temperature and (when needed) water temperature. Exchangeable
 supply is an explicit exposure prescription, not an extra allocation. Source and
 escaped bookkeeping stays with the caller. Formation/accessibility priors are
 not run inside this API. Gas is partitioned using the same approximate cold-trap
-caps as generation. The remainder belongs to radial condensed regions; neither
-a mutable reservoir copy nor a second column owns any mass. Unsupported
-condensed molecules are refused, not replaced by water. Exchange smaller than
+caps as generation. The remaining metal, silicate and water belongs to radial
+condensed regions; neither a mutable reservoir copy nor a second column owns any
+mass. Exchangeable CO₂, N₂, CH₄ and Ar above their cap form a
+[surface deposit](#frost-surface-deposit). Exchange smaller than
 one machine epsilon of that species' own retained total (for example a few kg of
 vapour over a cold ocean) cannot change the condensed total in f64. It is
 accepted: the gas keeps it and the sum still closes exactly. The allowance is
@@ -553,11 +554,11 @@ debit their source are still refused.
 The fixed-point iteration matches three quantities:
 
 1. Solve supply-limited mixture and finite spherical column mass at a trial
-   boundary radius and condensed mass.
-2. Apply its inventory-derived base pressure to the dry or water radial solver,
-   using the remaining metal/silicate/water inventory.
-3. Re-evaluate pressure and partition at that solved radius and mass. Repeat
-   until pressure differs by at most **0.01 Pa** and each gas constituent's
+   radius and mass under the gas (condensed body plus deposit).
+2. Apply its inventory-derived base pressure, plus the deposit's weight, to the
+   dry or water radial solver, using the remaining metal/silicate/water inventory.
+3. Re-evaluate pressure, load and partition at that solved radius and mass. Repeat
+   until gas pressure and total load each differ by at most **0.01 Pa** and each gas constituent's
    allocation differs by at most relative **10⁻⁹**, scaled to that constituent's
    gas allocation, not planet mass.
 
@@ -569,10 +570,11 @@ absolute-pressure policy; its standalone API keeps its original policy. No
 pressure-profile translation repairs a solve. Region plus gas allocations derive
 retained totals with species-local relative 10⁻¹⁰ closure.
 
-Total inertia includes the condensed integral and spherical gas integral
+Total inertia includes the condensed integral, the deposit shell and spherical gas integral
 `I_gas=(8π/3)∫ρr⁴dr`. Its inertia factor uses total retained mass and the
-**condensed boundary radius**, not one bar or optical extent. One bar is located
-only if it exists above the boundary; otherwise it is absent. Boundary pressure
+**condensed boundary radius**, not one bar or optical extent. The gas column
+starts at the top of the deposit (the condensed boundary when there is none).
+One bar is located only if it exists above that base; otherwise it is absent. Boundary pressure
 is never a request input. Airless differs from trace gas: this API has no 0.1 Pa
 display cutoff.
 
@@ -581,8 +583,8 @@ display cutoff.
 - Total and condensed masses must both fit the radial 0.0001–20 Earth-mass domain.
   Supported condensed materials are metal, silicate and checkpoint-3 water.
 - Gas is at most **1% of retained mass**. Self-gravity is neglected: column
-  normalisation and pressure profile consistently use `GM_condensed`, not a
-  point mass containing the outer shell. This is an engineering restriction,
+  normalisation and pressure profile consistently use the condensed plus deposit
+  mass, not a point mass containing the gas shell. This is an engineering restriction,
   not a planet classification.
 - Column temperature is prescribed within **50–1,000 K**. Base ideal-gas density
   cannot exceed **10 kg/m³**, an engineering mask, not an established nonideal
@@ -599,9 +601,31 @@ display cutoff.
   independent imposed anchors: unequal values describe mechanical loading,
   not thermal or evaporation equilibrium.
 - Cold-trap caps are approximate, not matched Gibbs or chemical equilibrium.
-  Non-water molecules can be gas, but any positive condensed remainder needs
-  its own EOS and is refused. Protected water is supported; protected secondary
-  condensates are not.
+  Exchangeable secondaries above their cap become a surface deposit. Protected
+  water is supported; protected (non-exchangeable) secondary condensates are
+  refused here and handled by the protected-trace host solvers instead.
+
+### Frost surface deposit
+
+Cold-trapped CO₂, N₂, CH₄ and Ar settle on the ground as ice, as on Mars, Pluto
+and Triton. The excess above each gas's vapour-pressure cap is a labelled
+deposit region on top of the rock or water, not atmosphere mass. The air above
+it stays at the frost's vapour pressure. O₂ and H/He have no cap here, so they
+never freeze out.
+
+- **Fixed solid densities, not compressed:** CO₂ 1,560, N₂ 1,030, Ar 1,620 and
+  CH₄ 520 kg/m³. Mixed frost uses the volume-weighted bulk density.
+- **Thickness** is the shell that holds that volume. Its exact hydrostatic
+  weight (a uniform self-gravitating shell on the condensed mass) is added to
+  the gas pressure as the condensed body's outer load. The rock and water
+  solvers are unchanged.
+- **Simplifications:** one even global layer, though real frost gathers at the
+  poles or nightside. Placement on top is a convention (CO₂ ice is denser than
+  water ice). The phase is not modelled: CO₂ above about 5 bar and 217 K would
+  be liquid, but solid density is used. Dissolution in oceans is ignored.
+
+Only about 10% of each secondary is accessible, so deposits are a small share
+of mass. Their thickness describes the surface; their effect on radius is small.
 
 Dense envelopes retain the explicitly identified existing `EnvelopeSurrogate`
 generation model. A failed coupled solve never automatically becomes a successful
@@ -623,8 +647,9 @@ them. Nonconvergence is explicit.
 cargo test -p space-simulation system::structure::coupled -- --nocapture
 ```
 
-Ten tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
-and absent gas, mixed N₂/CO₂, thin H/He, stripping, deterministic repeats,
+Twelve tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+and absent gas, mixed N₂/CO₂, thin H/He, N₂ frost on rock, CO₂ frost loading a
+warmer water host, sub-ulp vapour, stripping, deterministic repeats,
 refinement, exact aggregate-work success/failure and unsupported inputs/regimes.
 Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
 and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
@@ -673,8 +698,10 @@ The route is provisional and test-only, until the single entry point exists:
    secondaries exchangeable, at the equilibrium temperature (column floored at
    20 K, as in generation).
 3. The resulting condensed host is re-solved with the protected secondaries
-   entrained at the coupled surface pressure. The column's gravity ignores that
-   protected mass, at most 0.3% of the body.
+   entrained at the coupled load (gas pressure plus any frost deposit). The
+   column's gravity ignores that protected mass, at most 0.3% of the body. Any
+   frost sits on top: its thickness is added to the radius, the surface is
+   reported as `frost` and the TSV carries `deposit_m`.
 
 Each planet reports only its **first** blocker. Water failures are binned by
 condition (below 250 K, above 623 K, surface below 1 kPa, vapour, otherwise deep
@@ -688,11 +715,12 @@ as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
 Baseline (October 2026, 20 systems per component, equilibrium temperature,
-after P1 step 6): 1,544 planets, 219 envelopes. **57 of 1,325** non-envelope
-planets solve (4%), all at 250–623 K. First blockers among non-envelope planets:
-CO₂ or N₂ frost 27%, column below 50 K or above 1,000 K 21%, surface below 1 kPa
-18%, water below 250 K 18%, water above 623 K 7%, vapour 4%, deep water or phase
-seam 1%. Solved radii are within 0.6% of the legacy radius at p95 (6.5% at
+after P1 step 6 and the frost deposit): 1,544 planets, 219 envelopes. **57 of
+1,325** non-envelope planets solve (4%), all at 250–623 K. First blockers among
+non-envelope planets: water below 250 K 45%, column below 50 K or above 1,000 K
+21%, surface below 1 kPa 18%, water above 623 K 7%, vapour 4%, deep water or
+phase seam 1%. Frost no longer blocks any body: all 358 former frost bodies are
+also below 250 K and now stop at cold water. Solved radii are within 0.6% of the legacy radius at p95 (6.5% at
 most); a solve takes about 90 ms at the median and up to about 4 s. Thick H/He
 columns raise solved surface pressures to about 100 bar at p95.
 

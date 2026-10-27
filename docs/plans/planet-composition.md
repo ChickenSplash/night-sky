@@ -67,10 +67,11 @@ route, equilibrium temperature) gives the P1 baseline:
 - **57 of 1,325 non-envelope planets solve (4%),** all at 250–623 K. The earlier
   throwaway probe's 26% used an imposed surface load; the coupled route uses the
   generated atmospheres, so many bodies have a water surface below 1 kPa.
-- First blockers after step 6: CO₂ or N₂ frost 27%, column temperature outside
-  50–1,000 K 21%, surface below 1 kPa 18%, water below 250 K 18%, water above
-  623 K 7%, vapour 4%, deep water or phase seam 1%. Step 6 removed trace water
-  rounding (23%); those cold bodies now stop at frost or cold water instead.
+- First blockers after step 6 and the frost deposit: water below 250 K 45%,
+  column temperature outside 50–1,000 K 21%, surface below 1 kPa 18%, water
+  above 623 K 7%, vapour 4%, deep water or phase seam 1%. Step 6 removed trace
+  water rounding (23%) and the frost deposit removed frost (27%); all those
+  bodies are cold and now stop at cold water (step 3).
 - Where solved, radius is within 0.6% of the legacy model at p95. The visible
   gain is layer structure and boundary meaning, not radius.
 - A solve costs about 90 ms at the median, up to 2.4–4 s with thick H/He
@@ -121,9 +122,11 @@ Each step is small and labelled. Rerun the coverage report after each one.
    non-envelope planets are below 50 K).
 4. **Vapour allocation.** Exposed water that cannot stay liquid or frozen at the
    surface moves to the atmosphere inventory; protected water stays in the host.
-   Reuse the existing coupling loop to re-solve the load. Cold-trapped CO₂ and
-   other secondaries stay in the atmosphere inventory, labelled as unresolved
-   frost, instead of being refused.
+   Reuse the existing coupling loop to re-solve the load. **Frost done:**
+   cold-trapped CO₂, N₂, CH₄ and Ar above their vapour-pressure cap settle as a
+   labelled [surface deposit](../simulation/planet-composition.md#frost-surface-deposit)
+   on top of the rock or water, at fixed solid densities, with its weight on the
+   body below. The vapour part is still to do.
 5. **Hot and deep water.** One labelled approximation for supercritical water
    above 623 K and warm deep ice (300–623 K beyond 1 GPa), using effective
    high-pressure ice at depth whatever the temperature.
@@ -187,7 +190,8 @@ something visible in game or closes a gap measured by the coverage report.
 
 Revisit only for a demonstrated game need or an explicit user request:
 
-- CO₂, N₂, CH₄, O₂ and Ar phases: frost, lakes, supercritical states. Parked
+- CO₂, N₂, CH₄, O₂ and Ar phases beyond the fixed-density frost deposit:
+  compressed or polar frost, lakes, supercritical states. Parked
   methane work is a starting point if methane lakes are ever wanted.
 - Solubility, clathrates, phase separation and realistic mixtures.
 - Finer water polymorphs, thermal profiles through oceans, refractory melting,

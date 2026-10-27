@@ -45,7 +45,7 @@ fn check(s: &CoupledStructure, r: &Request) {
     // Independent radial Simpson integration, not profile::mass_factor.
     let n = 8192;
     let dr = c.extent_m / n as f64;
-    let radius = s.condensed().radius_m();
+    let radius = s.surface_radius_m();
     let density = |h: f64| {
         air.pressure_pa() * air.composition().mean_molecular_mass_kg()
             / (crate::units::BOLTZMANN_J_K * air.temperature_k())
@@ -236,16 +236,17 @@ fn unsupported_dense_weakly_bound_and_condensed_species_are_not_fallback_planets
         solve(&dense, Controls::default()),
         Err(Error::DenseGasUnsupported)
     );
-    let mut cold = request(0.0, 50.0);
+    let mut protected = request(0.0, 50.0);
+    protected.exchangeable = Inventory::default();
     assert_eq!(
-        solve(&cold, Controls::default()),
+        solve(&protected, Controls::default()),
         Err(Error::UnsupportedCondensate(Material::Nitrogen))
     );
-    cold = request(0.0, 1000.0);
-    cold.retained = cold.retained.scaled(0.0002).unwrap();
-    cold.exchangeable = cold.exchangeable.scaled(0.0002).unwrap();
+    let mut hot = request(0.0, 1000.0);
+    hot.retained = hot.retained.scaled(0.0002).unwrap();
+    hot.exchangeable = hot.exchangeable.scaled(0.0002).unwrap();
     assert_eq!(
-        solve(&cold, Controls::default()),
+        solve(&hot, Controls::default()),
         Err(Error::WeakBindingUnsupported)
     );
 }
@@ -379,4 +380,76 @@ fn sub_ulp_water_exchange_keeps_vapour_and_closes_exactly() {
         water
     );
     assert_eq!(s.retained_inventory().mass_kg(Material::Water), water);
+}
+
+#[test]
+fn frost_settles_as_a_weighted_surface_deposit_under_its_vapour_cap() {
+    let r = request(0.0, 50.0);
+    let s = solve(&r, Controls::default()).unwrap();
+    check(&s, &r);
+    let nitrogen = r.retained.mass_kg(Material::Nitrogen);
+    let frost = s.deposit_inventory().mass_kg(Material::Nitrogen);
+    assert!(frost > 0.9 * nitrogen);
+    assert_eq!(
+        frost + s.gas_inventory().mass_kg(Material::Nitrogen),
+        nitrogen
+    );
+    let air = s.atmosphere().unwrap();
+    close(
+        air.pressure_pa(),
+        vapour_pressure(Gas::Nitrogen, 50.0),
+        1e-8,
+    );
+    let radius = s.condensed().radius_m();
+    close(
+        s.deposit_thickness_m(),
+        frost / (1030.0 * 4.0 * PI * radius.powi(2)),
+        1e-5,
+    );
+    close(s.surface_radius_m() - radius, s.deposit_thickness_m(), 1e-6);
+    let weight =
+        GRAVITATIONAL_CONSTANT * s.condensed().mass_kg() * frost / (4.0 * PI * radius.powi(4));
+    close(s.condensed_load_pa() - air.pressure_pa(), weight, 1e-5);
+    assert!(
+        (s.condensed().outer().pressure_pa - s.condensed_load_pa()).abs()
+            <= 2.0 * PRESSURE_TOLERANCE_PA
+    );
+    let direct = dry::solve_loaded(
+        &s.condensed().retained_inventory(),
+        s.condensed_load_pa(),
+        dry::Controls::default(),
+    )
+    .unwrap();
+    close(direct.radius_m(), radius, 1e-9);
+    let shell = s.inertia_kg_m2() - s.condensed().inertia_kg_m2() - column::inertia_kg_m2(&s);
+    close(shell, (2.0 / 3.0) * frost * radius.powi(2), 1e-5);
+}
+
+#[test]
+fn frost_load_reaches_a_warmer_water_host() {
+    let mut r = request(0.01, 150.0);
+    let carbon = Inventory::new(&[(Material::CarbonDioxide, EARTH_MASS_KG * 1e-6)]).unwrap();
+    r.retained = r.retained.checked_add(&carbon).unwrap();
+    r.exchangeable = r.exchangeable.checked_add(&carbon).unwrap();
+    r.water_temperature_k = Some(260.0);
+    let s = solve(&r, Controls::default()).unwrap();
+    check(&s, &r);
+    assert!(matches!(s.condensed(), CondensedStructure::Water(_)));
+    let frost = s.deposit_inventory().mass_kg(Material::CarbonDioxide);
+    assert!(frost > 0.0);
+    assert_eq!(s.deposit_inventory().total_mass_kg(), frost);
+    let radius = s.condensed().radius_m();
+    close(
+        s.condensed_load_pa() - s.atmosphere().unwrap().pressure_pa(),
+        GRAVITATIONAL_CONSTANT * s.condensed().mass_kg() * frost / (4.0 * PI * radius.powi(4)),
+        1e-5,
+    );
+    let direct = water::solve(
+        &s.condensed().retained_inventory(),
+        260.0,
+        s.condensed_load_pa(),
+        dry::Controls::default(),
+    )
+    .unwrap();
+    close(direct.radius_m(), s.condensed().radius_m(), 1e-9);
 }

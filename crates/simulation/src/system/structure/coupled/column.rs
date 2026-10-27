@@ -123,7 +123,7 @@ pub(super) fn inertia_kg_m2(s: &CoupledStructure) -> f64 {
     };
     // A successful coupling has already validated this spherical column.
     let c = s.column().unwrap().unwrap();
-    let radius = s.condensed().radius_m();
+    let radius = s.surface_radius_m();
     let end = Profile::cutoff_drop(air.pressure_pa()).min(64.0);
     const STEPS: usize = 256;
     let dz = end / STEPS as f64;

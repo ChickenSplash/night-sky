@@ -49,7 +49,7 @@ impl Category {
             Self::WaterVapour => "water vapour",
             Self::WaterHot => "water hot (>623 K)",
             Self::WaterDeep => "water deep or phase seam",
-            Self::SecondaryCondensate => "cold-trapped CO2/N2 etc. (frost)",
+            Self::SecondaryCondensate => "protected secondary condensate",
             Self::TraceRounding => "trace rounding (closure)",
             Self::GasDomain => "gas domain (dense, weak binding, mass)",
             Self::Numerics => "numerics (work, convergence)",
@@ -81,6 +81,7 @@ struct Row {
     detail: String,
     surface: &'static str,
     surface_pressure_pa: f64,
+    deposit_m: f64,
     legacy_pressure_pa: f64,
     radius_change: Option<f64>,
     eos_evaluations: usize,
@@ -91,6 +92,7 @@ struct Solved {
     radius_m: f64,
     surface: &'static str,
     surface_pressure_pa: f64,
+    deposit_m: f64,
     eos_evaluations: usize,
 }
 
@@ -106,7 +108,8 @@ fn is_secondary(m: Material) -> bool {
 }
 
 /// Provisional join: couple the atmosphere without protected secondaries, then
-/// re-solve the condensed host with them entrained at that surface load.
+/// re-solve the condensed host with them entrained at that surface load. Any
+/// frost deposit then sits on top of the re-solved host.
 /// H/He is an ordinary exchangeable gas. A body is an envelope only when the
 /// thin-column coupling refuses its gas, not by any H/He amount threshold.
 fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
@@ -165,6 +168,8 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
         }
     })?;
     let pressure = atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa());
+    let load = atmosphere.condensed_load_pa();
+    let deposit_m = atmosphere.deposit_thickness_m();
     let host = atmosphere.condensed().retained_inventory();
     let mut work = atmosphere.diagnostics().total_eos_evaluations;
     let controls = dry::Controls::default();
@@ -175,20 +180,21 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
             surface_of(atmosphere.condensed()),
         )
     } else if host.mass_kg(Material::Water) > 0.0 {
-        let s =
-            water::protected::solve(&host, &protected, t, pressure, controls).map_err(radial)?;
+        let s = water::protected::solve(&host, &protected, t, load, controls).map_err(radial)?;
         work += s.diagnostics().work.eos_evaluations;
         let surface = water_surface(s.regions().last().unwrap().phase());
         (s.radius_m(), surface)
     } else {
-        let s = dry::protected::solve(&host, &protected, pressure, controls).map_err(radial)?;
+        let s = dry::protected::solve(&host, &protected, load, controls).map_err(radial)?;
         work += s.diagnostics().work.eos_evaluations;
         (s.radius_m(), "rock")
     };
+    let surface = if deposit_m > 0.0 { "frost" } else { surface };
     Ok(Solved {
-        radius_m,
+        radius_m: radius_m + deposit_m,
         surface,
         surface_pressure_pa: pressure,
+        deposit_m,
         eos_evaluations: work,
     })
 }
@@ -292,6 +298,7 @@ fn row(p: &Hosted) -> Row {
         detail,
         surface: solved.as_ref().map_or("", |s| s.surface),
         surface_pressure_pa: solved.as_ref().map_or(f64::NAN, |s| s.surface_pressure_pa),
+        deposit_m: solved.as_ref().map_or(f64::NAN, |s| s.deposit_m),
         legacy_pressure_pa: env.atmosphere.as_ref().map_or(0.0, |a| a.pressure_pa),
         radius_change: solved.as_ref().map(|s| s.radius_m / legacy - 1.0),
         eos_evaluations: solved.as_ref().map_or(0, |s| s.eos_evaluations),
@@ -439,6 +446,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
         "\n## Solved planets\n\n- Outer layer: {}\n\
          - Radius change vs legacy, |relative| p50 / p95 / max: {}\n\
          - Surface pressure, bar, p50 / p95 / max: {}\n\
+         - Frost deposit thickness, m, p50 / p95 / max (frost surfaces): {}\n\
          - EOS evaluations, p50 / p95 / max: {}\n\
          - Solve time, ms, p50 / p95 / max: {}\n\
          - Failed attempt time, ms, p50 / p95 / max: {}",
@@ -454,6 +462,12 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
                 .collect()
         ),
         quantiles(ok.iter().map(|r| r.surface_pressure_pa / 1e5).collect()),
+        quantiles(
+            ok.iter()
+                .filter(|r| r.deposit_m > 0.0)
+                .map(|r| r.deposit_m)
+                .collect()
+        ),
         quantiles(ok.iter().map(|r| r.eos_evaluations as f64).collect()),
         quantiles(ok.iter().map(|r| r.milliseconds).collect()),
         quantiles(
@@ -470,12 +484,12 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
 fn table(rows: &[Row]) -> String {
     let mut out =
         "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\toutcome\tdetail\t\
-                   surface\tsurface_pa\tlegacy_pa\tradius_change\teos_evaluations\tms\n"
+                   surface\tsurface_pa\tdeposit_m\tlegacy_pa\tradius_change\teos_evaluations\tms\n"
             .to_owned();
     for r in rows {
         let _ = writeln!(
             out,
-            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
+            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
             r.id,
             r.class,
             r.mass_earth,
@@ -486,6 +500,7 @@ fn table(rows: &[Row]) -> String {
             r.detail,
             r.surface,
             r.surface_pressure_pa,
+            r.deposit_m,
             r.legacy_pressure_pa,
             r.radius_change
                 .map_or(String::new(), |c| format!("{c:.6e}")),
