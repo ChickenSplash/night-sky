@@ -540,7 +540,9 @@ rendering still use their previous paths.** No camera restriction is introduced.
 The model is `loaded_condensed_spherical_isothermal_column_v1`.
 
 The immutable request supplies retained inventory, a subset eligible for gas
-exchange, column temperature and (when needed) water temperature. Exchangeable
+exchange and a `Temperature`: either a prescribed column temperature and (when
+needed) water temperature, or an equilibrium temperature for the
+[greenhouse surface temperature](#greenhouse-surface-temperature). Exchangeable
 supply is an explicit exposure prescription, not an extra allocation. Source and
 escaped bookkeeping stays with the caller. Formation/accessibility priors are
 not run inside this API. Gas is partitioned using the same approximate cold-trap
@@ -589,7 +591,8 @@ display cutoff.
   normalisation and pressure profile consistently use the condensed plus deposit
   mass, not a point mass containing the gas shell. This is an engineering restriction,
   not a planet classification.
-- Column temperature is prescribed within **20–1,000 K**, generation's own floor.
+- Column temperature, prescribed or warmed, stays within **20–1,000 K**,
+  generation's own floor.
   Below 50 K the cold-trap caps are extrapolated from their liquid-vapour
   anchors and so overstate the frost vapour pressure; O₂ and H/He have no cap and
   stay gas. Both are labelled notes, not a separate solver. Base ideal-gas density
@@ -603,10 +606,10 @@ display cutoff.
   mass is inferred. Its cutoff is a prescription, not an exobase.
 - Water keeps the radial model's bounds. Ice surfaces may sit at any pressure,
   including airless ones; a liquid surface needs at least its saturation
-  pressure, otherwise the vapour is refused. No pressure floor is invented. Gas
-  and water temperatures are
-  independent imposed anchors: unequal values describe mechanical loading,
-  not thermal or evaporation equilibrium.
+  pressure, otherwise the vapour is refused. No pressure floor is invented.
+  Prescribed gas and water temperatures are independent imposed anchors: unequal
+  values describe mechanical loading, not thermal or evaporation equilibrium.
+  Under the greenhouse both take the one surface temperature.
 - Cold-trap caps are approximate, not matched Gibbs or chemical equilibrium.
   Exchangeable secondaries above their cap become a surface deposit. Water above
   273.16 K is capped at the IF97 saturation pressure instead, so a column
@@ -615,6 +618,33 @@ display cutoff.
   so a pure steam column loads its ocean at saturation to rounding, and the ocean
   top takes the liquid-side limit. Protected water is supported; protected (non-exchangeable) secondary condensates are
   refused here and handled by the protected-trace host solvers instead.
+
+### Greenhouse surface temperature
+
+`Temperature::Greenhouse { equilibrium_k }` replaces the imposed temperature
+with the [grey greenhouse estimate](atmospheres.md#grey-greenhouse-estimate).
+The isothermal column and the condensed water both take the warmed surface
+temperature `T_s`.
+
+- **Solved on the coupled column.** At each coupling geometry `T_s` balances
+  `T_s = f(T_s)`, where `f` warms `T_eq` by the optical depth of the gas
+  partitioned at `T_s`. Warming raises the caps, so frost and water evaporate,
+  which warms further.
+- **The coolest balance.** `f` never falls as `T` rises, so a scan up from
+  `T_eq` in 0.5% steps finds the first crossing, then bisects it to full
+  precision. This is the balance a planet warming up from equilibrium would
+  reach. Hotter balances, which a planet that started hot (a magma-ocean steam
+  world) could keep, are not explored.
+- **The unwarmed column is checked first.** If the column at `T_eq` is already
+  dense or weakly bound, that error is returned, so a dense H/He column is still
+  reported as one and not as a runaway its broadening would drive.
+- **Runaway is refused, not capped.** If warming passes 1,000 K or pushes the
+  gas past 1% of the mass before balancing, `WarmingOutsideDomain` is
+  returned. A balanced column that is then too dense still fails the usual
+  dense-gas check.
+- Convergence also requires `T_s` to change by at most relative 10⁻⁹ between
+  geometries. Results report `surface_temperature_k` and
+  `greenhouse_optical_depth`.
 
 ### Frost surface deposit
 
@@ -658,9 +688,11 @@ them. Nonconvergence is explicit.
 cargo test -p space-simulation system::structure::coupled -- --nocapture
 ```
 
-Fourteen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+Seventeen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
 and absent gas, mixed N₂/CO₂, thin H/He, N₂ frost on rock, CO₂ frost loading a
-warmer water host, a 30 K icy body with N₂ frost on airless ice, an ocean under its own saturated steam and trace water fully evaporated, sub-ulp vapour, stripping, deterministic repeats,
+warmer water host, a 30 K icy body with N₂ frost on airless ice, an ocean under its own saturated steam and trace water fully evaporated, an
+Earth twin warmed from frozen to a liquid ocean, unwarmed transparent and absent
+air, a steam runaway refused, sub-ulp vapour, stripping, deterministic repeats,
 refinement, exact aggregate-work success/failure and unsupported inputs/regimes.
 Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
 and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
@@ -706,8 +738,8 @@ The route is provisional and test-only, until the single entry point exists:
    an H/He-bearing body.
 2. Protected secondaries (90% of CO₂/N₂/CH₄/O₂/Ar source) are set aside. The
    coupled solver runs on the rest, with H/He, **all** water and all remaining
-   secondaries exchangeable, at the equilibrium temperature (column floored at
-   20 K, as in generation). Water is not split: exposed water evaporates until
+   secondaries exchangeable, at the greenhouse surface temperature over the
+   equilibrium temperature (floored at 20 K, as in generation). Water is not split: exposed water evaporates until
    the air is saturated, leaving an ocean or ice below, or all of it becomes
    steam over dry rock. Generation's 99.999% protection shields water from
    escape only, which has already been applied.
@@ -720,6 +752,9 @@ The route is provisional and test-only, until the single entry point exists:
 Each planet reports only its **first** blocker. Water failures are binned by
 condition (below 250 K, above 623 K, vapour, surface below 1 kPa, otherwise deep
 or phase seam) rather than error variant, so each bin maps to one plan step.
+A failed coupled solve does not report its warmed temperature, so its water
+failures fall in the vapour, low-pressure or deep bins only. Bands are still by
+equilibrium temperature; the TSV carries `surface_k` for solved bodies.
 Fixing one blocker can expose another, including the dense-gas limit for bodies
 with 0.1–1% H/He.
 
@@ -728,34 +763,43 @@ protected heavy material, and escape never removes it exactly. Treating any H/He
 as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
-Baseline (October 2026, 20 systems per component, equilibrium temperature,
-after P1 steps 3, 4 and 6): 1,544 planets, 454 envelopes. **954 of 1,090**
-non-envelope planets solve (88%): all 227 below 50 K, 414 of 425 at 50–250 K,
-257 of 349 at 250–623 K and 56 of 89 above. Outer layers are frost 461, ice
-214, ocean 151 and rock 128 (all water in a steam column). First blockers among
-non-envelope planets: gas triage 10% (109 weak binding, 2 dense gas), column
-above 1,000 K 1.4%, deep water or phase seam 0.9%. No vapour or hot-water
-blockers remain.
+Baseline (October 2026, 20 systems per component, greenhouse surface
+temperature, after P1 steps 2, 3, 4 and 6): 1,544 planets, 449 envelopes.
+**748 of 1,095** non-envelope planets solve (68%): all 227 below 50 K, 391 of
+429 at 50–250 K, 95 of 345 at 250–623 K and 35 of 94 above (bands by
+equilibrium temperature). Outer layers are frost 422, ice 202, ocean 21 and
+rock 103. First blockers among non-envelope planets: gas triage 15% (155 weak
+binding, 7 dense gas), greenhouse runaway 15% (159), column above 1,000 K 1.4%,
+deep water or phase seam 1.0%.
 
-- **Weak binding rose from 2 to 109.** These are small bodies (0.002–0.02 Earth
-  masses, median 0.004) at 200–960 K whose water now forms a steam column the
-  sonic-radius guard refuses: it would escape. Generation protected that water
-  from escape, so these bodies show where its escape prior and exposed water
-  disagree. They were vapour failures before, not solved bodies.
-- **Envelopes rose from 417 to 454.** Steam added to thin H/He columns takes 37
-  more bodies past the dense-gas limit.
-- Bodies above 623 K now solve as dry rock under steam, so the hot-water bin is
-  empty. Liquid or supercritical water at depth on hot bodies is still step 5.
-- Earlier, step 3 raised envelopes from 219 to 417: cold bodies with 0.1–1%
-  H/He used to stop at cold water first and now exceed the dense-gas limit.
-- **Radius against legacy:** p50 1.5%, p95 9.8%, at most 12.7%. Icy bodies grow
+- **Step 2 moved coverage from 88% to 68%, by design.** Warm water worlds now
+  run away instead of keeping an ocean at their equilibrium temperature.
+  - **Runaway (159):** equilibrium 176–977 K, median 370 K; median water
+    2.5×10⁻⁴ of the mass, about one Earth ocean. The coolest ones carry several
+    % water or thick CO₂ frost that evaporates as they warm. Their end state is a
+    hot, dense steam column this thin-column model cannot hold (P2).
+  - **Oceans fell from 151 to 21.** They now sit at equilibrium 163–284 K,
+    warmed to 274–313 K. Before, every ocean was an unwarmed body above 273 K.
+  - **Warming** of solved bodies: 0.6 K at the median, 335 K at p95, 595 K at
+    most (dry rock under steam, Venus-like).
+  - **Weak binding rose from 109 to 155:** warmer columns have larger scale
+    heights, so more small bodies fail the sonic-radius guard. These are small
+    bodies (median 0.006 Earth masses) whose steam column would escape; the
+    escape question from step 4 is still open.
+- Envelopes went from 454 to 449: a few thin H/He columns are warmer and so less
+  dense.
+- Earlier, step 4 raised envelopes from 417 to 454 (steam added to thin H/He
+  columns) and step 3 from 219 to 417 (cold bodies with 0.1–1% H/He now exceed
+  the dense-gas limit).
+- **Radius against legacy:** p50 2.4%, p95 10.2%, at most 12.7%. Icy bodies grow
   most: a Pluto-mass body with 58% water comes out about 12.6% larger, at about
   1,350 kg/m³ mean density, because ice Ih (about 934 kg/m³) is lighter than the
   legacy fit assumes. Massive icy bodies come out up to 7% smaller from deep-ice
   compression.
-- Frost deposits are 1 m at the median, 217 m at p95 and under 1 km at most.
-- A solve takes about 70 ms at the median and up to about 3–5 s (thick H/He
-  columns). Solved surface pressures reach about 12 bar at p95, 167 bar at most.
+- Frost deposits are 0.8 m at the median, 216 m at p95 and under 1 km at most.
+- A solve takes about 110–190 ms at the median on 20 threads (the warming scan
+  adds partition work) and up to about 9 s. Solved surface pressures reach about
+  10 bar at p95, 41 bar at most.
 
 ## Light envelopes and the giant transition
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::system::atmosphere::{Gas, condensation::vapour_pressure};
+use crate::system::atmosphere::{Gas, condensation::vapour_pressure, greenhouse};
 
 fn request(water: f64, temperature: f64) -> Request {
     let retained = Inventory::from_mass_fractions(
@@ -19,8 +19,10 @@ fn request(water: f64, temperature: f64) -> Request {
             (Material::Water, retained.mass_kg(Material::Water)),
         ])
         .unwrap(),
-        column_temperature_k: temperature,
-        water_temperature_k: Some(temperature),
+        temperature: Temperature::Prescribed {
+            column_k: temperature,
+            water_k: Some(temperature),
+        },
     }
 }
 
@@ -301,7 +303,10 @@ fn iteration_and_aggregate_work_limits_fail_and_exact_work_replays() {
 #[test]
 fn invalid_supply_thermal_inputs_and_missing_water_anchors_fail_explicitly() {
     let mut r = request(0.01, 300.0);
-    r.water_temperature_k = None;
+    r.temperature = Temperature::Prescribed {
+        column_k: 300.0,
+        water_k: None,
+    };
     assert_eq!(
         solve(&r, Controls::default()),
         Err(Error::InvalidInput("missing water temperature"))
@@ -433,7 +438,10 @@ fn frost_load_reaches_a_warmer_water_host() {
     let carbon = Inventory::new(&[(Material::CarbonDioxide, EARTH_MASS_KG * 1e-6)]).unwrap();
     r.retained = r.retained.checked_add(&carbon).unwrap();
     r.exchangeable = r.exchangeable.checked_add(&carbon).unwrap();
-    r.water_temperature_k = Some(260.0);
+    r.temperature = Temperature::Prescribed {
+        column_k: 150.0,
+        water_k: Some(260.0),
+    };
     let s = solve(&r, Controls::default()).unwrap();
     check(&s, &r);
     assert!(matches!(s.condensed(), CondensedStructure::Water(_)));
@@ -499,8 +507,10 @@ fn water_only(water: f64, temperature: f64) -> Request {
         retained,
         exchangeable: Inventory::new(&[(Material::Water, retained.mass_kg(Material::Water))])
             .unwrap(),
-        column_temperature_k: temperature,
-        water_temperature_k: Some(temperature),
+        temperature: Temperature::Prescribed {
+            column_k: temperature,
+            water_k: Some(temperature),
+        },
     }
 }
 
@@ -533,4 +543,89 @@ fn exposed_water_saturates_its_column_or_evaporates_entirely() {
         r.retained.mass_kg(Material::Water)
     );
     assert!(s.atmosphere().unwrap().pressure_pa() < column::cap_pa(Gas::Water, 400.0));
+}
+
+fn greenhouse(mut r: Request, equilibrium_k: f64) -> Request {
+    r.temperature = Temperature::Greenhouse { equilibrium_k };
+    r
+}
+
+#[test]
+fn greenhouse_warms_an_earth_twin_into_a_liquid_ocean() {
+    // Earth's air by mass, about 1 bar with 420 ppm CO₂, over a 0.1% ocean.
+    let mut r = water_only(0.001, 255.0);
+    let air = Inventory::new(&[
+        (Material::Nitrogen, EARTH_MASS_KG * 6.5e-7),
+        (Material::Oxygen, EARTH_MASS_KG * 2.0e-7),
+        (Material::Argon, EARTH_MASS_KG * 1.1e-8),
+        (Material::CarbonDioxide, EARTH_MASS_KG * 5.4e-10),
+    ])
+    .unwrap();
+    r.retained = r.retained.checked_add(&air).unwrap();
+    r.exchangeable = r.exchangeable.checked_add(&air).unwrap();
+    let cold = solve(&r, Controls::default()).unwrap();
+    let CondensedStructure::Water(body) = cold.condensed() else {
+        panic!("water expected");
+    };
+    assert_eq!(
+        body.regions().last().unwrap().phase(),
+        water::PhaseKnowledge::Water(crate::system::materials::water::Phase::IceIh)
+    );
+    assert_eq!(cold.greenhouse_optical_depth(), None);
+    let r = greenhouse(r, 255.0);
+    let s = solve(&r, Controls::default()).unwrap();
+    check(&s, &r);
+    let t = s.surface_temperature_k();
+    eprintln!(
+        "earth twin {t} K, {} bar",
+        s.atmosphere().unwrap().pressure_pa() / 1e5
+    );
+    assert!((283.0..293.0).contains(&t), "{t}");
+    let CondensedStructure::Water(body) = s.condensed() else {
+        panic!("water expected");
+    };
+    assert_eq!(
+        body.regions().last().unwrap().phase(),
+        water::PhaseKnowledge::Water(crate::system::materials::water::Phase::Liquid)
+    );
+    let air = s.atmosphere().unwrap();
+    assert_eq!(air.temperature_k(), t);
+    let tau = s.greenhouse_optical_depth().unwrap();
+    close(tau, greenhouse::optical_depth(air), 1e-12);
+    close(greenhouse::surface_temperature_k(255.0, tau), t, 1e-8);
+    close(
+        air.pressure_pa() * air.composition().fraction(Gas::Water),
+        column::cap_pa(Gas::Water, t),
+        1e-8,
+    );
+}
+
+#[test]
+fn transparent_or_absent_air_keeps_the_equilibrium_temperature() {
+    let r = greenhouse(request(0.0, 250.0), 250.0);
+    let s = solve(&r, Controls::default()).unwrap();
+    assert_eq!(s.surface_temperature_k(), 250.0);
+    assert_eq!(s.greenhouse_optical_depth(), Some(0.0));
+    let mut dry = request(0.0, 250.0);
+    dry.exchangeable = Inventory::default();
+    dry.retained = Inventory::from_mass_fractions(
+        EARTH_MASS_KG,
+        &[(Material::Metal, 0.325), (Material::Silicate, 0.675)],
+    )
+    .unwrap();
+    let s = solve(&greenhouse(dry, 250.0), Controls::default()).unwrap();
+    assert!(s.atmosphere().is_none());
+    assert_eq!(s.surface_temperature_k(), 250.0);
+}
+
+#[test]
+fn a_steam_runaway_beyond_the_column_is_refused_not_capped() {
+    // At 300 K imposed this ocean holds; warmed, all of it becomes steam and
+    // the surface passes 1000 K before any balance.
+    let r = water_only(0.001, 300.0);
+    assert!(solve(&r, Controls::default()).is_ok());
+    assert_eq!(
+        solve(&greenhouse(r, 300.0), Controls::default()).unwrap_err(),
+        Error::WarmingOutsideDomain
+    );
 }

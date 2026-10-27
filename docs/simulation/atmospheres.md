@@ -57,7 +57,9 @@ first and gives the same final radius to geometry, column, optics and clearance.
 The reference temperature is a representative **isothermal gas-column
 temperature**, not an equilibrium-temperature calculation or a solved
 surface climate. Generation currently estimates it from equilibrium temperature
-with a 20 K floor; there is no greenhouse or internal-heat solution. All stored units
+with a 20 K floor; there is no internal-heat solution, and the
+[grey greenhouse estimate](#grey-greenhouse-estimate) is used only by the opt-in
+coupled structure, not by generation. All stored units
 are SI, including pascals, kelvin, metres and kilograms.
 
 ## Derived column
@@ -220,6 +222,32 @@ exclusion and swept safety stop; its preferred wrapping margin now includes
 atmospheric clearance height, avoiding a near-zero steering gap around thick air.
 Pressure alone never reclassifies a planet.
 
+## Grey greenhouse estimate
+
+`atmosphere::greenhouse` (`grey_eddington_pressure_fit_greenhouse_v1`) is a
+labelled estimate of surface warming, not radiative transfer or a climate model.
+
+- **Surface temperature:** `T_s⁴ = T_eq⁴ (1 + 3τ/4)`, the Eddington grey
+  radiative-equilibrium surface.
+- **Optical depth:** `τ = P^0.2808 · (4.07 p_H₂O^0.4453 + 5.40 (p_CO₂^0.4453 +
+  p_CH₄^0.4453))`, pressures in bar at the surface. The absorber exponent stands
+  for band saturation, the total-pressure exponent for pressure broadening.
+- **Calibration:** CO₂ is fitted to Mars (210 → 215 K), Venus (229 → 737 K) and
+  Earth's CO₂ share of about 20%. Water, with clouds lumped in, takes the rest of
+  Earth's 255 → 288 K, with its vapour saturated at 288 K. CH₄ uses the CO₂ fit
+  with no separate physics; on Titan this gives about 103 K, the greenhouse-only
+  value before its haze anti-greenhouse.
+- **Transparent:** N₂, O₂, Ar and H/He, apart from broadening. No
+  collision-induced absorption, so thick H₂ or N₂ columns are under-warmed.
+- **Not included:** lapse rate (the column stays isothermal at `T_s`), clouds as
+  a separate term, ice-albedo feedback, the radiation limit of a moist
+  atmosphere, and day–night or latitude contrast. Albedo stays the one
+  generation drew.
+
+With saturated water the warming feeds back on itself. Earth-like air over an
+ocean runs away near `T_eq ≈ 262 K`, close to the usual inner edge of the
+habitable zone. This is a fitted outcome, not a validated threshold.
+
 ## Visible optical conversion
 
 Optics remain independent of generation and Bevy. `GasAtmosphere::optics`
@@ -311,7 +339,8 @@ Route tests use the calculated safe launch height, not a fixed altitude that
 can lie inside newly generated air; the clearance refusal policy is unchanged.
 
 Not modelled: physical escape rates, atmospheric evolution, chemical equilibrium,
-resolved phase diagrams/hydrospheres, greenhouse heating, nonideal dense gases,
+resolved phase diagrams/hydrospheres, radiative transfer (beyond the grey
+greenhouse estimate), nonideal dense gases,
 dissociation/ionisation, upper-air
 temperature structure, winds or resolved deep envelopes. Physically
 valid input ranges are not evidence that these approximations hold in every

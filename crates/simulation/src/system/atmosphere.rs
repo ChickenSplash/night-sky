@@ -8,6 +8,7 @@ use std::fmt;
 
 pub(crate) mod condensation;
 pub mod generation;
+pub mod greenhouse;
 pub mod optics;
 pub mod profile;
 mod wire;

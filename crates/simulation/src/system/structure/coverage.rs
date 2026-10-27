@@ -33,6 +33,7 @@ enum Category {
     SecondaryCondensate,
     TraceRounding,
     GasDomain,
+    Runaway,
     Numerics,
     Other,
 }
@@ -52,6 +53,7 @@ impl Category {
             Self::SecondaryCondensate => "protected secondary condensate",
             Self::TraceRounding => "trace rounding (closure)",
             Self::GasDomain => "gas domain (dense, weak binding, mass)",
+            Self::Runaway => "greenhouse runaway (beyond thin column)",
             Self::Numerics => "numerics (work, convergence)",
             Self::Other => "other",
         }
@@ -59,7 +61,7 @@ impl Category {
     fn plan(self) -> &'static str {
         match self {
             Self::Solved => "",
-            Self::Envelope | Self::MassDomain => "P2",
+            Self::Envelope | Self::MassDomain | Self::Runaway => "P2",
             Self::ColumnTemperature => "step 5",
             Self::WaterCold | Self::WaterLowPressure => "step 3",
             Self::WaterVapour | Self::SecondaryCondensate => "step 4",
@@ -77,6 +79,7 @@ struct Row {
     water_fraction: f64,
     light_fraction: f64,
     temperature_k: f64,
+    surface_k: f64,
     category: Category,
     detail: String,
     surface: &'static str,
@@ -89,6 +92,7 @@ struct Row {
 }
 
 struct Solved {
+    surface_k: f64,
     radius_m: f64,
     surface: &'static str,
     surface_pressure_pa: f64,
@@ -116,8 +120,8 @@ fn is_secondary(m: Material) -> bool {
 fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let retained = p.body.budget.retained();
     let source = p.body.budget.source();
-    // Generation's 20 K column floor applies to the water as well.
-    let t = p
+    // Generation's 20 K column floor applies to the equilibrium temperature.
+    let equilibrium = p
         .environment
         .as_ref()
         .unwrap()
@@ -165,17 +169,22 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let request = coupled::Request {
         retained: open,
         exchangeable,
-        column_temperature_k: t,
-        water_temperature_k: Some(t),
+        temperature: coupled::Temperature::Greenhouse {
+            equilibrium_k: equilibrium,
+        },
     };
     let atmosphere = coupled::solve(&request, coupled::Controls::default()).map_err(|e| {
-        let (category, detail) = coupled_error(t, &e);
+        // The warmed surface temperature is unknown on failure, so water
+        // errors are not binned by temperature here.
+        let (category, detail) = coupled_error(f64::NAN, &e);
         if light && matches!(category, Category::GasDomain | Category::MassDomain) {
             (Category::Envelope, detail)
         } else {
             (category, detail)
         }
     })?;
+    // Protected traces are entrained at the warmed surface temperature.
+    let t = atmosphere.surface_temperature_k();
     let pressure = atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa());
     let load = atmosphere.condensed_load_pa();
     let deposit_m = atmosphere.deposit_thickness_m();
@@ -200,6 +209,7 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     };
     let surface = if deposit_m > 0.0 { "frost" } else { surface };
     Ok(Solved {
+        surface_k: t,
         radius_m: radius_m + deposit_m,
         surface,
         surface_pressure_pa: pressure,
@@ -237,6 +247,7 @@ fn coupled_error(t: f64, e: &coupled::Error) -> (Category, String) {
         E::GasMassOutsideDomain => (Category::GasDomain, "gas mass".to_owned()),
         E::DenseGasUnsupported => (Category::GasDomain, "dense gas".to_owned()),
         E::WeakBindingUnsupported => (Category::GasDomain, "weak binding".to_owned()),
+        E::WarmingOutsideDomain => (Category::Runaway, "warming outside domain".to_owned()),
         E::WorkBudgetExhausted => (Category::Numerics, "coupled work".to_owned()),
         E::NonConvergence => (Category::Numerics, "coupled convergence".to_owned()),
         other => (Category::Other, format!("{other:?}")),
@@ -303,6 +314,7 @@ fn row(p: &Hosted) -> Row {
         light_fraction: (retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium))
             / mass,
         temperature_k: env.equilibrium_temperature_k,
+        surface_k: solved.as_ref().map_or(f64::NAN, |s| s.surface_k),
         category,
         detail,
         surface: solved.as_ref().map_or("", |s| s.surface),
@@ -363,7 +375,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
          - Systems: {systems} per component, {} components, {} planets\n\
          - Non-envelope planets solved: {}\n\
          - Wall time: {seconds:.1} s on {threads} threads\n\
-         - Water temperature: equilibrium (no greenhouse yet)\n",
+         - Surface temperature: grey greenhouse over equilibrium\n",
         Component::ALL.len(),
         rows.len(),
         ratio(solved, rocky.len()),
@@ -455,6 +467,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
         "\n## Solved planets\n\n- Outer layer: {}\n\
          - Radius change vs legacy, |relative| p50 / p95 / max: {}\n\
          - Surface pressure, bar, p50 / p95 / max: {}\n\
+         - Greenhouse warming, K, p50 / p95 / max: {}\n\
          - Frost deposit thickness, m, p50 / p95 / max (frost surfaces): {}\n\
          - EOS evaluations, p50 / p95 / max: {}\n\
          - Solve time, ms, p50 / p95 / max: {}\n\
@@ -471,6 +484,11 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
                 .collect()
         ),
         quantiles(ok.iter().map(|r| r.surface_pressure_pa / 1e5).collect()),
+        quantiles(
+            ok.iter()
+                .map(|r| r.surface_k - r.temperature_k.max(coupled::MIN_COLUMN_TEMPERATURE_K))
+                .collect()
+        ),
         quantiles(
             ok.iter()
                 .filter(|r| r.deposit_m > 0.0)
@@ -492,19 +510,20 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
 
 fn table(rows: &[Row]) -> String {
     let mut out =
-        "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\toutcome\tdetail\t\
+        "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\tsurface_k\toutcome\tdetail\t\
                    surface\tsurface_pa\tdeposit_m\tlegacy_pa\tradius_change\teos_evaluations\tms\n"
             .to_owned();
     for r in rows {
         let _ = writeln!(
             out,
-            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
+            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
             r.id,
             r.class,
             r.mass_earth,
             r.water_fraction,
             r.light_fraction,
             r.temperature_k,
+            r.surface_k,
             r.category.label(),
             r.detail,
             r.surface,

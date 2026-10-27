@@ -57,25 +57,29 @@ unchanged unless a step below deliberately widens them with a labelled model.
 
 The [coverage report](../simulation/planet-composition.md#prototype-coverage-report)
 (October 2026, 1,544 planets from 140 calibration systems, provisional joined
-route, equilibrium temperature) gives the P1 baseline:
+route, greenhouse surface temperature) gives the P1 baseline:
 
 - 27% are envelopes: H/He beyond the thin column's 1% gas-mass, dense-gas or
   20 Earth-mass limits. Trace H/He is an ordinary gas, not an envelope; counting
   any H/He as an envelope had misclassified 472 stripped rock-type worlds. Step 3
   raised envelopes from 219 to 417 (cold bodies with 0.1–1% H/He now exceed the
-  dense-gas limit) and step 4 to 454 (steam added to thin H/He columns).
-- Every rock planet starts with at least trace water. After step 4, 128 solved
-  bodies have evaporated all of it and are dry rock under steam.
-- **954 of 1,090 non-envelope planets solve (88%)** after steps 3, 4 and 6, up
-  from 57 of 1,325. All 227 below 50 K, 414 of 425 at 50–250 K, 257 of 349 at
-  250–623 K and 56 of 89 above.
-- First blockers now: gas triage 10%, almost all weak binding (109 small warm
-  bodies whose steam column would escape), column above 1,000 K 1.4%, deep water
-  0.9%. No vapour or hot-water blockers remain.
-- Radius against legacy: 1.5% at the median, 9.8% at p95, 12.7% at most. Small
+  dense-gas limit), step 4 to 454 (steam added to thin H/He columns); step 2
+  left 449.
+- Every rock planet starts with at least trace water. 103 solved bodies have
+  evaporated all of it and are dry rock under steam.
+- **748 of 1,095 non-envelope planets solve (68%)** after steps 2, 3, 4 and 6,
+  up from 57 of 1,325. All 227 below 50 K, 391 of 429 at 50–250 K, 95 of 345 at
+  250–623 K and 35 of 94 above (by equilibrium temperature). Step 4 alone had
+  reached 88%; step 2 makes warm water worlds run away instead of keeping an
+  ocean at their equilibrium temperature.
+- First blockers now: gas triage 15%, almost all weak binding (155 small warm
+  bodies whose steam column would escape), greenhouse runaway 15% (159 hot steam
+  worlds beyond the thin column, P2), column above 1,000 K 1.4%, deep water 1.0%.
+- Oceans: 21, at equilibrium 163–284 K warmed to 274–313 K.
+- Radius against legacy: 2.4% at the median, 10.2% at p95, 12.7% at most. Small
   icy bodies grow because ice Ih is lighter than the legacy fit assumes.
-- A solve costs about 70 ms at the median, up to 3–5 s with thick H/He
-  columns (varies between runs).
+- A solve costs about 110–190 ms at the median on 20 threads, up to about 9 s
+  (varies between runs). The warming scan adds partition work.
   Cost needs attention before the experimental mode (step 8).
 
 ## Replacement contract
@@ -112,9 +116,13 @@ Each step is small and labelled. Rerun the coverage report after each one.
 1. **Coverage report. Done.** A reproducible command routes a fixed deterministic
    set of generated planets through the prototype path. It reports success,
    first failure reason by category, work counts and timings.
-2. **Surface temperature.** A simple labelled greenhouse warming estimate from
-   atmospheric pressure and composition, above the equilibrium temperature.
-   Without it an Earth twin is about 255 K and frozen. Not a climate model.
+2. **Surface temperature. Done.** A labelled
+   [grey greenhouse estimate](../simulation/atmospheres.md#grey-greenhouse-estimate)
+   from partial and total pressure (H₂O, CO₂ and CH₄ absorb), fitted to Earth,
+   Mars and Venus, sets one surface temperature for the column and the water.
+   It is solved on the coupled column, taking the coolest balance warming up
+   from equilibrium; a runaway past the column domain is refused. An Earth twin
+   now has a liquid ocean near 290 K. Not a climate model.
 3. **Cold and airless water. Done.** A labelled
    [surface-water model](../simulation/water-physics.md#cold-and-low-pressure-surface-water)
    gives IAPWS ice Ih below 250 K down to 20 K and at any surface pressure, and

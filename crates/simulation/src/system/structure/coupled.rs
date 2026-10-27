@@ -1,15 +1,17 @@
 //! Headless condensed-body/finite outer-column matching. No generation switch,
-//! dense-gas EOS, climate or hidden envelope-surrogate fallback.
+//! dense-gas EOS, climate or hidden envelope-surrogate fallback. An optional
+//! grey greenhouse estimate sets the surface temperature.
 
 mod column;
 mod deposit;
 #[cfg(test)]
 mod tests;
+mod warming;
 
 use super::{dry, water};
 use crate::{
     system::{
-        atmosphere::{AtmosphereError, Column, GasAtmosphere, ONE_BAR_PA},
+        atmosphere::{AtmosphereError, Column, GasAtmosphere, ONE_BAR_PA, greenhouse},
         composition::{CompositionError, Inventory},
         materials::Material,
     },
@@ -27,6 +29,17 @@ pub const ALLOCATION_RELATIVE_TOLERANCE: f64 = 1e-9;
 /// Generation's column floor. Cold-trap caps are extrapolated below 50 K.
 pub const MIN_COLUMN_TEMPERATURE_K: f64 = 20.0;
 pub const MAX_COLUMN_TEMPERATURE_K: f64 = 1000.0;
+pub const TEMPERATURE_RELATIVE_TOLERANCE: f64 = 1e-9;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Temperature {
+    /// Imposed isothermal column and, separately, condensed-water temperature.
+    /// Water's is required when water remains condensed.
+    Prescribed { column_k: f64, water_k: Option<f64> },
+    /// Column and water both take the grey-greenhouse surface temperature
+    /// solved over this equilibrium temperature, on the coupled column.
+    Greenhouse { equilibrium_k: f64 },
+}
 
 /// The caller specifies supply eligible for gas exchange, not mutable reservoirs.
 /// Everything else stays condensed. Exchangeable secondaries above their cold-trap
@@ -35,9 +48,7 @@ pub const MAX_COLUMN_TEMPERATURE_K: f64 = 1000.0;
 pub struct Request {
     pub retained: Inventory,
     pub exchangeable: Inventory,
-    pub column_temperature_k: f64,
-    /// Required when water remains condensed; independent of the gas temperature.
-    pub water_temperature_k: Option<f64>,
+    pub temperature: Temperature,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,6 +129,8 @@ pub struct CoupledStructure {
     deposit: deposit::Deposit,
     gas: Inventory,
     atmosphere: Option<GasAtmosphere>,
+    surface_temperature_k: f64,
+    optical_depth: Option<f64>,
     diagnostics: Diagnostics,
 }
 
@@ -159,6 +172,14 @@ impl CoupledStructure {
     }
     pub fn atmosphere(&self) -> Option<&GasAtmosphere> {
         self.atmosphere.as_ref()
+    }
+    /// The isothermal column's temperature, imposed or greenhouse-warmed.
+    pub fn surface_temperature_k(&self) -> f64 {
+        self.surface_temperature_k
+    }
+    /// Grey infrared optical depth, present only for a greenhouse request.
+    pub fn greenhouse_optical_depth(&self) -> Option<f64> {
+        self.optical_depth
     }
     /// Atmospheric gravity ignores the shell's own mass, consistently with the
     /// central-field hydrostatic prescription and its explicit <=1% mass mask.
@@ -211,6 +232,9 @@ impl CoupledStructure {
             "Frost phase (ice or liquid) and dissolution in water are not modelled",
             "Entire gas inventory normalised to an operational finite shell",
             "Water and refractory thermal/phase limitations remain those of the radial model",
+            "Greenhouse: grey Eddington fit to Earth, Mars and Venus, not radiative transfer",
+            "Greenhouse: no lapse rate, clouds, ice-albedo feedback or collision-induced absorption",
+            "Greenhouse: the coolest balance warming up from equilibrium; hot starts not explored",
         ]
     }
 }
@@ -226,6 +250,9 @@ pub enum Error {
     GasMassOutsideDomain,
     DenseGasUnsupported,
     WeakBindingUnsupported,
+    /// Greenhouse warming left the column domain (1000 K or 1% gas mass)
+    /// before balancing: a runaway this thin column cannot represent.
+    WarmingOutsideDomain,
     WorkBudgetExhausted,
     NonConvergence,
     InvalidClosure(Material),
@@ -245,16 +272,21 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
     if controls.max_iterations > 32 || controls.max_total_eos_evaluations > 16_000_000 {
         return Err(Error::InvalidInput("coupling controls"));
     }
-    if !request.column_temperature_k.is_finite()
-        || !(MIN_COLUMN_TEMPERATURE_K..=MAX_COLUMN_TEMPERATURE_K)
-            .contains(&request.column_temperature_k)
+    let column_k = match request.temperature {
+        Temperature::Prescribed { column_k, water_k } => {
+            if let Some(t) = water_k
+                && (!t.is_finite() || t <= 0.0)
+            {
+                return Err(Error::InvalidInput("water temperature"));
+            }
+            column_k
+        }
+        Temperature::Greenhouse { equilibrium_k } => equilibrium_k,
+    };
+    if !column_k.is_finite()
+        || !(MIN_COLUMN_TEMPERATURE_K..=MAX_COLUMN_TEMPERATURE_K).contains(&column_k)
     {
         return Err(Error::InvalidInput("column temperature (20..=1000 K)"));
-    }
-    if let Some(t) = request.water_temperature_k
-        && (!t.is_finite() || t <= 0.0)
-    {
-        return Err(Error::InvalidInput("water temperature"));
     }
     for material in Material::ALL {
         let offered = request.exchangeable.mass_kg(material);
@@ -280,20 +312,17 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
     let mut radius = (3.0 * total / (4.0 * PI * 4100.0)).cbrt();
     // Mass and radius under the gas column: condensed body plus deposit.
     let mut base = (total, radius);
+    let mut temperature = warming::temperatures(request, base)?;
     let mut work = 0;
     for iteration in 1..=controls.max_iterations {
-        let gas = column::partition(request, base.0, base.1)?;
+        let (column_k, water_k) = temperature;
+        let gas = column::partition(request, column_k, base.0, base.1)?;
         let (inventory, deposit) = split(&request.retained, &gas)?;
         let host_mass = inventory.total_mass_kg();
         let gm = GRAVITATIONAL_CONSTANT * (host_mass + deposit.mass_kg());
         // The load uses the geometry the gas was partitioned on, so a column
         // saturated in water loads its liquid at saturation, not just below it.
-        let air = column::atmosphere(
-            &gas,
-            request.column_temperature_k,
-            GRAVITATIONAL_CONSTANT * base.0,
-            base.1,
-        )?;
+        let air = column::atmosphere(&gas, column_k, GRAVITATIONAL_CONSTANT * base.0, base.1)?;
         let pressure = air.map_or(0.0, |a| a.pressure_pa());
         let load = pressure + deposit.load_pa(host_mass, radius);
         let mut radial_controls = controls.radial;
@@ -304,9 +333,7 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
             return Err(Error::WorkBudgetExhausted);
         }
         let condensed = if inventory.mass_kg(Material::Water) > 0.0 {
-            let t = request
-                .water_temperature_k
-                .ok_or(Error::InvalidInput("missing water temperature"))?;
+            let t = water_k.ok_or(Error::InvalidInput("missing water temperature"))?;
             CondensedStructure::Water(
                 water::solve(&inventory, t, load, radial_controls).map_err(Error::Radial)?,
             )
@@ -318,9 +345,10 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
         work += condensed.diagnostics().work.eos_evaluations;
         radius = condensed.radius_m();
         let top = deposit.top_radius_m(radius);
-        let actual_air = column::atmosphere(&gas, request.column_temperature_k, gm, top)?;
+        let actual_air = column::atmosphere(&gas, column_k, gm, top)?;
         base = (host_mass + deposit.mass_kg(), top);
-        let next_gas = column::partition(request, base.0, base.1)?;
+        temperature = warming::temperatures(request, base)?;
+        let next_gas = column::partition(request, temperature.0, base.0, base.1)?;
         let partition_residual = Material::ALL
             .iter()
             .map(|&m| {
@@ -338,6 +366,7 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
         if (pressure - actual_pressure).abs() <= PRESSURE_TOLERANCE_PA
             && (load - actual_load).abs() <= PRESSURE_TOLERANCE_PA
             && partition_residual <= ALLOCATION_RELATIVE_TOLERANCE
+            && (temperature.0 - column_k).abs() <= TEMPERATURE_RELATIVE_TOLERANCE * column_k
         {
             column::validate(&gas, actual_air.as_ref(), gm, top)?;
             let interface_residual = condensed.outer().pressure_pa - actual_load;
@@ -351,6 +380,9 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
                 deposit,
                 gas,
                 atmosphere: actual_air,
+                surface_temperature_k: column_k,
+                optical_depth: matches!(request.temperature, Temperature::Greenhouse { .. })
+                    .then(|| actual_air.map_or(0.0, |a| greenhouse::optical_depth(&a))),
                 diagnostics: Diagnostics {
                     iterations: iteration,
                     total_eos_evaluations: work,

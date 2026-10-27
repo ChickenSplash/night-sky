@@ -45,7 +45,12 @@ pub(super) fn atmosphere(
     .map_err(Error::Atmosphere)
 }
 
-pub(super) fn partition(request: &Request, mass: f64, radius: f64) -> Result<Inventory, Error> {
+pub(super) fn partition(
+    request: &Request,
+    temperature: f64,
+    mass: f64,
+    radius: f64,
+) -> Result<Inventory, Error> {
     if request.exchangeable.total_mass_kg() == 0.0 {
         return Ok(Inventory::default());
     }
@@ -65,7 +70,7 @@ pub(super) fn partition(request: &Request, mass: f64, radius: f64) -> Result<Inv
                 request
                     .exchangeable
                     .mass_kg(m)
-                    .min(cap_pa(g, request.column_temperature_k) * g.molecular_mass_u() / c),
+                    .min(cap_pa(g, temperature) * g.molecular_mass_u() / c),
             )
         }))
         .map_err(Error::Composition)
@@ -82,7 +87,7 @@ pub(super) fn partition(request: &Request, mass: f64, radius: f64) -> Result<Inv
         }
         let pressure = c * moles;
         let mean_mass = gas.total_mass_kg() / moles * ATOMIC_MASS_KG;
-        let height = BOLTZMANN_J_K * request.column_temperature_k
+        let height = BOLTZMANN_J_K * temperature
             / mean_mass
             / (GRAVITATIONAL_CONSTANT * mass / radius.powi(2));
         let profile = Profile::new(radius, height, pressure);
