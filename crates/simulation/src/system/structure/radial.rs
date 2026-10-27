@@ -95,6 +95,76 @@ impl<'a> Solver<'a> {
         self.pressure_scale
     }
 
+    /// Re-integrate a previous solution on the new inventory/load, then grow a
+    /// local bracket in the necessary direction. The hint is never a solution
+    /// or a domain override. Every probe uses this solver's existing budgets.
+    pub fn seeded_bracket(
+        &mut self,
+        seed: Option<f64>,
+        maximum: f64,
+        classify_upper: impl Fn(Result<Option<Trial>, SolveError>) -> Result<Option<Trial>, SolveError>,
+    ) -> Result<Option<(f64, f64, Option<Trial>)>, SolveError> {
+        let Some(seed) =
+            seed.filter(|p| p.is_finite() && *p > self.outer_pressure_pa && *p <= maximum)
+        else {
+            return Ok(None);
+        };
+        let initial = self.trial(seed);
+        let mut width = (seed * 1e-6).max(1.0);
+        let mut low = self.outer_pressure_pa;
+        let mut high = seed;
+        let upwards = matches!(initial, Ok(None));
+        let mut upper = if upwards {
+            low = seed;
+            None
+        } else {
+            classify_upper(initial)?
+        };
+        loop {
+            // An already acceptable hint needs no extra bracketing probes.
+            if let Some(trial) = &upper {
+                let residual =
+                    trial.regions.last().unwrap().outer().pressure_pa - self.outer_pressure_pa;
+                if (0.0..=self.policy.boundary_tolerance_pa.unwrap_or(0.0)).contains(&residual) {
+                    return Ok(Some((low, high, upper)));
+                }
+            }
+            let next = if upwards {
+                (seed + width).min(maximum)
+            } else {
+                (seed - width).max(self.outer_pressure_pa)
+            };
+            if !upwards && next == self.outer_pressure_pa {
+                return Ok(Some((next, high, upper)));
+            }
+            if upwards && next <= low {
+                return Err(SolveError::Unbracketed {
+                    maximum_central_pressure_pa: maximum,
+                });
+            }
+            if self.work.bracket_expansions == self.controls.max_bracket_expansions {
+                return Err(SolveError::WorkBudgetExhausted(WorkLimit::Bracketing));
+            }
+            self.work.bracket_expansions += 1;
+            match self.trial(next) {
+                Ok(None) => {
+                    low = next;
+                    if !upwards {
+                        return Ok(Some((low, high, upper)));
+                    }
+                }
+                trial => {
+                    high = next;
+                    upper = classify_upper(trial)?;
+                    if upwards {
+                        return Ok(Some((low, high, upper)));
+                    }
+                }
+            }
+            width *= 2.0;
+        }
+    }
+
     fn density(&mut self, material: Material, pressure: f64) -> Result<f64, SolveError> {
         if self.work.eos_evaluations == self.controls.max_eos_evaluations {
             return Err(SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations));

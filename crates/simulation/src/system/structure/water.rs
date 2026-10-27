@@ -162,12 +162,29 @@ pub fn solve(
     outer_pressure_pa: f64,
     controls: Controls,
 ) -> Result<WaterStructure, SolveError> {
+    solve_seeded(
+        retained,
+        water_temperature_k,
+        outer_pressure_pa,
+        controls,
+        None,
+    )
+}
+
+pub(super) fn solve_seeded(
+    retained: &Inventory,
+    water_temperature_k: f64,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    central_pressure_pa: Option<f64>,
+) -> Result<WaterStructure, SolveError> {
     solve_with_volume_factor(
         retained,
         water_temperature_k,
         outer_pressure_pa,
         controls,
         1.0,
+        central_pressure_pa,
     )
 }
 
@@ -177,6 +194,7 @@ fn solve_with_volume_factor(
     outer_pressure_pa: f64,
     controls: Controls,
     volume_factor: f64,
+    central_pressure_pa: Option<f64>,
 ) -> Result<WaterStructure, SolveError> {
     controls.validate()?;
     for material in Material::ALL {
@@ -429,27 +447,34 @@ fn solve_with_volume_factor(
     };
     let mut solver = radial::Solver::new(retained, outer_pressure_pa, controls, &density, policy);
     solver.work = initial_work;
-    let mut low = outer_pressure_pa;
-    let mut high = (low + solver.pressure_scale()).min(cold::MAX_PRESSURE_PA);
-    let mut upper = loop {
-        let trial = solver.trial(high);
-        match trial {
-            Ok(None) => {
-                low = high;
-                if high == cold::MAX_PRESSURE_PA {
-                    return Err(SolveError::Unbracketed {
-                        maximum_central_pressure_pa: high,
-                    });
+    let seeded =
+        solver.seeded_bracket(central_pressure_pa, cold::MAX_PRESSURE_PA, classify_upper)?;
+    let (mut low, mut high, mut upper) = if let Some(bracket) = seeded {
+        bracket
+    } else {
+        let mut low = outer_pressure_pa;
+        let mut high = (low + solver.pressure_scale()).min(cold::MAX_PRESSURE_PA);
+        let upper = loop {
+            let trial = solver.trial(high);
+            match trial {
+                Ok(None) => {
+                    low = high;
+                    if high == cold::MAX_PRESSURE_PA {
+                        return Err(SolveError::Unbracketed {
+                            maximum_central_pressure_pa: high,
+                        });
+                    }
+                    if solver.work.bracket_expansions == controls.max_bracket_expansions {
+                        return Err(SolveError::WorkBudgetExhausted(WorkLimit::Bracketing));
+                    }
+                    solver.work.bracket_expansions += 1;
+                    high = (outer_pressure_pa + 2.0 * (high - outer_pressure_pa))
+                        .min(cold::MAX_PRESSURE_PA);
                 }
-                if solver.work.bracket_expansions == controls.max_bracket_expansions {
-                    return Err(SolveError::WorkBudgetExhausted(WorkLimit::Bracketing));
-                }
-                solver.work.bracket_expansions += 1;
-                high = (outer_pressure_pa + 2.0 * (high - outer_pressure_pa))
-                    .min(cold::MAX_PRESSURE_PA);
+                _ => break classify_upper(trial)?,
             }
-            _ => break classify_upper(trial)?,
-        }
+        };
+        (low, high, upper)
     };
     loop {
         if let Some(trial) = upper.as_ref() {

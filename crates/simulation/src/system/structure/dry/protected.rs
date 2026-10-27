@@ -33,6 +33,48 @@ fn solve_with_density_ratio(
     controls: Controls,
     lambda: f64,
 ) -> Result<DryStructure, SolveError> {
+    solve_internal(
+        host,
+        protected,
+        outer_pressure_pa,
+        controls,
+        lambda,
+        radial::Policy::default(),
+        None,
+    )
+}
+
+pub(crate) fn solve_loaded_seeded(
+    host: &Inventory,
+    protected: &Inventory,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    seed: Option<f64>,
+) -> Result<DryStructure, SolveError> {
+    solve_internal(
+        host,
+        protected,
+        outer_pressure_pa,
+        controls,
+        1.0,
+        radial::Policy {
+            boundary_tolerance_pa: Some(super::super::water::BOUNDARY_TOLERANCE_PA),
+            pressure_error_scale_pa: Some(1e8),
+            ..radial::Policy::default()
+        },
+        seed,
+    )
+}
+
+fn solve_internal(
+    host: &Inventory,
+    protected: &Inventory,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    lambda: f64,
+    policy: radial::Policy,
+    seed: Option<f64>,
+) -> Result<DryStructure, SolveError> {
     controls.validate()?;
     for material in Material::ALL {
         if host.mass_kg(material) > 0.0 && !matches!(material, Material::Metal | Material::Silicate)
@@ -79,7 +121,8 @@ fn solve_with_density_ratio(
         outer_pressure_pa,
         controls,
         |material, pressure| cold::density_kg_m3(material, pressure).map(|rho| rho / volume_factor),
-        radial::Policy::default(),
+        policy,
+        seed,
     )?;
     for region in &mut body.regions {
         let material = if region.inventory.mass_kg(Material::Metal) > 0.0 {

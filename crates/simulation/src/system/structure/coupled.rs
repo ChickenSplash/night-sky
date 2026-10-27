@@ -281,6 +281,16 @@ impl std::error::Error for Error {}
 /// Match gas mass/partition, condensed loading and radius. Surface pressure is
 /// always an output. Repeated evaluations start from immutable offered supply.
 pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, Error> {
+    solve_protected(request, &Inventory::default(), controls)
+}
+
+/// Protected secondaries participate in every interior/column iteration, not
+/// in a second, mechanically inconsistent solve after convergence.
+pub(super) fn solve_protected(
+    request: &Request,
+    protected: &Inventory,
+    controls: Controls,
+) -> Result<CoupledStructure, Error> {
     controls.radial.validate().map_err(Error::Radial)?;
     if controls.max_iterations > 32 || controls.max_total_eos_evaluations > 16_000_000 {
         return Err(Error::InvalidInput("coupling controls"));
@@ -303,7 +313,22 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
     }
     for material in Material::ALL {
         let offered = request.exchangeable.mass_kg(material);
-        if offered > request.retained.mass_kg(material) {
+        let shielded = protected.mass_kg(material);
+        if shielded > 0.0
+            && !matches!(
+                material,
+                Material::CarbonDioxide
+                    | Material::Nitrogen
+                    | Material::Methane
+                    | Material::Oxygen
+                    | Material::Argon
+            )
+        {
+            return Err(Error::UnsupportedCondensate(material));
+        }
+        if shielded > request.retained.mass_kg(material)
+            || offered > request.retained.mass_kg(material) - shielded
+        {
             return Err(Error::InvalidInput("exchangeable exceeds retained"));
         }
         if offered > 0.0 && material.properties().gas.is_none() {
@@ -312,7 +337,7 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
         if !matches!(
             material,
             Material::Metal | Material::Silicate | Material::Water
-        ) && offered != request.retained.mass_kg(material)
+        ) && offered != request.retained.mass_kg(material) - shielded
         {
             return Err(Error::UnsupportedCondensate(material));
         }
@@ -327,11 +352,16 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
     let mut base = (total, radius);
     let mut temperature = warming::temperatures(request, base)?;
     let mut work = 0;
+    let mut central_pressure_pa = None;
     for iteration in 1..=controls.max_iterations {
         let (column_k, water_k) = temperature;
         let gas = column::partition(request, column_k, base.0, base.1)?;
-        let (inventory, deposit) = split(&request.retained, &gas)?;
-        let host_mass = inventory.total_mass_kg();
+        let exposed = Inventory::new(
+            &Material::ALL.map(|m| (m, request.retained.mass_kg(m) - protected.mass_kg(m))),
+        )
+        .map_err(Error::Composition)?;
+        let (inventory, deposit) = split(&exposed, &gas)?;
+        let host_mass = inventory.total_mass_kg() + protected.total_mass_kg();
         let gm = GRAVITATIONAL_CONSTANT * (host_mass + deposit.mass_kg());
         // The load uses the geometry the gas was partitioned on, so a column
         // saturated in water loads its liquid at saturation, not just below it.
@@ -345,17 +375,50 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
         if radial_controls.max_eos_evaluations == 0 {
             return Err(Error::WorkBudgetExhausted);
         }
-        let condensed = if inventory.mass_kg(Material::Water) > 0.0 {
+        let condensed = if protected.total_mass_kg() > 0.0 {
+            if inventory.mass_kg(Material::Water) > 0.0 {
+                let t = water_k.ok_or(Error::InvalidInput("missing water temperature"))?;
+                CondensedStructure::Water(
+                    water::protected::solve_seeded(
+                        &inventory,
+                        protected,
+                        t,
+                        load,
+                        radial_controls,
+                        central_pressure_pa,
+                    )
+                    .map_err(Error::Radial)?,
+                )
+            } else {
+                CondensedStructure::Dry(
+                    dry::protected::solve_loaded_seeded(
+                        &inventory,
+                        protected,
+                        load,
+                        radial_controls,
+                        central_pressure_pa,
+                    )
+                    .map_err(Error::Radial)?,
+                )
+            }
+        } else if inventory.mass_kg(Material::Water) > 0.0 {
             let t = water_k.ok_or(Error::InvalidInput("missing water temperature"))?;
             CondensedStructure::Water(
-                water::solve(&inventory, t, load, radial_controls).map_err(Error::Radial)?,
+                water::solve_seeded(&inventory, t, load, radial_controls, central_pressure_pa)
+                    .map_err(Error::Radial)?,
             )
         } else {
             CondensedStructure::Dry(
-                dry::solve_loaded(&inventory, load, radial_controls).map_err(Error::Radial)?,
+                if central_pressure_pa.is_some() {
+                    dry::solve_loaded_seeded(&inventory, load, radial_controls, central_pressure_pa)
+                } else {
+                    dry::solve_loaded(&inventory, load, radial_controls)
+                }
+                .map_err(Error::Radial)?,
             )
         };
         work += condensed.diagnostics().work.eos_evaluations;
+        central_pressure_pa = Some(condensed.diagnostics().central_pressure_pa);
         radius = condensed.radius_m();
         let top = deposit.top_radius_m(radius);
         let actual_air = column::atmosphere(&gas, column_k, gm, top)?;

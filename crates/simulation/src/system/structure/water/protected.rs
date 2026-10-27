@@ -38,6 +38,45 @@ fn solve_with_density_ratio(
     controls: Controls,
     lambda: f64,
 ) -> Result<WaterStructure, SolveError> {
+    solve_internal(
+        host,
+        protected,
+        water_temperature_k,
+        outer_pressure_pa,
+        controls,
+        lambda,
+        None,
+    )
+}
+
+pub(crate) fn solve_seeded(
+    host: &Inventory,
+    protected: &Inventory,
+    water_temperature_k: f64,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    seed: Option<f64>,
+) -> Result<WaterStructure, SolveError> {
+    solve_internal(
+        host,
+        protected,
+        water_temperature_k,
+        outer_pressure_pa,
+        controls,
+        1.0,
+        seed,
+    )
+}
+
+fn solve_internal(
+    host: &Inventory,
+    protected: &Inventory,
+    water_temperature_k: f64,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    lambda: f64,
+    seed: Option<f64>,
+) -> Result<WaterStructure, SolveError> {
     controls.validate()?;
     for material in Material::ALL {
         if host.mass_kg(material) > 0.0
@@ -87,6 +126,7 @@ fn solve_with_density_ratio(
         outer_pressure_pa,
         controls,
         1.0 - f + f / lambda,
+        seed,
     )?;
     if protected.total_mass_kg() > 0.0 {
         for region in &mut body.regions {

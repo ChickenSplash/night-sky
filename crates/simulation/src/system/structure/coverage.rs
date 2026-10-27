@@ -1,16 +1,14 @@
 //! Opt-in coverage report for the rock-and-water prototype (plan P1 step 1).
-//! The provisional route joins the existing headless solvers until the single
-//! entry point exists. Test-only; generation never calls it.
+//! Exercises the unified headless entry point. Generation never calls it yet.
 //! See docs/simulation/planet-composition.md#prototype-coverage-report.
 
-use super::{coupled, dry, water};
+use super::{coupled, dry, prototype, water};
 use crate::{
     galaxy::Component,
     star::multiple::Hosted,
     system::{
-        composition::{Inventory, Material},
+        composition::Material,
         galactic_bodies,
-        generation::retention::accessible_fraction,
         materials::water::{self as eos, Unsupported},
     },
     units::EARTH_MASS_KG,
@@ -104,120 +102,37 @@ struct Solved {
     eos_evaluations: usize,
 }
 
-fn is_secondary(m: Material) -> bool {
-    !matches!(
-        m,
-        Material::Metal
-            | Material::Silicate
-            | Material::Water
-            | Material::Hydrogen
-            | Material::Helium
-    )
-}
-
-/// Provisional join: couple the atmosphere, with all water exchangeable but
-/// without protected secondaries, then
-/// re-solve the condensed host with them entrained at that surface load. Any
-/// frost deposit then sits on top of the re-solved host.
-/// H/He is an ordinary exchangeable gas. A body is an envelope only when the
-/// thin-column coupling refuses its gas, not by any H/He amount threshold.
+/// Every reported planet uses the same entry point intended for generation.
 fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let retained = p.body.budget.retained();
-    let source = p.body.budget.source();
-    // Generation's 20 K column floor applies to the equilibrium temperature.
-    let equilibrium = p
-        .environment
-        .as_ref()
-        .unwrap()
-        .equilibrium_temperature_k
-        .max(coupled::MIN_COLUMN_TEMPERATURE_K);
     let light_mass = retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium);
     let light = light_mass > 0.0;
-    // H/He never condenses, so this alone already exceeds the column's own mask.
-    if light_mass / retained.total_mass_kg() > coupled::MAX_GAS_MASS_FRACTION {
-        return Err((Category::Envelope, "gas mass".to_owned()));
-    }
-    let protected_of = |m: Material| {
-        let accessible = accessible_fraction(m);
-        if accessible > 0.0 {
-            (source.mass_kg(m) * (1.0 - accessible)).min(retained.mass_kg(m))
+    let escaping = prototype::solve(
+        &p.body.budget,
+        p.environment.as_ref().unwrap(),
+        coupled::Controls::default(),
+    )
+    .map_err(|e| {
+        // The warmed surface temperature is unknown on failure, so water
+        // errors are not binned by temperature here.
+        let (category, detail) = coupled_error(f64::NAN, &e);
+        if light && matches!(category, Category::GasDomain | Category::MassDomain) {
+            (Category::Envelope, detail)
         } else {
-            0.0
-        }
-    };
-    let inventory = |f: &dyn Fn(Material) -> f64| {
-        Inventory::new(&Material::ALL.map(|m| (m, f(m))))
-            .map_err(|e| (Category::Other, format!("inventory {e:?}")))
-    };
-    let protected = inventory(&|m| {
-        if is_secondary(m) {
-            protected_of(m)
-        } else {
-            0.0
+            (category, detail)
         }
     })?;
-    let open = inventory(&|m| {
-        let r = retained.mass_kg(m);
-        if is_secondary(m) {
-            (r - protected_of(m)).max(0.0)
-        } else {
-            r
-        }
-    })?;
-    // All water trades with the air: exposed water evaporates up to saturation.
-    // Protection only shielded it from escape, which generation already applied.
-    let exchangeable = inventory(&|m| match m {
-        Material::Metal | Material::Silicate => 0.0,
-        _ => open.mass_kg(m),
-    })?;
-    let request = coupled::Request {
-        retained: open,
-        exchangeable,
-        temperature: coupled::Temperature::Greenhouse {
-            equilibrium_k: equilibrium,
-        },
-    };
-    let escaping = coupled::escape::solve_escaping(&request, coupled::Controls::default())
-        .map_err(|e| {
-            // The warmed surface temperature is unknown on failure, so water
-            // errors are not binned by temperature here.
-            let (category, detail) = coupled_error(f64::NAN, &e);
-            if light && matches!(category, Category::GasDomain | Category::MassDomain) {
-                (Category::Envelope, detail)
-            } else {
-                (category, detail)
-            }
-        })?;
     let atmosphere = &escaping.structure;
-    let escaped = escaping.escaped;
-    // Protected traces are entrained at the warmed surface temperature.
+    let escaped = escaping.blowoff;
     let t = atmosphere.surface_temperature_k();
     let pressure = atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa());
-    let load = atmosphere.condensed_load_pa();
     let deposit_m = atmosphere.deposit_thickness_m();
-    let host = atmosphere.condensed().retained_inventory();
-    let mut work = atmosphere.diagnostics().total_eos_evaluations;
-    let controls = dry::Controls::default();
-    let radial = |e: dry::SolveError| radial_error(t, &e);
-    let (radius_m, surface) = if protected.total_mass_kg() == 0.0 {
-        (
-            atmosphere.condensed().radius_m(),
-            surface_of(atmosphere.condensed()),
-        )
-    } else if host.mass_kg(Material::Water) > 0.0 {
-        let s = water::protected::solve(&host, &protected, t, load, controls).map_err(radial)?;
-        work += s.diagnostics().work.eos_evaluations;
-        let surface = water_surface(s.regions().last().unwrap().phase());
-        (s.radius_m(), surface)
-    } else {
-        let s = dry::protected::solve(&host, &protected, load, controls).map_err(radial)?;
-        work += s.diagnostics().work.eos_evaluations;
-        (s.radius_m(), "rock")
-    };
+    let work = atmosphere.diagnostics().total_eos_evaluations;
+    let surface = surface_of(atmosphere.condensed());
     let surface = if deposit_m > 0.0 { "frost" } else { surface };
     Ok(Solved {
         surface_k: t,
-        radius_m: radius_m + deposit_m,
+        radius_m: atmosphere.surface_radius_m(),
         surface,
         surface_pressure_pa: pressure,
         deposit_m,

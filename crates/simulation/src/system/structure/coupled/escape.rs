@@ -16,13 +16,21 @@ pub struct Escaping {
 /// lightest exchangeable gas entirely and re-solve, until the column binds.
 /// Each attempt carries the full controls; at most one per gas species.
 pub fn solve_escaping(request: &Request, controls: Controls) -> Result<Escaping, Error> {
+    solve_protected(request, &Inventory::default(), controls)
+}
+
+pub(crate) fn solve_protected(
+    request: &Request,
+    protected: &Inventory,
+    controls: Controls,
+) -> Result<Escaping, Error> {
     let mut request = *request;
     let mut escaped = Inventory::default();
     let mut order = Gas::ALL;
     order.sort_by(|a, b| a.molecular_mass_u().total_cmp(&b.molecular_mass_u()));
     let mut order = order.into_iter().map(Material::from_gas);
     loop {
-        match solve(&request, controls) {
+        match super::solve_protected(&request, protected, controls) {
             Err(Error::WeakBindingUnsupported) => {
                 let lightest = order
                     .find(|&m| request.exchangeable.mass_kg(m) > 0.0)

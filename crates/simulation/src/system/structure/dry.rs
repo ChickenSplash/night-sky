@@ -234,6 +234,7 @@ fn solve_with_eos(
         controls,
         eos,
         radial::Policy::default(),
+        None,
     )
 }
 
@@ -242,6 +243,15 @@ pub(super) fn solve_loaded(
     retained: &Inventory,
     outer_pressure_pa: f64,
     controls: Controls,
+) -> Result<DryStructure, SolveError> {
+    solve_loaded_seeded(retained, outer_pressure_pa, controls, None)
+}
+
+pub(super) fn solve_loaded_seeded(
+    retained: &Inventory,
+    outer_pressure_pa: f64,
+    controls: Controls,
+    central_pressure_pa: Option<f64>,
 ) -> Result<DryStructure, SolveError> {
     solve_with_policy(
         retained,
@@ -253,6 +263,7 @@ pub(super) fn solve_loaded(
             pressure_error_scale_pa: Some(1e8),
             ..radial::Policy::default()
         },
+        central_pressure_pa,
     )
 }
 
@@ -262,6 +273,7 @@ fn solve_with_policy(
     controls: Controls,
     eos: impl Fn(Material, f64) -> Result<f64, cold::ColdEosError>,
     policy: radial::Policy,
+    central_pressure_pa: Option<f64>,
 ) -> Result<DryStructure, SolveError> {
     controls.validate()?;
     for material in Material::ALL {
@@ -283,24 +295,32 @@ fn solve_with_policy(
         |material, pressure, _, _: &mut Work, _| eos(material, pressure).map_err(SolveError::Eos);
     let boundary_tolerance = policy.boundary_tolerance_pa;
     let mut solver = radial::Solver::new(retained, outer_pressure_pa, controls, &density, policy);
-    let mut low = outer_pressure_pa;
-    // Ambient-density sphere is only an initial bracket scale, never a radius fallback.
-    let mut high = (low + solver.pressure_scale()).min(cold::MAX_PRESSURE_PA);
-    let mut high_trial = loop {
-        if let Some(trial) = solver.trial(high)? {
-            break trial;
-        }
-        low = high;
-        if high == cold::MAX_PRESSURE_PA {
-            return Err(SolveError::Unbracketed {
-                maximum_central_pressure_pa: high,
-            });
-        }
-        if solver.work.bracket_expansions == controls.max_bracket_expansions {
-            return Err(SolveError::WorkBudgetExhausted(WorkLimit::Bracketing));
-        }
-        solver.work.bracket_expansions += 1;
-        high = (outer_pressure_pa + 2.0 * (high - outer_pressure_pa)).min(cold::MAX_PRESSURE_PA);
+    let seeded =
+        solver.seeded_bracket(central_pressure_pa, cold::MAX_PRESSURE_PA, |trial| trial)?;
+    let (mut low, mut high, mut high_trial) = if let Some((low, high, upper)) = seeded {
+        (low, high, upper.unwrap())
+    } else {
+        let mut low = outer_pressure_pa;
+        // Ambient-density sphere is only an initial bracket scale, never a radius fallback.
+        let mut high = (low + solver.pressure_scale()).min(cold::MAX_PRESSURE_PA);
+        let high_trial = loop {
+            if let Some(trial) = solver.trial(high)? {
+                break trial;
+            }
+            low = high;
+            if high == cold::MAX_PRESSURE_PA {
+                return Err(SolveError::Unbracketed {
+                    maximum_central_pressure_pa: high,
+                });
+            }
+            if solver.work.bracket_expansions == controls.max_bracket_expansions {
+                return Err(SolveError::WorkBudgetExhausted(WorkLimit::Bracketing));
+            }
+            solver.work.bracket_expansions += 1;
+            high =
+                (outer_pressure_pa + 2.0 * (high - outer_pressure_pa)).min(cold::MAX_PRESSURE_PA);
+        };
+        (low, high, high_trial)
     };
     loop {
         let residual = high_trial.regions.last().unwrap().outer().pressure_pa - outer_pressure_pa;

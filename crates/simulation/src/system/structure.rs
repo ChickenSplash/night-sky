@@ -9,6 +9,7 @@ pub mod coupled;
 mod coverage;
 pub mod dry;
 pub mod parameters;
+pub mod prototype;
 mod radial;
 mod radius;
 pub mod water;

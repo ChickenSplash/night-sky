@@ -827,3 +827,113 @@ fn unbound_columns_lose_their_lightest_gases_until_the_rest_binds() {
         Error::DenseGasUnsupported
     );
 }
+
+#[test]
+fn dry_interior_hints_preserve_accuracy_and_work_limits() {
+    let inventory = Inventory::new(&[
+        (Material::Metal, 0.3 * EARTH_MASS_KG),
+        (Material::Silicate, 0.7 * EARTH_MASS_KG),
+    ])
+    .unwrap();
+    let controls = dry::Controls::default();
+    let original = dry::solve_loaded(&inventory, 1e5, controls).unwrap();
+    let pressure = original.diagnostics().central_pressure_pa;
+    for seed in [
+        0.5 * pressure,
+        pressure,
+        1.5 * pressure,
+        0.0,
+        f64::NAN,
+        f64::INFINITY,
+    ] {
+        let hinted = dry::solve_loaded_seeded(&inventory, 1e5, controls, Some(seed)).unwrap();
+        assert!((hinted.radius_m() / original.radius_m() - 1.0).abs() < 1e-10);
+        assert!(hinted.diagnostics().boundary_residual_pa <= water::BOUNDARY_TOLERANCE_PA);
+    }
+    let hinted = dry::solve_loaded_seeded(&inventory, 1e5, controls, Some(pressure)).unwrap();
+    let needed = hinted.diagnostics().work.eos_evaluations;
+    assert!(needed < original.diagnostics().work.eos_evaluations);
+    assert!(
+        dry::solve_loaded_seeded(
+            &inventory,
+            1e5,
+            dry::Controls {
+                max_eos_evaluations: needed,
+                ..controls
+            },
+            Some(pressure)
+        )
+        .is_ok()
+    );
+    assert!(matches!(
+        dry::solve_loaded_seeded(
+            &inventory,
+            1e5,
+            dry::Controls {
+                max_eos_evaluations: needed - 1,
+                ..controls
+            },
+            Some(pressure)
+        ),
+        Err(dry::SolveError::WorkBudgetExhausted(_))
+    ));
+}
+
+#[test]
+fn water_interior_hints_preserve_accuracy_and_work_limits() {
+    let inventory = Inventory::new(&[
+        (Material::Metal, 0.3 * EARTH_MASS_KG),
+        (Material::Silicate, 0.4 * EARTH_MASS_KG),
+        (Material::Water, 0.3 * EARTH_MASS_KG),
+    ])
+    .unwrap();
+    let controls = dry::Controls::default();
+    for temperature in [250.0, 300.0] {
+        let original = water::solve(&inventory, temperature, 1e5, controls).unwrap();
+        let pressure = original.diagnostics().central_pressure_pa;
+        for seed in [
+            0.5 * pressure,
+            pressure,
+            1.5 * pressure,
+            0.0,
+            f64::NAN,
+            f64::INFINITY,
+        ] {
+            let hinted =
+                water::solve_seeded(&inventory, temperature, 1e5, controls, Some(seed)).unwrap();
+            assert!((hinted.radius_m() / original.radius_m() - 1.0).abs() < 1e-10);
+            assert!((hinted.inertia_kg_m2() / original.inertia_kg_m2() - 1.0).abs() < 1e-10);
+            assert!(hinted.diagnostics().boundary_residual_pa <= water::BOUNDARY_TOLERANCE_PA);
+        }
+        let hinted =
+            water::solve_seeded(&inventory, temperature, 1e5, controls, Some(pressure)).unwrap();
+        let needed = hinted.diagnostics().work.eos_evaluations;
+        assert!(needed < original.diagnostics().work.eos_evaluations);
+        assert!(
+            water::solve_seeded(
+                &inventory,
+                temperature,
+                1e5,
+                dry::Controls {
+                    max_eos_evaluations: needed,
+                    ..controls
+                },
+                Some(pressure)
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            water::solve_seeded(
+                &inventory,
+                temperature,
+                1e5,
+                dry::Controls {
+                    max_eos_evaluations: needed - 1,
+                    ..controls
+                },
+                Some(pressure)
+            ),
+            Err(dry::SolveError::WorkBudgetExhausted(_))
+        ));
+    }
+}
