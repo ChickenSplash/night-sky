@@ -29,6 +29,7 @@ for implementation details.
 | Lists, pages, tasks and wire models | `crates/shared`, simulation `system/overlay.rs`, `system/demo.rs` and client | [Information overlay](docs/shared/information-overlay.md) |
 | Visits, selection, camera and presentation | Client `navigation/`, `scene/` | [Navigation](docs/client/navigation.md) |
 | Visible-star loading and spatial queries | Client `stars/stream/`, simulation `galaxy/` | [Streaming](docs/client/streaming.md) |
+| Experimental planet loading and shared CPU work budget | Client `planet_loading.rs`, simulation `background.rs`, `system/generated.rs` | [Background prototype](docs/simulation/planet-composition.md#experimental-background-loading), [streaming](docs/client/streaming.md#shared-star-and-planet-cpu-budget) |
 | Bodies, lighting, star points and galaxy glow | Client `render/`, `stars/` | [Rendering](docs/client/rendering.md), [galactic rendering](docs/client/galactic-rendering.md) |
 | Key bindings and piloting | Client `input/` | [Controls](docs/client/controls.md) |
 | HUD, breadcrumbs, inspector and panels | Client `ui/` | [Interface](docs/client/ui/interface.md), [controls](docs/client/controls.md), [browser](docs/client/ui/browser.md) |

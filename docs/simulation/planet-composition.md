@@ -620,7 +620,7 @@ display cutoff.
 - Water keeps the radial model's bounds. Ice surfaces may sit at any pressure,
   including airless ones; a liquid surface needs at least its saturation
   pressure, otherwise the vapour is refused. No pressure floor is invented.
-  Prescribed gas and water temperatures are independent imposed anchors: unequal
+   Prescribed gas and water temperatures are independent imposed anchors: unequal
   values describe mechanical loading, not thermal or evaporation equilibrium.
   Under the greenhouse both take the one surface temperature.
 - Cold-trap caps are approximate, not matched Gibbs or chemical equilibrium.
@@ -629,8 +629,9 @@ display cutoff.
   saturated in water leaves the liquid below it stable; ice keeps the cold-trap
   fit. The condensed load is computed on the geometry the gas was partitioned on,
   so a pure steam column loads its ocean at saturation to rounding, and the ocean
-  top takes the liquid-side limit. Protected water is supported; protected (non-exchangeable) secondary condensates are
-  refused here and handled by the protected-trace host solvers instead.
+   top takes the liquid-side limit. Protected water is supported by the low-level
+   API; protected secondary condensates require the unified entry point below,
+   which integrates them with the protected-trace host prescription.
 
 ### Greenhouse surface temperature
 
@@ -724,17 +725,34 @@ aggregate budget limits each subsequent call; a failed call terminates the
 request, never retries with reset work. Controls can lower ceilings, not raise
 them. Nonconvergence is explicit.
 
+After the first interior solve, coupling carries forward its central pressure
+as a **search hint**, not a reused profile. The radial solver reintegrates at
+that pressure with the new inventory, load and water temperature. If it is not
+already acceptable, a local bracket expands towards higher or lower pressure
+until it encloses a solution. The initial span is relative 10⁻⁶ of the hint
+(at least 10⁻⁵ bar); this affects search cost only, not acceptance. Invalid or
+out-of-range hints use the original unseeded search. Standalone and protected
+host solves still start unseeded.
+
+All trial integrations, boundary tolerances, phase/domain checks and work
+ceilings are unchanged. Water-domain failures may delimit an upper bracket
+exactly as before, but numerical/budget errors propagate. Hint probes debit
+the same request budgets, without reset or a hidden fallback. Blow-off attempts
+start fresh, so a different retained inventory never inherits another attempt's
+hint.
+
 ```sh
 cargo test -p space-simulation system::structure::coupled -- --nocapture
 ```
 
-Twenty-one tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+Twenty-three tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
 and absent gas, mixed N₂/CO₂, thin H/He, N₂ frost on rock, CO₂ frost loading a
 warmer water host, a 30 K icy body with N₂ frost on airless ice, an ocean under its own saturated steam and trace water fully evaporated, an
 Earth twin warmed from frozen to a liquid ocean, unwarmed transparent and absent
 air, a steam runaway refused, bounded hot steam, lightest-first blow-off, sub-ulp vapour, stripping, deterministic repeats,
 refinement (including bracket preservation and interpolation versus full-precision
-bisection), exact aggregate-work success/failure and unsupported inputs/regimes.
+bisection), accurate/inaccurate/invalid dry and water interior hints with exact
+work-limit checks, exact aggregate-work success/failure and unsupported inputs/regimes.
 Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
 and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
 pressure and water allocation by less than relative 10⁻⁷. These are numerical
@@ -742,10 +760,10 @@ targets, not scientific error bars.
 
 The nitrogen fixture (0.325 metal, 0.674999 silicate and 0.000001 nitrogen Earth
 masses at 250 K) takes three iterations to reach **6,113.588 km** and
-**134,987.088 Pa**, using 1,002,398 radial EOS evaluations. Replacing 0.3 Earth
+**134,987.088 Pa**. Replacing 0.3 Earth
 masses of silicate with exchangeable water gives **7,179.896 km / 70,950.716 Pa**
-at 250 K and **7,170.596 km / 73,548.551 Pa** at 300 K. Both take three iterations,
-using 1,085,619 and 2,793,870 radial evaluations respectively. These are prescribed
+at 250 K and **7,170.596 km / 73,548.551 Pa** at 300 K. Both take three iterations.
+These are prescribed
 test compositions, not reconstructions of observed planets.
 
 The cold fixture exposed a round-trip floating-point error: `(P/scale)*scale`
@@ -753,6 +771,53 @@ could lie one ulp beyond an outward EOS branch. The shared kernel now recognises
 **exact equality** to a prescribed event's dimensionless coordinate and evaluates
 the original endpoint pressure. No tolerance band, pressure offset, density
 blend or EOS-domain extension is used.
+
+## Experimental background loading
+
+Step 8 is opt-in and does **not** yet change live `PlanetPhysical`, rendering,
+navigation geometry or the planet inspector. Enable **layered calculations**
+under F3 → perf → experimental planet loading. It resets off on restart.
+The debug section reports queued, calculating, solved and unsupported results;
+a refusal retains its typed reason, not a successful legacy substitution.
+Legacy visuals remain in use for every planet until the step-9 consumer adapter.
+
+`system::generated::generated_system_with_mode` defaults via the existing
+`generated_system` wrapper to `Mode::Legacy`. `Mode::LayeredPrototype` also
+prepares immutable per-planet budgets and environments, without solving them
+inline or changing the initial wire system. The client prepares these inputs
+off-thread by reconstructing the deterministic natural system once, avoiding
+transport-record decoding or changes to live snapshots. This duplicates the
+cheap initial generation on a cache miss, not the expensive physics solve.
+The optional list/task overlay is not refined separately in step 8.
+
+The current visited system is the target (including during a navigation
+flight). Without a visit, a selected star or remote planet's parent system is
+prefetched. A lingering selection of a system just left does not restart its
+cancelled queue. Each planet is one independent background job; the selected
+planet goes first among queued jobs. Jobs already running are not reordered.
+The [shared star/planet budget](../client/streaming.md#shared-star-and-planet-cpu-budget)
+prevents independent ¾-CPU worker allocations from competing unchecked.
+
+Results live in a four-system, least-recently-targeted in-memory cache, keyed by
+stable natural-system ID for the one compiled prototype model. Completed solves
+and typed refusals are reused on revisit; incomplete entries prepare only their
+missing jobs. There is no disk cache or cross-version reuse. Changing targets or
+disabling the mode cancels queued work, marks running work obsolete and rejects
+its results using a request epoch. Running numerical calls finish under their
+unchanged work ceilings before releasing their slot; they are not forcibly
+interrupted. Worker panics/spawn failures are explicit diagnostic failures.
+The frame thread drains at most two result messages per update and never joins
+unfinished workers or waits for a budget permit. Closing the debug window does
+not stop jobs.
+
+The original fast system-generation path remains synchronous, with an info-level
+timing log at the client generation wrapper. Two headless sample systems took
+5.6 ms (19 planets) and 1.4 ms (9 planets) in the optimised test profile. These
+are preliminary samples, not an interactive frame-time guarantee or a population
+benchmark; moving this initial path off-thread remains warranted if flight logs
+show hitches. The debug readout separately times background input preparation.
+The user runs visual/frame-time/star-flight benchmarks; no such test has been
+launched as part of this implementation.
 
 ## Prototype coverage report
 
@@ -770,15 +835,17 @@ census keys `composition-calibration:{component:?}:{index}`).
 printed and written to `data/tmp/composition-coverage.md`, with one row per
 planet in `data/tmp/composition-coverage.tsv` for diffing between steps.
 
-The route is provisional and test-only, until the single entry point exists:
+The report uses `structure::prototype::solve`, the same headless entry point
+intended for experimental generation. It is not yet wired into live generation.
 
 1. H/He is an ordinary exchangeable gas, with no amount threshold. A body is an
    **envelope** only when the thin column refuses its gas: H/He alone above the
    coupling's 1% gas-mass mask (H/He never condenses, so this is checked first),
    or a coupled refusal for gas mass, dense gas or mass above 20 Earth masses on
    an H/He-bearing body.
-2. Protected secondaries (90% of CO₂/N₂/CH₄/O₂/Ar source) are set aside. The
-   coupled solver runs on the rest, with H/He, **all** water and all remaining
+2. Protected secondaries (90% of CO₂/N₂/CH₄/O₂/Ar source, capped by retained
+   supply) stay entrained in the interior. The coupled solver includes that
+   mass in every iteration, with H/He, **all** water and all remaining
    secondaries exchangeable, at the greenhouse surface temperature over the
    equilibrium temperature (floored at 20 K, as in generation). Water is not split: exposed water evaporates until
    the air is saturated, leaving an ocean or ice below, or all of it becomes
@@ -787,11 +854,40 @@ The route is provisional and test-only, until the single entry point exists:
    The coupled call goes through the [blow-off wrapper](#unbound-column-blow-off),
    so a weakly bound column loses its lightest gases instead of failing. The
    report counts escaping planets, their species and escaped mass fraction.
-3. The resulting condensed host is re-solved with the protected secondaries
-   entrained at the coupled load (gas pressure plus any frost deposit). The
-   column's gravity ignores that protected mass, at most 0.3% of the body. Any
-   frost sits on top: its thickness is added to the radius, the surface is
-   reported as `frost` and the TSV carries `deposit_m`.
+3. Each iteration uses the dry or water protected-trace radial solver under
+   the coupled load (gas pressure plus any frost deposit), with the same
+   central-pressure hints and shared work ceiling. Protected mass contributes
+   to volume, gravity and inertia throughout; no separate final re-solve is
+   needed. Any frost sits on top: the surface is reported as `frost` and the TSV
+   carries `deposit_m`.
+
+The immutable inputs are generation's `Budget` and `PlanetEnvironment`. Only
+the equilibrium temperature is read from the environment; legacy pressure,
+atmosphere and reservoir assignments do not seed the new physical answer.
+Generation's retained inventory and prior losses are authoritative, so retention
+history is not run again. The result contains the region-owned `CoupledStructure`
+(ordered interior layers, deposit, gas, atmosphere, boundary facts and model
+identities), original source, total escape and additional blow-off separately.
+The protected inventory is audit-only, already owned by the interior layers.
+Source equals the returned retained regions plus total escape for every origin,
+with relative 10⁻¹⁰ closure. Unsupported inputs return the original typed error,
+never legacy geometry. Methane remains an ordinary secondary gas/entrained trace.
+
+Seven entry-point tests cover dry/icy/ocean hosts, frozen deposits, evaporation
+of all water into gas over dry rock, protected supply surviving blow-off, prior
+losses, deterministic repeats, unchanged inputs, no-trace compatibility, exact
+shared-work success/failure and explicit invalid/envelope refusals.
+
+Step 7 replaces the provisional two-pass route, rather than just wrapping it.
+The 20-thread coverage run still solves 1,017/1,032 non-envelope planets, with
+all outcome/reason, surface and escaped-species labels and escaped fractions
+unchanged. Including the previously omitted protected mass in the column's
+gravity changes temperature by at most 0.067 K, pressure by 0.022 bar and radius
+by about 0.0006% relative to the former join. This is a coupling correction, not
+looser numerical tolerances. Report wall time was 13.9 s (previous run 15.5 s),
+with 565,778,193 reported EOS evaluations instead of 818,072,711; the redundant
+final interior solve is gone. Timing comparisons remain load-dependent and the
+work counter still excludes discarded escape attempts.
 
 Each planet reports only its **first** blocker. Water failures are binned by
 condition (below 250 K, above 623 K, vapour, surface below 1 kPa, otherwise deep
@@ -833,6 +929,26 @@ significant digits for physical values so comparisons do not hide differences
 through display rounding. These timings include thread contention, are not
 uncontended per-body CPU timings, and vary with machine load. The unchanged
 scan and repeated interior solves still dominate the remaining cost.
+
+The subsequent interior-hint optimisation was measured separately with another
+paired 20-thread run, retaining greenhouse refinement and excluding the reverted
+gas-search caching experiment:
+
+| Metric | Before hints | After hints |
+| --- | --- | --- |
+| Report wall time | 17.9 s | 15.5 s |
+| Solved planet median | 129.51 ms | 109.73 ms |
+| Solved planet p95 | 576.94 ms | 548.61 ms |
+| Solved planet maximum | 7,089.56 ms | 6,903.73 ms |
+| Ocean median | 3,052.32 ms | 2,223.82 ms |
+| Reported radial EOS evaluations | 1,137,912,815 | 818,072,711 |
+
+Every outcome/reason, surface and escaped-species label matched for all 1,544
+planets; escaped fractions were identical. Maximum differences: temperature
+1.07 × 10⁻⁹ K, pressure 3.62 × 10⁻¹¹ bar and relative radius 2.03 × 10⁻¹⁴.
+Reported EOS work fell 28%, a timing-independent indication of reduced numerical
+work. That counter covers successful reported structures, not all failed or
+discarded escape attempts; timings still include contention/load variability.
 
 - All 178 former weak-binding failures now solve by escape, 3 of them former
   envelopes that lose only hydrogen. Lost species: water and methane 130; water,

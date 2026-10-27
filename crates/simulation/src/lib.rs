@@ -1,6 +1,7 @@
 //! Engine-independent simulation. Domain modules own implementations; explicit
 //! root exports keep common models and operations convenient for callers.
 
+pub mod background;
 pub mod clock;
 pub mod craft;
 pub mod galaxy;

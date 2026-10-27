@@ -26,7 +26,7 @@ only when a demonstrated simulation or game problem requires them.
 
 ### Resume here (October 2026)
 
-- **Done in P1:** steps 1–6, plus the frost deposit, bounded hot-steam extension
+- **Done in P1:** steps 1–8, plus the frost deposit, bounded hot-steam extension
   and [unbound-column blow-off](../simulation/planet-composition.md#unbound-column-blow-off).
   Nothing is pushed: neither
   the main branch nor `park/methane-physics` (parked methane physics). Ask the
@@ -36,11 +36,27 @@ only when a demonstrated simulation or game problem requires them.
   [measured starting point](#measured-starting-point).
 - **Remaining blockers:** dense gas (8) and warming beyond the bounded column
   (7). Blow-off resolved all 178 weak-binding failures.
-- **Open decisions for the user:**
+- **Performance and next step:**
   - Refinement-only warming optimisation is implemented: a paired 20-thread
     run reduced report wall time from 19.5 to 18.2 s and solved median from
     152 to 127 ms, with unchanged outcomes and negligible numerical differences.
-    The upward scan and repeated interior solves remain; address before step 8.
+    Interior search hints are also implemented: a separate paired 20-thread run
+    reduced wall time from 17.9 to 15.5 s, typical ocean solves from 3.05 to
+    2.22 s and reported radial EOS work by 28%, with unchanged outcomes and
+    negligible numerical differences. Gas-search caching was reverted at the
+    user's request. Further optimisation is deferred: seconds per system are
+    acceptable for the prototype. Step 7 removed the separate protected-host
+    re-solve: coverage is unchanged, with a 13.9 s report on 20 threads.
+  - Step 8 now queues/caches background refinement, sharing a ¾-CPU budget with
+    star streaming (including grid workers), with star admission priority and
+    one reserved star slot on multi-thread budgets. F3 → perf → experimental
+    planet loading enables it. No live physical/inspector/visual changes yet.
+    Fast initial generation remains on the main thread, logged per system;
+    two preliminary headless samples measured 1.4–5.6 ms. Interactive hitches
+    still need the user's tests. Next is **step 9 only when requested**.
+  - Unsupported planets will retain explicitly labelled legacy visuals during
+    transition, without making them successful new-model solves. Full legacy
+    removal remains P3. The step-9 inspector must make this distinction visible.
 - **After each step:** rerun the coverage report
   (`cargo test --release -p space-simulation composition_coverage -- --ignored
   --nocapture`), update the baseline here and in the
@@ -202,13 +218,21 @@ Each step is small and labelled. Rerun the coverage report after each one.
 6. **Trace rounding. Done.** Water transfers below one machine epsilon of the
    planet's water are accepted with a documented, species-local allowance,
    instead of being rejected.
-7. **One entry point.** Generated budget and environment in; one region-owned
+7. **One entry point. Done.** `structure::prototype::solve`: generated budget and environment in; one region-owned
    result out, with layers, atmosphere, model labels and boundary facts. It joins
-   protected traces in the host with the atmosphere coupling, which today are
-   separate routes.
-8. **Experimental mode.** An explicit switch in `generated_system`, separate from
+   protected traces in the host with atmosphere coupling and blow-off. Protected
+   material participates in every iteration, not an after-the-fact host solve.
+   The result accounts for source, generation's prior escape and new blow-off.
+   All 1,544 coverage labels and escape fractions remain unchanged; small physical
+   changes reflect the formerly omitted protected mass in the coupled gravity.
+8. **Experimental mode. Done.** An explicit mode in `generated_system_with_mode`, separate from
    the default. Envelope planets return a labelled unsupported result, never a
-   quiet per-body substitution of the legacy solver.
+   quiet per-body substitution of the legacy solver. The client prepares inputs
+   and solves planets off-thread under the shared star/planet work budget, with
+   selected-planet queue priority, bounded result polling, request cancellation
+   and a four-system in-memory result cache. The F3 perf switch defaults off.
+   Live consumers deliberately stay unchanged until step 9. Coverage's 1,544
+   non-timing rows are identical to step 7.
 9. **Consumers and inspector.** Map results onto `PlanetPhysical` so snapshots
    work unchanged. The inspector shows layers, model identity and failure reason.
    Preserve liquid-top semantics and free camera descent; no landing permission

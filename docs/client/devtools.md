@@ -49,6 +49,17 @@ pixels (off still runs vertices, never rasterises), 4x MSAA (both window cameras
 bloom, cull blocks outside the view (default on), split multiple systems, and
 stars as points (default on).
 
+## Experimental planet loading
+
+The `perf` tab's **experimental planet loading** section enables optional
+background layered calculations, off by default and not persisted. It shows
+per-planet queue/running/solved/refusal states. The separate **CPU threads**
+section shows the shared star/planet budget and star-worker activity once,
+rather than repeating thread counts in each loader section.
+Step 8 caches results only: the live scene and ordinary planet inspector
+still use the legacy model. See [composition](../simulation/planet-composition.md#experimental-background-loading)
+for target selection, caching, cancellation, initial-generation timings and limits.
+
 ## Terminal interaction
 
 The debug window uses `ui/terminal.rs`, a translucent black terminal skin with

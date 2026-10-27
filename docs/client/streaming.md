@@ -24,8 +24,9 @@ See [galaxy cells](../simulation/galaxy.md),
   rejection bound as a `Need`, which `supply`/`complete` work out.
   `Loader::with_threads(n)` shares each cell's stars among n threads:
   `star_threads` uses three quarters of the machine's threads, at least
-  1. The perf tab's **threads** row shows them and how
-  many were busy, from `Loader::take_worked`.
+   1. This is now a shared work budget with experimental planet refinement,
+   not an independent allowance for each loader. The perf tab's **CPU threads**
+   section shows the shared ceiling and star-worker activity, from `Loader::take_worked`.
 - Stars needing something become holes, made again once it is worked out,
   so a cell is identical with any thread count (tested). With several threads,
   a made cell's grid (`StarCell::new`) builds on a thread of its own while the
@@ -53,6 +54,30 @@ See [galaxy cells](../simulation/galaxy.md),
   jobs, mesh backlog and wait, render-sync time and frame-time percentiles
   once per second; the debug window's `perf` tab shows them.
   Instrumentation does not change loading policy.
+
+## Shared star and planet CPU budget
+
+`simulation::background` admits active star and experimental planet work into
+one process-local budget: `max(1, available_parallelism × 3 / 4)`. On a machine
+reporting 20 threads that is **15 total**, not 15 per subsystem. The star loader's
+coordinator, scoped star workers and asynchronous cell-grid builders all hold
+permits. If no grid slot is free, the coordinator builds the grid itself; extra
+star workers take only currently free slots. Separate magnitude loaders also
+share the same budget while the old one winds down.
+
+Star admission has priority. Planet preparation/solves are admitted only when
+no star work is active or waiting. On multi-thread budgets one slot is reserved
+for newly arriving star work, so planets alone can occupy at most 14 of 15 slots.
+Existing solves are not preempted: stars use the reserved slot immediately and
+reclaim more as solves finish. On a one-thread budget they must wait for the
+current solve. Only the background star coordinator may wait for admission;
+planet dispatch and result polling on the frame thread are nonblocking.
+
+This is a concurrency budget, not CPU affinity, real-time scheduling or a
+guarantee against dropped frames. Bevy rendering/ground jobs, search, craft
+loading and other processes are outside this budget. Interactive frame-time
+testing remains necessary. See [experimental planet loading](../simulation/planet-composition.md#experimental-background-loading)
+for the opt-in mode and cancellation/cache behaviour.
 
 ## Magnitude changes
 

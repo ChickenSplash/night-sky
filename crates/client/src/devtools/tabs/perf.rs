@@ -95,6 +95,29 @@ pub fn perf(
             ],
         );
     }
+    if terminal::section(ui, "CPU threads") {
+        let s = metrics.live(field);
+        terminal::facts_with_details(
+            ui,
+            "debug-cpu-threads",
+            &[
+                (
+                    "shared budget",
+                    space_simulation::background::shared().limit().to_string(),
+                    Some(
+                        "Three quarters of available CPU threads for stars and planet calculations together, not per loader. Stars have admission priority, with one slot reserved for new star work on multi-thread budgets. This is not CPU affinity or a frame-time guarantee; other game work is outside this budget.",
+                    ),
+                ),
+                (
+                    "star activity",
+                    format!("{:.1} busy", s.busy_threads),
+                    Some(
+                        "Average star-worker activity over the last second, grids included. This is the existing elapsed-time estimate, not total CPU usage or planet-worker activity.",
+                    ),
+                ),
+            ],
+        );
+    }
     if terminal::section(ui, "star stream") {
         let s = metrics.live(field);
         let aimed = field.aimed_pc.map_or("nowhere yet".into(), |[x, y, z]| {
@@ -109,13 +132,6 @@ pub fn perf(
                     s.mode.to_lowercase(),
                     Some(
                         "Where stars are generated: a background thread or worker, or slices of each frame as a fallback.",
-                    ),
-                ),
-                (
-                    "threads",
-                    format!("{} started, {:.1} busy", s.threads, s.busy_threads),
-                    Some(
-                        "Threads making stars (three quarters of the CPU's), and how many were working on average over the last second, grids included.",
                     ),
                 ),
                 (

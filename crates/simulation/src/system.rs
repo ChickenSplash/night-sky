@@ -4,7 +4,7 @@ pub mod atmosphere;
 pub mod clearance;
 pub mod composition;
 mod demo;
-mod generated;
+pub mod generated;
 mod generation;
 pub mod materials;
 mod overlay;

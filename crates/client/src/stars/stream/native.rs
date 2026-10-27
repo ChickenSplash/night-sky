@@ -12,8 +12,7 @@ const SLICE: Duration = Duration::from_millis(20);
 /// Threads making each cell's stars, the stream thread included: three
 /// quarters of the machine's, leaving the rest for the app.
 fn star_threads() -> usize {
-    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
-    (available * 3 / 4).max(1)
+    space_simulation::background::threads()
 }
 
 type Batch = (Vec<Event>, usize, Duration, usize);

@@ -200,7 +200,13 @@ pub fn label(lists: &Galaxy, id: &str) -> String {
 
 /// A task-free system built from a cell star's ID alone.
 pub fn generated(id: &str, position_ly: DVec3) -> Option<StarSystem> {
-    space_simulation::generated_system(id, position_ly.to_array())
+    let start = std::time::Instant::now();
+    let system = space_simulation::generated_system(id, position_ly.to_array());
+    bevy::log::info!(
+        "Initial system generation {id}: {:.2} ms",
+        start.elapsed().as_secs_f64() * 1000.0
+    );
+    system
 }
 
 /// Fly to the selected star: its list page when it has one, or its generated

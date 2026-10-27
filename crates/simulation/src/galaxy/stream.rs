@@ -207,11 +207,13 @@ impl Loader {
     }
 
     /// Moves the camera, in parsecs from the centre: drops cells left well
-    /// behind and queues those newly in reach. Cheap enough to call every frame.
+    /// behind and queues those newly in reach. Call from the loader thread:
+    /// admission to the shared background budget can wait for ongoing work.
     pub fn aim(&mut self, camera: [f64; 3]) {
         if self.camera == Some(camera) {
             return;
         }
+        let _permit = crate::background::shared().star();
         self.camera = Some(camera);
         let mut dropped: Vec<Cell> = self
             .loaded
@@ -282,6 +284,8 @@ impl Loader {
     /// integrated, or until nothing is left. Returns cells loaded and dropped
     /// since the last step.
     pub fn step(&mut self, more: &mut dyn FnMut() -> bool) -> Vec<Event> {
+        let budget = crate::background::shared();
+        let _coordinator = budget.star();
         loop {
             self.deliver(false);
             if self.job.is_none() {
@@ -307,12 +311,15 @@ impl Loader {
             }
             if self.advance() {
                 let job = self.job.take().expect("a job is being built");
-                if self.threads > 1 {
+                if self.threads > 1
+                    && let Some(permit) = budget.try_star()
+                {
                     if self.gridding.len() >= GRIDDING {
                         self.deliver(true);
                     }
                     let (cell, stars) = (job.cell, job.stars);
                     let grid = std::thread::spawn(move || {
+                        let _permit = permit;
                         let start = Instant::now();
                         (StarCell::new(cell, stars), start.elapsed())
                     });
@@ -404,6 +411,9 @@ impl Loader {
         component: Component,
         count: u64,
     ) -> Duration {
+        let budget = crate::background::shared();
+        let _permits: Vec<_> = (1..threads).map_while(|_| budget.try_star()).collect();
+        let threads = _permits.len() + 1;
         let cell = job.cell;
         // Where the component's first star goes in `stars`.
         let base = job.stars.len() - job.index as usize;

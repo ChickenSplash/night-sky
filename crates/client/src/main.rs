@@ -5,6 +5,7 @@ mod format;
 mod input;
 mod navigation;
 mod network;
+mod planet_loading;
 mod render;
 mod scene;
 mod search;
@@ -87,6 +88,7 @@ fn main() {
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
+    .init_resource::<planet_loading::PlanetLoading>()
     .init_resource::<craft::Fleet>()
     .init_resource::<input::Bindings>()
     .init_resource::<input::Actions>()
@@ -140,6 +142,7 @@ fn main() {
         (ui::draw_ui, devtools::draw.after(ui::draw_ui)),
     );
     app.add_systems(Update, devtools::smoke::exercise);
+    app.add_systems(Update, planet_loading::update.after(scene::locate));
     devtools::snapshot::install(&mut app);
     devtools::install_http(&mut app);
     app.run();

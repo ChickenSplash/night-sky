@@ -150,6 +150,7 @@ pub fn draw(
     rendering: Rendering,
     mut bindings: ResMut<crate::input::Bindings>,
     mut tools: ResMut<DevTools>,
+    mut planets: ResMut<crate::planet_loading::PlanetLoading>,
 ) {
     let (mut contexts, mut writer, mut typed, mut commands) = interaction;
     let (universe, nav, clock, time) = scene;
@@ -205,15 +206,18 @@ pub fn draw(
                     .id_salt("debug-tab")
                     .auto_shrink(false)
                     .show(ui, |ui| match tab {
-                        Tab::Perf => perf(
-                            ui,
-                            &tools.frames,
-                            &metrics,
-                            &starfield,
-                            diagnostics.as_deref(),
-                            (&debug, &searches),
-                            &mut out,
-                        ),
+                        Tab::Perf => {
+                            perf(
+                                ui,
+                                &tools.frames,
+                                &metrics,
+                                &starfield,
+                                diagnostics.as_deref(),
+                                (&debug, &searches),
+                                &mut out,
+                            );
+                            tabs::planets::planets(ui, &mut planets);
+                        }
                         Tab::Render => render(ui, &nav, &mut out),
                         Tab::Atmosphere => atmosphere(
                             ui,

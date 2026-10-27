@@ -25,6 +25,7 @@ crates/client/       Bevy client and egui interface
   src/input/         Named bindings, input capture and ship piloting
   src/format.rs      Shared text formatting
   src/search/        Object search requests, settings and the shared store
+  src/planet_loading.rs Experimental background refinement queue and result cache
   src/scene/         Camera, controls, location, placement and wireframes
   src/stars/         Galactic star streaming, batching, drawing and shaders
     starfield/       Budgeted batches, precise sprites, multiple-system resolution and culling
@@ -58,6 +59,7 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     demo.rs          Reproducible fictional overlay content
   src/orbit/         Analytic orbits, states and nested barycentric motion
   src/clock.rs       Accumulated simulation time
+  src/background.rs  Shared active-work budget for stars and planet refinement
   src/units.rs       Shared physical constants
   src/seed.rs        Stable hashing, random draws and seeded placement
   src/light.rs       Star and planet photometry
