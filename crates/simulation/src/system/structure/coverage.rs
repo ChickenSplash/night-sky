@@ -41,7 +41,7 @@ impl Category {
     fn label(self) -> &'static str {
         match self {
             Self::Solved => "solved",
-            Self::Envelope => "envelope (H/He)",
+            Self::Envelope => "envelope (H/He beyond thin column)",
             Self::MassDomain => "mass domain (>20 ME)",
             Self::ColumnTemperature => "column temperature (outside 50-1000 K)",
             Self::WaterCold => "water cold (<250 K)",
@@ -75,6 +75,7 @@ struct Row {
     class: &'static str,
     mass_earth: f64,
     water_fraction: f64,
+    light_fraction: f64,
     temperature_k: f64,
     category: Category,
     detail: String,
@@ -106,12 +107,17 @@ fn is_secondary(m: Material) -> bool {
 
 /// Provisional join: couple the atmosphere without protected secondaries, then
 /// re-solve the condensed host with them entrained at that surface load.
+/// H/He is an ordinary exchangeable gas. A body is an envelope only when the
+/// thin-column coupling refuses its gas, not by any H/He amount threshold.
 fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let retained = p.body.budget.retained();
     let source = p.body.budget.source();
     let t = p.environment.as_ref().unwrap().equilibrium_temperature_k;
-    if retained.mass_kg(Material::Hydrogen) > 0.0 || retained.mass_kg(Material::Helium) > 0.0 {
-        return Err((Category::Envelope, String::new()));
+    let light_mass = retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium);
+    let light = light_mass > 0.0;
+    // H/He never condenses, so this alone already exceeds the column's own mask.
+    if light_mass / retained.total_mass_kg() > coupled::MAX_GAS_MASS_FRACTION {
+        return Err((Category::Envelope, "gas mass".to_owned()));
     }
     let protected_of = |m: Material| {
         let accessible = accessible_fraction(m);
@@ -150,8 +156,14 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
         column_temperature_k: t.max(20.0),
         water_temperature_k: Some(t),
     };
-    let atmosphere =
-        coupled::solve(&request, coupled::Controls::default()).map_err(|e| coupled_error(t, &e))?;
+    let atmosphere = coupled::solve(&request, coupled::Controls::default()).map_err(|e| {
+        let (category, detail) = coupled_error(t, &e);
+        if light && matches!(category, Category::GasDomain | Category::MassDomain) {
+            (Category::Envelope, detail)
+        } else {
+            (category, detail)
+        }
+    })?;
     let pressure = atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa());
     let host = atmosphere.condensed().retained_inventory();
     let mut work = atmosphere.diagnostics().total_eos_evaluations;
@@ -243,7 +255,7 @@ fn radial_error(t: f64, e: &dry::SolveError) -> (Category, String) {
             expected, actual, ..
         } => water(format!("phase crossing {expected:?}->{actual:?}")),
         E::UnsupportedWaterProfile => water("unsupported water profile".to_owned()),
-        E::OutsideMassDomain(_) => (Category::MassDomain, String::new()),
+        E::OutsideMassDomain(_) => (Category::MassDomain, "mass above 20 ME".to_owned()),
         E::InvalidClosure { material, quantity } => {
             (Category::TraceRounding, format!("{material:?} {quantity}"))
         }
@@ -273,6 +285,8 @@ fn row(p: &Hosted) -> Row {
         class: p.body.class.name(),
         mass_earth: mass / EARTH_MASS_KG,
         water_fraction: retained.mass_kg(Material::Water) / mass,
+        light_fraction: (retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium))
+            / mass,
         temperature_k: env.equilibrium_temperature_k,
         category,
         detail,
@@ -362,7 +376,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
     }
     let _ = writeln!(out, "\n## Failure details\n");
     for (category, members) in &categories {
-        if matches!(category, Category::Solved | Category::Envelope) {
+        if *category == Category::Solved {
             continue;
         }
         let mut details = BTreeMap::<&str, usize>::new();
@@ -454,17 +468,19 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
 }
 
 fn table(rows: &[Row]) -> String {
-    let mut out = "id\tclass\tmass_earth\twater_fraction\tequilibrium_k\toutcome\tdetail\t\
+    let mut out =
+        "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\toutcome\tdetail\t\
                    surface\tsurface_pa\tlegacy_pa\tradius_change\teos_evaluations\tms\n"
-        .to_owned();
+            .to_owned();
     for r in rows {
         let _ = writeln!(
             out,
-            "{}\t{}\t{:.6e}\t{:.6e}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
+            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
             r.id,
             r.class,
             r.mass_earth,
             r.water_fraction,
+            r.light_fraction,
             r.temperature_k,
             r.category.label(),
             r.detail,

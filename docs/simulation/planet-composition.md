@@ -659,9 +659,13 @@ planet in `data/tmp/composition-coverage.tsv` for diffing between steps.
 
 The route is provisional and test-only, until the single entry point exists:
 
-1. H/He-bearing planets are reported as envelopes and not attempted.
+1. H/He is an ordinary exchangeable gas, with no amount threshold. A body is an
+   **envelope** only when the thin column refuses its gas: H/He alone above the
+   coupling's 1% gas-mass mask (H/He never condenses, so this is checked first),
+   or a coupled refusal for gas mass, dense gas or mass above 20 Earth masses on
+   an H/He-bearing body.
 2. Protected secondaries (90% of CO₂/N₂/CH₄/O₂/Ar source) are set aside. The
-   coupled solver runs on the rest, with accessible water and all remaining
+   coupled solver runs on the rest, with H/He, accessible water and all remaining
    secondaries exchangeable, at the equilibrium temperature (column floored at
    20 K, as in generation).
 3. The resulting condensed host is re-solved with the protected secondaries
@@ -671,15 +675,23 @@ The route is provisional and test-only, until the single entry point exists:
 Each planet reports only its **first** blocker. Water failures are binned by
 condition (below 250 K, above 623 K, surface below 1 kPa, vapour, otherwise deep
 or phase seam) rather than error variant, so each bin maps to one plan step.
-Fixing one blocker can expose another.
+Fixing one blocker can expose another, including the dense-gas limit for bodies
+with 0.1–1% H/He.
+
+Formation gives H/He to nearly every body above about 0.1 Earth masses of
+protected heavy material, and escape never removes it exactly. Treating any H/He
+as an envelope therefore misclassified 472 stripped rock, metal and water worlds
+with less than 0.01% H/He by mass.
 
 Baseline (October 2026, 20 systems per component, equilibrium temperature):
-1,544 planets, 847 with envelopes. **8 of 697** non-envelope planets solve
-(1%), all at 250–623 K. Blockers among non-envelope planets: surface below
-1 kPa 28%, column below 50 K or above 1,000 K 28%, trace water rounding in the
-coupled partition 19%, water below 250 K 17%, water above 623 K 5%, CO₂ frost
-1%, vapour 1%. Solved radii are within 0.6% of the legacy radius; a solve takes
-about 50 ms, up to 0.5 s.
+1,544 planets, 219 envelopes. **57 of 1,325** non-envelope planets solve (4%),
+all at 250–623 K. First blockers among non-envelope planets: trace water
+rounding in the coupled partition 23%, column below 50 K or above 1,000 K 21%,
+surface below 1 kPa 18%, water below 250 K 17%, water above 623 K 7%, CO₂ frost
+5%, vapour 4%, deep water or phase seam 1%. Solved radii are within 0.6% of the
+legacy radius at p95 (6.5% at most); a solve takes about 90 ms at the median
+and up to 2.4 s. Thick H/He columns raise solved surface pressures to about
+100 bar at p95.
 
 ## Light envelopes and the giant transition
 

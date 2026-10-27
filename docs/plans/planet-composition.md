@@ -39,8 +39,9 @@ only when a demonstrated simulation or game problem requires them.
   Earth's oceans are about 0.023% of its mass, so a trace cut-off would remove
   Earth-like oceans. Thin layers need the right phase (ocean, ice or none) and
   conserved mass, not a precise EOS.
-- **Envelopes come later.** H/He planets (about half the population) are not part
-  of the first prototype and are reported as unsupported in prototype mode.
+- **Envelopes come later.** Trace and thin H/He is an ordinary gas in the
+  prototype. Bodies whose H/He exceeds the thin column's limits (about 14% of the
+  population) are reported as unsupported in prototype mode.
 
 ## Completed foundation
 
@@ -58,19 +59,21 @@ The [coverage report](../simulation/planet-composition.md#prototype-coverage-rep
 (October 2026, 1,544 planets from 140 calibration systems, provisional joined
 route, equilibrium temperature) gives the P1 baseline:
 
-- 55% carry H/He and have no new route.
+- 14% are envelopes: H/He beyond the thin column's 1% gas-mass, dense-gas or
+  20 Earth-mass limits. Trace H/He is an ordinary gas, not an envelope; counting
+  any H/He as an envelope had misclassified 472 stripped rock-type worlds.
 - No rock planet is completely dry: every one carries at least trace water, so
   all use the water solver.
-- **8 of 697 non-envelope planets solve (1%).** The earlier throwaway probe's
-  26% used an imposed surface load; the coupled route uses the generated thin
-  atmospheres, so most bodies have a water surface below 1 kPa.
-- First blockers: surface below 1 kPa 28%, column temperature outside
-  50–1,000 K 28%, trace water rounding 19%, water below 250 K 17%, water above
-  623 K 5%, CO₂ frost 1%, vapour 1%.
-- Where solved, radius is within 0.6% of the legacy model. The visible gain is
-  layer structure and boundary meaning, not radius.
-- A solve costs about 50 ms (up to 0.5 s), roughly 0.6 s for a twelve-planet
-  system.
+- **57 of 1,325 non-envelope planets solve (4%),** all at 250–623 K. The earlier
+  throwaway probe's 26% used an imposed surface load; the coupled route uses the
+  generated atmospheres, so many bodies have a water surface below 1 kPa.
+- First blockers: trace water rounding 23%, column temperature outside
+  50–1,000 K 21%, surface below 1 kPa 18%, water below 250 K 17%, water above
+  623 K 7%, CO₂ frost 5%, vapour 4%, deep water or phase seam 1%.
+- Where solved, radius is within 0.6% of the legacy model at p95. The visible
+  gain is layer structure and boundary meaning, not radius.
+- A solve costs about 90 ms at the median, up to 2.4 s with thick H/He columns.
+  Cost needs attention before the experimental mode (step 8).
 
 ## Replacement contract
 
@@ -112,7 +115,7 @@ Each step is small and labelled. Rerun the coverage report after each one.
 3. **Cold and airless water.** Ice Ih below 250 K down to 20 K, and water surfaces
    below 1 kPa, use a labelled near-constant ice density. Extend the existing
    temperature-independent effective deep-ice model to cold bodies. Cold
-   columns below the coupling's 50 K floor need a labelled route too (27% of
+   columns below the coupling's 50 K floor need a labelled route too (21% of
    non-envelope planets are below 50 K).
 4. **Vapour allocation.** Exposed water that cannot stay liquid or frozen at the
    surface moves to the atmosphere inventory; protected water stays in the host.
