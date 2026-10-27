@@ -552,7 +552,7 @@ fn table(rows: &[Row]) -> String {
     for r in rows {
         let _ = writeln!(
             out,
-            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
+            "{}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{}\t{}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{}\t{}\t{:.2}",
             r.id,
             r.class,
             r.mass_earth,
@@ -569,7 +569,7 @@ fn table(rows: &[Row]) -> String {
             r.escaped_fraction,
             r.legacy_pressure_pa,
             r.radius_change
-                .map_or(String::new(), |c| format!("{c:.6e}")),
+                .map_or(String::new(), |c| format!("{c:.16e}")),
             r.eos_evaluations,
             r.milliseconds,
         );

@@ -37,8 +37,10 @@ only when a demonstrated simulation or game problem requires them.
 - **Remaining blockers:** dense gas (8) and warming beyond the bounded column
   (7). Blow-off resolved all 178 weak-binding failures.
 - **Open decisions for the user:**
-  - Solve cost is about 156 ms at the median with the warming scan;
-    address before step 8.
+  - Refinement-only warming optimisation is implemented: a paired 20-thread
+    run reduced report wall time from 19.5 to 18.2 s and solved median from
+    152 to 127 ms, with unchanged outcomes and negligible numerical differences.
+    The upward scan and repeated interior solves remain; address before step 8.
 - **After each step:** rerun the coverage report
   (`cargo test --release -p space-simulation composition_coverage -- --ignored
   --nocapture`), update the baseline here and in the

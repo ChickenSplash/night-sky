@@ -644,8 +644,11 @@ temperature `T_s`.
   partitioned at `T_s`. Warming raises the caps, so frost and water evaporate,
   which warms further.
 - **The coolest balance.** `f` never falls as `T` rises, so a scan up from
-  `T_eq` in 0.5% steps finds the first crossing, then bisects it to full
-  precision. This is the balance a planet warming up from equilibrium would
+  `T_eq` in 0.5% steps finds the first crossing, then refines that same bracket
+  with safeguarded linear interpolation (bisection when the estimate lies in
+  the outer 10% of either end). Refinement stops at relative temperature width
+  10⁻¹², three orders tighter than the coupling test, or an exact zero. As before,
+  balances closer than a scan step may be missed. This is the balance a planet warming up from equilibrium would
   reach. Hotter balances, which a planet that started hot (a magma-ocean steam
   world) could keep, are not explored.
 - **The unwarmed column is checked first.** If the column at `T_eq` is already
@@ -712,8 +715,9 @@ profile is claimed.
 
 ### Numerical work and acceptance
 
-At most **32 coupling iterations**, each with two 64-step partition evaluations
-and finite-column pressure bisections, are permitted. The aggregate ceiling is
+At most **32 coupling iterations**, each with two 64-step partition evaluations,
+additional partition evaluations for the greenhouse search, and finite-column
+pressure bisections, are permitted. The aggregate ceiling is
 **16,000,000 radial EOS evaluations**, including nested work and retries. Each
 radial call retains its existing 2,000,000 maximum and other ceilings. Remaining
 aggregate budget limits each subsequent call; a failed call terminates the
@@ -724,12 +728,13 @@ them. Nonconvergence is explicit.
 cargo test -p space-simulation system::structure::coupled -- --nocapture
 ```
 
-Nineteen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+Twenty-one tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
 and absent gas, mixed N₂/CO₂, thin H/He, N₂ frost on rock, CO₂ frost loading a
 warmer water host, a 30 K icy body with N₂ frost on airless ice, an ocean under its own saturated steam and trace water fully evaporated, an
 Earth twin warmed from frozen to a liquid ocean, unwarmed transparent and absent
 air, a steam runaway refused, bounded hot steam, lightest-first blow-off, sub-ulp vapour, stripping, deterministic repeats,
-refinement, exact aggregate-work success/failure and unsupported inputs/regimes.
+refinement (including bracket preservation and interpolation versus full-precision
+bisection), exact aggregate-work success/failure and unsupported inputs/regimes.
 Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
 and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
 pressure and water allocation by less than relative 10⁻⁷. These are numerical
@@ -802,11 +807,32 @@ protected heavy material, and escape never removes it exactly. Treating any H/He
 as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
-Current baseline after unbound blow-off (October 2026, 20 systems per component):
+Current coverage after unbound blow-off and greenhouse refinement optimisation
+(October 2026, 20 systems per component):
 **1,017 of 1,032 non-envelope planets solve (99%)**, from 1,544 planets with
 512 H/He-bearing envelopes. Bands by equilibrium temperature: 227/227 below
 50 K, 411/419 at 50–250 K, 292/299 at 250–623 K, 87/87 above. Outer layers:
 frost 422, ice 202, ocean 28, rock 365.
+
+The refinement-only optimisation preserves the 0.5% upward scan, equations,
+partition solver and radial solver. A paired 20-thread release coverage run on
+the same 1,544 planets measured:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Report wall time | 19.5 s | 18.2 s |
+| Solved planet median | 152.27 ms | 126.90 ms |
+| Solved planet p95 | 621.06 ms | 573.12 ms |
+| Solved planet maximum | 9,992.71 ms | 9,813.92 ms |
+| Ocean median | 2,814.54 ms | 2,752.72 ms |
+
+All outcome/reason, surface and escaped-species labels matched, as did escaped
+fractions. Maximum differences: temperature 1.21 × 10⁻⁹ K, surface pressure
+3.51 × 10⁻¹¹ bar and relative radius 4.36 × 10⁻¹⁴. The TSV now preserves 17
+significant digits for physical values so comparisons do not hide differences
+through display rounding. These timings include thread contention, are not
+uncontended per-body CPU timings, and vary with machine load. The unchanged
+scan and repeated interior solves still dominate the remaining cost.
 
 - All 178 former weak-binding failures now solve by escape, 3 of them former
   envelopes that lose only hydrogen. Lost species: water and methane 130; water,
