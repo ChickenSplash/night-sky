@@ -774,12 +774,44 @@ blend or EOS-domain extension is used.
 
 ## Experimental background loading
 
-Step 8 is opt-in and does **not** yet change live `PlanetPhysical`, rendering,
-navigation geometry or the planet inspector. Enable **layered calculations**
-under F3 → perf → experimental planet loading. It resets off on restart.
-The debug section reports queued, calculating, solved and unsupported results;
-a refusal retains its typed reason, not a successful legacy substitution.
-Legacy visuals remain in use for every planet until the step-9 consumer adapter.
+The mode is opt-in: enable **layered calculations** under F3 → perf →
+experimental planet loading, with `ns planets on` or `set_layered_planets true`.
+It resets off on restart. Results reach the planet inspector and developer
+snapshot only. Rendering, shape, spin, atmosphere optics, navigation and landing
+keep reading the legacy `Planet` record for every planet (moving them is P3).
+A refusal retains its typed reason and shows as "Legacy model (unsupported: …)",
+never as a successful solve.
+
+### Layered transport record
+
+`system::physical::layered` turns a solve into `space_shared::LayeredPlanet`,
+held beside the legacy record, never written into `Planet::physical` (whose
+validation re-derives the legacy structure and would reject it).
+
+- `physical` keeps the `PlanetPhysical` shape. Reservoirs map as interior =
+  condensed regions minus water, condensed = condensed water plus the frost
+  deposit, gas = the coupled gas inventory. `reference_radius_m` is the top of
+  the surface, frost included; density, gravity and inertia factor use it.
+  `approximations` lists the model IDs used (prototype, condensed structure,
+  column and each region's density model), not legacy caveat IDs.
+- `radius_reference` is `solid_surface` only for bare rock or bare ice-Ih. An
+  ocean, a frost deposit (phase not modelled) and unresolved water stay
+  `unresolved_volatile_boundary`, so this record can never grant ground to a
+  liquid or unresolved phase.
+- `layers` run outermost first: the atmosphere's operational finite shell (its
+  top pressure is not resolved, so absent), the frost deposit, then each
+  condensed region named by phase (`ocean`, `ice`, `deep_ice`, `hot_water`,
+  `water_coexistence`) or, for refractories, by its dominant material (`mantle`,
+  `core`). Cold refractory regions carry no temperature.
+- Layer masses sum to the retained mass and adjacent layers share their radius.
+  The coverage report checks both, and the surface label, for every solved planet.
+
+The inspector's **Layered model (experimental)** section compares radius,
+surface temperature and pressure with the legacy values, and notes that the
+planet is still drawn at its legacy radius. It then lists greenhouse optical
+depth, blow-off losses, one row per layer (thickness, mass, pressure range,
+temperature) and the models used. The section is absent while the mode is off.
+The object browser's detail pane does not show it.
 
 `system::generated::generated_system_with_mode` defaults via the existing
 `generated_system` wrapper to `Mode::Legacy`. `Mode::LayeredPrototype` also
@@ -788,7 +820,7 @@ inline or changing the initial wire system. The client prepares these inputs
 off-thread by reconstructing the deterministic natural system once, avoiding
 transport-record decoding or changes to live snapshots. This duplicates the
 cheap initial generation on a cache miss, not the expensive physics solve.
-The optional list/task overlay is not refined separately in step 8.
+The optional list/task overlay is not refined separately.
 
 The current visited system is the target (including during a navigation
 flight). Without a visit, a selected star or remote planet's parent system is
@@ -808,7 +840,10 @@ unchanged work ceilings before releasing their slot; they are not forcibly
 interrupted. Worker panics/spawn failures are explicit diagnostic failures.
 The frame thread drains at most two result messages per update and never joins
 unfinished workers or waits for a budget permit. Closing the debug window does
-not stop jobs.
+not stop jobs. Conversion to the transport record runs on the worker too. The
+inspector rebuilds an inspected planet's facts only when that planet's status
+changes; for a generated system this regenerates it on the frame thread, as any
+inspection of an unvisited generated system already does.
 
 The original fast system-generation path remains synchronous, with an info-level
 timing log at the client generation wrapper. Two headless sample systems took

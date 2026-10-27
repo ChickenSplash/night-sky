@@ -52,13 +52,15 @@ stars as points (default on).
 ## Experimental planet loading
 
 The `perf` tab's **experimental planet loading** section enables optional
-background layered calculations, off by default and not persisted. It shows
-per-planet queue/running/solved/refusal states. The separate **CPU threads**
-section shows the shared star/planet budget and star-worker activity once,
-rather than repeating thread counts in each loader section.
-Step 8 caches results only: the live scene and ordinary planet inspector
-still use the legacy model. See [composition](../simulation/planet-composition.md#experimental-background-loading)
-for target selection, caching, cancellation, initial-generation timings and limits.
+background layered calculations, off by default and not persisted
+(`set_layered_planets <on>` or `ns planets on|off` also switch it). It shows
+per-planet queue/running/solved/refusal states by designation, in orbit order.
+The separate **CPU threads** section shows the shared star/planet budget and
+star-worker activity once, rather than repeating thread counts in each loader
+section. Solved results appear in the planet inspector's layered section and
+`/state/planet_loading`; the live scene still uses the legacy model. See
+[composition](../simulation/planet-composition.md#experimental-background-loading)
+for target selection, caching, cancellation, the transport record and limits.
 
 ## Terminal interaction
 

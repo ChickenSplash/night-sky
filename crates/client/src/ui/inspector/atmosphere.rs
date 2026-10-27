@@ -2,7 +2,7 @@
 use super::{Info, Section};
 use space_shared::{AtmosphereReference, PlanetEnvironment};
 
-fn pressure_display(pressure_pa: f64) -> (&'static str, String) {
+pub(super) fn pressure_display(pressure_pa: f64) -> (&'static str, String) {
     if pressure_pa < 1e3 {
         let mbar = pressure_pa / 100.0;
         let value = if mbar > 0.0 && mbar < 0.0001 {

@@ -331,6 +331,13 @@ def parser():
         "Use enabled=false to restore generated air on the selected planet.",
         epilog="example: ns atmosphere mars haze=20 haze_colour=[1,0.5,0.3]")
     atmosphere.add_argument("words", nargs="*", help="preset and field=value pairs")
+    planets = sub.add_parser(
+        "planets", help="experimental layered planet calculations: status per planet, or switch them on/off",
+        description="Without arguments, lists the target system's planets and their layered results. "
+        "on/off switches the experimental mode (off by default, not saved). The full layered records "
+        "are under state/planet_loading; the inspector shows them beside the legacy facts.",
+        epilog="example: ns planets on; ns planets")
+    planets.add_argument("switch", nargs="?", choices=("on", "off"), help="switch the mode on or off")
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
     watch.add_argument("target", choices=("state", "perf"))
     watch.add_argument("path", nargs="?", default="", help="optional nested path")
@@ -647,6 +654,45 @@ def atmosphere(args):
                         "transparent_pass": round(gpu.get("main_transparent_pass_3d", 0.0), 3)})
 
 
+def planets(args):
+    if args.switch:
+        command = f"set_layered_planets {'true' if args.switch == 'on' else 'false'}"
+        result = request(args.port, endpoint("command"), command.encode("utf-8"))
+        if result.get("status") != "accepted":
+            return result
+        after = time.time() * 1000
+        deadline = time.monotonic() + 2
+        state = request(args.port, endpoint("state"))
+        while state.get("sampled_unix_ms", 0) <= after and time.monotonic() < deadline:
+            time.sleep(0.05)
+            state = request(args.port, endpoint("state"))
+        return state["planet_loading"]
+    return request(args.port, endpoint("state", "planet_loading"))
+
+
+def planets_text(loading):
+    lines = [f"layered calculations: {'on' if loading['enabled'] else 'off'}"
+             f" · shared CPU threads {loading['shared_cpu_threads']}"]
+    system = loading.get("system")
+    if not system:
+        lines.append("no target system (visit or select one)" if loading["enabled"] else "")
+        return "\n".join(line for line in lines if line)
+    lines.append(f"system {system['id']}")
+    if system.get("error"):
+        lines.append(f"  preparation failed: {system['error']}")
+    for planet in system["planets"]:
+        layered = planet.get("layered")
+        if layered:
+            detail = (f"{layered['surface']}, {layered['surface_temperature_k']:.0f} K, "
+                      f"{layered['surface_pressure_pa'] / 1e5:.4g} bar, "
+                      f"{layered['physical']['reference_radius_m'] / 1e3:.0f} km, "
+                      f"{len(layered['layers'])} layers")
+        else:
+            detail = planet["status"]
+        lines.append(f"  {planet['designation']}: {detail}")
+    return "\n".join(lines)
+
+
 def lists(state):
     return [{"id": entry["id"], "name": entry["name"], "tasks": entry["tasks"],
              "systems": [system["star"] for system in entry["systems"]]} for entry in state]
@@ -695,6 +741,13 @@ def main(argv=None):
             return 0
         elif args.action == "atmosphere":
             output(atmosphere(args), args.json)
+            return 0
+        elif args.action == "planets":
+            result = planets(args)
+            if args.json or "enabled" not in result:
+                output(result, args.json)
+            else:
+                print(planets_text(result), flush=True)
             return 0
         elif args.action == "lists":
             output(lists(request(args.port, endpoint("state", "lists"))), args.json)

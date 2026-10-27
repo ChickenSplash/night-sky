@@ -1,11 +1,14 @@
-//! Step 8: cache headless refinements, without changing live planet consumers.
+//! Experimental layered solves in the background, cached per system. Only the
+//! inspector and developer snapshot read them; rendering stays on legacy data.
 use crate::{Navigation, Selection, Universe};
 use bevy::prelude::*;
+use space_shared::LayeredPlanet;
 use space_simulation::{
     background,
     system::{
         generated::{self, Mode, PlanetJob},
-        structure::{coupled, prototype},
+        physical,
+        structure::coupled,
     },
 };
 use std::{
@@ -24,9 +27,46 @@ const RESULTS_PER_FRAME: usize = 2;
 pub enum PlanetState {
     Queued,
     Running,
-    Solved(Box<prototype::Solved>),
+    Solved(Box<LayeredPlanet>),
     Unsupported(coupled::Error),
     Failed(String),
+}
+
+impl PlanetState {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Queued => "Queued".into(),
+            Self::Running => "Calculating".into(),
+            Self::Solved(_) => "Solved".into(),
+            Self::Unsupported(e) => format!("Unsupported: {e}"),
+            Self::Failed(e) => format!("Worker failed: {e}"),
+        }
+    }
+}
+
+/// One planet's layered result as the inspector sees it.
+pub enum Layered<'a> {
+    /// The experimental mode is switched off.
+    Off,
+    /// Its system is not the loader's target, or inputs are still being prepared.
+    Waiting,
+    State(&'a PlanetState),
+}
+
+impl Layered<'_> {
+    /// Changes whenever what the inspector shows changes. A planet's result,
+    /// once finished, is deterministic, so its kind is enough.
+    pub fn key(&self) -> u8 {
+        match self {
+            Self::Off => 0,
+            Self::Waiting => 1,
+            Self::State(PlanetState::Queued) => 2,
+            Self::State(PlanetState::Running) => 3,
+            Self::State(PlanetState::Solved(_)) => 4,
+            Self::State(PlanetState::Unsupported(_)) => 5,
+            Self::State(PlanetState::Failed(_)) => 6,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -48,7 +88,7 @@ enum Message {
     Planet {
         epoch: u64,
         id: String,
-        result: Result<Result<Box<prototype::Solved>, coupled::Error>, String>,
+        result: Result<Result<Box<LayeredPlanet>, coupled::Error>, String>,
     },
 }
 
@@ -112,6 +152,52 @@ impl PlanetLoading {
         // A lingering selection of the star just left must not restart its jobs.
         let selected = selected.filter(|s| Some(s) != self.departed.as_ref());
         self.target(visited.or(selected));
+    }
+
+    pub fn status(&self, planet: &str) -> Layered<'_> {
+        if !self.enabled {
+            return Layered::Off;
+        }
+        crate::navigation::objects::parent_star(planet)
+            .and_then(|system| self.cache.get(system)?.planets.get(planet))
+            .map_or(Layered::Waiting, Layered::State)
+    }
+
+    /// For `GET /state` and `ns planets`: the target system and each planet's
+    /// state, with its full layered record once solved.
+    pub fn readout(&self) -> serde_json::Value {
+        use serde_json::json;
+        let system = self.active().map(|(id, c)| {
+            json!({
+                "id": id,
+                "initial_generation_ms": c.initial_ms,
+                "error": c.error,
+                "planets": c.names.iter().filter_map(|(id, name)| {
+                    let state = c.planets.get(id)?;
+                    Some(json!({
+                        "id": id, "designation": name,
+                        "state": match state {
+                            PlanetState::Queued => "queued",
+                            PlanetState::Running => "calculating",
+                            PlanetState::Solved(_) => "solved",
+                            PlanetState::Unsupported(_) => "unsupported",
+                            PlanetState::Failed(_) => "failed",
+                        },
+                        "status": state.label(),
+                        "layered": match state {
+                            PlanetState::Solved(l) => json!(l),
+                            _ => json!(null),
+                        },
+                    }))
+                }).collect::<Vec<_>>(),
+            })
+        });
+        json!({
+            "enabled": self.enabled,
+            "shared_cpu_threads": self.budget.limit(),
+            "cached_systems": self.recent,
+            "system": system,
+        })
     }
 
     pub fn active(&self) -> Option<(&str, &CachedSystem)> {
@@ -255,8 +341,10 @@ impl PlanetLoading {
                     if cancel.load(Ordering::Relaxed) {
                         return;
                     }
-                    let result = std::panic::catch_unwind(|| job.solve().map(Box::new))
-                        .map_err(|_| "Planet solver worker panicked".into());
+                    let result = std::panic::catch_unwind(|| {
+                        job.solve().map(|s| Box::new(physical::layered(&s)))
+                    })
+                    .map_err(|_| "Planet solver worker panicked".into());
                     if !cancel.load(Ordering::Relaxed) {
                         let _ = sender.send(Message::Planet {
                             epoch,
@@ -286,7 +374,17 @@ impl Drop for PlanetLoading {
     }
 }
 
-pub fn update(mut loading: ResMut<PlanetLoading>, nav: Res<Navigation>, universe: Res<Universe>) {
+pub fn update(
+    mut loading: ResMut<PlanetLoading>,
+    mut commands: MessageReader<crate::actions::UiCommand>,
+    nav: Res<Navigation>,
+    universe: Res<Universe>,
+) {
+    for command in commands.read() {
+        if let crate::actions::UiCommand::SetLayeredPlanets { on } = command {
+            loading.enabled = *on;
+        }
+    }
     let visited = nav
         .system(&universe.0)
         .map(|s| crate::navigation::objects::star_id(s, nav.page));

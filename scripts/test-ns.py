@@ -13,6 +13,16 @@ from unittest import mock
 
 SCRIPT = Path(__file__).with_name("ns")
 NS = runpy.run_path(str(SCRIPT))
+PLANET_LOADING = {
+    "enabled": True, "shared_cpu_threads": 15, "cached_systems": ["g1.2.3"],
+    "system": {"id": "g1.2.3", "initial_generation_ms": 1.5, "error": None, "planets": [
+        {"id": "g1.2.3/1", "designation": "TS 1-2-3 b", "state": "solved", "status": "Solved",
+         "layered": {"surface": "ocean", "surface_temperature_k": 288.2, "surface_pressure_pa": 101325.0,
+                     "physical": {"reference_radius_m": 6.4e6}, "layers": [{}, {}, {}, {}]}},
+        {"id": "g1.2.3/2", "designation": "TS 1-2-3 c", "state": "unsupported",
+         "status": "Unsupported: dense gas", "layered": None},
+    ]},
+}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -27,12 +37,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/state/lists":
             self.reply(200, [{"id": "demo", "name": "Demo", "tasks": 3,
                               "systems": [{"page": 0, "star": "g1.2.3"}]}])
+        elif self.path == "/state/planet_loading":
+            self.reply(200, PLANET_LOADING)
         elif self.path == "/state":
             # Flying on the first read after a command, landed on the next.
             self.server.flights = getattr(self.server, "flights", 0) + 1
             self.reply(200, {"sampled_unix_ms": 2 ** 53, "trail": ["Milky Way", "Demo"],
                              "presentation_mode": "simulation", "location_body": None,
-                             "camera": {"flying": self.server.flights == 1}})
+                             "camera": {"flying": self.server.flights == 1},
+                             "planet_loading": PLANET_LOADING})
         else:
             self.reply(200, ["split"])
 
@@ -44,6 +57,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        else {"id": 5, "status": "cancelling"})
         elif body.startswith("search "):
             self.server.shown = True
+            self.reply(202, {"status": "accepted"})
+        elif body.startswith("set_layered_planets "):
             self.reply(202, {"status": "accepted"})
         elif body == "jump missing":
             self.reply(409, {"error": "Unknown list `missing`"})
@@ -188,6 +203,19 @@ class CliTests(unittest.TestCase):
         result = self.run_cli("cmd", "jump missing")
         self.assertEqual(result.returncode, 1)
         self.assertIn("HTTP 409: Unknown list `missing`", result.stderr)
+
+    def test_planets_summarise_layered_results_and_switch_the_mode(self):
+        result = self.run_cli("planets")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.server.requests[-1][1], "/state/planet_loading")
+        self.assertIn("layered calculations: on · shared CPU threads 15", result.stdout)
+        self.assertIn("TS 1-2-3 b: ocean, 288 K, 1.013 bar, 6400 km, 4 layers", result.stdout)
+        self.assertIn("TS 1-2-3 c: Unsupported: dense gas", result.stdout)
+        result = self.run_cli("planets", "off")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(("POST", "/command", "set_layered_planets false", "cli"), self.server.requests)
+        result = self.run_cli("--json", "planets")
+        self.assertEqual(json.loads(result.stdout), PLANET_LOADING)
 
     def test_lists_and_screenshot_paths(self):
         result = self.run_cli("lists")

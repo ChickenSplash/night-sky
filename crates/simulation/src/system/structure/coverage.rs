@@ -2,7 +2,7 @@
 //! Exercises the unified headless entry point. Generation never calls it yet.
 //! See docs/simulation/planet-composition.md#prototype-coverage-report.
 
-use super::{coupled, dry, prototype, water};
+use super::{coupled, dry, prototype};
 use crate::{
     galaxy::Component,
     star::multiple::Hosted,
@@ -128,8 +128,15 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let pressure = atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa());
     let deposit_m = atmosphere.deposit_thickness_m();
     let work = atmosphere.diagnostics().total_eos_evaluations;
-    let surface = surface_of(atmosphere.condensed());
-    let surface = if deposit_m > 0.0 { "frost" } else { surface };
+    let surface = escaping.surface();
+    // Every solve must also convert to a conserved, contiguous transport record.
+    let layered = crate::system::physical::layered(&escaping);
+    let layer_mass: f64 = layered.layers.iter().map(|l| l.mass_kg).sum();
+    assert!((layer_mass / layered.physical.retained_mass_kg - 1.0).abs() < 1e-9);
+    assert!(layered.layers.windows(2).all(|p| {
+        (p[0].inner_radius_m - p[1].outer_radius_m).abs() <= 1e-9 * p[0].inner_radius_m
+    }));
+    assert_eq!(layered.surface, surface);
     Ok(Solved {
         surface_k: t,
         radius_m: atmosphere.surface_radius_m(),
@@ -145,24 +152,6 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
         escaped_fraction: escaped.total_mass_kg() / retained.total_mass_kg(),
         eos_evaluations: work,
     })
-}
-
-fn surface_of(condensed: &coupled::CondensedStructure) -> &'static str {
-    match condensed {
-        coupled::CondensedStructure::Dry(_) => "rock",
-        coupled::CondensedStructure::Water(s) => water_surface(s.regions().last().unwrap().phase()),
-    }
-}
-
-fn water_surface(phase: water::PhaseKnowledge) -> &'static str {
-    match phase {
-        water::PhaseKnowledge::Water(eos::Phase::Liquid) => "ocean",
-        water::PhaseKnowledge::Water(eos::Phase::IceIh) => "ice",
-        water::PhaseKnowledge::Water(_) => "water coexistence",
-        water::PhaseKnowledge::EffectiveHighPressureIce => "deep ice",
-        water::PhaseKnowledge::Unresolved => "rock",
-        water::PhaseKnowledge::UnresolvedHotWater => "unresolved hot water",
-    }
 }
 
 fn coupled_error(t: f64, e: &coupled::Error) -> (Category, String) {

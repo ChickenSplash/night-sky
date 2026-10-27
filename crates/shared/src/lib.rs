@@ -5,7 +5,7 @@ mod composition;
 pub use atmosphere::{
     AerosolData, AerosolKind, AtmosphereData, AtmosphereReference, GasFraction, PlanetEnvironment,
 };
-pub use composition::{MaterialBudget, PlanetPhysical, RadiusReference};
+pub use composition::{Layer, LayeredPlanet, MaterialBudget, PlanetPhysical, RadiusReference};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Galaxy {

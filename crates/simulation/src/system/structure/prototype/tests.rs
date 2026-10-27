@@ -92,6 +92,53 @@ fn dry_ice_and_ocean_join_closes_without_mutating_generation() {
 }
 
 #[test]
+fn layered_record_is_contiguous_conserved_and_grants_ground_only_to_rock_or_ice() {
+    use space_shared::RadiusReference;
+    for (water, temperature, surface, reference) in [
+        (0.0, 250.0, "rock", RadiusReference::SolidSurface),
+        (0.3, 250.0, "ice", RadiusReference::SolidSurface),
+        (
+            0.3,
+            280.0,
+            "ocean",
+            RadiusReference::UnresolvedVolatileBoundary,
+        ),
+    ] {
+        let s = solve(
+            &budget(water, 1.0),
+            &environment(temperature),
+            Controls::default(),
+        )
+        .unwrap();
+        let l = crate::system::physical::layered(&s);
+        assert_eq!(l.surface, surface);
+        assert_eq!(l.physical.radius_reference, reference);
+        assert_eq!(l.physical.approximations[0], MODEL_ID);
+        let mass: f64 = l.layers.iter().map(|x| x.mass_kg).sum();
+        assert!((mass / l.physical.retained_mass_kg - 1.0).abs() < 1e-12);
+        assert_eq!(l.layers.last().unwrap().kind, "core");
+        assert_eq!(l.layers.last().unwrap().inner_radius_m, 0.0);
+        for pair in l.layers.windows(2) {
+            assert!((pair[0].inner_radius_m / pair[1].outer_radius_m - 1.0).abs() < 1e-12);
+        }
+        let solid = &l.layers[usize::from(l.layers[0].kind == "atmosphere")];
+        assert_eq!(solid.outer_radius_m, l.physical.reference_radius_m);
+        for p in &l.physical.materials {
+            assert!(
+                (p.interior_kg + p.condensed_kg + p.gas_kg - p.retained_kg).abs()
+                    <= 1e-12 * p.source_kg
+            );
+            assert!((p.retained_kg + p.escaped_kg - p.source_kg).abs() <= 1e-10 * p.source_kg);
+        }
+        let json = serde_json::to_string(&l).unwrap();
+        assert_eq!(
+            serde_json::from_str::<space_shared::LayeredPlanet>(&json).unwrap(),
+            l
+        );
+    }
+}
+
+#[test]
 fn blowoff_preserves_protected_species_and_previous_escape() {
     let b = budget(0.0, 0.0002);
     let s = solve(&b, &environment(1000.0), Controls::default()).unwrap();

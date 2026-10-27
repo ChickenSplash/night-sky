@@ -464,7 +464,10 @@ fn text_huds_share_edge_padding_and_bottom_baseline() {
                         &galaxy,
                         &crate::stars::stream::Starfield::default(),
                         &mut inspector,
-                        crate::craft::Now::none(),
+                        (
+                            crate::craft::Now::none(),
+                            &crate::planet_loading::PlanetLoading::default(),
+                        ),
                         &mut commands,
                     );
                     time_controls(ctx, rect, &clock, false, &mut drag, &mut commands);
@@ -543,7 +546,10 @@ fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport()
                         &galaxy,
                         &crate::stars::stream::Starfield::default(),
                         &mut inspector,
-                        crate::craft::Now::none(),
+                        (
+                            crate::craft::Now::none(),
+                            &crate::planet_loading::PlanetLoading::default(),
+                        ),
                         &mut commands,
                     );
                 },
@@ -620,7 +626,10 @@ fn floating_inspector_bounds_long_composition_with_scrolling() {
                     &galaxy,
                     &crate::stars::stream::Starfield::default(),
                     &mut inspector,
-                    crate::craft::Now::none(),
+                    (
+                        crate::craft::Now::none(),
+                        &crate::planet_loading::PlanetLoading::default(),
+                    ),
                     &mut commands,
                 )
             },
@@ -672,7 +681,10 @@ fn floating_inspector_bounds_long_composition_with_scrolling() {
                     &galaxy,
                     &crate::stars::stream::Starfield::default(),
                     &mut inspector,
-                    crate::craft::Now::none(),
+                    (
+                        crate::craft::Now::none(),
+                        &crate::planet_loading::PlanetLoading::default(),
+                    ),
                     &mut commands,
                 )
             },

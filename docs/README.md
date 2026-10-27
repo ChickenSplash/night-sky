@@ -31,8 +31,8 @@ seed helpers, object identities and photometry stay at the crate root; see
 - [Material inventories and structure](simulation/planet-composition.md): conserved
   formation/retained budgets, approximate generated radii, bounded H/He retention
   and separate headless dry/water radial solvers, protected traces in dry and
-   water-bearing hosts, atmosphere coupling and opt-in background refinement
-   (live consumers still use legacy data).
+  water-bearing hosts, atmosphere coupling and opt-in background refinement
+  shown in the inspector (rendering and navigation still use legacy data).
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.
@@ -138,7 +138,8 @@ The Bevy/egui client in `crates/client`:
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   Layered results can be calculated/cached through the opt-in
   [background prototype](simulation/planet-composition.md#experimental-background-loading),
-  but do not yet drive live planet transport or presentation. The dry solver's
+  and shown in the planet inspector, but do not yet drive rendering, shape,
+  atmosphere optics or navigation. The dry solver's
   protected-trace extension conserves
   CO₂/N₂/CH₄/O₂/Ar in dry hosts without resolving their chemistry or phase.
   Local water physics, including compressed liquid,

@@ -68,7 +68,7 @@ pub(super) fn publish(
     ),
     camera: (Res<CameraPose>, Res<CameraRig>),
     render: Rendering,
-    time: Res<Time>,
+    (time, loading): (Res<Time>, Res<crate::planet_loading::PlanetLoading>),
 ) {
     let record_start = Instant::now();
     metrics.record_frame(time.delta_secs_f64() * 1000.0);
@@ -105,6 +105,7 @@ pub(super) fn publish(
         &field,
         &mut snapshot.inspector,
         now,
+        &loading,
     );
     let position_pc = crate::search::camera_pc(&rig, &pose);
     let gpu: Vec<Value> = diagnostics
@@ -205,6 +206,8 @@ pub(super) fn publish(
         state["process_id"] = json!(std::process::id());
         // The prototype air on the selected planet, for `ns atmosphere`.
         state["atmosphere"] = json!(*tuning);
+        // Experimental layered solves, for `ns planets`.
+        state["planet_loading"] = loading.readout();
         // Ground chunks (`render::ground`); null without the renderer.
         state["performance"]["ground"] = json!(ground.map(|g| *g));
         state["sampled_unix_ms"] = json!(
@@ -303,6 +306,7 @@ mod tests {
         .init_resource::<crate::render::atmosphere::AtmosphereTuning>()
         .init_resource::<crate::search::Searches>()
         .init_resource::<crate::ui::browser::Browser>()
+        .init_resource::<crate::planet_loading::PlanetLoading>()
         .insert_resource(Time::<()>::default())
         .add_systems(Last, publish);
         app.update();
@@ -337,6 +341,8 @@ mod tests {
         assert_eq!(state["inspector"]["title"], "Milky Way");
         assert_eq!(state["inspector"]["inspection"], state["inspection"]);
         assert!(state["inspector"]["facts"].is_array());
+        assert_eq!(state["planet_loading"]["enabled"], false);
+        assert!(state["planet_loading"]["system"].is_null());
         assert_eq!(state["inspector"]["actions"][0]["label"], "View from above");
         // Rate-limited publishing must not stop per-frame history recording.
         app.update();

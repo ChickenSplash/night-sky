@@ -1,6 +1,7 @@
 //! One borderless readout shared by both breadcrumb trails.
 mod atmosphere;
 mod composition;
+mod layered;
 mod planet_layout;
 mod presentation;
 use crate::{
@@ -9,6 +10,7 @@ use crate::{
     craft::Now,
     navigation::objects::{self, ObjectRef},
     navigation::presentation::PresentationMode,
+    planet_loading::{Layered, PlanetLoading},
     stars::stream::Starfield,
     ui::breadcrumb::Inspection,
     ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, LINK, halo_text, halo_wrapped_text},
@@ -24,7 +26,7 @@ use space_simulation::{
 
 #[derive(Default)]
 pub struct Cache {
-    key: Option<(ObjectRef, Option<DVec3>)>,
+    key: Option<(ObjectRef, Option<DVec3>, u8)>,
     info: Info,
     model_details_open: bool,
 }
@@ -35,19 +37,25 @@ impl Cache {
     }
 
     /// A star's facts include its motion once its position is known. A
-    /// craft's change every frame, so are never kept.
+    /// craft's change every frame, so are never kept. A planet's change with
+    /// its experimental layered result.
     pub(crate) fn get(
         &mut self,
         object: &ObjectRef,
         galaxy: &Galaxy,
         position_ly: Option<DVec3>,
         now: Now,
+        loading: Option<&PlanetLoading>,
     ) -> &Info {
-        if self.key.as_ref() != Some(&(object.clone(), position_ly))
+        let revision = match (object, loading) {
+            (ObjectRef::Planet { id }, Some(loading)) => loading.status(id).key(),
+            _ => 0,
+        };
+        if self.key.as_ref() != Some(&(object.clone(), position_ly, revision))
             || matches!(object, ObjectRef::Craft { .. })
         {
-            self.info = describe(object, galaxy, position_ly, now);
-            self.key = Some((object.clone(), position_ly));
+            self.info = describe_with(object, galaxy, position_ly, now, loading);
+            self.key = Some((object.clone(), position_ly, revision));
         }
         &self.info
     }
@@ -118,7 +126,19 @@ pub(crate) fn position_ly(
 }
 
 /// `position_ly` is the system's, from home, when known.
+/// Without the experimental layered section.
+#[cfg(test)]
 pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>, now: Now) -> Info {
+    describe_with(object, galaxy, position_ly, now, None)
+}
+
+fn describe_with(
+    object: &ObjectRef,
+    galaxy: &Galaxy,
+    position_ly: Option<DVec3>,
+    now: Now,
+    loading: Option<&PlanetLoading>,
+) -> Info {
     use crate::format::{luminosity_text, mass_text, period_text, rotation_text, star_radius_text};
     let mut info = Info::default();
     match object {
@@ -312,6 +332,8 @@ pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>,
                 }
                 atmosphere::facts(&mut info, planet.environment.as_ref());
                 planet_layout::organise(&mut info, planet);
+                let status = loading.map_or(Layered::Off, |l| l.status(&planet.id));
+                layered::facts(&mut info, planet, status);
                 info.section = Section::Overview;
                 if let Some(task) = &planet.task {
                     info.field("task.name", "Task", None, task.name.clone());
@@ -609,10 +631,11 @@ pub fn readout(
     field: &Starfield,
     cache: &mut Cache,
     now: Now,
+    loading: &PlanetLoading,
 ) -> serde_json::Value {
     use serde_json::json;
     let position = position_ly(&inspection.object, nav, galaxy, field);
-    let info = cache.get(&inspection.object, galaxy, position, now);
+    let info = cache.get(&inspection.object, galaxy, position, now, Some(loading));
     let export = |action: Action, group: &str| {
         json!({
             "label": action.label, "current": action.current, "available": true,
@@ -670,11 +693,12 @@ pub fn show(
     galaxy: &Galaxy,
     field: &Starfield,
     cache: &mut Cache,
-    now: Now,
+    (now, loading): (Now, &PlanetLoading),
     out: &mut Vec<UiCommand>,
 ) {
     let object = &inspection.object;
-    cache.get(object, galaxy, position_ly(object, nav, galaxy, field), now);
+    let position = position_ly(object, nav, galaxy, field);
+    cache.get(object, galaxy, position, now, Some(loading));
     let width = ui.available_width().min(480.0);
     halo_wrapped_text(ui, &cache.info.title, width, CURRENT);
     ui.scope(|ui| {
@@ -800,8 +824,10 @@ mod tests {
             assert!(ids.insert(&field.id), "duplicate field {}", field.id);
             assert!(!field.value.text().is_empty());
         }
+        // The experimental layered section appears only while its mode is on.
         for section in Section::ALL {
-            assert!(info.fields.iter().any(|f| f.section == section));
+            let shown = info.fields.iter().any(|f| f.section == section);
+            assert_eq!(shown, section != Section::Layered, "{section:?}");
         }
         let density = info
             .fields
@@ -817,6 +843,7 @@ mod tests {
             &Starfield::default(),
             &mut Cache::default(),
             Now::none(),
+            &PlanetLoading::default(),
         );
         assert_eq!(
             exported["fields"],
@@ -873,7 +900,15 @@ mod tests {
         let mut cache = Cache::default();
         for object in objects {
             let inspection = inspection(object.clone());
-            let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
+            let exported = readout(
+                &inspection,
+                &nav,
+                &galaxy,
+                &field,
+                &mut cache,
+                now,
+                &PlanetLoading::default(),
+            );
             let info = describe(
                 &object,
                 &galaxy,
@@ -938,7 +973,15 @@ mod tests {
             id: galaxy.systems[0].id.clone(),
         });
         let mut cache = Cache::default();
-        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
+        let exported = readout(
+            &inspection,
+            &nav,
+            &galaxy,
+            &field,
+            &mut cache,
+            now,
+            &PlanetLoading::default(),
+        );
         let systems: Vec<_> = exported["actions"]
             .as_array()
             .unwrap()
@@ -959,12 +1002,28 @@ mod tests {
         }
         galaxy.systems[0].name = "Updated list".into();
         assert_eq!(
-            readout(&inspection, &nav, &galaxy, &field, &mut cache, now)["title"],
+            readout(
+                &inspection,
+                &nav,
+                &galaxy,
+                &field,
+                &mut cache,
+                now,
+                &PlanetLoading::default()
+            )["title"],
             exported["title"]
         );
         cache.invalidate();
         assert_eq!(
-            readout(&inspection, &nav, &galaxy, &field, &mut cache, now)["title"],
+            readout(
+                &inspection,
+                &nav,
+                &galaxy,
+                &field,
+                &mut cache,
+                now,
+                &PlanetLoading::default()
+            )["title"],
             "Updated list"
         );
     }
@@ -989,14 +1048,103 @@ mod tests {
             id: planet.id.clone(),
         });
         let mut cache = Cache::default();
-        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
+        let exported = readout(
+            &inspection,
+            &nav,
+            &galaxy,
+            &field,
+            &mut cache,
+            now,
+            &PlanetLoading::default(),
+        );
         let link = &exported["actions"][0];
         assert_eq!(link["kind"], "link");
         assert_eq!(link["url"], "https://example.com/task");
         assert_eq!(link["commands"], serde_json::json!([]));
         let unreachable = inspection_for_unreachable();
-        let exported = readout(&unreachable, &nav, &galaxy, &field, &mut cache, now);
+        let exported = readout(
+            &unreachable,
+            &nav,
+            &galaxy,
+            &field,
+            &mut cache,
+            now,
+            &PlanetLoading::default(),
+        );
         assert_eq!(exported["actions"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn layered_section_shows_only_when_enabled_and_labels_legacy_fallbacks() {
+        use crate::planet_loading::PlanetState;
+        use space_simulation::system::{
+            generated::{Mode, generated_system_with_mode},
+            physical,
+            structure::coupled,
+        };
+        let galaxy = space_simulation::demo_galaxy();
+        let system = "g13b6ffffcfeba.2.1";
+        let prepared =
+            generated_system_with_mode(system, [0.0; 3], Mode::LayeredPrototype).unwrap();
+        let (job, solved) = prepared
+            .jobs
+            .iter()
+            .find_map(|j| Some((j, j.solve().ok()?)))
+            .unwrap();
+        let object = ObjectRef::Planet { id: job.id.clone() };
+        let layered = |loading: &PlanetLoading| {
+            describe_with(&object, &galaxy, None, Now::none(), Some(loading))
+                .fields
+                .into_iter()
+                .filter(|f| f.section == Section::Layered)
+                .map(|f| (f.id, f.value.text().to_owned()))
+                .collect::<Vec<_>>()
+        };
+        let mut loading = PlanetLoading::default();
+        assert!(layered(&loading).is_empty());
+        let mut cache = Cache::default();
+        let off = cache
+            .get(&object, &galaxy, None, Now::none(), Some(&loading))
+            .fields
+            .len();
+        loading.enabled = true;
+        // The cached facts follow the planet's status.
+        let waiting = cache.get(&object, &galaxy, None, Now::none(), Some(&loading));
+        assert_eq!(waiting.fields.len(), off + 1);
+        assert_eq!(layered(&loading)[0].1, "Waiting · legacy model shown");
+        let planets = &mut loading.cache.entry(system.into()).or_default().planets;
+        planets.insert(
+            job.id.clone(),
+            PlanetState::Unsupported(coupled::Error::DenseGasUnsupported),
+        );
+        assert!(
+            layered(&loading)[0]
+                .1
+                .starts_with("Legacy model (unsupported: ")
+        );
+        let planets = &mut loading.cache.get_mut(system).unwrap().planets;
+        planets.insert(
+            job.id.clone(),
+            PlanetState::Solved(Box::new(physical::layered(&solved))),
+        );
+        let facts = layered(&loading);
+        assert_eq!(facts[0].1, "Solved");
+        for id in [
+            "layered.radius",
+            "layered.temperature",
+            "layered.pressure",
+            "layered.models",
+        ] {
+            assert!(facts.iter().any(|(f, _)| f == id), "{id}");
+        }
+        let layers = facts
+            .iter()
+            .filter(|(f, _)| f.starts_with("layered.layer."))
+            .count();
+        assert_eq!(layers, physical::layered(&solved).layers.len());
+        // The plain readout and the browser never include the experimental section.
+        let plain = describe(&object, &galaxy, None, Now::none());
+        assert!(!plain.fields.iter().any(|f| f.section == Section::Layered));
     }
 
     fn inspection_for_unreachable() -> Inspection {

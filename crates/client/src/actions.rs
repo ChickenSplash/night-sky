@@ -162,6 +162,11 @@ pub enum UiCommand {
         #[serde(default)]
         work_cap_millions: Option<f64>,
     },
+    /// Experimental layered planet calculations (`planet_loading.rs`), shown in
+    /// the inspector beside the legacy facts.
+    SetLayeredPlanets {
+        on: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -775,6 +780,8 @@ pub fn apply(
             UiCommand::SetAtmosphere(change) => tuning.apply(change),
             // `search::apply` runs these.
             UiCommand::Search { .. } | UiCommand::ClearSearch | UiCommand::SetSearch { .. } => {}
+            // `planet_loading::update` runs this.
+            UiCommand::SetLayeredPlanets { .. } => {}
         }
     }
 }

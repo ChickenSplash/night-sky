@@ -356,7 +356,7 @@ fn detail(
     let position = crate::ui::inspector::position_ly(&result.object, view.nav, galaxy, view.field);
     let info = browser
         .inspector
-        .get(&result.object, galaxy, position, view.craft);
+        .get(&result.object, galaxy, position, view.craft, None);
     kit::eyebrow(ui, theme, "Selected");
     let title = if info.title.is_empty() {
         &result.name
@@ -407,7 +407,7 @@ fn detail(
     });
     let info = browser
         .inspector
-        .get(&result.object, galaxy, position, view.craft);
+        .get(&result.object, galaxy, position, view.craft, None);
     let rows: Vec<(&str, String)> = info
         .rows()
         .map(|(label, value)| (label, value.to_owned()))

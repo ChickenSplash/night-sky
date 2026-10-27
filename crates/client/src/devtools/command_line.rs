@@ -140,7 +140,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 34] = [
+pub const USAGE: [Usage; 35] = [
     Usage {
         name: "steer_craft",
         fields: &["order", "id", "tick", "in_s", "for_s"],
@@ -322,6 +322,11 @@ pub const USAGE: [Usage; 34] = [
         name: "set_search",
         fields: &["threads", "work_cap_millions"],
         about: "Debug: search threads (1 to 64) and work cap in millions of units (1 to 10000); either may be left out",
+    },
+    Usage {
+        name: "set_layered_planets",
+        fields: &["on"],
+        about: "Experimental layered planet calculations, shown in the planet inspector beside the legacy facts; rendering stays legacy",
     },
 ];
 

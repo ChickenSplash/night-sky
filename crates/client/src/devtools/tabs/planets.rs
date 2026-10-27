@@ -1,4 +1,5 @@
-//! Step-8 control/readout, separate from the future planet inspector adapter.
+//! Experimental layered planet loading: switch and per-planet progress. The
+//! results themselves show in the planet inspector.
 use crate::{
     planet_loading::{PlanetLoading, PlanetState},
     ui::terminal,
@@ -14,7 +15,7 @@ pub fn planets(ui: &mut egui::Ui, loading: &mut PlanetLoading) {
         loading.enabled,
         "layered calculations",
         true,
-        "Opt-in background rock/water solves. Live visuals and the planet inspector stay on the legacy model until step 9. Stars have priority within the shared CPU budget; running solves finish before releasing their slot.",
+        "Opt-in background rock/water solves, shown in the planet inspector's layered model section beside the legacy facts. Rendering, shape and landing stay on the legacy model. Stars have priority within the shared CPU budget; running solves finish before releasing their slot.",
     ) {
         loading.enabled = !loading.enabled;
     }
@@ -30,15 +31,13 @@ pub fn planets(ui: &mut egui::Ui, loading: &mut PlanetLoading) {
                 continue;
             };
             let text = match state {
-                PlanetState::Queued => "Queued".into(),
-                PlanetState::Running => "Calculating".into(),
-                PlanetState::Solved(s) => format!(
-                    "Solved: {:.1} K, {:.1} km",
-                    s.structure.surface_temperature_k(),
-                    s.structure.surface_radius_m() / 1000.0
+                PlanetState::Solved(l) => format!(
+                    "Solved: {}, {:.1} K, {:.1} km",
+                    l.surface,
+                    l.surface_temperature_k,
+                    l.physical.reference_radius_m / 1000.0
                 ),
-                PlanetState::Unsupported(e) => format!("Unsupported: {e}"),
-                PlanetState::Failed(e) => format!("Worker failed: {e}"),
+                state => state.label(),
             };
             rows.push((name, text, None));
         }

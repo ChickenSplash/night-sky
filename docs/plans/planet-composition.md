@@ -26,7 +26,7 @@ only when a demonstrated simulation or game problem requires them.
 
 ### Resume here (October 2026)
 
-- **Done in P1:** steps 1–8, plus the frost deposit, bounded hot-steam extension
+- **Done in P1:** steps 1–9, plus the frost deposit, bounded hot-steam extension
   and [unbound-column blow-off](../simulation/planet-composition.md#unbound-column-blow-off).
   Nothing is pushed: neither
   the main branch nor `park/methane-physics` (parked methane physics). Ask the
@@ -50,13 +50,17 @@ only when a demonstrated simulation or game problem requires them.
   - Step 8 now queues/caches background refinement, sharing a ¾-CPU budget with
     star streaming (including grid workers), with star admission priority and
     one reserved star slot on multi-thread budgets. F3 → perf → experimental
-    planet loading enables it. No live physical/inspector/visual changes yet.
-    Fast initial generation remains on the main thread, logged per system;
-    two preliminary headless samples measured 1.4–5.6 ms. Interactive hitches
-    still need the user's tests. Next is **step 9 only when requested**.
-  - Unsupported planets will retain explicitly labelled legacy visuals during
-    transition, without making them successful new-model solves. Full legacy
-    removal remains P3. The step-9 inspector must make this distinction visible.
+    planet loading enables it. Fast initial generation remains on the main
+    thread, logged per system; two preliminary headless samples measured
+    1.4–5.6 ms. Interactive hitches still need the user's tests.
+  - Step 9 converts each solve to a `LayeredPlanet` record kept beside the
+    legacy one, shown in the inspector's layered section and
+    `/state/planet_loading` (`ns planets`). Rendering, shape, landing and
+    atmosphere optics stay legacy for every planet; unsupported planets show
+    "Legacy model (unsupported: …)". Full legacy removal remains P3.
+  - **P1 exit remaining:** the user's in-client review of representative dry,
+    ocean, icy and steam worlds and interactive benchmarks. P2 starts only when
+    the user requests it.
 - **After each step:** rerun the coverage report
   (`cargo test --release -p space-simulation composition_coverage -- --ignored
   --nocapture`), update the baseline here and in the
@@ -233,10 +237,15 @@ Each step is small and labelled. Rerun the coverage report after each one.
    and a four-system in-memory result cache. The F3 perf switch defaults off.
    Live consumers deliberately stay unchanged until step 9. Coverage's 1,544
    non-timing rows are identical to step 7.
-9. **Consumers and inspector.** Map results onto `PlanetPhysical` so snapshots
-   work unchanged. The inspector shows layers, model identity and failure reason.
-   Preserve liquid-top semantics and free camera descent; no landing permission
-   from unresolved phases.
+9. **Consumers and inspector. Done.** Results map to `LayeredPlanet`, whose
+   `physical` keeps the `PlanetPhysical` shape, beside (not replacing) the legacy
+   record, so existing snapshots and consumers work unchanged. The inspector
+   shows layers, model identity, legacy comparisons and failure reasons; `ns
+   planets` and `set_layered_planets` expose them. Only bare rock or ice-Ih is
+   `solid_surface`; navigation and landing remain legacy, so liquid-top
+   semantics and free camera descent are untouched. All 1,017 solved coverage
+   planets convert with closed mass and contiguous layers; coverage rows are
+   unchanged.
 
 Left as a documented limitation: each water layer has one temperature, so a deep
 ocean is as warm as its surface. Revisit only if layer results look wrong.

@@ -1,9 +1,12 @@
 //! Headless generated-budget entry point. No legacy fallback or runtime switch.
-use super::coupled::{self, Controls, CoupledStructure, Error, Request, Temperature};
+use super::coupled::{
+    self, CondensedStructure, Controls, CoupledStructure, Error, Request, Temperature,
+};
+use super::water;
 use crate::system::{
     composition::{Budget, Inventory},
     generation::retention::accessible_fraction,
-    materials::Material,
+    materials::{Material, water::Phase},
 };
 use space_shared::PlanetEnvironment;
 
@@ -25,6 +28,24 @@ pub struct Solved {
 impl Solved {
     pub fn model_id(&self) -> &'static str {
         MODEL_ID
+    }
+
+    /// What sits on top: a frost deposit, else the outermost condensed region.
+    pub fn surface(&self) -> &'static str {
+        if self.structure.deposit_thickness_m() > 0.0 {
+            return "frost";
+        }
+        match self.structure.condensed() {
+            CondensedStructure::Dry(_) => "rock",
+            CondensedStructure::Water(s) => match s.regions().last().unwrap().phase() {
+                water::PhaseKnowledge::Water(Phase::Liquid) => "ocean",
+                water::PhaseKnowledge::Water(Phase::IceIh) => "ice",
+                water::PhaseKnowledge::Water(_) => "water coexistence",
+                water::PhaseKnowledge::EffectiveHighPressureIce => "deep ice",
+                water::PhaseKnowledge::Unresolved => "rock",
+                water::PhaseKnowledge::UnresolvedHotWater => "unresolved hot water",
+            },
+        }
     }
 }
 

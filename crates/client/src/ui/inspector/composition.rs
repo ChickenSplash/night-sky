@@ -154,7 +154,7 @@ pub(super) fn percent(fraction: f64) -> String {
     }
 }
 
-fn material_label(id: &str) -> &str {
+pub(super) fn material_label(id: &str) -> &str {
     match id {
         "iron_nickel" => "Iron/nickel",
         "silicate" => "Silicate rock",

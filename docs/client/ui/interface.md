@@ -76,7 +76,9 @@ records are visibly unknown, never zero-filled. Water-rich boundaries make no
 ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 
 The player-facing order is Overview, Composition, Atmosphere, Orbit and rotation,
-then Model details (closed by default). Overview identifies the surface/radius
+then Model details (closed by default). While experimental layered calculations
+are on, a **Layered model (experimental)** section follows Overview, beside the
+legacy facts; see [the layered record](../../simulation/planet-composition.md#layered-transport-record). Overview identifies the surface/radius
 meaning and gives atmospheric pressure without a separate present/absent row.
 An absent/sub-cutoff model has unknown pressure, not an invented exact zero.
 Composition groups bulk gas species separately from rock, metal and water;

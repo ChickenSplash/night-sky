@@ -23,6 +23,36 @@ fn disabled_by_default_and_switching_discards_stale_results() {
 }
 
 #[test]
+fn results_change_the_revision_and_reach_status_and_readout() {
+    let mut l = PlanetLoading::default();
+    l.enabled = true;
+    l.target(Some("sys".into()));
+    l.cache.get_mut("sys").unwrap().names = vec![("sys/1".into(), "sys b".into())];
+    assert!(matches!(l.status("sys/1"), Layered::Waiting));
+    let before = l.status("sys/1").key();
+    l.sender
+        .send(Message::Planet {
+            epoch: l.epoch,
+            id: "sys/1".into(),
+            result: Ok(Err(coupled::Error::DenseGasUnsupported)),
+        })
+        .unwrap();
+    l.receive();
+    assert_ne!(l.status("sys/1").key(), before);
+    assert!(matches!(
+        l.status("sys/1"),
+        Layered::State(PlanetState::Unsupported(_))
+    ));
+    let readout = l.readout();
+    let planet = &readout["system"]["planets"][0];
+    assert_eq!(planet["designation"], "sys b");
+    assert_eq!(planet["state"], "unsupported");
+    assert!(planet["layered"].is_null());
+    l.enabled = false;
+    assert!(matches!(l.status("sys/1"), Layered::Off));
+}
+
+#[test]
 fn cache_is_bounded_and_revisits_keep_finished_refusals() {
     let mut l = PlanetLoading::default();
     l.target(Some("first".into()));

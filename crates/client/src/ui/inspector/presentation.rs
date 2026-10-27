@@ -6,6 +6,8 @@ use serde::Serialize;
 pub enum Section {
     #[default]
     Overview,
+    /// Experimental layered solve, beside the legacy facts it may disagree with.
+    Layered,
     Composition,
     Atmosphere,
     Orbit,
@@ -13,8 +15,9 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Overview,
+        Self::Layered,
         Self::Composition,
         Self::Atmosphere,
         Self::Orbit,
@@ -23,6 +26,7 @@ impl Section {
     pub fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
+            Self::Layered => "Layered model (experimental)",
             Self::Composition => "Composition",
             Self::Orbit => "Orbit and rotation",
             Self::ModelDetails => "Model details",

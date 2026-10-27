@@ -260,6 +260,10 @@ fn search_takes_the_rest_of_the_line_and_explains_refusals() {
         }
     );
     assert!(parse("set_search").unwrap_err().contains("Give threads"));
+    assert_eq!(
+        parse("set_layered_planets true").unwrap(),
+        UiCommand::SetLayeredPlanets { on: true }
+    );
     assert!(
         parse("set_search threads=0")
             .unwrap_err()

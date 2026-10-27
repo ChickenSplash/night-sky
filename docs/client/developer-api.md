@@ -117,6 +117,15 @@ enables the override; `ns atmosphere enabled=false` restores generated air.
 Quality-only changes do not enable it. These settings are not the generated
 physical atmosphere shown in the inspector.
 
+`ns planets` reads `/state/planet_loading` and lists the target system's planets
+by designation with their [layered result](../simulation/planet-composition.md#experimental-background-loading)
+(surface, temperature, pressure, radius, layer count) or status (queued,
+calculating, unsupported with its reason, failed). `ns planets on|off` sends
+`set_layered_planets true|false` and prints the state from a later snapshot.
+`--json` prints the whole entry: switch, shared CPU threads, cached systems and,
+per planet, the full `LayeredPlanet` record once solved. `ns inspect` includes
+the inspector's layered section while the mode is on.
+
 `cmd` takes one quoted text/JSON string; refusals exit 1 with the reason.
 `--wait` polls `/state` until a snapshot sampled after the reply has no flight,
 then adds `settled` (trail, presentation mode, location planet, camera).
