@@ -97,9 +97,9 @@ The Bevy/egui client in `crates/client`:
   per-planet rendering work, validation history and explicitly deferred follow-ups.
 - [Planet surfaces](plans/planet-surfaces.md): bodies flattened by their spin,
   landing on the ground, then geology, water and giants' depths.
-- [Planet composition replacement](plans/planet-composition.md): the active roadmap,
-  completed headless foundation, region/boundary contract, remaining blockers and
-  gates for generated coverage, migration and legacy deletion.
+- [Planet composition replacement](plans/planet-composition.md): rock-and-water
+  prototype first, completed headless foundation, conserved-region contract, then
+  envelopes and default cutover. Methane physics is parked on its own branch.
 
 ## Current limitations
 

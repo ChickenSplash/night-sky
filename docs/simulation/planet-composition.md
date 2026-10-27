@@ -43,6 +43,8 @@ masses in `atmosphere.rs`, and approximate cold-trap curves in
 under `materials`. Methane is already drawn by formation and can enter the gas
 budget; neither methane liquids/lakes nor condensed CO₂/supercritical CO₂ are
 resolved by the new radial/coupled path. A cold-trap cap is not a phase diagram.
+Methane is treated as an ordinary gas; dedicated methane phase work is parked on
+the `park/methane-physics` branch.
 The [replacement contract](../plans/planet-composition.md#replacement-contract)
 describes the remaining consolidation and extensions, not current behaviour.
 

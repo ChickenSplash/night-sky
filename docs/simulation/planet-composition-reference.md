@@ -609,66 +609,12 @@ Result: select the bounded pure-fluid equations and closure above, but **do not
 mark secondary coverage complete**. Cryogenic solids, sublimation, freezing-edge
 uncertainty, dense/exposed mixtures and deep/hot chemistry remain separate gates.
 
-### Methane inversion and coexistence numerical gate
+### Parked methane physics
 
-`scripts/secondary-inversion.py` is a separate **offline** numerical gate. It
-imports the pressure/Gibbs transcription above, differentiates power/Gaussian
-terms analytically through second density order, and solves for molar density on
-supplied branch brackets. CO₂ nonanalytic second derivatives are deliberately
-unsupported. It neither ships coefficients to Rust nor changes any runtime route.
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-secondary-inversion.py
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/secondary-inversion.py data/composition-sources > data/checkpoint-6c-inversion.json
-```
-
-The coefficient-backed gate verifies the methane and licence hashes. The finite
-reference window is 95–172 K / 1e4–3e6 Pa, independently screened against the pinned
-methane melting correlation. It is not a full physical mask or a generation-domain
-restriction. Each of the three supplied source temperatures starts from ancillary
-vapour/liquid densities ±10% and ancillary pressure ±2%. Neither the source answer
-nor an ancillary density is returned as the solved state. The bisections enforce
-equal EOS pressure and same-T Gibbs energy. Root selection below/above saturation
-compares Gibbs energy among all **supplied** candidates, not density ordering.
-At a Gibbs tie (≤1e-8 in RT units), selecting a bulk phase without volume closure
-fails explicitly. No arbitrary saturated bulk density or 50:50 split is supplied.
-
-Every evaluated branch point must have positive analytic `dP/dn`; a 17-point
-bracket screen also rejects detected branch crossing/nonmonotonicity. **Sampling
-does not prove stability everywhere or enumerate all roots.** These fixed, separated
-vapour/liquid brackets are numerical reference fixtures, not permission to use
-the same search for arbitrary input states. Global fluid-root completeness,
-critical-neighbourhood resolution and solid competition remain open.
-
-The relative pressure tolerance is 1e-9 (fourfold refinement 2.5e-10); inner
-inversions use one quarter of that tolerance and also shrink the density bracket
-to relative 1e-12. Coexistence requires pressure-bracket width within tolerance and
-`|Δg|/(RT)≤1e-10`. Each inner/outer bisection has at most 96 iterations, with a
-shared ceiling of 50,000 EOS probes across all nested density solves and rejected
-probes. Limits may only be reduced; no bracket expansion, hidden retries or
-unbounded Newton iterations occur. Failure to resolve a bracket is reported,
-not treated as evidence of a different phase. These are offline audit ceilings,
-not runtime performance promises or the later whole-planet budget.
-
-Measured against the three source rows: maximum relative errors are 8.65e-11 in
-pressure and 9.79e-11 in density; maximum Gibbs mismatch is 7.74e-11 in RT units.
-Fourfold refinement changes pressure/density by at most 1.39e-10 relative.
-Each nominal coexistence solve uses at most 3,360 EOS probes (3,645 refined).
-Independent pressure differences check the analytic compressibility derivative.
-Pressure neighbours at ±1e-4 choose vapour/liquid respectively. Repeated and reversed
-branch inputs agree, and exact shared-budget success/one-fewer failure is checked
-at every source temperature.
-
-The five mass fractions 0/0.25/0.5/0.75/1 are recovered to better than 1e-8.
-Interior volumes come from the independent source row; endpoint volumes use the
-resolved endpoints themselves, since a source endpoint can lie just outside the
-numerically resolved interval. No endpoint clipping is used. Ten dependency-free
-synthetic regressions also exercise ideal SI units, derivative differences,
-unstable/unbracketed/overlapping branches, Gibbs selection, missing bulk closure,
-lever-rule endpoints/outside volumes and contrast failure, invalid inputs and
-deterministic iteration/work refusals. These run in `./scripts/check.sh` without
-downloaded files. This closes only the finite numerical gate, **not runtime pure
-fluid inversion, exposed methane, calorics, partition or checkpoint 6 overall**.
+The offline methane inversion gate and runtime methane fluid, cold-state,
+condensed-shell and dilute-exchange work are parked on the
+`park/methane-physics` branch. Methane is treated as an ordinary gas on the
+main composition line. Methane source rows above remain reference material only.
 
 ## Finite acceptance requests
 

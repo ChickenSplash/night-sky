@@ -154,7 +154,7 @@ Keep it in step with Bevy upgrades.
 ```
 
 It runs the `ns` CLI tests and offline ice-VI/H-He/secondary-fluid reference-audit
-and methane-inversion regressions, then
+regressions, then
 checks formatting, workspace unit tests and strict Clippy.
 Python checks disable bytecode writes, keeping generated caches out of `scripts/`.
 The optional reference-only `scripts/audit-revised-aqua.py` checks a separately
