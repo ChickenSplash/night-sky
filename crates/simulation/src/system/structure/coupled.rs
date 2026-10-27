@@ -24,6 +24,9 @@ pub const MAX_GAS_MASS_FRACTION: f64 = 0.01;
 pub const MAX_GAS_DENSITY_KG_M3: f64 = 10.0;
 pub const PRESSURE_TOLERANCE_PA: f64 = 0.01;
 pub const ALLOCATION_RELATIVE_TOLERANCE: f64 = 1e-9;
+/// Generation's column floor. Cold-trap caps are extrapolated below 50 K.
+pub const MIN_COLUMN_TEMPERATURE_K: f64 = 20.0;
+pub const MAX_COLUMN_TEMPERATURE_K: f64 = 1000.0;
 
 /// The caller specifies supply eligible for gas exchange, not mutable reservoirs.
 /// Everything else stays condensed. Exchangeable secondaries above their cold-trap
@@ -201,6 +204,8 @@ impl CoupledStructure {
             "Prescribed isothermal ideal-gas mixture, not a climate solution",
             "Gas self-gravity neglected within the 1% mass mask",
             "Cold-trap caps are approximate, not full phase equilibrium",
+            "Below 50 K cold-trap caps are extrapolated from their liquid-vapour anchors",
+            "O2 and H/He have no cold-trap cap, so they stay gas at any temperature",
             "Frost is one even global layer of fixed solid density, on top by convention",
             "Frost phase (ice or liquid) and dissolution in water are not modelled",
             "Entire gas inventory normalised to an operational finite shell",
@@ -240,9 +245,10 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
         return Err(Error::InvalidInput("coupling controls"));
     }
     if !request.column_temperature_k.is_finite()
-        || !(50.0..=1000.0).contains(&request.column_temperature_k)
+        || !(MIN_COLUMN_TEMPERATURE_K..=MAX_COLUMN_TEMPERATURE_K)
+            .contains(&request.column_temperature_k)
     {
-        return Err(Error::InvalidInput("column temperature (50..=1000 K)"));
+        return Err(Error::InvalidInput("column temperature (20..=1000 K)"));
     }
     if let Some(t) = request.water_temperature_k
         && (!t.is_finite() || t <= 0.0)

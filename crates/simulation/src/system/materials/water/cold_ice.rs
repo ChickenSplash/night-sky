@@ -1,11 +1,13 @@
 //! Labelled cold-water engineering approximation, not resolved polymorphs.
 //! Rounded engineering boundaries inspired by the water phase diagram:
 //! Ih/dense ice near 220 MPa at 250 K, deeper ice near 2.1 GPa. They are
-//! constant across this narrow cold mask, not measured equilibrium curves.
+//! constant across this cold mask, not measured equilibrium curves. Below
+//! 250 K they are held constant down to 20 K, where the real Ih/II boundary
+//! moves only slightly.
 //! Intermediate compression uses a Murnaghan law anchored to the measured
 //! H2O VI density at 1.5 GPa/293 K, with explicitly assumed elastic constants.
 
-use super::{Unsupported, WaterError, error, ice, melting, subfreezing_liquid};
+use super::{Unsupported, WaterError, error, ice, melting, subfreezing_liquid, surface};
 
 pub const INTERMEDIATE_MODEL_ID: &str = "reference_anchored_cold_intermediate_ice_v1";
 pub const IH_MODEL_ID: &str = "iapws_ih_extended_cold_pressure_proxy_v1";
@@ -22,11 +24,14 @@ pub const APPROXIMATION_NOTES: &[&str] = &[
     "Intermediate compression uses assumed elastic constants",
     "293 K lattice-density reference used without a thermal correction",
     "Liquid slivers up to 10 kPa near the rounded Ih/III triple point are unresolved",
+    "Below 250 K the 250 K boundaries and compression are held fixed down to 20 K",
 ];
 
 pub fn supports_temperature(temperature_k: f64) -> bool {
     // Below the minimum melting temperature there is no intervening liquid.
-    if !temperature_k.is_finite() || !(250.0..=256.164).contains(&temperature_k) {
+    if !temperature_k.is_finite()
+        || !(surface::MIN_TEMPERATURE_K..=256.164).contains(&temperature_k)
+    {
         return false;
     }
     if temperature_k <= 251.165 {
@@ -46,7 +51,8 @@ pub fn density_kg_m3(
     temperature_k: f64,
     model_id: &str,
 ) -> Result<f64, WaterError> {
-    if !temperature_k.is_finite() || !(250.0..273.15).contains(&temperature_k) {
+    if !temperature_k.is_finite() || !(surface::MIN_TEMPERATURE_K..273.15).contains(&temperature_k)
+    {
         return Err(error(
             pressure_pa,
             temperature_k,
@@ -106,7 +112,7 @@ mod tests {
             density_kg_m3(REFERENCE_PRESSURE_PA, 250.0, INTERMEDIATE_MODEL_ID).unwrap(),
             REFERENCE_DENSITY_KG_M3
         );
-        for t in [250.0, 250.5, 251.165] {
+        for t in [20.0, 100.0, 250.0, 250.5, 251.165] {
             let mut previous = 0.0;
             for p in [
                 IH_BOUNDARY_PA,
@@ -124,10 +130,12 @@ mod tests {
                 assert!((recovered / p - 1.0).abs() < 1e-13);
                 previous = rho;
             }
-            assert_eq!(
-                density_kg_m3(100e6, t, IH_MODEL_ID).unwrap(),
+            let below = if t < super::super::MIN_TEMPERATURE_K {
+                surface::density_kg_m3(100e6, t).unwrap()
+            } else {
                 super::super::state(100e6, t).unwrap().density_kg_m3
-            );
+            };
+            assert_eq!(density_kg_m3(100e6, t, IH_MODEL_ID).unwrap(), below);
             assert!(
                 density_kg_m3(IH_BOUNDARY_PA, t, INTERMEDIATE_MODEL_ID).unwrap()
                     > density_kg_m3(IH_BOUNDARY_PA, t, IH_MODEL_ID).unwrap()
@@ -136,7 +144,7 @@ mod tests {
         for p in [f64::NAN, -1.0, IH_BOUNDARY_PA - 1.0, DEEP_BOUNDARY_PA + 1.0] {
             assert!(density_kg_m3(p, 250.0, INTERMEDIATE_MODEL_ID).is_err());
         }
-        for t in [249.0, 273.15, 300.0, f64::NAN] {
+        for t in [19.0, 273.15, 300.0, f64::NAN] {
             assert!(density_kg_m3(1e9, t, INTERMEDIATE_MODEL_ID).is_err());
         }
         for p in [0.0, 100e6 - 1.0, IH_BOUNDARY_PA + 1.0, f64::NAN] {

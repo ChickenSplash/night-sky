@@ -482,7 +482,7 @@ fn invalid_unsupported_and_unrepresentable_requests_never_return_partial_bodies(
     for (t, load) in [
         (f64::NAN, LOAD),
         (f64::INFINITY, LOAD),
-        (249.0, LOAD),
+        (19.0, LOAD),
         (300.0, -1.0),
         (300.0, 999.0),
         (300.0, f64::NAN),

@@ -43,7 +43,7 @@ impl Category {
             Self::Solved => "solved",
             Self::Envelope => "envelope (H/He beyond thin column)",
             Self::MassDomain => "mass domain (>20 ME)",
-            Self::ColumnTemperature => "column temperature (outside 50-1000 K)",
+            Self::ColumnTemperature => "column temperature (above 1000 K)",
             Self::WaterCold => "water cold (<250 K)",
             Self::WaterLowPressure => "water surface below 1 kPa",
             Self::WaterVapour => "water vapour",
@@ -60,7 +60,7 @@ impl Category {
         match self {
             Self::Solved => "",
             Self::Envelope | Self::MassDomain => "P2",
-            Self::ColumnTemperature => "steps 2-3",
+            Self::ColumnTemperature => "step 5",
             Self::WaterCold | Self::WaterLowPressure => "step 3",
             Self::WaterVapour | Self::SecondaryCondensate => "step 4",
             Self::WaterHot | Self::WaterDeep => "step 5",
@@ -115,7 +115,13 @@ fn is_secondary(m: Material) -> bool {
 fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let retained = p.body.budget.retained();
     let source = p.body.budget.source();
-    let t = p.environment.as_ref().unwrap().equilibrium_temperature_k;
+    // Generation's 20 K column floor applies to the water as well.
+    let t = p
+        .environment
+        .as_ref()
+        .unwrap()
+        .equilibrium_temperature_k
+        .max(coupled::MIN_COLUMN_TEMPERATURE_K);
     let light_mass = retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium);
     let light = light_mass > 0.0;
     // H/He never condenses, so this alone already exceeds the column's own mask.
@@ -156,7 +162,7 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let request = coupled::Request {
         retained: open,
         exchangeable,
-        column_temperature_k: t.max(20.0),
+        column_temperature_k: t,
         water_temperature_k: Some(t),
     };
     let atmosphere = coupled::solve(&request, coupled::Controls::default()).map_err(|e| {
@@ -245,10 +251,10 @@ fn radial_error(t: f64, e: &dry::SolveError) -> (Category, String) {
             Category::WaterHot
         } else {
             match e {
+                E::Water(w) if w.reason == Unsupported::VapourDensity => Category::WaterVapour,
                 E::Water(w) if w.pressure_pa.is_some_and(|p| p < eos::MIN_PRESSURE_PA) => {
                     Category::WaterLowPressure
                 }
-                E::Water(w) if w.reason == Unsupported::VapourDensity => Category::WaterVapour,
                 _ => Category::WaterDeep,
             }
         };

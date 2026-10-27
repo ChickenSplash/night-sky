@@ -367,7 +367,10 @@ fail, rather than disappearing into a neighbouring region.
 Water alone has a prescribed uniform temperature and resolved phase regions:
 liquid, ice Ih or explicitly effective high-pressure ice, using the
 [original low-pressure IAPWS model](water-physics.md)
-between 1,000 Pa and 100 MPa, within 250–623.15 K. Compressed liquid additionally
+between 1,000 Pa and 100 MPa, within 250–623.15 K. Below 250 K (down to 20 K) or
+below 1,000 Pa the top water region instead uses the labelled
+[surface-water model](water-physics.md#cold-and-low-pressure-surface-water), with
+the cold intermediate and deep-ice branches below it. Compressed liquid additionally
 uses IAPWS95 at 100–1,000 MPa and 273.16–623.15 K, restricted to its liquid mask.
 Every stage and sample must remain in its selected model's domain.
 An ice-Ih/liquid transition is supported only where **both** density
@@ -586,7 +589,10 @@ display cutoff.
   normalisation and pressure profile consistently use the condensed plus deposit
   mass, not a point mass containing the gas shell. This is an engineering restriction,
   not a planet classification.
-- Column temperature is prescribed within **50–1,000 K**. Base ideal-gas density
+- Column temperature is prescribed within **20–1,000 K**, generation's own floor.
+  Below 50 K the cold-trap caps are extrapolated from their liquid-vapour
+  anchors and so overstate the frost vapour pressure; O₂ and H/He have no cap and
+  stay gas. Both are labelled notes, not a separate solver. Base ideal-gas density
   cannot exceed **10 kg/m³**, an engineering mask, not an established nonideal
   error bound. Neither dense CO₂ nor dense H/He is solved here.
 - The existing spherical sonic-radius guard must pass. Weak binding returns an
@@ -595,9 +601,10 @@ display cutoff.
 - The entire gas allocation normalises the operational finite shell described in
   [atmospheres](atmospheres.md#pressure-and-cold-trap-solve). No additional tail
   mass is inferred. Its cutoff is a prescription, not an exobase.
-- Water keeps all checkpoint-3 bounds, including **1,000 Pa minimum outer
-  pressure**. Exposed cold water with only lower-pressure vapour can therefore
-  be unsupported. No pressure floor is invented. Gas and water temperatures are
+- Water keeps the radial model's bounds. Ice surfaces may sit at any pressure,
+  including airless ones; a liquid surface needs at least its saturation
+  pressure, otherwise the vapour is refused. No pressure floor is invented. Gas
+  and water temperatures are
   independent imposed anchors: unequal values describe mechanical loading,
   not thermal or evaporation equilibrium.
 - Cold-trap caps are approximate, not matched Gibbs or chemical equilibrium.
@@ -647,9 +654,9 @@ them. Nonconvergence is explicit.
 cargo test -p space-simulation system::structure::coupled -- --nocapture
 ```
 
-Twelve tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+Thirteen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
 and absent gas, mixed N₂/CO₂, thin H/He, N₂ frost on rock, CO₂ frost loading a
-warmer water host, sub-ulp vapour, stripping, deterministic repeats,
+warmer water host, a 30 K icy body with N₂ frost on airless ice, sub-ulp vapour, stripping, deterministic repeats,
 refinement, exact aggregate-work success/failure and unsupported inputs/regimes.
 Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
 and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
@@ -704,7 +711,7 @@ The route is provisional and test-only, until the single entry point exists:
    reported as `frost` and the TSV carries `deposit_m`.
 
 Each planet reports only its **first** blocker. Water failures are binned by
-condition (below 250 K, above 623 K, surface below 1 kPa, vapour, otherwise deep
+condition (below 250 K, above 623 K, vapour, surface below 1 kPa, otherwise deep
 or phase seam) rather than error variant, so each bin maps to one plan step.
 Fixing one blocker can expose another, including the dense-gas limit for bodies
 with 0.1–1% H/He.
@@ -715,14 +722,28 @@ as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
 Baseline (October 2026, 20 systems per component, equilibrium temperature,
-after P1 step 6 and the frost deposit): 1,544 planets, 219 envelopes. **57 of
-1,325** non-envelope planets solve (4%), all at 250–623 K. First blockers among
-non-envelope planets: water below 250 K 45%, column below 50 K or above 1,000 K
-21%, surface below 1 kPa 18%, water above 623 K 7%, vapour 4%, deep water or
-phase seam 1%. Frost no longer blocks any body: all 358 former frost bodies are
-also below 250 K and now stop at cold water. Solved radii are within 0.6% of the legacy radius at p95 (6.5% at
-most); a solve takes about 90 ms at the median and up to about 4 s. Thick H/He
-columns raise solved surface pressures to about 100 bar at p95.
+after P1 steps 3 and 6 and the frost deposit): 1,544 planets, 417 envelopes.
+**726 of 1,127** non-envelope planets solve (64%): all 227 below 50 K, 421 of
+425 at 50–250 K, 78 of 370 at 250–623 K and none above. Outer layers are frost
+461, ice 224 and ocean 41. First blockers among non-envelope planets: vapour
+24%, water above 623 K 8%, deep water or phase seam 1.5%, column above 1,000 K
+1.3%, gas triage 0.5% (dense CO₂, weak binding).
+
+- **Envelopes rose from 219 to 417.** Cold bodies with 0.1–1% H/He used to stop
+  at cold water first; now their column is checked and 198 exceed the dense-gas
+  limit. By the envelope rule they are P2 work, not regressions.
+- **Vapour rose from 56 to 273.** Former "surface below 1 kPa" bodies above
+  273 K sit below their saturation pressure, so their exposed water is vapour
+  (step 4). These are mostly the protected 99.999% of water left on top of the
+  rock when all accessible water is already in the air.
+- **Radius against legacy:** p50 2.6%, p95 10%, at most 12.7%. Icy bodies grow
+  most: a Pluto-mass body with 58% water comes out about 12.6% larger, at about
+  1,350 kg/m³ mean density, because ice Ih (about 934 kg/m³) is lighter than the
+  legacy fit assumes. Massive icy bodies come out up to 7% smaller from deep-ice
+  compression.
+- Frost deposits are 1 m at the median, 217 m at p95 and under 1 km at most.
+- A solve takes about 70 ms at the median and up to about 3–5 s (thick H/He
+  columns). Solved surface pressures reach about 10 bar at p95, 129 bar at most.
 
 ## Light envelopes and the giant transition
 

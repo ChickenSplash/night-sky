@@ -70,9 +70,9 @@ Source-derived constraints, distinct from measurements:
   `T_eq=[F(1-A)/(4σ)]^(1/4)`, column T=`max(T_eq,20 K)`. Neither is climate,
   deep temperature or entropy. Sample maximum T/flux/age are **not global bounds**;
   the conservative source-derived envelope below covers evolved/companion hosts.
-- Existing radial scope (20 Earth masses), dilute coupling (50–1,000 K, ≤1% gas,
-  ideal base density ≤10 kg/m³) and condensed-water pressure floor (1,000 Pa)
-  miss this population. Replacement central P/T must be solved, not inferred
+- Existing radial scope (20 Earth masses), dilute coupling (20–1,000 K, ≤1% gas,
+  ideal base density ≤10 kg/m³) and liquid water at or above its saturation
+  pressure miss parts of this population. Replacement central P/T must be solved, not inferred
   from legacy reference pressures.
 
 ### Source-derived forcing envelope

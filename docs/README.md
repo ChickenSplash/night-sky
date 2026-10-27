@@ -142,7 +142,8 @@ The Bevy/egui client in `crates/client`:
   is independently tested. A separate headless solver supports restricted
   liquid/ice-Ih shells and their narrow supported phase-interface overlap, but
   effective compressed deep ice now enables the 300 K water-rich fixture.
-  Cold 250 K deep water also solves using explicitly labelled approximations.
+  Cold water down to 20 K and airless or thin-air ice surfaces also solve using
+  explicitly labelled approximations.
   Pressure-melted liquid gaps are covered by a labelled density approximation.
   Exact deep-ice polymorphs, precise supercooled-liquid physics and dense
    envelopes remain unresolved.

@@ -244,8 +244,13 @@ later checkpoints. The original local IAPWS APIs/model identities are preserved;
 
 ### Cold intermediate ice approximation
 
-`water::cold_ice` covers **250–273.15 K** (exclusive upper endpoint). Below the
-minimum liquid melting temperature, 251.165 K, it uses an all-solid path. Above
+`water::cold_ice` covers **20–273.15 K** (exclusive upper endpoint). Below the
+minimum liquid melting temperature, 251.165 K, it uses an all-solid path. Below
+250 K the 250 K boundaries and compression are held fixed down to 20 K, with a
+labelled note; the real Ih/II boundary moves only slightly over that range. The
+Seager deep-ice branch is temperature-independent and starts at 2.1 GPa there
+too. Ice from the surface down to 100 MPa uses the
+[surface model](#cold-and-low-pressure-surface-water). Above
 that it includes the pressure-melted liquid interval described below. Rounded constant
 engineering transitions are **220 MPa** from Ih to effective intermediate ice,
 and **2.1 GPa** from intermediate to the Seager effective deep-ice proxy. The
@@ -287,6 +292,30 @@ the anchor, independent forward pressure closure, domain refusals, monotonicity,
 the original Ih overlap and full cold-planet conservation/refinement. The solved
 250 K fixture is documented in the solver guide. Its new cold treatment leaves
 the 300 K acceptance result unchanged.
+
+### Cold and low-pressure surface water
+
+`water::surface` (`iapws_cold_or_low_pressure_surface_water_v1`) covers what the
+API's 250 K and 1,000 Pa floors leave out, for the radial solver only. The
+original `phase`/`state` API is unchanged.
+
+- **Below 250 K, down to 20 K** (generation's column floor), 0–100 MPa: ice Ih
+  from the same IAPWS R10-06 density, which is published for 0–273.16 K up to
+  210 MPa. It runs from about 934 kg/m³ when cold to 920 kg/m³ near 250 K.
+- **Surfaces below 1,000 Pa, at 250 K and above:** ice Ih below 273.16 K. Above
+  it, IF97 liquid down to its saturation pressure, which region 1 is published
+  for; below that the state is vapour and is refused (plan step 4). From 1,000 Pa
+  upwards the model returns the API's own state, so the top region continues
+  into the API domain without a seam or an extra thin region.
+
+What the API floor really avoided is phase selection, so these are labelled:
+
+- Ice is kept below its sublimation pressure (on an airless body, at any
+  pressure). Real surface ice sublimates slowly; that loss is not modelled.
+- Below 1 kPa the phase is ice under 273.16 K and liquid above it. The melting
+  curve moves by under 0.0001 K there.
+- Proton-ordered ice XI below 72 K is treated as ice Ih; their densities are
+  nearly equal.
 
 ### Pressure-melted subfreezing liquid
 

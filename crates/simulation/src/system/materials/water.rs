@@ -14,6 +14,7 @@ pub mod ice_vii;
 mod liquid;
 pub mod melting;
 pub mod subfreezing_liquid;
+pub mod surface;
 
 use std::fmt;
 

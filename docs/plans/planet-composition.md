@@ -59,22 +59,23 @@ The [coverage report](../simulation/planet-composition.md#prototype-coverage-rep
 (October 2026, 1,544 planets from 140 calibration systems, provisional joined
 route, equilibrium temperature) gives the P1 baseline:
 
-- 14% are envelopes: H/He beyond the thin column's 1% gas-mass, dense-gas or
+- 27% are envelopes: H/He beyond the thin column's 1% gas-mass, dense-gas or
   20 Earth-mass limits. Trace H/He is an ordinary gas, not an envelope; counting
-  any H/He as an envelope had misclassified 472 stripped rock-type worlds.
+  any H/He as an envelope had misclassified 472 stripped rock-type worlds. Step 3
+  raised envelopes from 219 to 417: cold bodies with 0.1–1% H/He now reach the
+  column check and exceed the dense-gas limit.
 - No rock planet is completely dry: every one carries at least trace water, so
   all use the water solver.
-- **57 of 1,325 non-envelope planets solve (4%),** all at 250–623 K. The earlier
-  throwaway probe's 26% used an imposed surface load; the coupled route uses the
-  generated atmospheres, so many bodies have a water surface below 1 kPa.
-- First blockers after step 6 and the frost deposit: water below 250 K 45%,
-  column temperature outside 50–1,000 K 21%, surface below 1 kPa 18%, water
-  above 623 K 7%, vapour 4%, deep water or phase seam 1%. Step 6 removed trace
-  water rounding (23%) and the frost deposit removed frost (27%); all those
-  bodies are cold and now stop at cold water (step 3).
-- Where solved, radius is within 0.6% of the legacy model at p95. The visible
-  gain is layer structure and boundary meaning, not radius.
-- A solve costs about 90 ms at the median, up to 2.4–4 s with thick H/He
+- **726 of 1,127 non-envelope planets solve (64%)** after steps 3 and 6 and the
+  frost deposit, up from 57 of 1,325. Every non-envelope body below 250 K solves
+  except 4 gas-triage cases; at 250–623 K 78 of 370 do, above 623 K none.
+- First blockers now: vapour 24% (step 4), water above 623 K 8% and deep water
+  1.5% (step 5), column above 1,000 K 1.3%, gas triage 0.5%. Most vapour bodies
+  are warm rock worlds whose protected water sits on top of the rock below its
+  saturation pressure.
+- Radius against legacy: 2.6% at the median, 10% at p95, 12.7% at most. Small
+  icy bodies grow because ice Ih is lighter than the legacy fit assumes.
+- A solve costs about 70 ms at the median, up to 3–5 s with thick H/He
   columns (varies between runs).
   Cost needs attention before the experimental mode (step 8).
 
@@ -115,11 +116,13 @@ Each step is small and labelled. Rerun the coverage report after each one.
 2. **Surface temperature.** A simple labelled greenhouse warming estimate from
    atmospheric pressure and composition, above the equilibrium temperature.
    Without it an Earth twin is about 255 K and frozen. Not a climate model.
-3. **Cold and airless water.** Ice Ih below 250 K down to 20 K, and water surfaces
-   below 1 kPa, use a labelled near-constant ice density. Extend the existing
-   temperature-independent effective deep-ice model to cold bodies. Cold
-   columns below the coupling's 50 K floor need a labelled route too (21% of
-   non-envelope planets are below 50 K).
+3. **Cold and airless water. Done.** A labelled
+   [surface-water model](../simulation/water-physics.md#cold-and-low-pressure-surface-water)
+   gives IAPWS ice Ih below 250 K down to 20 K and at any surface pressure, and
+   IF97 liquid below 1 kPa down to its saturation pressure. The cold
+   intermediate and temperature-independent deep-ice branches extend to 20 K.
+   The coupling's column floor is now generation's 20 K, with labelled notes
+   for extrapolated cold-trap caps.
 4. **Vapour allocation.** Exposed water that cannot stay liquid or frozen at the
    surface moves to the atmosphere inventory; protected water stays in the host.
    Reuse the existing coupling loop to re-solve the load. **Frost done:**

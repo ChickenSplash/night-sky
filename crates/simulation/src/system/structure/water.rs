@@ -78,6 +78,7 @@ impl Region {
                 &["Ice-Ih pressure domain extended beyond the original 100 MPa mask"]
             }
             eos::subfreezing_liquid::MODEL_ID => eos::subfreezing_liquid::APPROXIMATION_NOTES,
+            eos::surface::MODEL_ID => eos::surface::APPROXIMATION_NOTES,
             eos::deep_ice::MODEL_ID => &[
                 "Effective high-pressure ice compression; individual polymorphs unresolved",
                 "No ice thermal-expansion correction or matched Gibbs potentials",
@@ -140,7 +141,8 @@ impl WaterStructure {
 /// All positive unsupported allocations are refused, including gas traces.
 /// Ih/liquid interfaces, the 100 MPa liquid-model seam and the approximate
 /// deep-ice melting boundary are located with separate one-sided densities.
-/// Effective deep ice supports 250..=300 K, not resolved polymorphs. Intermediate
+/// Effective deep ice supports 20..=300 K, not resolved polymorphs. Below 250 K
+/// or 1 kPa a labelled surface-water model extends the IAPWS API. Intermediate
 /// cold ice, pressure-melted subfreezing liquid and extended Ih density masks
 /// carry explicit approximation notes. Original local IAPWS APIs are unchanged.
 /// Unsupported high shooting trials bound the search;
@@ -188,25 +190,12 @@ fn solve_with_volume_factor(
     }
     let deep_boundary = eos::deep_ice::boundary_pressure_pa(water_temperature_k).ok();
     let cold_path = eos::cold_ice::supports_temperature(water_temperature_k);
+    // Below the API's 250 K floor the surface model replaces the top Ih branch.
+    let frozen = cold_path && water_temperature_k < eos::MIN_TEMPERATURE_K;
+    // Below its 1 kPa floor the surface model takes over the top API branch.
+    let thin = !frozen && outer_pressure_pa < eos::MIN_PRESSURE_PA;
     let subfreezing_path =
         !cold_path && water_temperature_k > 251.165 && water_temperature_k < 273.15;
-    let surface_phase =
-        if (cold_path || subfreezing_path) && outer_pressure_pa >= eos::MAX_PRESSURE_PA {
-            eos::Phase::IceIh // Only used on the low-pressure branch.
-        } else if outer_pressure_pa >= eos::MAX_PRESSURE_PA && water_temperature_k >= 273.15 {
-            // Used only for the liquid branches. The explicit deep-ice branch
-            // takes precedence where available; density validation follows below.
-            eos::Phase::Liquid
-        } else {
-            eos::phase(outer_pressure_pa, water_temperature_k).map_err(SolveError::Water)?
-        };
-    // At a coexistence outer boundary, the inward one-sided limit is liquid.
-    // No zero-mass ice skin or mixture is introduced.
-    let phase = if surface_phase == eos::Phase::IceIhLiquidCoexistence {
-        eos::Phase::Liquid
-    } else {
-        surface_phase
-    };
     let mut boundaries = Vec::new();
     let mut branches = Vec::new();
     let liquid = PhaseKnowledge::Water(eos::Phase::Liquid);
@@ -222,7 +211,14 @@ fn solve_with_volume_factor(
             (effective_ice, eos::deep_ice::MODEL_ID),
             (effective_ice, eos::cold_ice::INTERMEDIATE_MODEL_ID),
             (ih, eos::cold_ice::IH_MODEL_ID),
-            (ih, eos::MODEL_ID),
+            (
+                ih,
+                if frozen {
+                    eos::surface::MODEL_ID
+                } else {
+                    eos::MODEL_ID
+                },
+            ),
         ]);
     } else if subfreezing_path {
         let low = eos::melting_pressure_ih_pa(water_temperature_k).map_err(SolveError::Water)?;
@@ -265,8 +261,33 @@ fn solve_with_volume_factor(
             branches.push((liquid, eos::MODEL_ID));
             branches.push((ih, eos::MODEL_ID));
         } else {
+            let phase =
+                if outer_pressure_pa >= eos::MAX_PRESSURE_PA && water_temperature_k >= 273.15 {
+                    // Used only for the liquid branches. The explicit deep-ice branch
+                    // takes precedence where available; density validation follows below.
+                    eos::Phase::Liquid
+                } else {
+                    eos::phase(
+                        outer_pressure_pa.max(eos::MIN_PRESSURE_PA),
+                        water_temperature_k,
+                    )
+                    .map_err(SolveError::Water)?
+                };
+            // At a coexistence outer boundary, the inward one-sided limit is liquid.
+            // No zero-mass ice skin or mixture is introduced.
+            let phase = if phase == eos::Phase::IceIhLiquidCoexistence {
+                eos::Phase::Liquid
+            } else {
+                phase
+            };
             branches.push((PhaseKnowledge::Water(phase), eos::MODEL_ID));
         }
+    }
+    if thin {
+        *branches.last_mut().unwrap() = (
+            PhaseKnowledge::Water(eos::surface::phase(water_temperature_k)),
+            eos::surface::MODEL_ID,
+        );
     }
     let branch_at = |pressure: f64| boundaries.partition_point(|p| pressure < *p);
     let branch_phase = |branch: usize| branches[branch].0;
@@ -293,6 +314,10 @@ fn solve_with_volume_factor(
         }
         if model == eos::subfreezing_liquid::MODEL_ID {
             return eos::subfreezing_liquid::density_kg_m3(pressure, water_temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::surface::MODEL_ID {
+            return eos::surface::density_kg_m3(pressure, water_temperature_k)
                 .map_err(SolveError::Water);
         }
         if model == eos::dense_liquid::MODEL_ID {

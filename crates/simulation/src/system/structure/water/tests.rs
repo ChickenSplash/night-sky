@@ -722,7 +722,7 @@ fn unsupported_deep_water_phase_crossings_and_surface_states_are_explicit_failur
     for (temperature, pressure) in [
         (300.0, 0.0),
         (300.0, 1000.0),
-        (249.0, 1e5),
+        (19.0, 1e5),
         (300.0, 1e13 + 1.0),
         (f64::NAN, 1e5),
     ] {
@@ -1202,5 +1202,61 @@ fn unavailable_dense_profiles_and_numerical_failures_are_not_repaired() {
             eos_evaluations: 17,
         });
         assert!(matches!(classify_upper(Err(error)), Err(e) if e == error));
+    }
+}
+
+#[test]
+fn cold_and_airless_ice_solves_continuously_with_the_api_branches() {
+    let inv = Inventory::from_mass_fractions(
+        0.12 * EARTH_MASS_KG,
+        &[
+            (Material::Metal, 0.3),
+            (Material::Silicate, 0.69),
+            (Material::Water, 0.01),
+        ],
+    )
+    .unwrap();
+    let surface = |b: &WaterStructure| b.regions().last().unwrap().clone();
+    // The surface model reuses the API's densities, so crossing 1 kPa or
+    // 250 K moves the radius smoothly, with no seam or extra region.
+    for t in [252.71, 260.0, 275.0] {
+        let api = solve(&inv, t, eos::MIN_PRESSURE_PA, Controls::default()).unwrap();
+        assert_eq!(surface(&api).density_model_id(), eos::MODEL_ID);
+        let thin = solve(&inv, t, 999.0, Controls::default()).unwrap();
+        assert_eq!(thin.regions().len(), api.regions().len());
+        let top = surface(&thin);
+        assert_eq!(top.density_model_id(), eos::surface::MODEL_ID);
+        assert!(!top.approximation_notes().is_empty());
+        assert_eq!(top.phase(), PhaseKnowledge::Water(eos::surface::phase(t)));
+        assert!(thin.radius_m() > api.radius_m());
+        close(thin.radius_m(), api.radius_m(), 1e-9);
+    }
+    let warm = solve(&inv, 250.0, 1e5, Controls::default()).unwrap();
+    let cold = solve(&inv, 249.999, 1e5, Controls::default()).unwrap();
+    assert_eq!(surface(&cold).density_model_id(), eos::surface::MODEL_ID);
+    close(cold.radius_m(), warm.radius_m(), 1e-6);
+    // Airless cold bodies: ice at its zero-pressure density on top, effective
+    // deep ice below, and colder ice is denser.
+    let icy = inventory(0.3, 0.5);
+    let mut previous = f64::INFINITY;
+    for t in [200.0, 100.0, eos::surface::MIN_TEMPERATURE_K] {
+        let body = solve(&icy, t, 0.0, Controls::default()).unwrap();
+        let top = surface(&body);
+        assert_eq!(top.phase(), PhaseKnowledge::Water(eos::Phase::IceIh));
+        assert_eq!(top.temperature_k(), Some(t));
+        close(
+            top.outer().density_kg_m3,
+            eos::surface::density_kg_m3(0.0, t).unwrap(),
+            1e-12,
+        );
+        assert!(
+            body.regions()
+                .iter()
+                .any(|r| r.density_model_id() == eos::deep_ice::MODEL_ID)
+        );
+        assert!(body.radius_m() < previous);
+        previous = body.radius_m();
+        assert_eq!(body.retained_inventory(), icy);
+        assert!(body.inertia_factor() < 0.4);
     }
 }

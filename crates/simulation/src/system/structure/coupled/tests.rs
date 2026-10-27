@@ -306,11 +306,13 @@ fn invalid_supply_thermal_inputs_and_missing_water_anchors_fail_explicitly() {
         solve(&r, Controls::default()),
         Err(Error::InvalidInput("missing water temperature"))
     );
-    r = request(0.0, f64::NAN);
-    assert!(matches!(
-        solve(&r, Controls::default()),
-        Err(Error::InvalidInput(_))
-    ));
+    for t in [f64::NAN, 19.0, 1001.0] {
+        r = request(0.0, t);
+        assert!(matches!(
+            solve(&r, Controls::default()),
+            Err(Error::InvalidInput(_))
+        ));
+    }
     r = request(0.0, 250.0);
     r.exchangeable = r.exchangeable.scaled(2.0).unwrap();
     assert_eq!(
@@ -452,4 +454,33 @@ fn frost_load_reaches_a_warmer_water_host() {
     )
     .unwrap();
     close(direct.radius_m(), s.condensed().radius_m(), 1e-9);
+}
+
+#[test]
+fn cold_icy_body_below_fifty_kelvin_holds_frost_on_airless_ice() {
+    let r = request(0.3, 30.0);
+    let s = solve(&r, Controls::default()).unwrap();
+    check(&s, &r);
+    let CondensedStructure::Water(body) = s.condensed() else {
+        panic!("water host expected");
+    };
+    let top = body.regions().last().unwrap();
+    assert_eq!(
+        top.density_model_id(),
+        crate::system::materials::water::surface::MODEL_ID
+    );
+    assert_eq!(
+        top.phase(),
+        water::PhaseKnowledge::Water(crate::system::materials::water::Phase::IceIh)
+    );
+    let nitrogen = r.retained.mass_kg(Material::Nitrogen);
+    assert!(s.deposit_inventory().mass_kg(Material::Nitrogen) > 0.999 * nitrogen);
+    let air = s.atmosphere().unwrap();
+    assert!(air.pressure_pa() < 1.0);
+    close(
+        air.pressure_pa(),
+        vapour_pressure(Gas::Nitrogen, 30.0),
+        1e-6,
+    );
+    assert!(s.approximation_notes().iter().any(|n| n.contains("50 K")));
 }
