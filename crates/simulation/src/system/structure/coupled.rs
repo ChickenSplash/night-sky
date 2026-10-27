@@ -332,7 +332,12 @@ fn subtract(total: &Inventory, gas: &Inventory) -> Result<Inventory, Error> {
     let inventory = Inventory::new(&Material::ALL.map(|m| (m, total.mass_kg(m) - gas.mass_kg(m))))
         .map_err(Error::Composition)?;
     for m in Material::ALL {
-        if gas.mass_kg(m) > 0.0 && inventory.mass_kg(m) == total.mass_kg(m) {
+        // A transfer below one ulp of its own species' total cannot change that
+        // total in f64. Accept it: the sum still closes exactly. Larger lost
+        // transfers stay errors.
+        if gas.mass_kg(m) > total.mass_kg(m) * f64::EPSILON
+            && inventory.mass_kg(m) == total.mass_kg(m)
+        {
             return Err(Error::InvalidClosure(m));
         }
         if !matches!(m, Material::Metal | Material::Silicate | Material::Water)

@@ -67,12 +67,14 @@ route, equilibrium temperature) gives the P1 baseline:
 - **57 of 1,325 non-envelope planets solve (4%),** all at 250–623 K. The earlier
   throwaway probe's 26% used an imposed surface load; the coupled route uses the
   generated atmospheres, so many bodies have a water surface below 1 kPa.
-- First blockers: trace water rounding 23%, column temperature outside
-  50–1,000 K 21%, surface below 1 kPa 18%, water below 250 K 17%, water above
-  623 K 7%, CO₂ frost 5%, vapour 4%, deep water or phase seam 1%.
+- First blockers after step 6: CO₂ or N₂ frost 27%, column temperature outside
+  50–1,000 K 21%, surface below 1 kPa 18%, water below 250 K 18%, water above
+  623 K 7%, vapour 4%, deep water or phase seam 1%. Step 6 removed trace water
+  rounding (23%); those cold bodies now stop at frost or cold water instead.
 - Where solved, radius is within 0.6% of the legacy model at p95. The visible
   gain is layer structure and boundary meaning, not radius.
-- A solve costs about 90 ms at the median, up to 2.4 s with thick H/He columns.
+- A solve costs about 90 ms at the median, up to 2.4–4 s with thick H/He
+  columns (varies between runs).
   Cost needs attention before the experimental mode (step 8).
 
 ## Replacement contract
@@ -125,9 +127,9 @@ Each step is small and labelled. Rerun the coverage report after each one.
 5. **Hot and deep water.** One labelled approximation for supercritical water
    above 623 K and warm deep ice (300–623 K beyond 1 GPa), using effective
    high-pressure ice at depth whatever the temperature.
-6. **Trace rounding.** Accept water transfers below floating-point resolution of
-   the planet's water with a documented, species-local allowance, instead of
-   rejecting them.
+6. **Trace rounding. Done.** Water transfers below one machine epsilon of the
+   planet's water are accepted with a documented, species-local allowance,
+   instead of being rejected.
 7. **One entry point.** Generated budget and environment in; one region-owned
    result out, with layers, atmosphere, model labels and boundary facts. It joins
    protected traces in the host with the atmosphere coupling, which today are

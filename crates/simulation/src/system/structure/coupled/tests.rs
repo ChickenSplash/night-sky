@@ -362,15 +362,21 @@ fn gas_stripping_and_mixed_secondary_gases_keep_inventory_and_radius_continuous(
 }
 
 #[test]
-fn unrepresentable_water_exchange_is_refused_instead_of_manufacturing_trace_gas() {
+fn sub_ulp_water_exchange_keeps_vapour_and_closes_exactly() {
     let mut r = request(0.3, 300.0);
     r.exchangeable = Inventory::new(&[
         (Material::Water, 1.0),
         (Material::Nitrogen, r.retained.mass_kg(Material::Nitrogen)),
     ])
     .unwrap();
+    let water = r.retained.mass_kg(Material::Water);
+    assert!(1.0 <= water * f64::EPSILON);
+    let s = solve(&r, Controls::default()).unwrap();
+    check(&s, &r);
+    assert_eq!(s.gas_inventory().mass_kg(Material::Water), 1.0);
     assert_eq!(
-        solve(&r, Controls::default()),
-        Err(Error::InvalidClosure(Material::Water))
+        s.condensed().retained_inventory().mass_kg(Material::Water),
+        water
     );
+    assert_eq!(s.retained_inventory().mass_kg(Material::Water), water);
 }

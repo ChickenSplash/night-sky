@@ -543,8 +543,12 @@ escaped bookkeeping stays with the caller. Formation/accessibility priors are
 not run inside this API. Gas is partitioned using the same approximate cold-trap
 caps as generation. The remainder belongs to radial condensed regions; neither
 a mutable reservoir copy nor a second column owns any mass. Unsupported
-condensed molecules are refused, not replaced by water. Sub-precision exchange
-that cannot debit its condensed source is refused.
+condensed molecules are refused, not replaced by water. Exchange smaller than
+one machine epsilon of that species' own retained total (for example a few kg of
+vapour over a cold ocean) cannot change the condensed total in f64. It is
+accepted: the gas keeps it and the sum still closes exactly. The allowance is
+species-local, never scaled to planet mass, and larger transfers that fail to
+debit their source are still refused.
 
 The fixed-point iteration matches three quantities:
 
@@ -683,15 +687,14 @@ protected heavy material, and escape never removes it exactly. Treating any H/He
 as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
-Baseline (October 2026, 20 systems per component, equilibrium temperature):
-1,544 planets, 219 envelopes. **57 of 1,325** non-envelope planets solve (4%),
-all at 250–623 K. First blockers among non-envelope planets: trace water
-rounding in the coupled partition 23%, column below 50 K or above 1,000 K 21%,
-surface below 1 kPa 18%, water below 250 K 17%, water above 623 K 7%, CO₂ frost
-5%, vapour 4%, deep water or phase seam 1%. Solved radii are within 0.6% of the
-legacy radius at p95 (6.5% at most); a solve takes about 90 ms at the median
-and up to 2.4 s. Thick H/He columns raise solved surface pressures to about
-100 bar at p95.
+Baseline (October 2026, 20 systems per component, equilibrium temperature,
+after P1 step 6): 1,544 planets, 219 envelopes. **57 of 1,325** non-envelope
+planets solve (4%), all at 250–623 K. First blockers among non-envelope planets:
+CO₂ or N₂ frost 27%, column below 50 K or above 1,000 K 21%, surface below 1 kPa
+18%, water below 250 K 18%, water above 623 K 7%, vapour 4%, deep water or phase
+seam 1%. Solved radii are within 0.6% of the legacy radius at p95 (6.5% at
+most); a solve takes about 90 ms at the median and up to about 4 s. Thick H/He
+columns raise solved surface pressures to about 100 bar at p95.
 
 ## Light envelopes and the giant transition
 
