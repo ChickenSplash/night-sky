@@ -24,6 +24,33 @@ only when a demonstrated simulation or game problem requires them.
 | [Scientific reference](../simulation/planet-composition-reference.md) | Sources, generated-input bounds and candidate higher-fidelity fixtures |
 | [Water physics](../simulation/water-physics.md) | Implemented water prescriptions and their evidence |
 
+### Resume here (October 2026)
+
+- **Done in P1:** steps 1, 2, 3, 4 and 6, plus the frost deposit. Last commit
+  `55313bd` (step 2). `./scripts/check.sh` passes. Nothing is pushed: neither
+  the main branch nor `park/methane-physics` (parked methane physics). Ask the
+  user before pushing either.
+- **Coverage:** 748 of 1,095 non-envelope planets solve (68%). See
+  [measured starting point](#measured-starting-point).
+- **Biggest blockers:** greenhouse runaway (159, hot dense steam beyond the thin
+  column) and weak binding (155, small warm bodies whose steam column would
+  escape).
+- **Open decisions for the user:**
+  - Recommended next: step 5 (hot and deep water) together with a hot or dense
+    steam treatment above 1,000 K, which is what the runaways need.
+  - Steam escape: whether generation's escape should act on exposed water, so
+    weakly bound small bodies lose their steam instead of failing.
+  - Solve cost rose to about 110–190 ms at the median with the warming scan;
+    address before step 8.
+- **After each step:** rerun the coverage report
+  (`cargo test --release -p space-simulation composition_coverage -- --ignored
+  --nocapture`), update the baseline here and in the
+  [guide](../simulation/planet-composition.md#prototype-coverage-report), then
+  run `./scripts/check.sh`. The user runs benchmarks and visual review.
+- **Key code:** `structure/coupled.rs` (loop, `Temperature`),
+  `coupled/{column,warming,deposit}.rs`, `atmosphere/greenhouse.rs`,
+  `structure/coverage.rs` (route, categories), `materials/water.rs`.
+
 ## Decisions
 
 - **Rock and water first.** Metal, silicate and water get layered structure for
@@ -135,8 +162,9 @@ Each step is small and labelled. Rerun the coverage report after each one.
    an ocean or ice below, or all of it becomes steam over dry rock. Generation's
    protection shields water from escape only. The coupling loop re-solves the
    load; an ocean under pure steam takes the liquid-side limit on the saturation
-   curve. **Open:** 109 small warm bodies now have a steam column too weakly
-   bound to hold, so the escape prior and exposed water disagree there.
+   curve. **Open:** small warm bodies (155 after step 2) have a steam column
+   too weakly bound to hold, so the escape prior and exposed water disagree
+   there.
    **Frost:**
    cold-trapped CO₂, N₂, CH₄ and Ar above their vapour-pressure cap settle as a
    labelled [surface deposit](../simulation/planet-composition.md#frost-surface-deposit)
@@ -146,7 +174,10 @@ Each step is small and labelled. Rerun the coverage report after each one.
    above 623 K and warm deep ice (300–623 K beyond 1 GPa), using effective
    high-pressure ice at depth whatever the temperature.
    Since step 4, hot rock worlds evaporate all their water, so this now matters
-   for deep water (10 bodies) and hot water-rich worlds, none in the sample.
+   for deep water (11 bodies) and hot water-rich worlds. Since step 2, 159
+   greenhouse runaways also end as hot, dense steam above 1,000 K or past the
+   10 kg/m³ gas mask; solving them needs a steam treatment beyond the thin
+   column, best scoped together with this step.
 6. **Trace rounding. Done.** Water transfers below one machine epsilon of the
    planet's water are accepted with a documented, species-local allowance,
    instead of being rejected.
