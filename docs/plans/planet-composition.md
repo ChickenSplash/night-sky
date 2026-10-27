@@ -54,18 +54,23 @@ unchanged unless a step below deliberately widens them with a labelled model.
 
 ## Measured starting point
 
-A throwaway probe (October 2026) routed 1,375 generated planets from 120
-calibration systems through the existing headless solvers, using a provisional
-surface load. The numbers are indicative, not a formal coverage report:
+The [coverage report](../simulation/planet-composition.md#prototype-coverage-report)
+(October 2026, 1,544 planets from 140 calibration systems, provisional joined
+route, equilibrium temperature) gives the P1 baseline:
 
-- 54% carry H/He and have no new route.
+- 55% carry H/He and have no new route.
 - No rock planet is completely dry: every one carries at least trace water, so
   all use the water solver.
-- About 26% of non-envelope planets solve on any route. Most failures are water
-  conditions outside the solver's window, not missing mass.
-- Where solved, radius is within about 1% of the legacy model. The visible gain
-  is layer structure and boundary meaning, not radius.
-- A solve costs about 30–60 ms, roughly 0.5 s for a twelve-planet system.
+- **8 of 697 non-envelope planets solve (1%).** The earlier throwaway probe's
+  26% used an imposed surface load; the coupled route uses the generated thin
+  atmospheres, so most bodies have a water surface below 1 kPa.
+- First blockers: surface below 1 kPa 28%, column temperature outside
+  50–1,000 K 28%, trace water rounding 19%, water below 250 K 17%, water above
+  623 K 5%, CO₂ frost 1%, vapour 1%.
+- Where solved, radius is within 0.6% of the legacy model. The visible gain is
+  layer structure and boundary meaning, not radius.
+- A solve costs about 50 ms (up to 0.5 s), roughly 0.6 s for a twelve-planet
+  system.
 
 ## Replacement contract
 
@@ -98,18 +103,22 @@ transport. Do not build a parallel solver framework or a material plugin system.
 
 Each step is small and labelled. Rerun the coverage report after each one.
 
-1. **Coverage report.** A reproducible command routes a fixed deterministic set
-   of generated planets through the prototype path. It reports success, failure
-   reason by category, work counts and timings. It replaces the throwaway probe.
+1. **Coverage report. Done.** A reproducible command routes a fixed deterministic
+   set of generated planets through the prototype path. It reports success,
+   first failure reason by category, work counts and timings.
 2. **Surface temperature.** A simple labelled greenhouse warming estimate from
    atmospheric pressure and composition, above the equilibrium temperature.
    Without it an Earth twin is about 255 K and frozen. Not a climate model.
 3. **Cold and airless water.** Ice Ih below 250 K down to 20 K, and water surfaces
    below 1 kPa, use a labelled near-constant ice density. Extend the existing
-   temperature-independent effective deep-ice model to cold bodies.
+   temperature-independent effective deep-ice model to cold bodies. Cold
+   columns below the coupling's 50 K floor need a labelled route too (27% of
+   non-envelope planets are below 50 K).
 4. **Vapour allocation.** Exposed water that cannot stay liquid or frozen at the
    surface moves to the atmosphere inventory; protected water stays in the host.
-   Reuse the existing coupling loop to re-solve the load.
+   Reuse the existing coupling loop to re-solve the load. Cold-trapped CO₂ and
+   other secondaries stay in the atmosphere inventory, labelled as unresolved
+   frost, instead of being refused.
 5. **Hot and deep water.** One labelled approximation for supercritical water
    above 623 K and warm deep ice (300–623 K beyond 1 GPa), using effective
    high-pressure ice at depth whatever the temperature.

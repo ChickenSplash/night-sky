@@ -641,6 +641,46 @@ could lie one ulp beyond an outward EOS branch. The shared kernel now recognises
 the original endpoint pressure. No tolerance band, pressure offset, density
 blend or EOS-domain extension is used.
 
+## Prototype coverage report
+
+An opt-in report measures how much of the generated population the
+rock-and-water prototype path solves, so each P1 step of the
+[plan](../plans/planet-composition.md) can be measured against it.
+
+```sh
+cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
+```
+
+`NS_COVERAGE_SYSTEMS` sets systems per galactic component (default 20, using the
+census keys `composition-calibration:{component:?}:{index}`).
+`NS_COVERAGE_THREADS=1` gives uncontended per-planet timings. The summary is
+printed and written to `data/tmp/composition-coverage.md`, with one row per
+planet in `data/tmp/composition-coverage.tsv` for diffing between steps.
+
+The route is provisional and test-only, until the single entry point exists:
+
+1. H/He-bearing planets are reported as envelopes and not attempted.
+2. Protected secondaries (90% of CO₂/N₂/CH₄/O₂/Ar source) are set aside. The
+   coupled solver runs on the rest, with accessible water and all remaining
+   secondaries exchangeable, at the equilibrium temperature (column floored at
+   20 K, as in generation).
+3. The resulting condensed host is re-solved with the protected secondaries
+   entrained at the coupled surface pressure. The column's gravity ignores that
+   protected mass, at most 0.3% of the body.
+
+Each planet reports only its **first** blocker. Water failures are binned by
+condition (below 250 K, above 623 K, surface below 1 kPa, vapour, otherwise deep
+or phase seam) rather than error variant, so each bin maps to one plan step.
+Fixing one blocker can expose another.
+
+Baseline (October 2026, 20 systems per component, equilibrium temperature):
+1,544 planets, 847 with envelopes. **8 of 697** non-envelope planets solve
+(1%), all at 250–623 K. Blockers among non-envelope planets: surface below
+1 kPa 28%, column below 50 K or above 1,000 K 28%, trace water rounding in the
+coupled partition 19%, water below 250 K 17%, water above 623 K 5%, CO₂ frost
+1%, vapour 1%. Solved radii are within 0.6% of the legacy radius; a solve takes
+about 50 ms, up to 0.5 s.
+
 ## Light envelopes and the giant transition
 
 The following describes the existing **generation approximation**, not a dense

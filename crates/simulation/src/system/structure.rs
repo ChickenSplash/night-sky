@@ -5,6 +5,8 @@
 
 pub(crate) mod boundary;
 pub mod coupled;
+#[cfg(test)]
+mod coverage;
 pub mod dry;
 pub mod parameters;
 mod radial;
