@@ -83,7 +83,7 @@ fn check(s: &CoupledStructure, r: &Request) {
     for g in Gas::ALL {
         assert!(
             air.pressure_pa() * air.composition().fraction(g)
-                <= vapour_pressure(g, air.temperature_k()) * (1.0 + 1e-8)
+                <= column::cap_pa(g, air.temperature_k()) * (1.0 + 1e-8)
         );
     }
 }
@@ -132,7 +132,7 @@ fn water_rich_warm_and_cold_columns_partition_without_adding_water() {
         let air = s.atmosphere().unwrap();
         close(
             air.pressure_pa() * air.composition().fraction(Gas::Water),
-            vapour_pressure(Gas::Water, t),
+            column::cap_pa(Gas::Water, t),
             1e-8,
         );
     }
@@ -483,4 +483,54 @@ fn cold_icy_body_below_fifty_kelvin_holds_frost_on_airless_ice() {
         1e-6,
     );
     assert!(s.approximation_notes().iter().any(|n| n.contains("50 K")));
+}
+
+fn water_only(water: f64, temperature: f64) -> Request {
+    let retained = Inventory::from_mass_fractions(
+        EARTH_MASS_KG,
+        &[
+            (Material::Metal, 0.325),
+            (Material::Silicate, 0.675 - water),
+            (Material::Water, water),
+        ],
+    )
+    .unwrap();
+    Request {
+        retained,
+        exchangeable: Inventory::new(&[(Material::Water, retained.mass_kg(Material::Water))])
+            .unwrap(),
+        column_temperature_k: temperature,
+        water_temperature_k: Some(temperature),
+    }
+}
+
+#[test]
+fn exposed_water_saturates_its_column_or_evaporates_entirely() {
+    // A pure steam column over its own ocean sits exactly on the saturation
+    // curve; the liquid-side limit is taken, not refused as vapour.
+    for t in [280.0, 350.0, 450.0] {
+        let r = water_only(0.001, t);
+        let s = solve(&r, Controls::default()).unwrap_or_else(|e| panic!("{t} K: {e:?}"));
+        check(&s, &r);
+        let CondensedStructure::Water(body) = s.condensed() else {
+            panic!("ocean expected");
+        };
+        assert_eq!(
+            body.regions().last().unwrap().phase(),
+            water::PhaseKnowledge::Water(crate::system::materials::water::Phase::Liquid)
+        );
+        let saturation = crate::system::materials::water::saturation_pressure_pa(t).unwrap();
+        close(s.atmosphere().unwrap().pressure_pa(), saturation, 1e-8);
+        assert!(s.condensed().outer().pressure_pa >= saturation * (1.0 - 1e-14));
+    }
+    // Too little water to saturate: it all becomes steam over dry rock.
+    let r = water_only(1e-7, 400.0);
+    let s = solve(&r, Controls::default()).unwrap();
+    check(&s, &r);
+    assert!(matches!(s.condensed(), CondensedStructure::Dry(_)));
+    assert_eq!(
+        s.gas_inventory().mass_kg(Material::Water),
+        r.retained.mass_kg(Material::Water)
+    );
+    assert!(s.atmosphere().unwrap().pressure_pa() < column::cap_pa(Gas::Water, 400.0));
 }

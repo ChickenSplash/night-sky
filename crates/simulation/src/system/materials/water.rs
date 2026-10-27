@@ -25,6 +25,7 @@ pub const MIN_PRESSURE_PA: f64 = 1000.0;
 pub const MAX_PRESSURE_PA: f64 = 100e6;
 const TRIPLE_TEMPERATURE_K: f64 = 273.16;
 const TRIPLE_PRESSURE_PA: f64 = 611.657;
+pub const CRITICAL_TEMPERATURE_K: f64 = 647.096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -138,17 +139,19 @@ pub fn state(pressure_pa: f64, temperature_k: f64) -> Result<State, WaterError> 
     condensed_state(pressure_pa, temperature_k, phase)
 }
 
-/// A named condensed branch, including its one-sided limit on the Ih melting
-/// curve. This selects no mixture fraction and enables no metastable extension.
-/// `state` still refuses ambiguous coexistence densities.
+/// A named condensed branch, including its one-sided limits on the Ih melting
+/// curve and, for liquid, on the saturation curve. This selects no mixture
+/// fraction and enables no metastable extension. `state` still refuses
+/// ambiguous coexistence densities.
 pub fn condensed_state(
     pressure_pa: f64,
     temperature_k: f64,
     requested: Phase,
 ) -> Result<State, WaterError> {
     let equilibrium = phase(pressure_pa, temperature_k)?;
-    let phase = if equilibrium == Phase::IceIhLiquidCoexistence
-        && matches!(requested, Phase::IceIh | Phase::Liquid)
+    let phase = if (equilibrium == Phase::IceIhLiquidCoexistence
+        && matches!(requested, Phase::IceIh | Phase::Liquid))
+        || (equilibrium == Phase::LiquidVapourCoexistence && requested == Phase::Liquid)
     {
         requested
     } else if equilibrium == requested {
@@ -199,6 +202,19 @@ pub fn condensed_state(
 // melting curve has much larger scientific uncertainty, documented separately.
 fn on_curve(pressure: f64, boundary: f64) -> bool {
     (pressure - boundary).abs() <= 16.0 * f64::EPSILON * pressure.max(boundary)
+}
+
+/// IF97 region 4 saturation pressure, published for 273.15-647.096 K. Wider
+/// than the density API: it bounds liquid at a surface, not its density.
+pub fn saturation_pressure_pa(temperature_k: f64) -> Result<f64, WaterError> {
+    if !temperature_k.is_finite() || !(273.15..=CRITICAL_TEMPERATURE_K).contains(&temperature_k) {
+        return Err(WaterError {
+            pressure_pa: None,
+            temperature_k,
+            reason: Unsupported::TemperatureDomain,
+        });
+    }
+    Ok(liquid::saturation_pressure_pa(temperature_k))
 }
 
 /// IAPWS R14-08(2011), equation 1. This curve is valid beyond the density API's

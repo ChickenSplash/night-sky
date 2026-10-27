@@ -273,9 +273,13 @@ fn solve_with_volume_factor(
                     )
                     .map_err(SolveError::Water)?
                 };
-            // At a coexistence outer boundary, the inward one-sided limit is liquid.
-            // No zero-mass ice skin or mixture is introduced.
-            let phase = if phase == eos::Phase::IceIhLiquidCoexistence {
+            // At a coexistence outer boundary, the inward one-sided limit is liquid,
+            // as under a saturated steam column. No zero-mass ice skin, vapour
+            // film or mixture is introduced.
+            let phase = if matches!(
+                phase,
+                eos::Phase::IceIhLiquidCoexistence | eos::Phase::LiquidVapourCoexistence
+            ) {
                 eos::Phase::Liquid
             } else {
                 phase
@@ -343,7 +347,9 @@ fn solve_with_volume_factor(
             _ => unreachable!(),
         };
         let actual = eos::phase(pressure, water_temperature_k).map_err(SolveError::Water)?;
-        if actual != expected && actual != eos::Phase::IceIhLiquidCoexistence {
+        let one_sided = actual == eos::Phase::IceIhLiquidCoexistence
+            || (actual == eos::Phase::LiquidVapourCoexistence && expected == eos::Phase::Liquid);
+        if actual != expected && !one_sided {
             return Err(SolveError::WaterPhaseCrossing {
                 pressure_pa: pressure,
                 expected,

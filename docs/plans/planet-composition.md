@@ -62,18 +62,17 @@ route, equilibrium temperature) gives the P1 baseline:
 - 27% are envelopes: H/He beyond the thin column's 1% gas-mass, dense-gas or
   20 Earth-mass limits. Trace H/He is an ordinary gas, not an envelope; counting
   any H/He as an envelope had misclassified 472 stripped rock-type worlds. Step 3
-  raised envelopes from 219 to 417: cold bodies with 0.1–1% H/He now reach the
-  column check and exceed the dense-gas limit.
-- No rock planet is completely dry: every one carries at least trace water, so
-  all use the water solver.
-- **726 of 1,127 non-envelope planets solve (64%)** after steps 3 and 6 and the
-  frost deposit, up from 57 of 1,325. Every non-envelope body below 250 K solves
-  except 4 gas-triage cases; at 250–623 K 78 of 370 do, above 623 K none.
-- First blockers now: vapour 24% (step 4), water above 623 K 8% and deep water
-  1.5% (step 5), column above 1,000 K 1.3%, gas triage 0.5%. Most vapour bodies
-  are warm rock worlds whose protected water sits on top of the rock below its
-  saturation pressure.
-- Radius against legacy: 2.6% at the median, 10% at p95, 12.7% at most. Small
+  raised envelopes from 219 to 417 (cold bodies with 0.1–1% H/He now exceed the
+  dense-gas limit) and step 4 to 454 (steam added to thin H/He columns).
+- Every rock planet starts with at least trace water. After step 4, 128 solved
+  bodies have evaporated all of it and are dry rock under steam.
+- **954 of 1,090 non-envelope planets solve (88%)** after steps 3, 4 and 6, up
+  from 57 of 1,325. All 227 below 50 K, 414 of 425 at 50–250 K, 257 of 349 at
+  250–623 K and 56 of 89 above.
+- First blockers now: gas triage 10%, almost all weak binding (109 small warm
+  bodies whose steam column would escape), column above 1,000 K 1.4%, deep water
+  0.9%. No vapour or hot-water blockers remain.
+- Radius against legacy: 1.5% at the median, 9.8% at p95, 12.7% at most. Small
   icy bodies grow because ice Ih is lighter than the legacy fit assumes.
 - A solve costs about 70 ms at the median, up to 3–5 s with thick H/He
   columns (varies between runs).
@@ -123,16 +122,23 @@ Each step is small and labelled. Rerun the coverage report after each one.
    intermediate and temperature-independent deep-ice branches extend to 20 K.
    The coupling's column floor is now generation's 20 K, with labelled notes
    for extrapolated cold-trap caps.
-4. **Vapour allocation.** Exposed water that cannot stay liquid or frozen at the
-   surface moves to the atmosphere inventory; protected water stays in the host.
-   Reuse the existing coupling loop to re-solve the load. **Frost done:**
+4. **Vapour allocation. Done.** All water trades with the air: exposed water
+   evaporates until the air is saturated (IF97 saturation above 273.16 K), leaving
+   an ocean or ice below, or all of it becomes steam over dry rock. Generation's
+   protection shields water from escape only. The coupling loop re-solves the
+   load; an ocean under pure steam takes the liquid-side limit on the saturation
+   curve. **Open:** 109 small warm bodies now have a steam column too weakly
+   bound to hold, so the escape prior and exposed water disagree there.
+   **Frost:**
    cold-trapped CO₂, N₂, CH₄ and Ar above their vapour-pressure cap settle as a
    labelled [surface deposit](../simulation/planet-composition.md#frost-surface-deposit)
    on top of the rock or water, at fixed solid densities, with its weight on the
-   body below. The vapour part is still to do.
+   body below.
 5. **Hot and deep water.** One labelled approximation for supercritical water
    above 623 K and warm deep ice (300–623 K beyond 1 GPa), using effective
    high-pressure ice at depth whatever the temperature.
+   Since step 4, hot rock worlds evaporate all their water, so this now matters
+   for deep water (10 bodies) and hot water-rich worlds, none in the sample.
 6. **Trace rounding. Done.** Water transfers below one machine epsilon of the
    planet's water are accepted with a documented, species-local allowance,
    instead of being rejected.

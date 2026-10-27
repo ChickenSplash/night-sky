@@ -608,8 +608,12 @@ display cutoff.
   independent imposed anchors: unequal values describe mechanical loading,
   not thermal or evaporation equilibrium.
 - Cold-trap caps are approximate, not matched Gibbs or chemical equilibrium.
-  Exchangeable secondaries above their cap become a surface deposit. Protected
-  water is supported; protected (non-exchangeable) secondary condensates are
+  Exchangeable secondaries above their cap become a surface deposit. Water above
+  273.16 K is capped at the IF97 saturation pressure instead, so a column
+  saturated in water leaves the liquid below it stable; ice keeps the cold-trap
+  fit. The condensed load is computed on the geometry the gas was partitioned on,
+  so a pure steam column loads its ocean at saturation to rounding, and the ocean
+  top takes the liquid-side limit. Protected water is supported; protected (non-exchangeable) secondary condensates are
   refused here and handled by the protected-trace host solvers instead.
 
 ### Frost surface deposit
@@ -654,9 +658,9 @@ them. Nonconvergence is explicit.
 cargo test -p space-simulation system::structure::coupled -- --nocapture
 ```
 
-Thirteen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+Fourteen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
 and absent gas, mixed N₂/CO₂, thin H/He, N₂ frost on rock, CO₂ frost loading a
-warmer water host, a 30 K icy body with N₂ frost on airless ice, sub-ulp vapour, stripping, deterministic repeats,
+warmer water host, a 30 K icy body with N₂ frost on airless ice, an ocean under its own saturated steam and trace water fully evaporated, sub-ulp vapour, stripping, deterministic repeats,
 refinement, exact aggregate-work success/failure and unsupported inputs/regimes.
 Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
 and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
@@ -701,9 +705,12 @@ The route is provisional and test-only, until the single entry point exists:
    or a coupled refusal for gas mass, dense gas or mass above 20 Earth masses on
    an H/He-bearing body.
 2. Protected secondaries (90% of CO₂/N₂/CH₄/O₂/Ar source) are set aside. The
-   coupled solver runs on the rest, with H/He, accessible water and all remaining
+   coupled solver runs on the rest, with H/He, **all** water and all remaining
    secondaries exchangeable, at the equilibrium temperature (column floored at
-   20 K, as in generation).
+   20 K, as in generation). Water is not split: exposed water evaporates until
+   the air is saturated, leaving an ocean or ice below, or all of it becomes
+   steam over dry rock. Generation's 99.999% protection shields water from
+   escape only, which has already been applied.
 3. The resulting condensed host is re-solved with the protected secondaries
    entrained at the coupled load (gas pressure plus any frost deposit). The
    column's gravity ignores that protected mass, at most 0.3% of the body. Any
@@ -722,28 +729,33 @@ as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
 Baseline (October 2026, 20 systems per component, equilibrium temperature,
-after P1 steps 3 and 6 and the frost deposit): 1,544 planets, 417 envelopes.
-**726 of 1,127** non-envelope planets solve (64%): all 227 below 50 K, 421 of
-425 at 50–250 K, 78 of 370 at 250–623 K and none above. Outer layers are frost
-461, ice 224 and ocean 41. First blockers among non-envelope planets: vapour
-24%, water above 623 K 8%, deep water or phase seam 1.5%, column above 1,000 K
-1.3%, gas triage 0.5% (dense CO₂, weak binding).
+after P1 steps 3, 4 and 6): 1,544 planets, 454 envelopes. **954 of 1,090**
+non-envelope planets solve (88%): all 227 below 50 K, 414 of 425 at 50–250 K,
+257 of 349 at 250–623 K and 56 of 89 above. Outer layers are frost 461, ice
+214, ocean 151 and rock 128 (all water in a steam column). First blockers among
+non-envelope planets: gas triage 10% (109 weak binding, 2 dense gas), column
+above 1,000 K 1.4%, deep water or phase seam 0.9%. No vapour or hot-water
+blockers remain.
 
-- **Envelopes rose from 219 to 417.** Cold bodies with 0.1–1% H/He used to stop
-  at cold water first; now their column is checked and 198 exceed the dense-gas
-  limit. By the envelope rule they are P2 work, not regressions.
-- **Vapour rose from 56 to 273.** Former "surface below 1 kPa" bodies above
-  273 K sit below their saturation pressure, so their exposed water is vapour
-  (step 4). These are mostly the protected 99.999% of water left on top of the
-  rock when all accessible water is already in the air.
-- **Radius against legacy:** p50 2.6%, p95 10%, at most 12.7%. Icy bodies grow
+- **Weak binding rose from 2 to 109.** These are small bodies (0.002–0.02 Earth
+  masses, median 0.004) at 200–960 K whose water now forms a steam column the
+  sonic-radius guard refuses: it would escape. Generation protected that water
+  from escape, so these bodies show where its escape prior and exposed water
+  disagree. They were vapour failures before, not solved bodies.
+- **Envelopes rose from 417 to 454.** Steam added to thin H/He columns takes 37
+  more bodies past the dense-gas limit.
+- Bodies above 623 K now solve as dry rock under steam, so the hot-water bin is
+  empty. Liquid or supercritical water at depth on hot bodies is still step 5.
+- Earlier, step 3 raised envelopes from 219 to 417: cold bodies with 0.1–1%
+  H/He used to stop at cold water first and now exceed the dense-gas limit.
+- **Radius against legacy:** p50 1.5%, p95 9.8%, at most 12.7%. Icy bodies grow
   most: a Pluto-mass body with 58% water comes out about 12.6% larger, at about
   1,350 kg/m³ mean density, because ice Ih (about 934 kg/m³) is lighter than the
   legacy fit assumes. Massive icy bodies come out up to 7% smaller from deep-ice
   compression.
 - Frost deposits are 1 m at the median, 217 m at p95 and under 1 km at most.
 - A solve takes about 70 ms at the median and up to about 3–5 s (thick H/He
-  columns). Solved surface pressures reach about 10 bar at p95, 129 bar at most.
+  columns). Solved surface pressures reach about 12 bar at p95, 167 bar at most.
 
 ## Light envelopes and the giant transition
 

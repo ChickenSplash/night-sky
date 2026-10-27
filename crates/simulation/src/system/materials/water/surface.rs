@@ -54,7 +54,9 @@ pub fn density_kg_m3(pressure_pa: f64, temperature_k: f64) -> Result<f64, WaterE
     if phase(temperature_k) == Phase::IceIh {
         return Ok(ice::density_kg_m3(pressure_pa, temperature_k));
     }
-    if pressure_pa < liquid::saturation_pressure_pa(temperature_k) {
+    let saturation = liquid::saturation_pressure_pa(temperature_k);
+    // On the curve the liquid-side limit is taken, as in the API.
+    if pressure_pa < saturation && !super::on_curve(pressure_pa, saturation) {
         return Err(error(
             pressure_pa,
             temperature_k,

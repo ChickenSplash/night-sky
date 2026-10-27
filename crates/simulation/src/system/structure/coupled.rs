@@ -204,6 +204,7 @@ impl CoupledStructure {
             "Prescribed isothermal ideal-gas mixture, not a climate solution",
             "Gas self-gravity neglected within the 1% mass mask",
             "Cold-trap caps are approximate, not full phase equilibrium",
+            "Water vapour above 273.16 K is capped at IF97 saturation, ice by the cold-trap fit",
             "Below 50 K cold-trap caps are extrapolated from their liquid-vapour anchors",
             "O2 and H/He have no cold-trap cap, so they stay gas at any temperature",
             "Frost is one even global layer of fixed solid density, on top by convention",
@@ -285,11 +286,13 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
         let (inventory, deposit) = split(&request.retained, &gas)?;
         let host_mass = inventory.total_mass_kg();
         let gm = GRAVITATIONAL_CONSTANT * (host_mass + deposit.mass_kg());
+        // The load uses the geometry the gas was partitioned on, so a column
+        // saturated in water loads its liquid at saturation, not just below it.
         let air = column::atmosphere(
             &gas,
             request.column_temperature_k,
-            gm,
-            deposit.top_radius_m(radius),
+            GRAVITATIONAL_CONSTANT * base.0,
+            base.1,
         )?;
         let pressure = air.map_or(0.0, |a| a.pressure_pa());
         let load = pressure + deposit.load_pa(host_mass, radius);

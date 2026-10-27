@@ -84,6 +84,24 @@ fn pressure_dependent_freezing_and_coexistence_are_not_density_blends() {
         state(saturation, 300.0).unwrap_err().reason,
         Unsupported::CoexistenceDensity
     );
+    let liquid_side = condensed_state(saturation, 300.0, Phase::Liquid).unwrap();
+    assert_eq!(
+        liquid_side.density_kg_m3,
+        liquid::density_kg_m3(saturation, 300.0)
+    );
+    assert_eq!(
+        condensed_state(saturation, 300.0, Phase::Vapour)
+            .unwrap_err()
+            .reason,
+        Unsupported::PhaseMismatch
+    );
+    assert_eq!(saturation_pressure_pa(300.0).unwrap(), saturation);
+    for t in [273.149, 647.097, f64::NAN] {
+        assert!(saturation_pressure_pa(t).is_err());
+    }
+    assert!(
+        (saturation_pressure_pa(CRITICAL_TEMPERATURE_K).unwrap() / 22.064e6 - 1.0).abs() < 1e-4
+    );
     assert_eq!(phase(saturation - 1.0, 300.0).unwrap(), Phase::Vapour);
     assert_eq!(
         state(saturation - 1.0, 300.0).unwrap_err().reason,
@@ -199,9 +217,19 @@ fn named_coexistence_endpoints_are_one_sided_not_mixture_densities() {
             .reason,
         Unsupported::PressureDomain
     );
+    // On the saturation curve only the liquid side is named; vapour has no EOS.
     let p = liquid::saturation_pressure_pa(300.0);
+    relative(
+        condensed_state(p, 300.0, Phase::Liquid)
+            .unwrap()
+            .density_kg_m3,
+        state(p + 1.0, 300.0).unwrap().density_kg_m3,
+        1e-9,
+    );
     assert_eq!(
-        condensed_state(p, 300.0, Phase::Liquid).unwrap_err().reason,
+        condensed_state(p - 1.0, 300.0, Phase::Liquid)
+            .unwrap_err()
+            .reason,
         Unsupported::PhaseMismatch
     );
 }

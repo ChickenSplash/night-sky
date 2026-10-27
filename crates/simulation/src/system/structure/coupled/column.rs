@@ -1,9 +1,23 @@
 //! Supply-limited partition, without generation's source/exposure priors.
 use super::*;
 use crate::{
-    system::atmosphere::{Gas, ReferenceLevel, condensation::vapour_pressure, profile::Profile},
+    system::{
+        atmosphere::{Gas, ReferenceLevel, condensation::vapour_pressure, profile::Profile},
+        materials::water as eos,
+    },
     units::{ATOMIC_MASS_KG, BOLTZMANN_J_K},
 };
+
+/// Partial-pressure cap. Above its triple point water uses the IF97 saturation
+/// curve, so a saturated column leaves the liquid water below it stable.
+/// Other caps, and ice, keep the shared cold-trap prescription.
+pub(super) fn cap_pa(gas: Gas, temperature: f64) -> f64 {
+    if gas == Gas::Water && temperature >= 273.16 {
+        eos::saturation_pressure_pa(temperature).unwrap_or(f64::INFINITY)
+    } else {
+        vapour_pressure(gas, temperature)
+    }
+}
 
 pub(super) fn atmosphere(
     gas: &Inventory,
@@ -48,9 +62,10 @@ pub(super) fn partition(request: &Request, mass: f64, radius: f64) -> Result<Inv
             let m = Material::from_gas(g);
             (
                 m,
-                request.exchangeable.mass_kg(m).min(
-                    vapour_pressure(g, request.column_temperature_k) * g.molecular_mass_u() / c,
-                ),
+                request
+                    .exchangeable
+                    .mass_kg(m)
+                    .min(cap_pa(g, request.column_temperature_k) * g.molecular_mass_u() / c),
             )
         }))
         .map_err(Error::Composition)
@@ -103,7 +118,7 @@ pub(super) fn validate(
     }
     for g in Gas::ALL {
         if air.pressure_pa() * air.composition().fraction(g)
-            > vapour_pressure(g, air.temperature_k()) * (1.0 + 1e-8)
+            > cap_pa(g, air.temperature_k()) * (1.0 + 1e-8)
         {
             return Err(Error::InvalidClosure(Material::from_gas(g)));
         }

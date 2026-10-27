@@ -32,6 +32,8 @@ fit or a coarse interpolated table. `iapws_low_pressure_water_v1` combines:
   along this branch. It is not a universal freezing-temperature rule.
 - **Liquid/vapour saturation:** IF97 equation 30 and table 34, used to identify
   unsupported vapour and coexistence rather than return metastable liquid density.
+  `saturation_pressure_pa(T)` exposes it over its published 273.15–647.096 K
+  range; the coupling uses it to cap water vapour over liquid.
 
 Public calls use SI: absolute Pa, kelvin and kg/m³. Application masks are
 **250–623.15 K and 1,000–100,000,000 Pa (0.01–1,000 bar)**. These are deliberately
@@ -45,7 +47,7 @@ proxy is used.
 | Stable liquid below 273.15 K | Liquid | Explicit unsupported error |
 | Vapour | Vapour | Explicit unsupported error |
 | Ice-Ih/liquid coexistence | Named coexistence | Unconstrained density refused; named one-sided limits supported where their EOS exists |
-| Liquid/vapour coexistence | Named coexistence | Explicit unsupported error |
+| Liquid/vapour coexistence | Named coexistence | Unconstrained density refused; liquid-side limit supported |
 
 At 250–251.165 K and ≤100 MPa the supported phase is ice Ih. The pressure floor
 is above the ordinary triple-point pressure, so sublimation and three-phase
@@ -68,7 +70,9 @@ measurements. P–T alone cannot select phase fractions or a coexistence density
 The API does not manufacture a 50/50 mixture or smooth a density discontinuity.
 
 `condensed_state(p,T,phase)` explicitly selects liquid or ice Ih and allows that
-phase's one-sided density on the Ih melting curve. Away from coexistence, the
+phase's one-sided density on the Ih melting curve. Liquid also has its one-sided
+density on the saturation curve, the top of an ocean under a saturated steam
+column; vapour still has no density. Away from coexistence, the
 requested phase must be the stable one; mismatches fail rather than enabling
 metastable extrapolation. The same pressure/temperature masks and subfreezing
 liquid refusal apply. Both endpoint densities therefore exist only at ≥273.15 K.
@@ -304,7 +308,8 @@ original `phase`/`state` API is unchanged.
   210 MPa. It runs from about 934 kg/m³ when cold to 920 kg/m³ near 250 K.
 - **Surfaces below 1,000 Pa, at 250 K and above:** ice Ih below 273.16 K. Above
   it, IF97 liquid down to its saturation pressure, which region 1 is published
-  for; below that the state is vapour and is refused (plan step 4). From 1,000 Pa
+  for, including the liquid-side limit on the curve; below that the state is
+  vapour and is refused. The coupling evaporates such water instead. From 1,000 Pa
   upwards the model returns the API's own state, so the top region continues
   into the API domain without a seam or an extra thin region.
 

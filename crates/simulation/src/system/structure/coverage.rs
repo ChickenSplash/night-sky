@@ -107,7 +107,8 @@ fn is_secondary(m: Material) -> bool {
     )
 }
 
-/// Provisional join: couple the atmosphere without protected secondaries, then
+/// Provisional join: couple the atmosphere, with all water exchangeable but
+/// without protected secondaries, then
 /// re-solve the condensed host with them entrained at that surface load. Any
 /// frost deposit then sits on top of the re-solved host.
 /// H/He is an ordinary exchangeable gas. A body is an envelope only when the
@@ -155,9 +156,11 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
             r
         }
     })?;
+    // All water trades with the air: exposed water evaporates up to saturation.
+    // Protection only shielded it from escape, which generation already applied.
     let exchangeable = inventory(&|m| match m {
         Material::Metal | Material::Silicate => 0.0,
-        _ => (open.mass_kg(m) - protected_of(m) * f64::from(m == Material::Water)).max(0.0),
+        _ => open.mass_kg(m),
     })?;
     let request = coupled::Request {
         retained: open,
