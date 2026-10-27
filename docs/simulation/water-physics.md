@@ -356,6 +356,44 @@ latent heat, salinity, or precise intermediate polymorphs. There are no density
 offsets or pressure repairs to force models to agree. Local `water::state` and
 `dense_liquid::state` retain their original domains and coexistence refusals.
 
+## Hot and warm-deep prototype extension
+
+The radial prototype preserves the original local IAPWS and cold deep-ice APIs.
+It selects two separate, explicitly approximate prescriptions for P1 step 5:
+
+- **Above 300 K through 2,000 K**, effective ice starts at **10,000 bar**
+  (1 GPa), whatever the temperature. Model
+  `seager_effective_ice_warm_depth_proxy_v1` uses the same temperature-independent
+  Seager compression through 10¹³ Pa. This is a depth prescription, **not a
+  melting curve**: real warm water may remain liquid, supercritical or superionic
+  there. Individual polymorphs and thermal expansion are unresolved. At ≤300 K
+  the previous melting/cold boundaries remain unchanged. The prescription has an
+  intentional, unblended change of boundary at 300 K, not a continuous thermal EOS.
+- **Above 623.15 K through 2,000 K**, below that depth boundary,
+  `ideal_to_compressed_hot_water_proxy_v1` uses
+  `v = 461.526 T/P + 1/rho_c`, with
+  `rho_c = 1000 [1 + 4P/(2×10⁹)]^(1/4)` in SI. The reference density,
+  bulk modulus and derivative are engineering assumptions, not a published fit.
+  The two specific-volume contributions give positive compression and the dilute
+  ideal limit, not a matched critical EOS. Below the critical temperature the
+  outer load must still reach IF97 saturation. The region is labelled
+  `UnresolvedHotWater`, not asserted liquid, solid or supercritical.
+
+There is no density offset, blending, latent heat, critical anomaly, chemical
+dissociation or thermal evolution. Both model seams retain separate one-sided
+densities and disjoint water allocations. The 2,000 K ceiling is a conservative
+application stop, not a dissociation boundary. Outside these bounds the solve
+still fails explicitly. Exchangeable water above the critical point goes into
+the coupled column, whose independent mass/binding/density bounds still apply.
+Protected water can use the radial hot-fluid route under an imposed load.
+
+Tests exercise warm/deep and hot Earth-mass profiles at 350, 500, 623.15, 640,
+1,000 and 2,000 K, independent mass/inertia/hydrostatic quadrature, located model
+interfaces, deterministic repeats and fourfold refinement. Original local API
+refusals and work ceilings remain unchanged. These establish numerical consistency,
+not the physical accuracy of the proxies. For hot steam above the radial host,
+see the [coupling limits](planet-composition.md#coupling-domain-and-explicit-approximations).
+
 ## Thermal assumptions and radial integration
 
 This module takes **local prescribed temperature**, not irradiation or equilibrium

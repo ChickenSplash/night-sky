@@ -83,7 +83,7 @@ impl Profile {
             return 1.0;
         }
         let end = Self::cutoff_drop(pressure_pa).min(64.0);
-        const STEPS: usize = 256;
+        const STEPS: usize = 512;
         let dz = end / STEPS as f64;
         let at = |z: f64| (-z).exp() / (1.0 - z * self.scale_height_m / self.radius_m).powi(4);
         let mut sum = at(0.0) + at(end);

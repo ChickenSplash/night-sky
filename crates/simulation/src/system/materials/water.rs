@@ -9,6 +9,7 @@
 pub mod cold_ice;
 pub mod deep_ice;
 pub mod dense_liquid;
+pub mod hot;
 mod ice;
 pub mod ice_vii;
 mod liquid;

@@ -145,11 +145,15 @@ The Bevy/egui client in `crates/client`:
   Cold water down to 20 K and airless or thin-air ice surfaces also solve using
   explicitly labelled approximations.
   Pressure-melted liquid gaps are covered by a labelled density approximation.
+  [Warm/deep and hot-water proxies](simulation/water-physics.md#hot-and-warm-deep-prototype-extension)
+  extend the prototype to 2,000 K, without claiming resolved hot phases.
   Exact deep-ice polymorphs, precise supercooled-liquid physics and dense
    envelopes remain unresolved.
    Headless atmosphere coupling matches supported dilute gas inventories to
    radial condensed boundaries; it does not yet migrate generated planets or
-   resolve dense envelopes or unsupported condensed molecules.
+    resolve dense envelopes or unsupported condensed molecules.
+   A bounded hot ideal-steam approximation extends the column to 2,000 K and
+   50 kg/m³ for ≥90%-water gas; denser or weakly bound columns remain unsupported.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.
 

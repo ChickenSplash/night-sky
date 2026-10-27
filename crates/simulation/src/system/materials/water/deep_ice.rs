@@ -9,6 +9,28 @@ use super::{Unsupported, WaterError, cold_ice, error, subfreezing_liquid, surfac
 
 pub const MODEL_ID: &str = "seager_2007_effective_high_pressure_ice_v1";
 pub const MAX_PRESSURE_PA: f64 = 1e13;
+pub const WARM_MODEL_ID: &str = "seager_effective_ice_warm_depth_proxy_v1";
+
+/// P1 depth prescription, deliberately not an extrapolated melting curve.
+/// Existing cold boundaries are preserved; above 300 K use effective ice
+/// from 1 GPa, even where the real material would still be fluid.
+pub fn prototype_boundary_pressure_pa(t: f64) -> Result<f64, WaterError> {
+    if t > 300.0 && t <= super::hot::MAX_TEMPERATURE_K {
+        Ok(super::hot::DEEP_BOUNDARY_PA)
+    } else {
+        boundary_pressure_pa(t)
+    }
+}
+
+pub fn warm_density_kg_m3(p: f64, t: f64) -> Result<f64, WaterError> {
+    if !t.is_finite() || !(300.0..=super::hot::MAX_TEMPERATURE_K).contains(&t) {
+        return Err(error(p, t, Unsupported::TemperatureDomain));
+    }
+    if !p.is_finite() || !(super::hot::DEEP_BOUNDARY_PA..=MAX_PRESSURE_PA).contains(&p) {
+        return Err(error(p, t, Unsupported::PressureDomain));
+    }
+    Ok(1460.0 + 0.00311 * p.powf(0.513))
+}
 
 pub fn boundary_pressure_pa(temperature_k: f64) -> Result<f64, WaterError> {
     if temperature_k.is_finite() && (surface::MIN_TEMPERATURE_K..273.15).contains(&temperature_k) {
@@ -71,6 +93,26 @@ mod tests {
         }
         for t in [19.0, 300.01, f64::NAN] {
             assert!(density_kg_m3(1e10, t).is_err());
+        }
+    }
+
+    #[test]
+    fn warm_depth_proxy_is_separate_from_the_original_cold_api() {
+        for t in [300.01, 350.0, 623.15, 1000.0, 2000.0] {
+            assert_eq!(prototype_boundary_pressure_pa(t).unwrap(), 1e9);
+            assert!(boundary_pressure_pa(t).is_err());
+            for p in [1e9, 1e10, 1e13] {
+                assert_eq!(
+                    warm_density_kg_m3(p, t).unwrap(),
+                    1460.0 + 0.00311 * p.powf(0.513)
+                );
+            }
+            assert!(warm_density_kg_m3(1e9 - 1.0, t).is_err());
+            assert!(warm_density_kg_m3(1e13 + 1.0, t).is_err());
+        }
+        for t in [19.0, 2000.01, f64::NAN, f64::INFINITY] {
+            assert!(prototype_boundary_pressure_pa(t).is_err());
+            assert!(warm_density_kg_m3(1e9, t).is_err());
         }
     }
 }

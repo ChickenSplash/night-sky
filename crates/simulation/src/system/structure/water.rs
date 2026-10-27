@@ -13,7 +13,7 @@ pub mod protected;
 
 pub use dry::{Controls, Diagnostics, Sample, SolveError, Work, WorkLimit};
 
-pub const MODEL_ID: &str = "cold_refractories_isothermal_iapws_effective_ice_v4";
+pub const MODEL_ID: &str = "cold_refractories_isothermal_iapws_effective_ice_v5";
 pub const BOUNDARY_TOLERANCE_PA: f64 = 0.01;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +23,8 @@ pub enum PhaseKnowledge {
     Water(eos::Phase),
     /// Compression proxy, not an identified high-pressure polymorph.
     EffectiveHighPressureIce,
+    /// Hot-fluid proxy, no resolved equilibrium phase or solidity claim.
+    UnresolvedHotWater,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,6 +81,11 @@ impl Region {
             }
             eos::subfreezing_liquid::MODEL_ID => eos::subfreezing_liquid::APPROXIMATION_NOTES,
             eos::surface::MODEL_ID => eos::surface::APPROXIMATION_NOTES,
+            eos::hot::MODEL_ID => eos::hot::APPROXIMATION_NOTES,
+            eos::deep_ice::WARM_MODEL_ID => &[
+                "Temperature-independent effective ice above 1 GPa, not a melting curve",
+                "Warm fluid, ice polymorphs and superionic states are unresolved",
+            ],
             eos::deep_ice::MODEL_ID => &[
                 "Effective high-pressure ice compression; individual polymorphs unresolved",
                 "No ice thermal-expansion correction or matched Gibbs potentials",
@@ -141,7 +148,9 @@ impl WaterStructure {
 /// All positive unsupported allocations are refused, including gas traces.
 /// Ih/liquid interfaces, the 100 MPa liquid-model seam and the approximate
 /// deep-ice melting boundary are located with separate one-sided densities.
-/// Effective deep ice supports 20..=300 K, not resolved polymorphs. Below 250 K
+/// Above 300 K a labelled depth proxy uses effective ice beyond 1 GPa,
+/// regardless of physical phase. Above 623.15 K a hot-fluid proxy extends to
+/// 2000 K, without resolved phase knowledge. Below 250 K
 /// or 1 kPa a labelled surface-water model extends the IAPWS API. Intermediate
 /// cold ice, pressure-melted subfreezing liquid and extended Ih density masks
 /// carry explicit approximation notes. Original local IAPWS APIs are unchanged.
@@ -188,7 +197,8 @@ fn solve_with_volume_factor(
     if !super::in_domain(mass / EARTH_MASS_KG, 0.0001, 20.0) {
         return Err(SolveError::OutsideMassDomain(mass));
     }
-    let deep_boundary = eos::deep_ice::boundary_pressure_pa(water_temperature_k).ok();
+    let deep_boundary = eos::deep_ice::prototype_boundary_pressure_pa(water_temperature_k).ok();
+    let hot = water_temperature_k > eos::MAX_TEMPERATURE_K;
     let cold_path = eos::cold_ice::supports_temperature(water_temperature_k);
     // Below the API's 250 K floor the surface model replaces the top Ih branch.
     let frozen = cold_path && water_temperature_k < eos::MIN_TEMPERATURE_K;
@@ -201,7 +211,13 @@ fn solve_with_volume_factor(
     let liquid = PhaseKnowledge::Water(eos::Phase::Liquid);
     let ih = PhaseKnowledge::Water(eos::Phase::IceIh);
     let effective_ice = PhaseKnowledge::EffectiveHighPressureIce;
-    if cold_path {
+    if hot {
+        boundaries.push(eos::hot::DEEP_BOUNDARY_PA);
+        branches.extend([
+            (effective_ice, eos::deep_ice::WARM_MODEL_ID),
+            (PhaseKnowledge::UnresolvedHotWater, eos::hot::MODEL_ID),
+        ]);
+    } else if cold_path {
         boundaries.extend([
             eos::cold_ice::DEEP_BOUNDARY_PA,
             eos::cold_ice::IH_BOUNDARY_PA,
@@ -238,7 +254,14 @@ fn solve_with_volume_factor(
     } else {
         if let Some(p) = deep_boundary {
             boundaries.push(p);
-            branches.push((effective_ice, eos::deep_ice::MODEL_ID));
+            branches.push((
+                effective_ice,
+                if water_temperature_k > 300.0 {
+                    eos::deep_ice::WARM_MODEL_ID
+                } else {
+                    eos::deep_ice::MODEL_ID
+                },
+            ));
         }
         if water_temperature_k >= 273.15 && water_temperature_k.is_finite() {
             boundaries.push(eos::MAX_PRESSURE_PA);
@@ -287,7 +310,7 @@ fn solve_with_volume_factor(
             branches.push((PhaseKnowledge::Water(phase), eos::MODEL_ID));
         }
     }
-    if thin {
+    if thin && !hot {
         *branches.last_mut().unwrap() = (
             PhaseKnowledge::Water(eos::surface::phase(water_temperature_k)),
             eos::surface::MODEL_ID,
@@ -305,6 +328,14 @@ fn solve_with_volume_factor(
             radial::DensitySide::Equilibrium => branch_at(pressure),
         };
         let model = branch_model(branch);
+        if model == eos::hot::MODEL_ID {
+            return eos::hot::density_kg_m3(pressure, water_temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::deep_ice::WARM_MODEL_ID {
+            return eos::deep_ice::warm_density_kg_m3(pressure, water_temperature_k)
+                .map_err(SolveError::Water);
+        }
         if model == eos::deep_ice::MODEL_ID {
             return eos::deep_ice::density_kg_m3(pressure, water_temperature_k)
                 .map_err(SolveError::Water);

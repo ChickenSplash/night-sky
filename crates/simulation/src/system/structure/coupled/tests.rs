@@ -43,9 +43,16 @@ fn check(s: &CoupledStructure, r: &Request) {
     };
     let c = s.column().unwrap().unwrap();
     assert!(c.profile.spherical);
-    assert!(c.density_kg_m3 <= MAX_GAS_DENSITY_KG_M3);
+    assert!(
+        c.density_kg_m3
+            <= if column::hot_steam(air) {
+                MAX_HOT_STEAM_DENSITY_KG_M3
+            } else {
+                MAX_GAS_DENSITY_KG_M3
+            }
+    );
     // Independent radial Simpson integration, not profile::mass_factor.
-    let n = 8192;
+    let n = 16384;
     let dr = c.extent_m / n as f64;
     let radius = s.surface_radius_m();
     let density = |h: f64| {
@@ -311,7 +318,7 @@ fn invalid_supply_thermal_inputs_and_missing_water_anchors_fail_explicitly() {
         solve(&r, Controls::default()),
         Err(Error::InvalidInput("missing water temperature"))
     );
-    for t in [f64::NAN, 19.0, 1001.0] {
+    for t in [f64::NAN, 19.0, 2001.0] {
         r = request(0.0, t);
         assert!(matches!(
             solve(&r, Controls::default()),
@@ -620,12 +627,119 @@ fn transparent_or_absent_air_keeps_the_equilibrium_temperature() {
 
 #[test]
 fn a_steam_runaway_beyond_the_column_is_refused_not_capped() {
-    // At 300 K imposed this ocean holds; warmed, all of it becomes steam and
-    // the surface passes 1000 K before any balance.
+    // Warming can now balance above 1000 K, but this supply is still too dense.
     let r = water_only(0.001, 300.0);
     assert!(solve(&r, Controls::default()).is_ok());
     assert_eq!(
         solve(&greenhouse(r, 300.0), Controls::default()).unwrap_err(),
+        Error::DenseGasUnsupported
+    );
+    assert_eq!(
+        solve(
+            &greenhouse(water_only(0.0001, 1900.0), 1900.0),
+            Controls::default()
+        )
+        .unwrap_err(),
         Error::WarmingOutsideDomain
+    );
+}
+
+#[test]
+fn hot_steam_extension_is_labelled_conserved_and_bounded() {
+    let r = water_only(0.0001, 1200.0);
+    let s = solve(&r, Controls::default()).unwrap();
+    check(&s, &r);
+    assert_eq!(s.column_model_id(), HOT_STEAM_MODEL_ID);
+    assert!(s.column().unwrap().unwrap().density_kg_m3 > MAX_GAS_DENSITY_KG_M3);
+    assert!(matches!(s.condensed(), CondensedStructure::Dry(_)));
+    assert_eq!(
+        s.gas_inventory().mass_kg(Material::Water),
+        r.retained.mass_kg(Material::Water)
+    );
+    assert_eq!(s, solve(&r, Controls::default()).unwrap());
+    let refined = solve(
+        &r,
+        Controls {
+            radial: dry::Controls {
+                relative_tolerance: dry::Controls::default().relative_tolerance / 4.0,
+                max_step: dry::Controls::default().max_step / 4.0,
+                ..dry::Controls::default()
+            },
+            ..Controls::default()
+        },
+    )
+    .unwrap();
+    close(
+        s.condensed().radius_m(),
+        refined.condensed().radius_m(),
+        1e-7,
+    );
+    close(s.inertia_kg_m2(), refined.inertia_kg_m2(), 1e-7);
+    assert_eq!(
+        solve(&water_only(0.001, 1200.0), Controls::default()).unwrap_err(),
+        Error::DenseGasUnsupported
+    );
+    // Neither dense non-water gas nor cold steam receives the wider mask.
+    let nitrogen = GasAtmosphere::new(
+        crate::system::atmosphere::Composition::new(&[(Gas::Nitrogen, 1.0)]).unwrap(),
+        crate::system::atmosphere::ReferenceLevel::Surface,
+        1e7,
+        1200.0,
+        None,
+    )
+    .unwrap();
+    assert!(!column::hot_steam(&nitrogen));
+    assert!(!column::hot_steam(
+        solve(&water_only(1e-6, 999.0), Controls::default())
+            .unwrap()
+            .atmosphere()
+            .unwrap()
+    ));
+    for temperature in [1000.0, 2000.0] {
+        let r = water_only(0.0001, temperature);
+        let s = solve(&r, Controls::default()).unwrap();
+        check(&s, &r);
+        assert_eq!(s.column_model_id(), HOT_STEAM_MODEL_ID);
+    }
+    for fraction in [0.89, 0.91] {
+        let inventory = Inventory::from_mass_fractions(
+            1.0,
+            &[
+                (Material::Water, fraction),
+                (Material::Nitrogen, 1.0 - fraction),
+            ],
+        )
+        .unwrap();
+        let air = column::atmosphere(
+            &inventory,
+            1200.0,
+            s.column_gm_m3_s2(),
+            s.surface_radius_m(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(column::hot_steam(&air), fraction > 0.9);
+    }
+    let count = s.diagnostics().total_eos_evaluations;
+    assert_eq!(
+        s,
+        solve(
+            &r,
+            Controls {
+                max_total_eos_evaluations: count,
+                ..Controls::default()
+            }
+        )
+        .unwrap()
+    );
+    assert!(
+        solve(
+            &r,
+            Controls {
+                max_total_eos_evaluations: count - 1,
+                ..Controls::default()
+            }
+        )
+        .is_err()
     );
 }

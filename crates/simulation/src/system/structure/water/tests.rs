@@ -1,5 +1,72 @@
 use super::*;
 
+#[test]
+fn warm_deep_and_hot_water_have_labelled_conserved_profiles() {
+    for (temperature, load) in [
+        (350.0, 1e5),
+        (500.0, 1e7),
+        (623.15, 1e8),
+        (640.0, 1e8),
+        (1000.0, 1e8),
+        (2000.0, 1e8),
+    ] {
+        let retained = inventory(1.0, 0.03);
+        let body = solve(&retained, temperature, load, Controls::default())
+            .unwrap_or_else(|e| panic!("T={temperature}: {e:?}"));
+        let mut inertia = 0.0;
+        for region in body.regions() {
+            let (mass, i, dp) = quadrature(region);
+            close(mass, region.inventory().total_mass_kg(), 1e-8);
+            close(
+                dp,
+                region.inner().pressure_pa - region.outer().pressure_pa,
+                2e-4,
+            );
+            inertia += i;
+            if region.temperature_k().is_some() {
+                assert!(region.samples().iter().all(|s| s.density_kg_m3 > 0.0));
+            }
+        }
+        close(inertia, body.inertia_kg_m2(), 1e-8);
+        assert!(
+            body.regions()
+                .iter()
+                .any(|r| r.density_model_id() == eos::deep_ice::WARM_MODEL_ID)
+        );
+        assert_eq!(
+            body,
+            solve(&retained, temperature, load, Controls::default()).unwrap()
+        );
+        let refined = solve(
+            &retained,
+            temperature,
+            load,
+            Controls {
+                relative_tolerance: Controls::default().relative_tolerance / 4.0,
+                max_step: Controls::default().max_step / 4.0,
+                ..Controls::default()
+            },
+        )
+        .unwrap();
+        close(body.radius_m(), refined.radius_m(), 1e-7);
+        close(body.inertia_factor(), refined.inertia_factor(), 1e-7);
+        for (a, b) in body.regions().iter().zip(refined.regions()) {
+            close(
+                a.inventory().total_mass_kg(),
+                b.inventory().total_mass_kg(),
+                1e-5,
+            );
+        }
+        if temperature > eos::MAX_TEMPERATURE_K {
+            let top = body.regions().last().unwrap();
+            assert_eq!(top.phase(), PhaseKnowledge::UnresolvedHotWater);
+            assert_eq!(top.density_model_id(), eos::hot::MODEL_ID);
+            assert!(!top.approximation_notes().is_empty());
+        }
+    }
+    assert!(solve(&inventory(1.0, 0.03), 2000.01, 1e8, Controls::default()).is_err());
+}
+
 fn acceptance_inventory() -> Inventory {
     Inventory::from_mass_fractions(
         EARTH_MASS_KG,
@@ -609,7 +676,11 @@ pub(super) fn quadrature_with_volume_factor(
                     + h[2] * b.pressure_pa
                     + h[3] * dr * gradient(b);
                 let rho = if let Some(temperature) = region.temperature_k() {
-                    if region.density_model_id() == eos::subfreezing_liquid::MODEL_ID {
+                    if region.density_model_id() == eos::hot::MODEL_ID {
+                        eos::hot::density_kg_m3(p, temperature).unwrap()
+                    } else if region.density_model_id() == eos::deep_ice::WARM_MODEL_ID {
+                        eos::deep_ice::warm_density_kg_m3(p, temperature).unwrap()
+                    } else if region.density_model_id() == eos::subfreezing_liquid::MODEL_ID {
                         eos::subfreezing_liquid::density_kg_m3(p, temperature).unwrap()
                     } else if matches!(
                         region.density_model_id(),
@@ -1187,9 +1258,10 @@ fn unavailable_dense_profiles_and_numerical_failures_are_not_repaired() {
         solve(&inventory(0.0001, 1.0), 300.0, 80e6, Controls::default()),
         Err(SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations))
     );
+    let loaded = solve(&inventory(0.0001, 0.01), 500.0, 1e9, Controls::default()).unwrap();
     assert_eq!(
-        solve(&inventory(0.0001, 0.01), 500.0, 1e9, Controls::default()),
-        Err(SolveError::UnsupportedWaterProfile)
+        loaded.regions().last().unwrap().density_model_id(),
+        eos::deep_ice::WARM_MODEL_ID
     );
     for reason in [
         eos::dense_liquid::Failure::DensityBracket,

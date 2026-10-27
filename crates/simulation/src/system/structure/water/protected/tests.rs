@@ -488,7 +488,7 @@ fn invalid_unsupported_and_unrepresentable_requests_never_return_partial_bodies(
         (300.0, f64::NAN),
         (300.0, f64::INFINITY),
         (300.0, 1e13 + 1.0),
-        (700.0, LOAD),
+        (2001.0, LOAD),
         (300.0, 1e13),
     ] {
         assert!(

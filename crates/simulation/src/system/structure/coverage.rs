@@ -232,6 +232,7 @@ fn water_surface(phase: water::PhaseKnowledge) -> &'static str {
         water::PhaseKnowledge::Water(_) => "water coexistence",
         water::PhaseKnowledge::EffectiveHighPressureIce => "deep ice",
         water::PhaseKnowledge::Unresolved => "rock",
+        water::PhaseKnowledge::UnresolvedHotWater => "unresolved hot water",
     }
 }
 

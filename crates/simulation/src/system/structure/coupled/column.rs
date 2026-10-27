@@ -118,7 +118,12 @@ pub(super) fn validate(
     if !column.profile.spherical {
         return Err(Error::WeakBindingUnsupported);
     }
-    if column.density_kg_m3 > MAX_GAS_DENSITY_KG_M3 {
+    let limit = if hot_steam(air) {
+        MAX_HOT_STEAM_DENSITY_KG_M3
+    } else {
+        MAX_GAS_DENSITY_KG_M3
+    };
+    if column.density_kg_m3 > limit {
         return Err(Error::DenseGasUnsupported);
     }
     for g in Gas::ALL {
@@ -137,6 +142,15 @@ pub(super) fn validate(
     Ok(())
 }
 
+/// Composition guard is by mass, not mole fraction, and has no H/He exemption.
+/// Small admixtures simply ride along in this declared ideal-mixture proxy.
+pub(super) fn hot_steam(air: &GasAtmosphere) -> bool {
+    air.temperature_k() >= 1000.0
+        && air.composition().fraction(Gas::Water) * Gas::Water.molecular_mass_u()
+            / (air.composition().mean_molecular_mass_kg() / ATOMIC_MASS_KG)
+            >= 0.9
+}
+
 pub(super) fn inertia_kg_m2(s: &CoupledStructure) -> f64 {
     let Some(air) = s.atmosphere() else {
         return 0.0;
@@ -145,7 +159,7 @@ pub(super) fn inertia_kg_m2(s: &CoupledStructure) -> f64 {
     let c = s.column().unwrap().unwrap();
     let radius = s.surface_radius_m();
     let end = Profile::cutoff_drop(air.pressure_pa()).min(64.0);
-    const STEPS: usize = 256;
+    const STEPS: usize = 512;
     let dz = end / STEPS as f64;
     let at = |z: f64| (-z).exp() / (1.0 - z * c.scale_height_m / radius).powi(6);
     let mut sum = at(0.0) + at(end);

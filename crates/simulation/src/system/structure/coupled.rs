@@ -28,7 +28,10 @@ pub const PRESSURE_TOLERANCE_PA: f64 = 0.01;
 pub const ALLOCATION_RELATIVE_TOLERANCE: f64 = 1e-9;
 /// Generation's column floor. Cold-trap caps are extrapolated below 50 K.
 pub const MIN_COLUMN_TEMPERATURE_K: f64 = 20.0;
-pub const MAX_COLUMN_TEMPERATURE_K: f64 = 1000.0;
+pub const MAX_COLUMN_TEMPERATURE_K: f64 = 2000.0;
+/// Labelled ideal-steam extension, not a general dense-mixture EOS.
+pub const HOT_STEAM_MODEL_ID: &str = "bounded_hot_ideal_steam_column_v1";
+pub const MAX_HOT_STEAM_DENSITY_KG_M3: f64 = 50.0;
 pub const TEMPERATURE_RELATIVE_TOLERANCE: f64 = 1e-9;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -138,6 +141,13 @@ impl CoupledStructure {
     pub fn model_id(&self) -> &'static str {
         MODEL_ID
     }
+    pub fn column_model_id(&self) -> &'static str {
+        if self.atmosphere.is_some_and(|air| column::hot_steam(&air)) {
+            HOT_STEAM_MODEL_ID
+        } else {
+            MODEL_ID
+        }
+    }
     pub fn condensed(&self) -> &CondensedStructure {
         &self.condensed
     }
@@ -235,6 +245,8 @@ impl CoupledStructure {
             "Greenhouse: grey Eddington fit to Earth, Mars and Venus, not radiative transfer",
             "Greenhouse: no lapse rate, clouds, ice-albedo feedback or collision-induced absorption",
             "Greenhouse: the coolest balance warming up from equilibrium; hot starts not explored",
+            "Hot steam: ideal approximation at 1000..=2000 K, at least 90% water by mass, density at most 50 kg/m3",
+            "Hot steam neglects nonideality and dissociation; no physical accuracy bound is claimed",
         ]
     }
 }
@@ -250,7 +262,7 @@ pub enum Error {
     GasMassOutsideDomain,
     DenseGasUnsupported,
     WeakBindingUnsupported,
-    /// Greenhouse warming left the column domain (1000 K or 1% gas mass)
+    /// Greenhouse warming left the column domain (2000 K or 1% gas mass)
     /// before balancing: a runaway this thin column cannot represent.
     WarmingOutsideDomain,
     WorkBudgetExhausted,
@@ -286,7 +298,7 @@ pub fn solve(request: &Request, controls: Controls) -> Result<CoupledStructure, 
     if !column_k.is_finite()
         || !(MIN_COLUMN_TEMPERATURE_K..=MAX_COLUMN_TEMPERATURE_K).contains(&column_k)
     {
-        return Err(Error::InvalidInput("column temperature (20..=1000 K)"));
+        return Err(Error::InvalidInput("column temperature (20..=2000 K)"));
     }
     for material in Material::ALL {
         let offered = request.exchangeable.mass_kg(material);

@@ -354,7 +354,7 @@ cargo test -p space-simulation system::structure::water::protected -- --nocaptur
 outer_pressure_pa, Controls)` is a separate opt-in API. It uses the same bounded
 adaptive cube-root-mass kernel as the dry solver, not a second numerical
 implementation. Its model identity is
-`cold_refractories_isothermal_iapws_effective_ice_v4`. Generation, transport,
+`cold_refractories_isothermal_iapws_effective_ice_v5`. Generation, transport,
 inspector and rendering do not use it.
 
 The prescribed order is metal, silicate, water, omitting zero-mass regions.
@@ -373,6 +373,10 @@ below 1,000 Pa the top water region instead uses the labelled
 the cold intermediate and deep-ice branches below it. Compressed liquid additionally
 uses IAPWS95 at 100–1,000 MPa and 273.16–623.15 K, restricted to its liquid mask.
 Every stage and sample must remain in its selected model's domain.
+Above 300 K, a separate labelled depth prescription supplies effective ice from
+1 GPa; above 623.15 K, a bounded hot-fluid proxy supplies unresolved hot water
+to 2,000 K below that boundary. These do not extend the original IAPWS APIs or
+claim a thermal phase diagram. See the [hot/deep model and limits](water-physics.md#hot-and-warm-deep-prototype-extension).
 An ice-Ih/liquid transition is supported only where **both** density
 branches exist: 273.15–273.16 K, further restricted to melting pressures inside
 the pressure mask. Pressure decreases outwards, so a crossing gives inner liquid
@@ -462,8 +466,8 @@ pressure by less than relative 10⁻⁷ and each region's allocation, thickness 
 pressure drop by less than 10⁻⁵. Exact-budget repeats include nested work and
 initial dense-state exhaustion. The 0.0001-Earth-mass pure-water fixture with an
 80 MPa load at 300 K exhausts the existing request EOS budget and is explicitly
-refused, not accepted with uncounted work. A 1 GPa outer load cannot support a
-positive water shell within the pressure ceiling and is also refused.
+refused, not accepted with uncounted work. The former 1 GPa/500 K ceiling refusal
+now solves on the separately labelled warm effective-depth branch.
 These are numerical consistency targets only. The melting curve's 2% published
 pressure uncertainty remains, regardless of exact numerical endpoint placement.
 
@@ -591,13 +595,21 @@ display cutoff.
   normalisation and pressure profile consistently use the condensed plus deposit
   mass, not a point mass containing the gas shell. This is an engineering restriction,
   not a planet classification.
-- Column temperature, prescribed or warmed, stays within **20–1,000 K**,
+- Column temperature, prescribed or warmed, stays within **20–2,000 K**,
   generation's own floor.
   Below 50 K the cold-trap caps are extrapolated from their liquid-vapour
   anchors and so overstate the frost vapour pressure; O₂ and H/He have no cap and
   stay gas. Both are labelled notes, not a separate solver. Base ideal-gas density
   cannot exceed **10 kg/m³**, an engineering mask, not an established nonideal
-  error bound. Neither dense CO₂ nor dense H/He is solved here.
+  error bound. A separate **bounded hot ideal-steam approximation** allows up to
+  **50 kg/m³** only at **1,000–2,000 K** with **at least 90% water by mass**.
+  `column_model_id()` identifies `bounded_hot_ideal_steam_column_v1` on that
+  composition/temperature route. It still uses the ideal-mixture equation, not a
+  new real-fluid EOS: nonideality and dissociation are omitted and no physical
+  accuracy bound is claimed. Colder steam, dense CO₂ and dense H/He do not gain
+  the wider density mask. The 1% gas-mass and sonic-radius guards are unchanged.
+  Pressure/mass and inertia quadratures now use 512 rather than 256 steps to
+  preserve independent closure on these higher-pressure columns.
 - The existing spherical sonic-radius guard must pass. Weak binding returns an
   unsupported error instead of accepting the legacy exponential fallback as a
   coupled solution. Extended columns are not rejected solely for their height.
@@ -638,10 +650,10 @@ temperature `T_s`.
 - **The unwarmed column is checked first.** If the column at `T_eq` is already
   dense or weakly bound, that error is returned, so a dense H/He column is still
   reported as one and not as a runaway its broadening would drive.
-- **Runaway is refused, not capped.** If warming passes 1,000 K or pushes the
+- **Runaway is refused, not capped.** If warming passes 2,000 K or pushes the
   gas past 1% of the mass before balancing, `WarmingOutsideDomain` is
   returned. A balanced column that is then too dense still fails the usual
-  dense-gas check.
+  dense-gas check, including the separate bounded hot-steam mask.
 - Convergence also requires `T_s` to change by at most relative 10⁻⁹ between
   geometries. Results report `surface_temperature_k` and
   `greenhouse_optical_depth`.
@@ -763,7 +775,24 @@ protected heavy material, and escape never removes it exactly. Treating any H/He
 as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
-Baseline (October 2026, 20 systems per component, greenhouse surface
+Current baseline after step 5 (October 2026, 20 systems per component):
+**839 of 1,029 non-envelope planets solve (82%)**, from 1,544 planets with
+515 H/He-bearing envelopes. All 280 water-rich planets solve. Bands by equilibrium
+temperature: 227/227 below 50 K, 398/419 at 50–250 K, 154/298 at 250–623 K,
+60/85 above. Outer layers: frost 422, ice 202, ocean 28, rock 187.
+
+- Remaining first blockers: weak binding 175, dense gas 8, warming beyond the
+  bounded column 7. No deep-water or column-temperature first failures remain.
+- Solved count increased by **91**, not by 91 plus the reclassified envelopes.
+  Envelopes increased by 66 because extending warming past the old ceiling exposes
+  density/binding failures on H/He-bearing bodies under the existing triage rule.
+  Trace H/He alone is still not an envelope criterion.
+- Radius difference from legacy: 1.9% median, 10.0% p95, 12.7% maximum.
+  Surface pressure: 0.016 bar median, 37.9 bar p95, 379.2 bar maximum.
+- Diagnostic solve cost on 20 threads: 156 ms median, 535 ms p95, 7.2 s maximum;
+  full report wall time 17.3 s. Performance still needs attention before step 8.
+
+Historical baseline before step 5 (October 2026, 20 systems per component, greenhouse surface
 temperature, after P1 steps 2, 3, 4 and 6): 1,544 planets, 449 envelopes.
 **748 of 1,095** non-envelope planets solve (68%): all 227 below 50 K, 391 of
 429 at 50–250 K, 95 of 345 at 250–623 K and 35 of 94 above (bands by

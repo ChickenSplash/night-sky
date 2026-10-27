@@ -26,21 +26,19 @@ only when a demonstrated simulation or game problem requires them.
 
 ### Resume here (October 2026)
 
-- **Done in P1:** steps 1, 2, 3, 4 and 6, plus the frost deposit. Last commit
-  `55313bd` (step 2). `./scripts/check.sh` passes. Nothing is pushed: neither
+- **Done in P1:** steps 1–6, plus the frost deposit and bounded hot-steam extension.
+  Nothing is pushed: neither
   the main branch nor `park/methane-physics` (parked methane physics). Ask the
   user before pushing either.
-- **Coverage:** 748 of 1,095 non-envelope planets solve (68%). See
+- **Coverage:** 839 of 1,029 non-envelope planets solve (82%), including all 280
+  water-rich planets. See
   [measured starting point](#measured-starting-point).
-- **Biggest blockers:** greenhouse runaway (159, hot dense steam beyond the thin
-  column) and weak binding (155, small warm bodies whose steam column would
-  escape).
+- **Biggest blockers:** weak binding (175), dense gas (8) and warming beyond
+  the bounded column (7). Step 5 removed the deep-water first failures.
 - **Open decisions for the user:**
-  - Recommended next: step 5 (hot and deep water) together with a hot or dense
-    steam treatment above 1,000 K, which is what the runaways need.
   - Steam escape: whether generation's escape should act on exposed water, so
     weakly bound small bodies lose their steam instead of failing.
-  - Solve cost rose to about 110–190 ms at the median with the warming scan;
+  - Solve cost is about 156 ms at the median with the warming scan;
     address before step 8.
 - **After each step:** rerun the coverage report
   (`cargo test --release -p space-simulation composition_coverage -- --ignored
@@ -85,6 +83,19 @@ unchanged unless a step below deliberately widens them with a labelled model.
 The [coverage report](../simulation/planet-composition.md#prototype-coverage-report)
 (October 2026, 1,544 planets from 140 calibration systems, provisional joined
 route, greenhouse surface temperature) gives the P1 baseline:
+
+**Current, after step 5:** 839/1,029 non-envelope planets solve (82%), with
+515 H/He-bearing envelopes. This adds 91 solved bodies; another 66 are now
+classified as envelopes because the wider warming scan exposes their gas-domain
+failures. All 280 water-rich planets solve. Remaining first failures are weak
+binding 175, dense gas 8 and warming outside the domain 7. Surfaces are frost 422,
+ice 202, ocean 28 and rock 187. The bounded steam approximation is ideal gas at
+1,000–2,000 K, ≥90% water by mass, ≤50 kg/m³ and ≤1% total gas mass, not a
+general dense-fluid or envelope EOS. Cost on 20 threads: 156 ms median, 535 ms p95,
+7.2 s maximum; report wall time 17.3 s. Radius difference from legacy:
+1.9% median, 10.0% p95, 12.7% maximum.
+
+Historical baseline before step 5:
 
 - 27% are envelopes: H/He beyond the thin column's 1% gas-mass, dense-gas or
   20 Earth-mass limits. Trace H/He is an ordinary gas, not an envelope; counting
@@ -170,14 +181,16 @@ Each step is small and labelled. Rerun the coverage report after each one.
    labelled [surface deposit](../simulation/planet-composition.md#frost-surface-deposit)
    on top of the rock or water, at fixed solid densities, with its weight on the
    body below.
-5. **Hot and deep water.** One labelled approximation for supercritical water
+5. **Hot and deep water. Done.** One labelled approximation for hot water
    above 623 K and warm deep ice (300–623 K beyond 1 GPa), using effective
    high-pressure ice at depth whatever the temperature.
-   Since step 4, hot rock worlds evaporate all their water, so this now matters
-   for deep water (11 bodies) and hot water-rich worlds. Since step 2, 159
-   greenhouse runaways also end as hot, dense steam above 1,000 K or past the
-   10 kg/m³ gas mask; solving them needs a steam treatment beyond the thin
-   column, best scoped together with this step.
+   The [bounded hot/deep extension](../simulation/water-physics.md#hot-and-warm-deep-prototype-extension)
+   preserves the original local APIs and cold boundaries, uses a warm effective
+   depth proxy beyond 1 GPa, and an unresolved hot-fluid specific-volume law
+   above 623.15 K through 2,000 K. The column extends to 2,000 K with a separately
+   labelled ideal-steam approximation (≥90% water by mass, ≤50 kg/m³ above
+   1,000 K). No arbitrary dense gas or self-gravitating steam envelope is solved.
+   The gas-mass and binding guards remain; out-of-domain cases stay unsolved.
 6. **Trace rounding. Done.** Water transfers below one machine epsilon of the
    planet's water are accepted with a documented, species-local allowance,
    instead of being rejected.
