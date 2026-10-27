@@ -4,6 +4,7 @@
 
 mod column;
 mod deposit;
+pub mod escape;
 #[cfg(test)]
 mod tests;
 mod warming;

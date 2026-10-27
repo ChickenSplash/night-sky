@@ -613,6 +613,7 @@ display cutoff.
 - The existing spherical sonic-radius guard must pass. Weak binding returns an
   unsupported error instead of accepting the legacy exponential fallback as a
   coupled solution. Extended columns are not rejected solely for their height.
+  The separate [blow-off wrapper](#unbound-column-blow-off) resolves it by escape.
 - The entire gas allocation normalises the operational finite shell described in
   [atmospheres](atmospheres.md#pressure-and-cold-trap-solve). No additional tail
   mass is inferred. Its cutoff is a prescription, not an exobase.
@@ -658,6 +659,29 @@ temperature `T_s`.
   geometries. Results report `surface_temperature_k` and
   `greenhouse_optical_depth`.
 
+### Unbound column blow-off
+
+`coupled::escape::solve_escaping` (`unbound_column_lightest_first_blowoff_v1`)
+wraps `solve`. A static column reaching past its Parker sonic radius would flow
+outward, and exposed supply (an ocean, say) keeps refilling it, so over
+geological time that gas is lost. On `WeakBindingUnsupported` the wrapper
+removes the **lightest exchangeable gas entirely** from both supplies, reports
+it as `escaped` and re-solves, until the column binds or no gas is left.
+
+- Only exchangeable supply escapes. Condensed water outside the exchangeable
+  supply, protected secondaries and refractories stay.
+- Order is by molecular mass (H₂, He, CH₄, H₂O, N₂, O₂, Ar, CO₂), a crude
+  stand-in for diffusive fractionation. Hydrodynamic drag of heavier species
+  is not modelled; neither is any escape rate, timescale, energy limit or
+  isotope effect. A bound column loses nothing, however hot.
+- Every other refusal (dense gas, gas mass, runaway) is returned unchanged.
+- Each attempt carries the full controls, at most one per gas species, so
+  worst-case work is nine solves, not one shared budget.
+- `structure + escaped` closes on the request's retained inventory.
+
+It is a second escape on top of generation's population-level secondary escape,
+not a replacement for it.
+
 ### Frost surface deposit
 
 Cold-trapped CO₂, N₂, CH₄ and Ar settle on the ground as ice, as on Mars, Pluto
@@ -700,11 +724,11 @@ them. Nonconvergence is explicit.
 cargo test -p space-simulation system::structure::coupled -- --nocapture
 ```
 
-Seventeen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
+Nineteen tests cover thin nitrogen, cold/warm 30%-water bodies, protected water, trace
 and absent gas, mixed N₂/CO₂, thin H/He, N₂ frost on rock, CO₂ frost loading a
 warmer water host, a 30 K icy body with N₂ frost on airless ice, an ocean under its own saturated steam and trace water fully evaporated, an
 Earth twin warmed from frozen to a liquid ocean, unwarmed transparent and absent
-air, a steam runaway refused, sub-ulp vapour, stripping, deterministic repeats,
+air, a steam runaway refused, bounded hot steam, lightest-first blow-off, sub-ulp vapour, stripping, deterministic repeats,
 refinement, exact aggregate-work success/failure and unsupported inputs/regimes.
 Independent radial quadrature closes shell mass and inertia to relative 10⁻⁷
 and hydrostatic pressure drop to 10⁻⁹. Fourfold refinement changes radius,
@@ -755,6 +779,9 @@ The route is provisional and test-only, until the single entry point exists:
    the air is saturated, leaving an ocean or ice below, or all of it becomes
    steam over dry rock. Generation's 99.999% protection shields water from
    escape only, which has already been applied.
+   The coupled call goes through the [blow-off wrapper](#unbound-column-blow-off),
+   so a weakly bound column loses its lightest gases instead of failing. The
+   report counts escaping planets, their species and escaped mass fraction.
 3. The resulting condensed host is re-solved with the protected secondaries
    entrained at the coupled load (gas pressure plus any frost deposit). The
    column's gravity ignores that protected mass, at most 0.3% of the body. Any
@@ -775,13 +802,27 @@ protected heavy material, and escape never removes it exactly. Treating any H/He
 as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
-Current baseline after step 5 (October 2026, 20 systems per component):
-**839 of 1,029 non-envelope planets solve (82%)**, from 1,544 planets with
-515 H/He-bearing envelopes. All 280 water-rich planets solve. Bands by equilibrium
-temperature: 227/227 below 50 K, 398/419 at 50–250 K, 154/298 at 250–623 K,
-60/85 above. Outer layers: frost 422, ice 202, ocean 28, rock 187.
+Current baseline after unbound blow-off (October 2026, 20 systems per component):
+**1,017 of 1,032 non-envelope planets solve (99%)**, from 1,544 planets with
+512 H/He-bearing envelopes. Bands by equilibrium temperature: 227/227 below
+50 K, 411/419 at 50–250 K, 292/299 at 250–623 K, 87/87 above. Outer layers:
+frost 422, ice 202, ocean 28, rock 365.
 
-- Remaining first blockers: weak binding 175, dense gas 8, warming beyond the
+- All 178 former weak-binding failures now solve by escape, 3 of them former
+  envelopes that lose only hydrogen. Lost species: water and methane 130; water,
+  nitrogen and methane 24; all secondaries 21. Escaped mass fraction: under
+  0.1% median, 1.0% p95, 3.7% maximum.
+- Remaining first blockers: dense gas 8, warming beyond the bounded column 7.
+- Radius difference from legacy: 1.2% median, 9.6% p95, 12.7% maximum.
+- Diagnostic solve cost on 20 threads: 156 ms median, 593 ms p95, 9.8 s
+  maximum; report wall time 19.0 s.
+
+Baseline after step 5, before blow-off: **839 of 1,029 (82%)**, 515 envelopes.
+All 280 water-rich planets solve. Bands: 227/227 below 50 K, 398/419 at
+50–250 K, 154/298 at 250–623 K, 60/85 above. Outer layers: frost 422, ice 202,
+ocean 28, rock 187.
+
+- First blockers then: weak binding 175, dense gas 8, warming beyond the
   bounded column 7. No deep-water or column-temperature first failures remain.
 - Solved count increased by **91**, not by 91 plus the reclassified envelopes.
   Envelopes increased by 66 because extending warming past the old ceiling exposes

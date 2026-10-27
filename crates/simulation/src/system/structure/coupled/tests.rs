@@ -743,3 +743,87 @@ fn hot_steam_extension_is_labelled_conserved_and_bounded() {
         .is_err()
     );
 }
+
+fn escaping_closes(e: &escape::Escaping, r: &Request) {
+    let total = e
+        .structure
+        .retained_inventory()
+        .checked_add(&e.escaped)
+        .unwrap();
+    for m in Material::ALL {
+        let expected = r.retained.mass_kg(m);
+        assert!(
+            (total.mass_kg(m) - expected).abs() <= 1e-10 * expected,
+            "{m:?}"
+        );
+        assert!(e.escaped.mass_kg(m) <= r.exchangeable.mass_kg(m));
+    }
+}
+
+#[test]
+fn unbound_columns_lose_their_lightest_gases_until_the_rest_binds() {
+    // Bound columns are untouched.
+    let bound = request(0.001, 300.0);
+    let e = escape::solve_escaping(&bound, Controls::default()).unwrap();
+    assert_eq!(e.escaped.total_mass_kg(), 0.0);
+    assert_eq!(e.structure, solve(&bound, Controls::default()).unwrap());
+    // A small hot body cannot hold nitrogen at all.
+    let mut hot = request(0.0, 1000.0);
+    hot.retained = hot.retained.scaled(0.0002).unwrap();
+    hot.exchangeable = hot.exchangeable.scaled(0.0002).unwrap();
+    let e = escape::solve_escaping(&hot, Controls::default()).unwrap();
+    escaping_closes(&e, &hot);
+    assert!(e.structure.atmosphere().is_none());
+    assert_eq!(e.escaped, hot.exchangeable);
+    assert_eq!(
+        e,
+        escape::solve_escaping(&hot, Controls::default()).unwrap()
+    );
+    // Mixed supply: the light gas leaves first; heavier gas stays if then bound.
+    for (mass, temperature, kept) in [(0.01, 400.0, true), (0.0002, 1000.0, false)] {
+        let mut mixed = request(0.0, temperature);
+        mixed.retained = Inventory::from_mass_fractions(
+            mass * EARTH_MASS_KG,
+            &[
+                (Material::Metal, 0.3),
+                (Material::Silicate, 0.7 - 2e-6),
+                (Material::Hydrogen, 1e-6),
+                (Material::CarbonDioxide, 1e-6),
+            ],
+        )
+        .unwrap();
+        mixed.exchangeable = Inventory::new(&[
+            (
+                Material::Hydrogen,
+                mixed.retained.mass_kg(Material::Hydrogen),
+            ),
+            (
+                Material::CarbonDioxide,
+                mixed.retained.mass_kg(Material::CarbonDioxide),
+            ),
+        ])
+        .unwrap();
+        let e = escape::solve_escaping(&mixed, Controls::default()).unwrap();
+        escaping_closes(&e, &mixed);
+        assert_eq!(
+            e.escaped.mass_kg(Material::Hydrogen),
+            mixed.retained.mass_kg(Material::Hydrogen)
+        );
+        assert_eq!(
+            e.structure.gas_inventory().mass_kg(Material::CarbonDioxide) > 0.0,
+            kept,
+            "T={temperature}"
+        );
+    }
+    // Other refusals are never converted into escape.
+    let mut dense = request(0.0, 250.0);
+    dense.exchangeable = dense.exchangeable.scaled(100.0).unwrap();
+    dense.retained = dense
+        .retained
+        .checked_add(&dense.exchangeable.scaled(0.99).unwrap())
+        .unwrap();
+    assert_eq!(
+        escape::solve_escaping(&dense, Controls::default()).unwrap_err(),
+        Error::DenseGasUnsupported
+    );
+}

@@ -26,18 +26,17 @@ only when a demonstrated simulation or game problem requires them.
 
 ### Resume here (October 2026)
 
-- **Done in P1:** steps 1–6, plus the frost deposit and bounded hot-steam extension.
+- **Done in P1:** steps 1–6, plus the frost deposit, bounded hot-steam extension
+  and [unbound-column blow-off](../simulation/planet-composition.md#unbound-column-blow-off).
   Nothing is pushed: neither
   the main branch nor `park/methane-physics` (parked methane physics). Ask the
   user before pushing either.
-- **Coverage:** 839 of 1,029 non-envelope planets solve (82%), including all 280
+- **Coverage:** 1,017 of 1,032 non-envelope planets solve (99%), including all 280
   water-rich planets. See
   [measured starting point](#measured-starting-point).
-- **Biggest blockers:** weak binding (175), dense gas (8) and warming beyond
-  the bounded column (7). Step 5 removed the deep-water first failures.
+- **Remaining blockers:** dense gas (8) and warming beyond the bounded column
+  (7). Blow-off resolved all 178 weak-binding failures.
 - **Open decisions for the user:**
-  - Steam escape: whether generation's escape should act on exposed water, so
-    weakly bound small bodies lose their steam instead of failing.
   - Solve cost is about 156 ms at the median with the warming scan;
     address before step 8.
 - **After each step:** rerun the coverage report
@@ -84,7 +83,14 @@ The [coverage report](../simulation/planet-composition.md#prototype-coverage-rep
 (October 2026, 1,544 planets from 140 calibration systems, provisional joined
 route, greenhouse surface temperature) gives the P1 baseline:
 
-**Current, after step 5:** 839/1,029 non-envelope planets solve (82%), with
+**Current, after unbound blow-off:** 1,017/1,032 non-envelope planets solve
+(99%), with 512 envelopes. Weakly bound columns lose their lightest exchangeable
+gases (178 planets, at most 3.7% of their mass) instead of failing. Remaining
+first failures: dense gas 8, warming outside the domain 7. Surfaces: frost 422,
+ice 202, ocean 28, rock 365. Cost on 20 threads: 156 ms median, 593 ms p95,
+9.8 s maximum.
+
+**After step 5:** 839/1,029 non-envelope planets solve (82%), with
 515 H/He-bearing envelopes. This adds 91 solved bodies; another 66 are now
 classified as envelopes because the wider warming scan exposes their gas-domain
 failures. All 280 water-rich planets solve. Remaining first failures are weak

@@ -153,7 +153,9 @@ The Bevy/egui client in `crates/client`:
    radial condensed boundaries; it does not yet migrate generated planets or
     resolve dense envelopes or unsupported condensed molecules.
    A bounded hot ideal-steam approximation extends the column to 2,000 K and
-   50 kg/m³ for ≥90%-water gas; denser or weakly bound columns remain unsupported.
+   50 kg/m³ for ≥90%-water gas; denser columns remain unsupported. An opt-in
+   [blow-off wrapper](simulation/planet-composition.md#unbound-column-blow-off)
+   strips the lightest gases from weakly bound columns, with no escape rate.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.
 

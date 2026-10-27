@@ -85,6 +85,8 @@ struct Row {
     surface: &'static str,
     surface_pressure_pa: f64,
     deposit_m: f64,
+    escaped: String,
+    escaped_fraction: f64,
     legacy_pressure_pa: f64,
     radius_change: Option<f64>,
     eos_evaluations: usize,
@@ -97,6 +99,8 @@ struct Solved {
     surface: &'static str,
     surface_pressure_pa: f64,
     deposit_m: f64,
+    escaped: String,
+    escaped_fraction: f64,
     eos_evaluations: usize,
 }
 
@@ -173,16 +177,19 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
             equilibrium_k: equilibrium,
         },
     };
-    let atmosphere = coupled::solve(&request, coupled::Controls::default()).map_err(|e| {
-        // The warmed surface temperature is unknown on failure, so water
-        // errors are not binned by temperature here.
-        let (category, detail) = coupled_error(f64::NAN, &e);
-        if light && matches!(category, Category::GasDomain | Category::MassDomain) {
-            (Category::Envelope, detail)
-        } else {
-            (category, detail)
-        }
-    })?;
+    let escaping = coupled::escape::solve_escaping(&request, coupled::Controls::default())
+        .map_err(|e| {
+            // The warmed surface temperature is unknown on failure, so water
+            // errors are not binned by temperature here.
+            let (category, detail) = coupled_error(f64::NAN, &e);
+            if light && matches!(category, Category::GasDomain | Category::MassDomain) {
+                (Category::Envelope, detail)
+            } else {
+                (category, detail)
+            }
+        })?;
+    let atmosphere = &escaping.structure;
+    let escaped = escaping.escaped;
     // Protected traces are entrained at the warmed surface temperature.
     let t = atmosphere.surface_temperature_k();
     let pressure = atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa());
@@ -214,6 +221,13 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
         surface,
         surface_pressure_pa: pressure,
         deposit_m,
+        escaped: Material::ALL
+            .into_iter()
+            .filter(|&m| escaped.mass_kg(m) > 0.0)
+            .map(|m| format!("{m:?}"))
+            .collect::<Vec<_>>()
+            .join("+"),
+        escaped_fraction: escaped.total_mass_kg() / retained.total_mass_kg(),
         eos_evaluations: work,
     })
 }
@@ -321,6 +335,8 @@ fn row(p: &Hosted) -> Row {
         surface: solved.as_ref().map_or("", |s| s.surface),
         surface_pressure_pa: solved.as_ref().map_or(f64::NAN, |s| s.surface_pressure_pa),
         deposit_m: solved.as_ref().map_or(f64::NAN, |s| s.deposit_m),
+        escaped: solved.as_ref().map_or(String::new(), |s| s.escaped.clone()),
+        escaped_fraction: solved.as_ref().map_or(f64::NAN, |s| s.escaped_fraction),
         legacy_pressure_pa: env.atmosphere.as_ref().map_or(0.0, |a| a.pressure_pa),
         radius_change: solved.as_ref().map(|s| s.radius_m / legacy - 1.0),
         eos_evaluations: solved.as_ref().map_or(0, |s| s.eos_evaluations),
@@ -459,6 +475,11 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
         .iter()
         .filter(|r| r.category == Category::Solved)
         .collect();
+    let escapers: Vec<&&Row> = ok
+        .iter()
+        .copied()
+        .filter(|r| !r.escaped.is_empty())
+        .collect();
     let mut surfaces = BTreeMap::<&str, usize>::new();
     for r in &ok {
         *surfaces.entry(r.surface).or_default() += 1;
@@ -470,6 +491,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
          - Surface pressure, bar, p50 / p95 / max: {}\n\
          - Greenhouse warming, K, p50 / p95 / max: {}\n\
          - Frost deposit thickness, m, p50 / p95 / max (frost surfaces): {}\n\
+         - Unbound gas escaped: {} planets ({}); mass fraction p50 / p95 / max: {}\n\
          - EOS evaluations, p50 / p95 / max: {}\n\
          - Solve time, ms, p50 / p95 / max: {}\n\
          - Failed attempt time, ms, p50 / p95 / max: {}",
@@ -496,6 +518,19 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
                 .map(|r| r.deposit_m)
                 .collect()
         ),
+        escapers.len(),
+        {
+            let mut species = BTreeMap::<&str, usize>::new();
+            for r in &escapers {
+                *species.entry(&r.escaped).or_default() += 1;
+            }
+            species
+                .iter()
+                .map(|(s, n)| format!("{s} {n}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        quantiles(escapers.iter().map(|r| r.escaped_fraction).collect()),
         quantiles(ok.iter().map(|r| r.eos_evaluations as f64).collect()),
         quantiles(ok.iter().map(|r| r.milliseconds).collect()),
         quantiles(
@@ -512,12 +547,12 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
 fn table(rows: &[Row]) -> String {
     let mut out =
         "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\tsurface_k\toutcome\tdetail\t\
-                   surface\tsurface_pa\tdeposit_m\tlegacy_pa\tradius_change\teos_evaluations\tms\n"
+                   surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tlegacy_pa\tradius_change\teos_evaluations\tms\n"
             .to_owned();
     for r in rows {
         let _ = writeln!(
             out,
-            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
+            "{}\t{}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.2}\t{:.2}\t{}\t{}\t{}\t{:.6e}\t{:.6e}\t{}\t{:.6e}\t{:.6e}\t{}\t{}\t{:.2}",
             r.id,
             r.class,
             r.mass_earth,
@@ -530,6 +565,8 @@ fn table(rows: &[Row]) -> String {
             r.surface,
             r.surface_pressure_pa,
             r.deposit_m,
+            r.escaped,
+            r.escaped_fraction,
             r.legacy_pressure_pa,
             r.radius_change
                 .map_or(String::new(), |c| format!("{c:.6e}")),
