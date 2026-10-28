@@ -15,6 +15,8 @@ use crate::{
 use space_shared::{PlanetEnvironment, RadiusReference};
 use std::f64::consts::PI;
 
+pub mod partition;
+
 pub const MODEL_ID: &str = "fallback_mass_radius_v1";
 pub const NOTES: &[&str] = &[
     "Fallback: published mass-radius fits, not a hydrostatic EOS solve",
@@ -53,6 +55,7 @@ pub enum Kind {
     Water,
     Volatiles,
     Envelope,
+    Atmosphere,
 }
 
 impl Kind {
@@ -63,6 +66,7 @@ impl Kind {
             Self::Water => "water_compression",
             Self::Volatiles => "volatiles",
             Self::Envelope => "envelope",
+            Self::Atmosphere => "atmosphere",
         }
     }
 }
@@ -107,7 +111,12 @@ impl Fallback {
         if self.reference == RadiusReference::OneBar {
             return "envelope";
         }
-        match self.regions.iter().rev().find(|r| r.kind != Kind::Envelope) {
+        match self
+            .regions
+            .iter()
+            .rev()
+            .find(|r| !matches!(r.kind, Kind::Envelope | Kind::Atmosphere))
+        {
             Some(r) if r.kind == Kind::Water => "unresolved water",
             Some(r) if r.kind == Kind::Volatiles => "unresolved volatiles",
             _ => "rock",

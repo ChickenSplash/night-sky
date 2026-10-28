@@ -20,6 +20,14 @@ population at a different age can change retained mass, radius and spin, but nev
 formation inventories, IDs, orbits or resonances. See the
 [composition model](planet-composition.md#formation-priors-and-retained-structure).
 
+Staged synchronous results now also prepare their **own** source-bounded gas and
+condensate partition at the fallback reference, with matching pressure,
+temperature and updated inertia. This does not replace the live compatibility
+atmosphere above. The [reference-partition approximation](planet-composition.md#synchronous-reference-partition)
+holds proxy geometry fixed, retains trace gas and keeps bulk-envelope mass
+distinct from the sampled optical column. It is ready for coherent adoption,
+not permission to mix a candidate with the legacy live environment.
+
 ## State and reference level
 
 Layered checkpoint 4 also supplies a separate headless
@@ -257,6 +265,47 @@ ocean runs away near `T_eq ≈ 262 K`, close to the usual inner edge of the
 habitable zone. This is a fitted outcome, not a validated threshold.
 
 ## Visible optical conversion
+
+### Explicit renderer boundary contract
+
+`atmosphere::optics::boundary::OpticalColumn` declares the renderer's inputs
+independently of structural layers and navigation clearance:
+
+- Reference radius, pressure, temperature, gravity and reference-level meaning.
+- Named spherical-isothermal or unresolved-exponential density approximation,
+  with the existing gas/aerosol scattering and absorption coefficients.
+- An opaque lower **proxy** at the reference: either a condensed-boundary proxy
+  (not proof of phase or landability) or a gas-reference proxy (not a located
+  cloud deck). These are rendering assumptions, not optical-depth detections.
+- A finite outer radius and its height above the reference, with the declared
+  gas-density-drop and aerosol-scale-height cutoff policy. This preserves the
+  [existing cutoff](#derived-column), not a new opacity-adaptive outer boundary
+  or a guaranteed bound on omitted light.
+
+The current client builds this contract solely from the live atmosphere, mass
+and radius. A staged `Planet::initial_result` supplies none of those inputs.
+This preserves existing numerical optics while the coordinated live cutover
+is pending. The lower proxy does not certify terrain or navigation permission;
+the existing bulk-envelope visual descent policy remains separate and unchanged.
+
+`OpticalColumn::from_result` is a separate, checked preparation API for unified
+results, **not adoption**. It validates transported invariants, checks pressure,
+temperature, reference semantics and well-mixed gas-reservoir composition, then
+uses the result's reference gravity (enclosed mass), not total-mass gravity.
+It does not run structure, EOS, retention or partition solves. In particular,
+a fallback record with condensed secondary proxies cannot borrow a secondary
+atmosphere from a legacy planet. Suspended condensates are explicitly unsupported
+by this entry point until local vapour and cloud optical inputs are defined;
+bulk condensate mass must not silently become gas or cloud opacity.
+
+Structural outer edges never choose the optical cutoff. Visibility along a ray
+depends on integrated scattering/absorption, not a constituent's name, the one-bar
+coordinate or whether the screen looks dark. The renderer already has an
+[opaque-ray early stop](../client/rendering.md#atmospheres); the finite outer
+cutoff bounds the represented column, a different operation. This contract does
+not extend the validated profile to arbitrary giant-interior depths.
+
+### Coefficients and limitations
 
 Optics remain independent of generation and Bevy. `GasAtmosphere::optics`
 derives a column and reference coefficients per metre. All gas coefficients

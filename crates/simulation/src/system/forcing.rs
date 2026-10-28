@@ -38,7 +38,7 @@ impl Forcing {
         }
         PhysicalRevision {
             inputs,
-            model: "generation_fallback_v1".into(),
+            model: "generation_fallback_partition_v1".into(),
             sequence: 0,
         }
     }

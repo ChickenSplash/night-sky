@@ -113,6 +113,34 @@ fn wire_derived_values_are_recomputed_and_invalid_inputs_do_not_reach_gpu() {
 }
 
 #[test]
+fn live_optical_contract_never_uses_staged_candidate_geometry_or_layers() {
+    use space_simulation::system::atmosphere::optics::boundary::LowerBoundaryKind;
+    let mut world = planet(Gas::Nitrogen);
+    let expected = optical_column(&world).unwrap();
+    let expected_air = atmosphere(&world).unwrap();
+    assert_eq!(
+        expected.lower_boundary.kind,
+        LowerBoundaryKind::CondensedReferenceProxy
+    );
+    assert_eq!(expected.reference.radius_m, world.radius_km * 1e3);
+    assert_eq!(expected.outer_cutoff.height_m, expected_air.top);
+    world.initial_result =
+        space_simulation::system::generated_system("g1e0024924b.2.231", [0.0; 3])
+            .unwrap()
+            .planets
+            .into_iter()
+            .find_map(|p| p.initial_result);
+    let staged = world.initial_result.as_mut().unwrap();
+    staged.record.physical.reference_radius_m = 1e12;
+    staged.record.physical.reference_gravity_m_s2 = f64::NAN;
+    staged.record.layers.clear();
+    assert_eq!(optical_column(&world), Some(expected));
+    assert_eq!(atmosphere(&world), Some(expected_air));
+    assert!(!deep_envelope(&world));
+    assert!(!envelope(&world));
+}
+
+#[test]
 fn dense_boundary_pressure_changes_optics_and_preserves_the_upper_column() {
     let thin = planet(Gas::Nitrogen);
     let mut dense = thin.clone();

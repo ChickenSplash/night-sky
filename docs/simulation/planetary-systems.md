@@ -48,8 +48,10 @@ accreting into planets. For each permitted host (a star or close pair):
     Retention trials now use fast fallback facts and independent forcing inputs;
     the final live geometry/atmosphere still uses a legacy compatibility projection
     while P3 consumer migration is in progress.
-    The retained fallback candidate is kept on the body and exported separately
-    as `Planet::initial_result`; its presence does not switch live geometry.
+    The retained fallback candidate now has its own gas/condensate partition,
+    pressure, temperature and updated inertia at fixed proxy geometry. It is kept
+    on the body and exported separately as `Planet::initial_result`; its presence
+    does not switch live geometry or attach the legacy atmosphere to that result.
 8. Recheck stability using final retained masses. Escape only reduces masses,
    so the formation-mass spacing remains conservative.
 

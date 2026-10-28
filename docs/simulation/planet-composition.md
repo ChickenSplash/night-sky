@@ -77,7 +77,9 @@ transport consistency only. All physical fit prescriptions remain unchanged.
 
 Generated `Body::initial_result` now stores such a candidate. Formation constructs
 it from provisional forcing; final retention replaces it using all-star forcing
-and retained supply, before legacy atmosphere projection. Classification uses its
+and retained supply, before legacy atmosphere projection. The final candidate now
+includes its own [reference gas partition](#synchronous-reference-partition), not
+the standalone fallback's all-condensed secondary allocation. Classification uses its
 model-neutral material/mass fractions. A single `physical::export_planet` adapter
 carries the final candidate through both natural and overlay wire paths as
 `Planet::initial_result`. Older records may omit it. **Its presence does not make
@@ -88,7 +90,8 @@ Synchronous revision keys use exact input bit patterns for body identity, source
 retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
-prescriptions. These candidate identities are not yet wired into background
+prescriptions. The current generation key is `generation_fallback_partition_v1`.
+These candidate identities are not yet wired into background
 adoption or a layered-resource revision. Initial candidates start at sequence zero;
 regeneration is not an adoption or permission to renumber stale worker output.
 
@@ -2010,6 +2013,50 @@ greenhouse. For bodies with under 1% H/He, fallback radii exceed legacy (which
 treats that gas as a thin column) by up to 61%; layered solves of similar
 bodies exceed legacy by a median 32%, so the legacy value is the outlier.
 
+### Synchronous reference partition
+
+`physical::initial_with_atmosphere` prepares a **staged pair**: the initial
+`PlanetResult` and its matching `PlanetEnvironment`. It starts with the converged
+retention fallback and applies `fallback_reference_partition_v1`, without a
+legacy structure/boundary solve, EOS access, re-running retention or adopting
+live geometry. `Body::initial_result` carries this partitioned candidate through
+both exporters. Its gas allocations, pressure and temperature belong to that
+candidate, not to `Planet::environment`, which is still legacy.
+
+This bounded approximation deliberately holds the fallback's condensed proxy
+volumes, radius and reference meaning fixed. Accessible water/secondary mass
+enters gas through the existing source-bounded cold-trap prescription; protected
+material and prior escape remain accounted for. Condensed densities, loading
+pressures and inertia are recomputed for their reduced masses, not left at the
+pre-partition values. Fixed proxy volumes are a disclosed approximation, **not**
+a coupled phase/volume, greenhouse or thermal-structure solution.
+
+- A condensed reference gets one finite `atmosphere` region, normalised to the
+  actual gas inventory. Its pressure/temperature match the prepared atmosphere.
+  Inertia integrates the same spherical-isothermal or explicitly unresolved
+  exponential profile, normalised by mass. The finite support uses the current
+  column cutoff; it is not a material edge or independent visibility detection.
+- A one-bar reference keeps one prescribed bulk `envelope` region, with secondary
+  gas included in its inventory. The optical column samples it, not an additional
+  atmosphere mass. The bulk profile and deep pressure remain the labelled
+  thinning prescription, not an isothermal extrapolation to the core.
+- Boundary gravity retains fallback's total-mass central-field approximation;
+  atmospheric self-gravity is not newly solved. Weak-binding pressure retains the
+  explicit planar approximation even though inertia uses a normalised finite
+  profile. These numerical conventions do not validate a static atmosphere there.
+- Positive trace gas below the legacy population's 0.1 Pa emission threshold
+  remains represented, including its nonzero pressure. Vapour transfers below a
+  reservoir ulp remain condensed and are excluded from the trace pressure solve.
+  This prevents unrepresentable vapour changing the mixture used to satisfy
+  saturation caps. The legacy population's successful numerical path is unchanged.
+
+The standalone `fallback::initial`/`solve` prescriptions and archived P2 numerical
+outputs are unchanged. The new partition is applied once to an unpartitioned
+retention fallback; repeated preparation from the same input is deterministic,
+and repartitioning its output is refused. The prepared atmosphere passes the
+checked optical adapter against its own result. Live mass/radius/inertia,
+atmosphere, spin and consumer adoption still need a coordinated cutover.
+
 ## Prototype coverage report
 
 An opt-in report measures how much of the generated population the
@@ -2568,6 +2615,14 @@ and shape compatibility; invalid new reflectance uses a neutral proxy. Geometry,
 surface boundary semantics and atmospheric optics do not inspect class strings.
 Search consumes descriptions only. The [typed inspector](../client/ui/interface.md#breadcrumbs-and-inspector)
 and developer export share presentation fields, separate from these physical records.
+
+Atmospheric visibility has its own
+[explicit optical boundary contract](atmospheres.md#explicit-renderer-boundary-contract).
+It declares a profile, lower proxy and operational cutoff rather than using
+structural layer edges. Its current client path reads only live projections;
+the separate unified-result adapter checks reference and gas agreement without
+re-solving physics or adopting the result. The live authority cutover remains
+pending, including installing the prepared reference partition and coherent spin.
 
 ## Calibration census and regression scope
 

@@ -164,9 +164,13 @@ pub(crate) fn secondary_retention(escape_m_s: f64, loss_flux: f64) -> f64 {
 pub(crate) fn finalise(body: &mut Body, id: &str, host_mass: f64, forcing: &Forcing) {
     let (budget, fallback, solve) = reconcile(&body.budget, forcing)
         .expect("generated inventory must have supported convergent retained structure");
-    let initial_result =
-        crate::system::physical::initial_from_fallback(&fallback, forcing.revision(id, &budget))
-            .expect("retained fallback must satisfy the result contract");
+    let initial_result = crate::system::physical::initial_with_atmosphere(
+        &fallback,
+        &forcing.environment(),
+        forcing.revision(id, &budget),
+    )
+    .unwrap_or_else(|error| panic!("{id}: retained fallback: {error}"));
+    let initial_result = initial_result.result;
     // Temporary compatibility projection for unmigrated atmosphere/shape/wire
     // consumers. It must never feed back into the fallback-based retention solve.
     let structure = structure::derive(&budget, forcing.irradiation_w_m2, forcing.age_gyr)

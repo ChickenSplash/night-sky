@@ -29,6 +29,36 @@ pub(crate) fn solve(
     radius_m: f64,
     one_bar: bool,
 ) -> Result<(Budget, Option<GasAtmosphere>), AtmosphereError> {
+    solve_with_threshold(
+        budget,
+        temperature,
+        mass_kg,
+        radius_m,
+        one_bar,
+        MIN_PRESSURE_PA,
+    )
+}
+
+/// Structural candidates retain trace columns too. Visibility/population policy
+/// must not erase their gas inventory or zero their physical reference pressure.
+pub(crate) fn solve_including_trace(
+    budget: &Budget,
+    temperature: f64,
+    mass_kg: f64,
+    radius_m: f64,
+    one_bar: bool,
+) -> Result<(Budget, Option<GasAtmosphere>), AtmosphereError> {
+    solve_with_threshold(budget, temperature, mass_kg, radius_m, one_bar, 0.0)
+}
+
+fn solve_with_threshold(
+    budget: &Budget,
+    temperature: f64,
+    mass_kg: f64,
+    radius_m: f64,
+    one_bar: bool,
+    min_pressure: f64,
+) -> Result<(Budget, Option<GasAtmosphere>), AtmosphereError> {
     let available = Inventory::new(&Gas::ALL.map(|gas| {
         let material = Material::from_gas(gas);
         let retained = budget.retained().mass_kg(material);
@@ -55,7 +85,26 @@ pub(crate) fn solve(
         Inventory::new(&Gas::ALL.map(|gas| {
             let material = Material::from_gas(gas);
             let cap = vapour_pressure(gas, temperature) * gas.molecular_mass_u() / coefficient;
-            (material, available.mass_kg(material).min(cap))
+            let desired = available.mass_kg(material).min(cap);
+            let current = budget.reservoir(Reservoir::Gas).mass_kg(material);
+            let condensed = budget
+                .reservoir(Reservoir::CondensedVolatiles)
+                .mass_kg(material);
+            // The staged trace-aware solve must bracket the gas that can
+            // actually be transferred, not tiny unrepresentable vapour which
+            // will be left condensed afterwards. Keep the legacy population
+            // prescription's successful numerical path unchanged.
+            let represented = if min_pressure == 0.0 && desired > current {
+                let amount = desired - current;
+                if condensed - amount == condensed || current + amount == current {
+                    current
+                } else {
+                    current + amount
+                }
+            } else {
+                desired
+            };
+            (material, represented)
         }))
         .expect("finite nonnegative bounded allocations")
     };
@@ -90,6 +139,8 @@ pub(crate) fn solve(
         let moles = mole_weight(&gas);
         let below = if one_bar {
             coefficient * moles < ONE_BAR_PA
+        } else if moles == 0.0 {
+            false
         } else {
             let pressure = coefficient * moles;
             let mean_mass = gas.total_mass_kg() / moles * crate::units::ATOMIC_MASS_KG;
@@ -133,6 +184,9 @@ pub(crate) fn solve(
         }
     }
     let gas = partitioned.reservoir(Reservoir::Gas);
+    if gas.total_mass_kg() == 0.0 {
+        return Ok((partitioned, None));
+    }
     let pressure = if one_bar {
         ONE_BAR_PA
     } else {
@@ -148,7 +202,7 @@ pub(crate) fn solve(
         .gas_composition()
         .map_err(|_| AtmosphereError::InvalidValue("partitioned gas mixture"))?;
     // Trace gas remains accounted for, even when no rendered column is emitted.
-    if pressure < MIN_PRESSURE_PA || mixture.is_none() {
+    if pressure <= 0.0 || pressure < min_pressure || mixture.is_none() {
         return Ok((partitioned, None));
     }
     let mixture = mixture.unwrap();

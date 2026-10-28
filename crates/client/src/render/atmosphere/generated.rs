@@ -2,7 +2,7 @@
 use super::*;
 use space_shared::{AtmosphereReference, Planet};
 use space_simulation::{
-    system::atmosphere::GasAtmosphere,
+    system::atmosphere::{GasAtmosphere, optics::boundary::OpticalColumn},
     units::{EARTH_SOLAR, SUN_GM},
 };
 
@@ -30,19 +30,12 @@ pub fn deep_envelope(planet: &Planet) -> bool {
 }
 
 pub fn atmosphere(planet: &Planet) -> Option<Atmosphere> {
-    let data = planet.environment.as_ref()?.atmosphere.as_ref()?;
-    let gas = GasAtmosphere::try_from(data).ok()?;
-    let optics = gas
-        .optics(
-            planet.mass_earth * EARTH_SOLAR * SUN_GM,
-            planet.radius_km * 1e3,
-        )
-        .ok()?;
-    // Use the simulation's profile choice, including its explicit unresolved
-    // fallback. No artificial radius cap or silently changed pressure.
+    let column = optical_column(planet)?;
+    let optics = column.optics;
+    // Use the declared profile and operational cutoff, never a structural edge.
     Some(Atmosphere {
         spherical: optics.column.profile.spherical,
-        top: optics.column.extent_m,
+        top: column.outer_cutoff.height_m,
         rayleigh: DVec3::from_array(optics.rayleigh_m_inv),
         rayleigh_height: optics.column.scale_height_m,
         gas_absorption: DVec3::from_array(optics.gas_absorption_m_inv),
@@ -54,6 +47,20 @@ pub fn atmosphere(planet: &Planet) -> Option<Atmosphere> {
         layer_height: 0.0,
         layer_width: 1.0,
     })
+}
+
+/// Current live projections only. A staged `initial_result` must never provide
+/// radius/gravity/layers for a legacy live atmosphere. Unified candidates have
+/// a separate checked `OpticalColumn::from_result` entry point.
+pub fn optical_column(planet: &Planet) -> Option<OpticalColumn> {
+    let data = planet.environment.as_ref()?.atmosphere.as_ref()?;
+    let gas = GasAtmosphere::try_from(data).ok()?;
+    OpticalColumn::new(
+        &gas,
+        planet.mass_earth * EARTH_SOLAR * SUN_GM,
+        planet.radius_km * 1e3,
+    )
+    .ok()
 }
 
 pub fn for_planet(

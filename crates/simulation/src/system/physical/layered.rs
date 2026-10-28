@@ -303,11 +303,14 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
         .rev()
         .map(|r| {
             let envelope = r.kind == fallback::Kind::Envelope;
+            let atmosphere = r.kind == fallback::Kind::Atmosphere;
             Layer {
                 phase_allocations: Vec::new(),
                 model_fidelity: fidelity,
                 model_limitations: vec![
-                    if envelope {
+                    if atmosphere {
+                        "Finite mass-normalised isothermal gas column; weak-binding pressure remains approximate"
+                    } else if envelope {
                         "H/He envelope mass-radius fit; prescribed thinning density profile"
                     } else {
                         "Seager-fit compressed density; phase and temperature unresolved"
@@ -321,7 +324,7 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
                 mass_kg: r.inventory.total_mass_kg(),
                 inner_pressure_pa: r.inner_pressure_pa,
                 outer_pressure_pa: (!envelope).then_some(r.outer_pressure_pa),
-                temperature_k: envelope.then_some(f.surface_temperature_k),
+                temperature_k: (envelope || atmosphere).then_some(f.surface_temperature_k),
                 model: fallback::MODEL_ID.into(),
             }
         })
@@ -349,7 +352,7 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
                     escaped_kg: f.escaped.mass_kg(m),
                     interior_kg: in_kind(m, &[K::Core, K::Mantle]),
                     condensed_kg: in_kind(m, &[K::Water, K::Volatiles]),
-                    gas_kg: in_kind(m, &[K::Envelope]),
+                    gas_kg: in_kind(m, &[K::Envelope, K::Atmosphere]),
                 })
                 .collect(),
             retained_mass_kg: mass,

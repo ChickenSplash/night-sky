@@ -2,6 +2,8 @@
 //! Representative wavelengths are 680, 550 and 440 nm, not an RGB spectrum.
 use super::*;
 
+pub mod boundary;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Optics {
     pub column: Column,

@@ -170,6 +170,16 @@ terrain or a claim of a located solid surface.
 
 ### Atmospheres
 
+Generated atmosphere inputs now pass through the simulation's explicit
+[optical boundary contract](../simulation/atmospheres.md#explicit-renderer-boundary-contract).
+It declares reference conditions, the density/optics approximation, an opaque
+lower reference proxy and a finite density-drop outer cutoff. Neither a solver's
+layer edge nor the presence of H/He defines visibility. Current live inputs and
+numerical optical outputs are unchanged; staged composition candidates are not
+mixed into this path. The proxy is not a detected cloud top or landing surface,
+and this adapter does not change clearance, descent permission or the existing
+approximate deep visual continuation.
+
 A planet drawn as a disc may have an atmosphere: a shell mesh slightly larger
 than the air's top, whose pixels march single scattering along the line of
 sight (`render/atmosphere.rs`, with `atmosphere/atmosphere.wgsl`). The shader

@@ -685,7 +685,7 @@ Paths below are relative to `crates/`.
 | Background loading: `client/src/planet_loading.rs` | Opt-in inspector cache; completed records do not update the system. | Always expose a valid initial fallback. Track queued/running/refused/worker-failed separately from that result. Cache candidate refinements by inputs/model revision, discard stale jobs and publish through one coherent adoption path. |
 | Shape and spin: `simulation/src/system/shape.rs`, `generation.rs` | `planet_shape` accepts inertia only in 0.1–0.4 and otherwise substitutes a neutral/class value; spin limits use legacy facts. | Accept validated new-model inertia, including the audited values below 0.1. Recompute dependent spin limits and shapes consistently, preserving deterministic spin seeds and locked-period semantics. Keep the existing bounded shape approximation explicitly labelled. |
 | Ground, discs and lighting: `client/src/scene/draw.rs`, `render/ground.rs`, `simulation/src/system/surface.rs`, `light.rs` | A single reference spheroid supplies drawing and ground; atmosphere reference suppresses terrain. Reflectance calls legacy validation. | Distinguish a condensed drawable boundary, a gas reference and an opaque visual proxy. Rendering must not promote any of them to certified landable ground. Keep reflectance/scattering prescriptions separate from structure. |
-| Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | Reconstruct columns using total GM and `Planet::radius_km`; descent permission uses a legacy gas-fraction threshold. | Export gas inputs at the selected reference with actual pressure/temperature and enclosed-mass gravity. Use a named optical approximation for unresolved profiles; never infer a resolved column or clouds from bulk gas mass or suspended condensate alone. Replace legacy threshold-based descent eligibility with explicit geometry/surface knowledge. |
+| Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | Explicit optical boundary contract now carries reference conditions, named profile, lower proxy and outer cutoff. Live inputs still use total GM and `Planet::radius_km`; descent permission retains the legacy threshold. A separate checked unified-result adapter uses reference gravity but does not adopt candidates. | Complete coherent live atmosphere/partition cutover before using the unified adapter. Never infer resolved profiles/clouds from structural edges or suspended bulk condensate. Replace threshold-based descent eligibility with explicit geometry/surface knowledge. |
 | Camera and craft: `simulation/src/system/clearance.rs`, `craft.rs`, `craft/route.rs`, `craft/voyage.rs`, `client/src/scene/location.rs`, `client/src/craft.rs` | Clearance, gravity, spawn altitude, body reach and routes consume copied systems/fields. Camera field invalidation currently checks system ID/page and list changes, not a physical revision. | Adopt one revision across view and physical fields; rebuild mass/reach/clearance/route caches. Keep camera pose and craft state stable; never silently embed them in enlarged geometry or leave craft on a different mass revision. |
 | Search and distant generation: `simulation/src/search/{engine,live}.rs`, `craft/voyage.rs` | Radius, mass and class predicates use synchronous generated bodies; remote systems may never enter the client loader. | Use the new synchronous fallback, not hidden legacy or background EOS work. Disclose the result basis for searchable physical properties; a fallback match is not a guaranteed layered match. Reconcile/revalidate when a loaded result changes. |
 | Inspector and developer tools: `client/src/ui/inspector/`, `devtools/`, planet loader readout | Separate legacy and experimental reports, plus derived UI caches. | Show the active authoritative revision and any pending candidate distinctly; export the same facts in snapshots. Remove obsolete comparison/toggle paths after migration. |
@@ -845,6 +845,54 @@ a unified exact layered search across the galaxy is not part of this cutover.
      accepted diffuse extreme still refuses tighter integration. Logs:
      `data/tmp/p3-initial-export-{check,audit,envelope}.log`. No live authority,
      user visual/performance sign-off or new population coverage is claimed.
+   - Optical-boundary prerequisite implemented: `OpticalColumn` declares reference
+     pressure/temperature/radius/gravity, selected density approximation, an
+     opaque condensed/gas reference proxy and finite operational outer cutoff.
+     The client consumes this contract without changing existing optical numbers
+     or borrowing staged candidate geometry. `from_result` separately validates
+     reference/thermal/gas-reservoir agreement and uses enclosed-mass gravity,
+     without any structure/EOS/retention/partition solve or live adoption.
+     Suspended-condensate optical input is explicitly unsupported there rather
+     than inferred from bulk mass. Neither structural edges, one bar nor screen
+     darkness detects an optical boundary. This retains the fixed density-drop
+     cutoff and existing descent approximation, not an adaptive optical-depth
+     outer cutoff, resolved cloud deck or arbitrary deep-envelope model.
+      At that checkpoint fallback still had only condensed secondary proxies;
+      these could not be combined with legacy partitioned gas (see the next slice).
+     Verification: `./scripts/check.sh` passes (469 simulation tests, 374 client
+     tests, formatting and strict Clippy), including cutoff/proxy semantics,
+     composition/pressure effects, aerosol extent, weak binding, structural-edge
+     independence, enclosed-mass gravity, rejection of mixed reference inputs and
+     client candidate isolation. Log: `data/tmp/p3-optical-boundary-check.log`.
+      No visual or performance benchmark was launched; no new coverage claim.
+   - Synchronous reference partition implemented: final retention now prepares a
+     staged fallback result with its own gas/condensate allocations, pressure,
+     temperature and inertia. `physical::initial_with_atmosphere` returns that
+     result with its matching environment; the exported candidate carries the
+     physical gas facts, not the legacy live atmosphere. The named
+     `fallback_reference_partition_v1` holds proxy volumes/radius/reference fixed
+     while updating condensed densities, loading and inertia. Boundary gas uses
+     a mass-normalised finite column for inertia; a one-bar bulk envelope owns
+     its entire gas inventory once, with its original thinning profile. This is
+     not a new EOS, thermal, phase-volume or atmospheric self-gravity solution.
+   - Trace-aware cold trapping retains positive sub-0.1 Pa columns and excludes
+     unrepresentable vapour transfers from its bracket. Tests exposed a 20 K
+     case where otherwise such vapour changed the mixture then disappeared at
+     transfer, violating the final saturation cap. The legacy population's
+     successful numeric path remains unchanged. Original retention/standalone
+     fallback prescriptions remain unchanged; generation's model key is now
+     `generation_fallback_partition_v1`. No live authority switch is included:
+     installation of geometry, environment and spin together remains next.
+   - Reference-partition verification: `./scripts/check.sh` passes (474 simulation
+     tests, 374 client tests, formatting and strict Clippy). Fixtures cover dry,
+     secondary/trace, cold-trapped, sub-bar and one-bar inventories, source/loss
+     conservation, deterministic preparation, rejection of mixed thermal inputs,
+     mass-normalised inertia against independent radial quadrature, and the
+     20 K transfer-precision regression. The saved audit still reconstructs 315
+     original fallbacks with saved radii unchanged; the accepted diffuse case
+     retains its tighter-integration refusal. All 22 envelope fixtures pass.
+     Logs: `data/tmp/p3-reference-partition-{check,audit,envelope}.log`. No visual/performance
+     run or new population-coverage claim.
 3. **Consumer adapters.** Migrate shape/spin, ground/reference geometry, gas optics,
    light, clearances, spawn/camera/craft fields, search and UI/snapshots. Exercise
    bare rock, ocean/ice, hot/unresolved surfaces, gas-free fallback, sub-bar gas,

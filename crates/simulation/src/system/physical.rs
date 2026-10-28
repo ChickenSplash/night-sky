@@ -10,11 +10,13 @@ mod export;
 mod layered;
 pub(crate) use export::export_planet;
 mod result;
+mod synchronous;
 pub use layered::{fallback, layered, outcome};
 pub(crate) use result::initial_from_fallback;
 pub use result::{
     initial_result, resolved_result, validate_record, validate_refinement, validate_result,
 };
+pub use synchronous::{PreparedInitial, initial_with_atmosphere};
 
 /// Legacy consumer projection only. The new-model candidate is carried
 /// separately as `initial_result` until coordinated live adoption is implemented.
