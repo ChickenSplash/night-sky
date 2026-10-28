@@ -171,8 +171,8 @@ impl CoupledStructure {
         }
     }
     pub fn column_model_id(&self) -> &'static str {
-        if self.envelope.is_some() {
-            return crate::system::materials::hhe::MODEL_ID;
+        if let Some(e) = &self.envelope {
+            return e.density_model_id();
         }
         if self.atmosphere.is_some_and(|air| column::hot_steam(&air)) {
             HOT_STEAM_MODEL_ID
@@ -278,6 +278,21 @@ impl CoupledStructure {
         self.inertia_kg_m2() / (self.mass_kg() * self.condensed.radius_m().powi(2))
     }
     pub fn approximation_notes(&self) -> &'static [&'static str] {
+        if self
+            .envelope
+            .as_ref()
+            .is_some_and(|e| e.uses_molecular_mixture())
+        {
+            return &[
+                "Uniform envelope composition; at least 95% H/He by mass, no helium rain or chemical reactions",
+                "CMS19/HG23 H/He density plus Peng-Robinson pure-component additive specific volumes",
+                "Secondary molecular EOS restricted to 80-625 K and at most 1,000 bar, with conservative pure-condensation and near-critical screens",
+                "No binary excess volume, mixture phase equilibrium, dense metallic-depth chemistry or separate liquid/solid secondary layers",
+                "Protected traces and water retain their separate interior allocations; no material discarded",
+                "Prescribed grey thermal profile with 100 K intrinsic reference, not cooling evolution",
+                "Reference gravity from the new one-bar event; one bar is never ground",
+            ];
+        }
         if self.envelope.is_some() {
             return &[
                 "Uniform H/He mixture with separate conserved origins; no helium rain or heavy-water mixing",

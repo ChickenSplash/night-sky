@@ -203,10 +203,12 @@ cryptographic source authentication.
   generation's prior escaped inventory unchanged; no retention history is
   replayed and no gas is silently discarded.
 - Protected secondaries retain P1's host-volume prescription. Accessible
-  secondaries, capped at 0.301% of envelope mass, share H/He host specific
+  secondaries up to 0.301% of envelope mass retain the original H/He host specific
   volume under `passive_secondary_envelope_host_volume_v1`. This is a mechanical
   trace approximation, **not** protection, dissolution or condensation physics.
   Water is never folded into that trace allowance or dropped at a threshold.
+  Above this bound the [bounded molecular extension](#hhe-rich-molecular-mixtures)
+  is attempted, not a widened passive trace approximation.
 - Water gets its own `loaded_effective_water_compression_v1` region using the
   existing Seager pressure-only water row, only when its entire region is above
   10,000 bar and below 100,000,000 bar. Its phase is `UnresolvedCompression`, not
@@ -303,18 +305,149 @@ columns for the 1,017 thin successes are identical to P1. Four new successes
 have non-H/He inventory above 20 Earth masses. This is a coupled structural
 delivery, **not completed giant coverage**; larger giants remain unsupported.
 
-Remaining first failures among envelope-route bodies: secondary trace domain
+Step-3 first failures among envelope-route bodies: secondary trace domain
 212, shallow water boundary 103, radial integration convergence 25, conservative
 melting screen 22, cold dense gas 12, work budget 8, central shooting resolution
 7, gravity convergence 5 and region mass resolution 1. The original eight
 H/He-free dense-gas and seven warming refusals also remain. These measured gaps
-feed P2 step 4; no new water-amount cutoff is permitted to bypass them.
+fed P2 step 4; no new water-amount cutoff is permitted to bypass them. The
+molecular extension below reclassifies the original trace cohort without adding
+generated successes; these counts are the retained step-3 baseline.
+
+### H/He-rich molecular mixtures
+
+`materials::hhe_mixture` adds a uniformly composed molecular envelope model,
+`hhe_rich_additive_molecular_volume_v1`. Its first engineering scope requires
+**at least 95% H/He by envelope mass**. The 5% secondary bound is a conservative
+scope restriction, not a measured phase threshold or a claim that every
+H/He-dominated envelope is now supported. CO₂/N₂-dominated atmospheres remain
+outside this delivery, as do metallic-depth impurity thermodynamics.
+
+For each present secondary, `materials::molecular` supplies a pure-component
+Peng–Robinson gas/supercritical density at the **same total pressure and
+temperature** as the screened H/He endpoint. The specific volumes are combined:
+
+`v_mix(P,T) = (X_H + X_He) / rho_HHe(P,T,Y_He) + sum_i X_i / rho_i(P,T)`
+
+`rho_mix = 1 / v_mix`, with `Y_He = X_He / (X_H + X_He)`.
+
+H/He interactions remain included once through CMS19/HG23; no second H/He
+mixing correction is applied. Cross interactions with secondaries and excess
+mixing volumes are neglected. This is an approximate structural mixture, not a
+validated binary-fluid EOS or an equilibrium flash. Fractions remain uniform
+within the envelope, while pressure, temperature and density vary radially.
+Temperature still follows the prescribed H/He-dominated profile; composition
+does not update opacity, heat capacity or the fixed deep gradient in this slice.
+
+All positive supported constituents are evaluated and retain separate origin
+inventories. Protected material is never transferred out of the heavy interior;
+water never joins the mixed parcel, and ammonia is not introduced. No molecule
+is silently removed because its abundance is small. If a present component is
+unsupported, the new route refuses the whole structure.
+
+#### Component equation and restrictions
+
+The molecular component EOS is the original Peng–Robinson form:
+
+`P = R T / (v-b) - a alpha / (v² + 2 b v - b²)`
+
+`a = 0.45724 R² Tc² / Pc`, `b = 0.07780 R Tc / Pc`,
+`alpha = [1 + kappa (1 - sqrt(T/Tc))]²`,
+`kappa = 0.37464 + 1.54226 omega - 0.26992 omega²`.
+
+Here `v` is molar volume. Critical parameters and acentric factors for CO₂,
+N₂, CH₄, O₂ and Ar are rounded from the pinned CoolProp v7.2.0 cubic catalogue;
+the pressure equation and cubic-root solve are implemented locally, with no
+CoolProp dependency or new runtime resource. Provenance and independent NIST
+checks are in the [reference guide](planet-composition-reference.md#bounded-molecular-component-density).
+
+The **application** rectangle is 80–625 K and **0.01 mbar to 1,000 bar**. It is
+not an assertion of uniformly accurate density throughout that rectangle. In
+particular, cubic fluid equations cannot establish solid phases, high-temperature
+chemical survival or planetary metallic-pressure behaviour. This bounded
+molecular model must not be extrapolated to those states.
+
+Additional conservative screens:
+
+- Below a component's critical temperature, total pressure must remain below
+  the existing rough pure-component vapour/frost cap. Subcritical oxygen is
+  refused because that shared cap supplies no oxygen constraint. This is a
+  conservative pure-endpoint restriction, **not** a mixture dew/frost point;
+  dilution can keep real mixtures gaseous where this model refuses them.
+- The largest physical cubic root must have positive compressibility. Its
+  polynomial residual must close within relative scale 10⁻¹². Below critical
+  temperature, a compressed-liquid single root is refused; competing physical
+  roots are checked by their cubic fugacity coefficients, rather than silently
+  returning metastable vapour. No liquid secondary layer is created.
+- Exclude the near-critical box `abs(T/Tc - 1) < 0.1` with `P > 0.5 Pc`, where
+  cubic densities are particularly sensitive. This exclusion is an engineering
+  mask, not a phase boundary.
+- All existing H/He quantum, melting, cold-density and interpolation masks,
+  heavy-water bounds, gravity closure and numerical budgets remain unchanged.
+
+The old passive-trace envelope model stays unchanged through 0.301% secondary
+mass, preserving all previous envelope successes exactly. Above it, the new
+explicit molecular model is selected; failures never fall back to the passive
+model. This is an explicit approximation/domain boundary, not a physical phase
+transition. Overlap fixtures compare the two density prescriptions at that
+boundary, with differences below 0.31% in the sampled states. The molecular
+closure itself varies continuously with enrichment and approaches the exact
+H/He endpoint as secondary abundance vanishes. These overlap checks are not a
+whole-domain or planet-radius accuracy claim.
+
+#### Checks and generated coverage
+
+Tests compare ten sparse gas/supercritical density points against the independent
+NIST WebBook reference (within 4% for the component approximation), verify the
+analytic dilute molecular-weight limit, pressure compressibility, enrichment
+continuity, positive-species handling, unsupported states and condensation
+refusal. Source-backed coupled tests use a one-Earth-mass dry heavy body,
+`1e-5` Earth masses of H/He and 2% secondary envelope mass. Its one-bar radius is
+about **6,499 km**, with an interface near **12.30 bar**; radius and inertia
+refine within relative 10⁻⁷. The pure-density approximation tolerance does not
+relax the radial solver's relative 10⁻¹⁰ integration tolerance.
+
+```sh
+cargo test --release -p space-simulation materials::
+cargo test --release -p space-simulation rich_molecular -- --include-ignored --nocapture
+NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
+```
+
+Adding positive water to the dry fixture retains it and returns the existing
+water-load refusal. This exposes an important limitation: the molecular pressure
+ceiling is 1,000 bar, whereas the current loaded-water region requires its top
+at 10,000 bar or above. There is **no accepted overlap** between these two
+prescriptions. Generated candidates all retain positive water, so this slice
+cannot by itself produce new generated successes. Supporting shallow loaded
+water or a justified deeper impurity EOS is subsequent work, not a reason to
+discard water or widen a molecular EOS beyond its validity.
+
+The final 20-thread rerun still solves **1,134/1,544**, with every original
+non-timing coverage column identical for all 1,134 previous successes. Current
+outcomes of the original 212-body trace cohort:
+
+| Current outcome | Bodies |
+| --- | ---: |
+| Outside the first 5% secondary composition bound | 136 |
+| Conservative pure-component condensation screen | 42 |
+| Molecular pressure/temperature domain | 25 |
+| Existing shallow-water boundary | 8 |
+| Radial integration convergence | 1 |
+
+The 76 inside the new composition bound have progressed beyond the old trace
+guard, but **none is a new solved generated planet**. Domain/phase errors may
+arise during rejected shooting trials; they are not measured deep conditions of
+an accepted planet. The original cohort stays in the diagnostic TSV with its
+current outcome so that reclassification cannot masquerade as coverage gain.
+Full project checks and the source-backed mixed-envelope refinement test pass.
 
 ### Secondary trace input investigation
 
 The coverage probe also writes `data/tmp/composition-traces.{md,tsv}` for the
-trace-domain failures, including per-material protected/accessible inventories,
-both host-relative fractions and the prior thin-route refusal. This is test-only
+original trace-guard cohort, including per-material protected/accessible inventories,
+both host-relative fractions, the prior thin-route refusal and current outcomes.
+Selection remains based on the old guard, so reclassified refusals remain in
+the investigation. This is test-only
 instrumentation: it neither changes generation nor bypasses any solver guard.
 The protection floor is reconstructed from the source inventory, not by taking
 90% of the post-escape retained inventory. Synthetic tests distinguish both
@@ -350,16 +483,19 @@ secondary atmospheres with residual H/He need their own justified mechanical
 prescription, condensation handling and thermal bounds. Uniform composition
 within a gas/fluid region is a possible simplification, not permission to use
 H/He density for substantial CO₂/N₂ or to mix protected/water inventories into
-the atmosphere. No new mixture prescription is selected by this investigation.
+the atmosphere. The investigation itself selected no mixture prescription; the
+separate bounded delivery above now attempts the first 76 candidates, without
+claiming complete coverage of their conditions.
 
 Irradiation equilibrium spans 1.51–646.05 K (median 184.65 K), but is **not**
 the actual envelope temperature; runtime irradiation flooring and intrinsic
-heat still apply. These refusals happen before envelope integration, so no
+heat still apply. The original trace refusals happened before envelope integration, so no
 accepted interface pressure, deep temperature or metallic-hydrogen exposure
 exists for this population. Those cannot be inferred from the legacy atmosphere
 or by suppressing the trace guard. Further state-range investigation needs an
 explicitly bounded candidate model and must not count provisional profiles as
-successful planets. The 212 are first blockers, not guaranteed future wins.
+successful planets. The 212 were first blockers, not guaranteed future wins;
+the bounded molecular delivery confirms this distinction.
 
 ## Conserved inventory, not a classification
 

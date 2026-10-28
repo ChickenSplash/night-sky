@@ -260,7 +260,10 @@ fn row(p: &Hosted) -> Row {
         Err((c, d)) => (c, d, None),
     };
     let mut trace_audit = traces::Audit::new(&p.body.budget);
-    if detail == "secondary envelope trace domain" {
+    if trace_audit.exceeds_original_guard()
+        && (category == Category::Envelope
+            || solved.as_ref().is_some_and(|s| s.surface == "envelope"))
+    {
         trace_audit.thin_refusal = format!(
             "{:?}",
             prototype::thin_route_diagnostic(&p.body.budget, env).unwrap_err()

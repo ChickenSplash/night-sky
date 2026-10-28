@@ -217,6 +217,150 @@ fn transport_is_conserved_and_one_bar_is_not_ground() {
     }
 }
 
+fn rich_molecular_inventory(water_mass: f64) -> Inventory {
+    let base = inventory(1.0, 1e-5);
+    let secondary = 1e-5 * EARTH_MASS_KG * 0.02 / 0.98;
+    base.checked_add(
+        &Inventory::new(&[
+            (Material::CarbonDioxide, 0.5 * secondary),
+            (Material::Nitrogen, 0.48 * secondary),
+            (Material::Methane, 0.01 * secondary),
+            (Material::Argon, 0.01 * secondary),
+            (Material::Water, water_mass),
+        ])
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn rich_molecular_envelope_conserves_and_refines_without_dropping_water() {
+    let request = rich_molecular_inventory(0.0);
+    let density = |p: f64, t: f64, _: f64| {
+        Ok(
+            p / (crate::units::BOLTZMANN_J_K / crate::units::ATOMIC_MASS_KG
+                * t
+                * (0.75 / crate::system::atmosphere::Gas::Hydrogen.molecular_mass_u()
+                    + 0.25 / crate::system::atmosphere::Gas::Helium.molecular_mass_u())),
+        )
+    };
+    let (interior, e) = solve_with_density(
+        &request,
+        &Inventory::default(),
+        350.0,
+        100.0,
+        Default::default(),
+        &density,
+    )
+    .unwrap();
+    assert!(e.uses_molecular_mixture());
+    assert_eq!(e.density_model_id(), hhe_mixture::MODEL_ID);
+    let allocated = interior
+        .retained_inventory()
+        .checked_add(&e.inventory)
+        .unwrap();
+    for m in Material::ALL {
+        assert!((allocated.mass_kg(m) - request.mass_kg(m)).abs() <= 1e-10 * request.mass_kg(m));
+    }
+    let fine_controls = coupled::Controls {
+        radial: dry::Controls {
+            relative_tolerance: 2e-11,
+            max_step: 1.0 / 256.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (_, fine) = solve_with_density(
+        &request,
+        &Inventory::default(),
+        350.0,
+        100.0,
+        fine_controls,
+        &density,
+    )
+    .unwrap();
+    assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
+    assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
+    assert_eq!(
+        solve_with_density(
+            &rich_molecular_inventory(1e-6 * EARTH_MASS_KG),
+            &Inventory::default(),
+            350.0,
+            100.0,
+            Default::default(),
+            &density
+        )
+        .unwrap_err(),
+        Error::WaterLoadDomain
+    );
+}
+
+#[test]
+#[ignore = "local pinned source resource; run in release"]
+fn rich_molecular_reference_and_refinement() {
+    let request = rich_molecular_inventory(0.0);
+    let (interior, e) = solve(
+        &request,
+        &Inventory::default(),
+        350.0,
+        100.0,
+        Default::default(),
+    )
+    .unwrap();
+    let fine_controls = coupled::Controls {
+        radial: dry::Controls {
+            relative_tolerance: 2e-11,
+            max_step: 1.0 / 256.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (_, fine) = solve(&request, &Inventory::default(), 350.0, 100.0, fine_controls).unwrap();
+    assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
+    assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
+    eprintln!(
+        "mixed R={} km base={} bar I={} residual={}",
+        e.one_bar_radius_m / 1000.0,
+        interior.regions().last().unwrap().outer().pressure_pa / 1e5,
+        e.inertia_kg_m2 / (request.total_mass_kg() * e.one_bar_radius_m.powi(2)),
+        e.gravity_residual
+    );
+    let solved = super::super::prototype::Solved {
+        structure: coupled::CoupledStructure::from_envelope(interior, e),
+        source: request,
+        escaped: Inventory::default(),
+        blowoff: Inventory::default(),
+        protected: Inventory::default(),
+    };
+    let record = crate::system::physical::layered(&solved);
+    assert!(
+        record
+            .physical
+            .approximations
+            .iter()
+            .any(|m| m == hhe_mixture::MODEL_ID)
+    );
+    assert!(
+        record
+            .physical
+            .approximations
+            .iter()
+            .any(|m| m == crate::system::materials::molecular::MODEL_ID)
+    );
+    assert!(
+        !record
+            .physical
+            .approximations
+            .iter()
+            .any(|m| m == TRACE_MODEL_ID)
+    );
+    assert_eq!(record.layers[0].model, hhe_mixture::MODEL_ID);
+    assert_eq!(
+        record.physical.radius_reference,
+        space_shared::RadiusReference::OneBar
+    );
+}
+
 #[test]
 #[ignore = "local pinned source resource; run in release"]
 fn envelope_reference_cases() {

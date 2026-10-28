@@ -11,6 +11,40 @@ establish complete physical coverage. Cold dense H/He, secondary solid/deep/hot
 routes, generated partition and thermal closure remain unresolved where stated.
 No generation-domain reduction or runtime data import is implied.
 
+## Bounded molecular component density
+
+The first H/He-rich molecular extension uses Peng and Robinson (1976),
+"A New Two-Constant Equation of State", *Industrial & Engineering Chemistry
+Fundamentals* 15, 59–64, [doi:10.1021/i160057a011](https://doi.org/10.1021/i160057a011).
+Pure-component critical constants and acentric factors are rounded from
+[CoolProp v7.2.0's cubic-fluid catalogue](https://github.com/CoolProp/CoolProp/blob/v7.2.0/dev/cubics/all_cubic_fluids.json).
+No table, library dependency or binary interaction parameters are imported.
+
+Independent sparse density references below come from the
+[NIST Chemistry WebBook SRD 69 fluid service](https://webbook.nist.gov/chemistry/fluid/),
+retrieved 28 October 2026. Request an isotherm with pressure in bar and density
+in kg/m³. CAS identifiers are CO₂ `124-38-9`, N₂ `7727-37-9`, CH₄ `74-82-8`,
+O₂ `7782-44-7` and Ar `7440-37-1`. For example, the nitrogen data request is:
+
+`https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C7727379&Type=IsoTherm&Digits=8&PLow=1&PHigh=100&PInc=99&T=300&RefState=DEF&TUnit=K&PUnit=bar&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`
+
+| Component | Temperature, K | Density at 1 bar, kg/m³ | Density at 100 bar, kg/m³ |
+| --- | ---: | ---: | ---: |
+| N₂ | 300 | 1.1232786 | 111.72541 |
+| CO₂ | 400 | 1.3256858 | 161.52729 |
+| CH₄ | 300 | 0.64425426 | 75.175486 |
+| O₂ | 300 | 1.2836705 | 134.57394 |
+| Ar | 300 | 1.6025107 | 167.60263 |
+
+The component regression allowance is 4%, distinct from the numerical cubic-root
+residual scale of 10⁻¹² and radial integration tolerance of 10⁻¹⁰. These ten
+points are independent spot checks, **not** a 4% accuracy guarantee for the entire
+application rectangle or mixed-planet radii. Mixture interactions are unvalidated.
+Conservative pure-component condensation/critical screens may refuse real fluid
+mixtures; no mixed phase diagram is claimed. The
+[owning model guide](planet-composition.md#hhe-rich-molecular-mixtures) defines
+equations, scope, routing and current coverage implications.
+
 ## Generated inputs: measurements versus bounds
 
 Reproduce from the repository root:

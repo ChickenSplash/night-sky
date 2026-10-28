@@ -33,7 +33,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
                 r.outer(),
                 envelope.thermal().temperature_k(r.outer().pressure_pa).ok(),
                 "envelope",
-                crate::system::materials::hhe::MODEL_ID,
+                envelope.density_model_id(),
             ));
         }
     }
@@ -110,7 +110,15 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     let mass = s.mass_kg();
     let radius = s.surface_radius_m();
     let mut models: Vec<String> = Vec::new();
-    let envelope_models: &[&str] = if s.envelope().is_some() {
+    let envelope_models: &[&str] = if s.envelope().is_some_and(|e| e.uses_molecular_mixture()) {
+        &[
+            crate::system::structure::envelope::THERMAL_MODEL_ID,
+            crate::system::materials::molecular::MODEL_ID,
+            crate::system::materials::hhe::MODEL_ID,
+            crate::system::materials::hhe::COLD_MODEL_ID,
+            "bounded_pure_he_melting_screen_extension_v1",
+        ]
+    } else if s.envelope().is_some() {
         &[
             crate::system::structure::envelope::THERMAL_MODEL_ID,
             crate::system::structure::envelope::TRACE_MODEL_ID,

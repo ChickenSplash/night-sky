@@ -8,7 +8,7 @@ use super::{
 use crate::{
     system::{
         composition::Inventory,
-        materials::{Material, cold, hhe},
+        materials::{Material, cold, hhe, hhe_mixture},
     },
     units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT},
 };
@@ -33,6 +33,7 @@ const GRAVITY_TOLERANCE: f64 = 1e-8;
 pub enum Error {
     InvalidInput(&'static str),
     Eos(hhe::Error),
+    Mixture(hhe_mixture::Error),
     Radial(SolveError),
     TraceDomain,
     WaterLoadDomain,
@@ -46,6 +47,7 @@ impl Error {
     pub fn label(self) -> &'static str {
         match self {
             Self::Eos(e) | Self::Radial(SolveError::Envelope(e)) => e.label(),
+            Self::Mixture(e) | Self::Radial(SolveError::Mixture(e)) => e.label(),
             Self::InvalidInput(reason) => reason,
             Self::TraceDomain => "secondary envelope trace domain",
             Self::WaterLoadDomain => "water boundary below 1 GPa",
@@ -72,9 +74,20 @@ pub struct Envelope {
     pub(super) evaluations: usize,
     pub(super) iterations: usize,
     pub(super) gravity_residual: f64,
+    molecular_mixture: bool,
 }
 
 impl Envelope {
+    pub fn density_model_id(&self) -> &'static str {
+        if self.molecular_mixture {
+            hhe_mixture::MODEL_ID
+        } else {
+            hhe::MODEL_ID
+        }
+    }
+    pub fn uses_molecular_mixture(&self) -> bool {
+        self.molecular_mixture
+    }
     pub fn reference_gravity_m_s2(&self) -> f64 {
         GRAVITATIONAL_CONSTANT * self.one_bar_enclosed_mass_kg / self.one_bar_radius_m.powi(2)
     }
@@ -93,7 +106,8 @@ impl Envelope {
 }
 
 /// Generation's retained budget is immutable. Protected traces remain heavy;
-/// accessible secondaries share envelope host volume without becoming protected.
+/// Accessible secondaries either use the original bounded host-volume trace
+/// approximation or the explicitly screened H/He-rich molecular mixture.
 pub fn solve(
     retained: &Inventory,
     protected: &Inventory,
@@ -168,11 +182,15 @@ fn solve_with_density(
     {
         return Err(Error::InvalidInput("mass domain"));
     }
-    if protected.total_mass_kg() / heavy.total_mass_kg() > dry::protected::MAX_TRACE_FRACTION
-        || (gas.total_mass_kg() - light) / gas.total_mass_kg() > dry::protected::MAX_TRACE_FRACTION
-    {
+    if protected.total_mass_kg() / heavy.total_mass_kg() > dry::protected::MAX_TRACE_FRACTION {
         return Err(Error::TraceDomain);
     }
+    let secondary_fraction = (gas.total_mass_kg() - light) / gas.total_mass_kg();
+    let mixture = if secondary_fraction > dry::protected::MAX_TRACE_FRACTION {
+        Some(hhe_mixture::Mixture::new(&gas).map_err(Error::Mixture)?)
+    } else {
+        None
+    };
     let scale = heavy.total_mass_kg() / host.total_mass_kg();
     let parcels = Inventory::new(&Material::ALL.map(|m| {
         (
@@ -206,7 +224,13 @@ fn solve_with_density(
                 let t = thermal
                     .temperature_k(p)
                     .map_err(|_| SolveError::InvalidInput("envelope thermal domain"))?;
-                eos(p, t, y).map_err(SolveError::Envelope)
+                let density = eos(p, t, y).map_err(SolveError::Envelope)?;
+                match mixture {
+                    Some(mix) => mix
+                        .density_kg_m3(p, t, density)
+                        .map_err(SolveError::Mixture),
+                    None => Ok(density),
+                }
             } else if m == Material::Water {
                 // Named pressure-only effective compression, never a phase or
                 // thermal EOS. Final water intervals must all lie above 1 GPa.
@@ -323,6 +347,7 @@ fn solve_with_density(
                 evaluations: total_work,
                 iterations: iteration + 1,
                 gravity_residual: residual,
+                molecular_mixture: mixture.is_some(),
             },
         ));
     }

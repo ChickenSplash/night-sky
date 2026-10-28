@@ -182,6 +182,7 @@ pub enum SolveError {
     Water(super::super::materials::water::WaterError),
     DenseWater(super::super::materials::water::dense_liquid::Error),
     Envelope(super::super::materials::hhe::Error),
+    Mixture(super::super::materials::hhe_mixture::Error),
     WaterPhaseCrossing {
         pressure_pa: f64,
         expected: super::super::materials::water::Phase,

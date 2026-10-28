@@ -436,6 +436,43 @@ owns equations, resource setup, numerical boundary contracts and limitations.
   output ownership are in the
   [composition guide](../simulation/planet-composition.md#secondary-trace-input-investigation).
 
+### Step 4: bounded H/He-rich molecular foundation (28 October 2026)
+
+- **Observed gap:** the passive host-volume trace model cannot represent the
+  finite molecular volume of a non-trace secondary inventory.
+- **Implemented scope:** additive-specific-volume mixing of the existing
+  CMS19/HG23 H/He density with screened Peng–Robinson component densities.
+  This first extension requires at least 95% H/He by envelope mass, retaining
+  all origins and all separate protected/water allocations. It is a bounded
+  molecular foundation, **not completed H/He-rich planetary coverage**.
+- **Explicit restrictions:** 80–625 K, at most 1,000 bar for present molecular
+  components, conservative pure-condensation and near-critical masks, no liquid
+  secondary regions or metallic-depth chemistry. No changes to the thin solver,
+  original passive-trace route, heavy-water domain or numerical tolerances.
+- **Fixtures:** ten independent NIST component-density spot checks, dilute
+  molecular-weight limit, compressibility/continuity, trace-overlap comparisons,
+  positive-constituent and phase refusals, source-backed full-planet conservation
+  and refinement. The dry 2%-secondary fixture solves at about 6,499 km one-bar
+  radius with a 12.30-bar base. Adding positive water explicitly refuses rather
+  than dropping it or folding it into the envelope.
+- **Coverage finding:** no new generated successes. All generated candidates
+  retain water, and this molecular pressure domain has no accepted overlap with
+  the existing loaded-water floor of 10,000 bar. The original 1,134 successes
+  remain unchanged. A larger accepted-mixture fraction alone cannot resolve
+  that structural mismatch.
+- **Final census/checks:** 20-thread coverage remains 1,134/1,544; all 1,134
+  previous successes match every original non-timing column. Of the original
+  212, 136 exceed the new composition bound; the 76 eligible mixture attempts
+  return pure-condensation screen (42), component state domain (25), shallow
+  water (8) or radial convergence (1). Full project checks and source-backed
+  mixed-envelope refinement pass. These are reclassified refusals, not wins.
+- **Delivery gate:** do not call the original trace gap closed, widen molecular
+  bounds to planetary depths, or proceed to default cutover. Shallow-water
+  coupling and justified component/mixture phase/deeper-density prescriptions
+  remain separate future work. The
+  [canonical molecular model](../simulation/planet-composition.md#hhe-rich-molecular-mixtures)
+  owns the equations, masks, sources and resulting diagnostic outcomes.
+
 ### Remaining delivery order
 
 4. **Close remaining coverage.** Triage dense-gas refusals, including trace-H/He

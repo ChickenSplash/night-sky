@@ -51,8 +51,8 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     atmosphere/      Seeded generation, visible optics and validated wire conversion
     clearance.rs     Navigation clearance: bulge, maintenance-free air height and margins
     composition.rs   Conserved material inventories, gas/fit adapters and reservoir budgets
-    materials.rs     Shared identities, cold density EOS and bounded pure-water P-T physics
-    structure.rs     Approximate generated radii; headless dry/water/coupled solvers
+    materials.rs     Shared identities and bounded refractory/water/H/He/molecular density models
+    structure.rs     Approximate generated radii; headless dry/water/coupled/envelope solvers
     physical.rs      Validated composition/structure wire conversion for both system paths
     generation.rs    Natural planetary formation, independent of list/task placement
     overlay.rs       Optional task slots, pages and assigned-star placement
