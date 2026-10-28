@@ -106,6 +106,8 @@ struct Row {
     gravity_residual: f64,
     outer_residual_pa: f64,
     model: &'static str,
+    /// NaN when the layered solve succeeded.
+    fallback_radius_km: f64,
 }
 
 struct Solved {
@@ -125,26 +127,42 @@ struct Solved {
     model: &'static str,
 }
 
+/// Every converted record must be conserved, contiguous and finite.
+fn check_record(layered: &space_shared::LayeredPlanet) {
+    let layer_mass: f64 = layered.layers.iter().map(|l| l.mass_kg).sum();
+    assert!((layer_mass / layered.physical.retained_mass_kg - 1.0).abs() < 1e-9);
+    assert!(layered.layers.windows(2).all(|p| {
+        (p[0].inner_radius_m - p[1].outer_radius_m).abs() <= 1e-9 * p[0].inner_radius_m
+    }));
+    assert!(layered.physical.reference_radius_m.is_finite());
+    assert!(layered.physical.inertia_factor.is_finite() && layered.physical.inertia_factor > 0.0);
+}
+
 /// Every reported planet uses the same entry point intended for generation.
-fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
+/// Refusals also return their fallback structure's radius in metres.
+fn route(p: &Hosted) -> Result<Solved, (Category, String, f64)> {
     let retained = p.body.budget.retained();
     let light_mass = retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium);
     let light = light_mass > 0.0;
-    let escaping = prototype::solve(
-        &p.body.budget,
-        p.environment.as_ref().unwrap(),
-        coupled::Controls::default(),
-    )
-    .map_err(|e| {
-        // The warmed surface temperature is unknown on failure, so water
-        // errors are not binned by temperature here.
-        let (category, detail) = coupled_error(f64::NAN, &e);
-        if light && matches!(category, Category::GasDomain | Category::MassDomain) {
-            (Category::Envelope, detail)
-        } else {
-            (category, detail)
-        }
-    })?;
+    let environment = p.environment.as_ref().unwrap();
+    let escaping = prototype::solve(&p.body.budget, environment, coupled::Controls::default())
+        .map_err(|e| {
+            // The warmed surface temperature is unknown on failure, so water
+            // errors are not binned by temperature here.
+            let (category, detail) = coupled_error(f64::NAN, &e);
+            let fallback = crate::system::physical::fallback(&super::fallback::solve(
+                &p.body.budget,
+                environment,
+                e,
+            ));
+            check_record(&fallback);
+            let radius = fallback.physical.reference_radius_m;
+            if light && matches!(category, Category::GasDomain | Category::MassDomain) {
+                (Category::Envelope, detail, radius)
+            } else {
+                (category, detail, radius)
+            }
+        })?;
     let atmosphere = &escaping.structure;
     let escaped = escaping.blowoff;
     let t = atmosphere.surface_temperature_k();
@@ -158,11 +176,7 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let surface = escaping.surface();
     // Every solve must also convert to a conserved, contiguous transport record.
     let layered = crate::system::physical::layered(&escaping);
-    let layer_mass: f64 = layered.layers.iter().map(|l| l.mass_kg).sum();
-    assert!((layer_mass / layered.physical.retained_mass_kg - 1.0).abs() < 1e-9);
-    assert!(layered.layers.windows(2).all(|p| {
-        (p[0].inner_radius_m - p[1].outer_radius_m).abs() <= 1e-9 * p[0].inner_radius_m
-    }));
+    check_record(&layered);
     assert_eq!(layered.surface, surface);
     Ok(Solved {
         suspended: atmosphere
@@ -268,9 +282,9 @@ fn row(p: &Hosted) -> Row {
     let milliseconds = start.elapsed().as_secs_f64() * 1e3;
     let legacy = p.body.radius_km * 1e3;
     let env = p.environment.as_ref().unwrap();
-    let (category, detail, solved) = match outcome {
-        Ok(s) => (Category::Solved, String::new(), Some(s)),
-        Err((c, d)) => (c, d, None),
+    let (category, detail, solved, fallback_radius_m) = match outcome {
+        Ok(s) => (Category::Solved, String::new(), Some(s), f64::NAN),
+        Err((c, d, r)) => (c, d, None, r),
     };
     let mut trace_audit = traces::Audit::new(&p.body.budget);
     if trace_audit.exceeds_original_guard()
@@ -321,6 +335,7 @@ fn row(p: &Hosted) -> Row {
         gravity_residual: solved.as_ref().map_or(f64::NAN, |s| s.gravity_residual),
         outer_residual_pa: solved.as_ref().map_or(f64::NAN, |s| s.outer_residual_pa),
         model: solved.as_ref().map_or("", |s| s.model),
+        fallback_radius_km: fallback_radius_m / 1000.0,
     }
 }
 
@@ -394,6 +409,28 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
                 .filter(|r| r.envelope && r.category == Category::Solved)
                 .count(),
             rows.iter().filter(|r| r.envelope).count()
+        ),
+    );
+    let fallbacks: Vec<&Row> = rows
+        .iter()
+        .filter(|r| r.category != Category::Solved)
+        .collect();
+    let _ = writeln!(
+        out,
+        "## Fallback\n\n- Refusals with a checked fallback structure: {}\n\
+         - Fallback radius vs legacy, |relative| p50 / p95 / max: {}\n",
+        ratio(
+            fallbacks
+                .iter()
+                .filter(|r| r.fallback_radius_km.is_finite())
+                .count(),
+            fallbacks.len()
+        ),
+        quantiles(
+            fallbacks
+                .iter()
+                .map(|r| (r.fallback_radius_km / r.legacy_radius_km - 1.0).abs())
+                .collect()
         ),
     );
     let mut categories = BTreeMap::<Category, Vec<&Row>>::new();
@@ -574,12 +611,12 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
 fn table(rows: &[Row]) -> String {
     let mut out =
         "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\tsurface_k\toutcome\tdetail\t\
-                   surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tlegacy_pa\tradius_change\teos_evaluations\tms\thydrogen_fraction\thelium_fraction\trefractory_fraction\thhe_mass_earth\theavy_mass_earth\thelium_in_hhe\tnew_radius_km\tlegacy_radius_km\tinertia_factor\tinterface_pa\tgravity_residual\touter_residual_pa\tmodel\n"
+                   surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tlegacy_pa\tradius_change\teos_evaluations\tms\thydrogen_fraction\thelium_fraction\trefractory_fraction\thhe_mass_earth\theavy_mass_earth\thelium_in_hhe\tnew_radius_km\tlegacy_radius_km\tinertia_factor\tinterface_pa\tgravity_residual\touter_residual_pa\tmodel\tfallback_radius_km\n"
             .to_owned();
     for r in rows {
         let _ = writeln!(
             out,
-            "{}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{}\t{}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{}\t{}\t{:.2}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}",
+            "{}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{}\t{}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{}\t{}\t{:.2}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{:.16e}",
             r.id,
             r.class,
             r.mass_earth,
@@ -616,6 +653,7 @@ fn table(rows: &[Row]) -> String {
             r.gravity_residual,
             r.outer_residual_pa,
             r.model,
+            r.fallback_radius_km,
         );
     }
     out

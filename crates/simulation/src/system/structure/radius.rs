@@ -1,8 +1,9 @@
 use super::{Approximation, StructureError, parameters::*};
 use crate::{
     system::composition::{Inventory, Material},
-    units::EARTH_MASS_KG,
+    units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT},
 };
+use std::f64::consts::PI;
 
 pub(super) fn condensed(
     inventory: &Inventory,
@@ -62,7 +63,10 @@ pub(super) fn condensed(
     Ok(EARTH_REFERENCE_RADIUS_M * volume.cbrt())
 }
 
-fn pure_radius_earth(material: Material, mass_earth: f64) -> Result<f64, StructureError> {
+pub(super) fn pure_radius_earth(
+    material: Material,
+    mass_earth: f64,
+) -> Result<f64, StructureError> {
     let fit = material
         .properties()
         .condensed_fit
@@ -74,7 +78,39 @@ fn pure_radius_earth(material: Material, mass_earth: f64) -> Result<f64, Structu
     Ok(radius * (mass_earth / bounded_mass).powf(CONDENSED_CONTINUATION_EXPONENT))
 }
 
-pub(super) fn envelope(
+/// One-bar radius from the envelope fit, limited by the thin-column support
+/// radius. None when the H/He cannot hold one bar above the condensed boundary.
+pub(super) fn one_bar(
+    mass_kg: f64,
+    h_he_kg: f64,
+    condensed_radius_m: f64,
+    irradiation_w_m2: f64,
+    age_gyr: f64,
+    warnings: &mut Vec<Approximation>,
+) -> Option<f64> {
+    let radius = envelope(
+        mass_kg / EARTH_MASS_KG,
+        h_he_kg / mass_kg,
+        condensed_radius_m,
+        irradiation_w_m2,
+        age_gyr,
+        warnings,
+    );
+    // A necessary thin-column supply check, not an estimate of the entire
+    // giant envelope. It also gives a continuous bare-radius stripping limit.
+    let support_radius = (GRAVITATIONAL_CONSTANT * mass_kg * h_he_kg
+        / (4.0 * PI * crate::system::atmosphere::ONE_BAR_PA))
+        .sqrt()
+        .sqrt();
+    if support_radius <= condensed_radius_m {
+        return None;
+    }
+    let capacity = support_radius - condensed_radius_m;
+    let thickness = radius - condensed_radius_m;
+    Some(condensed_radius_m + thickness / (1.0 + (thickness / capacity).powi(4)).powf(0.25))
+}
+
+fn envelope(
     mass_earth: f64,
     fraction: f64,
     condensed_radius_m: f64,

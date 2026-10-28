@@ -1080,7 +1080,7 @@ mod tests {
         use space_simulation::system::{
             generated::{Mode, generated_system_with_mode},
             physical,
-            structure::coupled,
+            structure::{coupled, fallback},
         };
         let galaxy = space_simulation::demo_galaxy();
         let system = "g13b6ffffcfeba.2.1";
@@ -1113,15 +1113,15 @@ mod tests {
         assert_eq!(waiting.fields.len(), off + 1);
         assert_eq!(layered(&loading)[0].1, "Waiting · legacy model shown");
         let planets = &mut loading.cache.entry(system.into()).or_default().planets;
-        planets.insert(
-            job.id.clone(),
-            PlanetState::Unsupported(coupled::Error::DenseGasUnsupported),
-        );
-        assert!(
-            layered(&loading)[0]
-                .1
-                .starts_with("Legacy model (unsupported: ")
-        );
+        let fallback = physical::fallback(&fallback::solve(
+            &job.budget,
+            &job.environment,
+            coupled::Error::DenseGasUnsupported,
+        ));
+        planets.insert(job.id.clone(), PlanetState::Fallback(Box::new(fallback)));
+        let facts = layered(&loading);
+        assert!(facts[0].1.starts_with("Fallback (layered unsupported: "));
+        assert!(facts.iter().any(|(f, _)| f == "layered.radius"));
         let planets = &mut loading.cache.get_mut(system).unwrap().planets;
         planets.insert(
             job.id.clone(),

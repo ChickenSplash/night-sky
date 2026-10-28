@@ -20,19 +20,10 @@ pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
         Layered::State(state) => state,
     };
     let solved = match state {
-        PlanetState::Solved(solved) => solved,
+        PlanetState::Solved(solved) | PlanetState::Fallback(solved) => solved,
         PlanetState::Queued | PlanetState::Running => {
             let text = format!("{} · legacy model shown", state.label());
             info.field("layered.status", "Status", None, text);
-            return;
-        }
-        PlanetState::Unsupported(e) => {
-            info.field(
-                "layered.status",
-                "Status",
-                None,
-                format!("Legacy model (unsupported: {e})"),
-            );
             return;
         }
         PlanetState::Failed(e) => {
@@ -41,7 +32,7 @@ pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
             return;
         }
     };
-    info.field("layered.status", "Status", None, "Solved");
+    info.field("layered.status", "Status", None, state.label());
     info.field(
         "layered.surface",
         if solved.surface == "envelope" {
@@ -245,6 +236,8 @@ fn surface_label(surface: &str) -> String {
         "ice" => "Water ice".into(),
         "ocean" => "Liquid water ocean".into(),
         "frost" => "Frost deposit (phase not modelled)".into(),
+        "unresolved water" => "Water (phase unresolved)".into(),
+        "unresolved volatiles" => "Secondary volatiles (phase unresolved)".into(),
         other => format!("{} (unresolved)", capitalise(other)),
     }
 }
@@ -253,6 +246,7 @@ fn layer_label(kind: &str) -> String {
     match kind {
         "envelope" => "H/He envelope".into(),
         "water_compression" => "Water-rich layer (phase unresolved)".into(),
+        "volatiles" => "Secondary volatiles (phase unresolved)".into(),
         "deep_ice" => "High-pressure ice".into(),
         "hot_water" => "Hot water (unresolved)".into(),
         "water_coexistence" => "Water at a phase boundary".into(),

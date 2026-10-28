@@ -2,8 +2,8 @@
 
 ## Status and goal
 
-**P1 complete and signed off on 27 October 2026. Next: P2 envelopes and remaining
-coverage.** The live, generator-backed rock-and-water prototype provides
+**P1 complete and signed off on 27 October 2026. Next: P2 step 6, cheap
+layered wins.** The live, generator-backed rock-and-water prototype provides
 conserved, layered planets alongside the legacy model. Population-wide cutover
 and legacy removal remain P3.
 
@@ -18,21 +18,22 @@ bounded approximations and explicitly unresolved phases are acceptable. Exact
 phase diagrams and publication-grade accuracy are optional improvements, needed
 only when a demonstrated simulation or game problem requires them.
 
-**Policy agreed, 28 October 2026:** target at least **99% layered coverage**,
-not complete microphysical coverage. For this 1,544-body census that means at
-least 1,529 successful conserved structures and at most 15 remaining refusals.
-Use named, scoped approximations/extrapolations with visible global and region
-fidelity/limitations rather than requiring reference-validated material physics
-at every state. Conservation, numerical closure, finite physical quantities and
-no hidden legacy fallback remain non-negotiable. Approximation is an explicit
-model choice, not permission to accept any failed solver or extend every EOS.
-Local reference checks remain; whole-planet observational comparisons supplement
-them, not replace them. No universal physical radius-error tolerance is agreed.
+**Policy revised, 28 October 2026:** every planet gets a new-model result.
+The layered solver covers what it can; every refusal gets a simple, total,
+explicitly labelled **fallback** structure inside the same entry point and
+result type, carrying its refusal reason. Target about **95% layered** coverage,
+with the rest on the fallback and **no refusals**. Further physics slices are
+optional later work, not P2 exit gates.
 
-P3 should replace remaining unsupported cases with a simple, explicitly labelled
-placeholder and delete legacy consumers/model once cutover is tested. Placeholder
-results must remain distinguishable and do not count as successful layered
-structures towards 99%. Its exact prescription and validation remain to be chosen.
+Use named, scoped approximations with visible global and region
+fidelity/limitations. Conservation, numerical closure, finite physical
+quantities and no hidden legacy substitution remain non-negotiable. Fallback
+results are always distinguishable from layered solves and never counted as
+layered coverage. No universal physical radius-error tolerance is agreed.
+
+Legacy removal waits for P3: rendering, shape, landing, navigation, optics and
+snapshots still read the legacy record, and the fast synchronous first answer
+is still legacy.
 
 | Document | Owns |
 | --- | --- |
@@ -48,13 +49,8 @@ structures towards 99%. Its exact prescription and validation remain to be chose
   Nothing is pushed: neither
   the main branch nor `park/methane-physics` (parked methane physics). Ask the
   user before pushing either.
-- **Coverage after P2 step 3:** 1,134/1,544 solve: all 1,017 P1 successes plus
-  117 envelope-route bodies. The non-envelope baseline remains 1,017/1,032,
-  including all 280 water-rich planets. See [step 3](#step-3-coupled-structural-path-implemented-28-october-2026).
-- **Current coverage after suspended-condensation slice:** 1,380/1,544 (89.4%),
-  up 76 after slice 2 without lost successes. There are 164 refusals remaining,
-  requiring at least 149 more layered solves to reach 99%. See the step-4 slices
-  below. Larger-giant coverage is not complete.
+- **Current coverage:** 1,380/1,544 layered (89.4%), 164 on the fallback,
+  no refusals. Next: step 6, time-boxed.
 - **Performance and next step:**
   - Refinement-only warming optimisation is implemented: a paired 20-thread
     run reduced report wall time from 19.5 to 18.2 s and solved median from
@@ -76,8 +72,8 @@ structures towards 99%. Its exact prescription and validation remain to be chose
   - Step 9 converts each solve to a `LayeredPlanet` record kept beside the
     legacy one, shown in the inspector's layered section and
     `/state/planet_loading` (`ns planets`). Rendering, shape, landing and
-    atmosphere optics stay legacy for every planet; unsupported planets show
-    "Legacy model (unsupported: …)". Full legacy removal remains P3.
+    atmosphere optics stay legacy for every planet; refusals show the labelled
+    fallback (step 5). Full legacy removal remains P3.
    - **P1 signed off, 27 October 2026:** the user accepted the dry (Ab) and steam
      (Ae) in-client reviews as sufficient. Separate ocean/icy reviews and
      interactive benchmarks are waived for P1, not outstanding exit gates or
@@ -111,9 +107,8 @@ structures towards 99%. Its exact prescription and validation remain to be chose
   Earth's oceans are about 0.023% of its mass, so a trace cut-off would remove
   Earth-like oceans. Thin layers need the right phase (ocean, ice or none) and
   conserved mass, not a precise EOS.
-- **Envelopes come later.** Trace and thin H/He is an ordinary gas in the
-  prototype. Bodies whose H/He exceeds the thin column's limits (about 14% of the
-  population) are reported as unsupported in prototype mode.
+- **Trace H/He is an ordinary gas.** Bodies beyond the thin column's limits take
+  the self-gravitating envelope route (P2), else the fallback.
 
 ## Completed foundation
 
@@ -137,42 +132,6 @@ gases (178 planets, at most 3.7% of their mass) instead of failing. Remaining
 first failures: dense gas 8, warming outside the domain 7. Surfaces: frost 422,
 ice 202, ocean 28, rock 365. Cost on 20 threads: 156 ms median, 593 ms p95,
 9.8 s maximum.
-
-**After step 5:** 839/1,029 non-envelope planets solve (82%), with
-515 H/He-bearing envelopes. This adds 91 solved bodies; another 66 are now
-classified as envelopes because the wider warming scan exposes their gas-domain
-failures. All 280 water-rich planets solve. Remaining first failures are weak
-binding 175, dense gas 8 and warming outside the domain 7. Surfaces are frost 422,
-ice 202, ocean 28 and rock 187. The bounded steam approximation is ideal gas at
-1,000–2,000 K, ≥90% water by mass, ≤50 kg/m³ and ≤1% total gas mass, not a
-general dense-fluid or envelope EOS. Cost on 20 threads: 156 ms median, 535 ms p95,
-7.2 s maximum; report wall time 17.3 s. Radius difference from legacy:
-1.9% median, 10.0% p95, 12.7% maximum.
-
-Historical baseline before step 5:
-
-- 27% are envelopes: H/He beyond the thin column's 1% gas-mass, dense-gas or
-  20 Earth-mass limits. Trace H/He is an ordinary gas, not an envelope; counting
-  any H/He as an envelope had misclassified 472 stripped rock-type worlds. Step 3
-  raised envelopes from 219 to 417 (cold bodies with 0.1–1% H/He now exceed the
-  dense-gas limit), step 4 to 454 (steam added to thin H/He columns); step 2
-  left 449.
-- Every rock planet starts with at least trace water. 103 solved bodies have
-  evaporated all of it and are dry rock under steam.
-- **748 of 1,095 non-envelope planets solve (68%)** after steps 2, 3, 4 and 6,
-  up from 57 of 1,325. All 227 below 50 K, 391 of 429 at 50–250 K, 95 of 345 at
-  250–623 K and 35 of 94 above (by equilibrium temperature). Step 4 alone had
-  reached 88%; step 2 makes warm water worlds run away instead of keeping an
-  ocean at their equilibrium temperature.
-- First blockers now: gas triage 15%, almost all weak binding (155 small warm
-  bodies whose steam column would escape), greenhouse runaway 15% (159 hot steam
-  worlds beyond the thin column, P2), column above 1,000 K 1.4%, deep water 1.0%.
-- Oceans: 21, at equilibrium 163–284 K warmed to 274–313 K.
-- Radius against legacy: 2.4% at the median, 10.2% at p95, 12.7% at most. Small
-  icy bodies grow because ice Ih is lighter than the legacy fit assumes.
-- A solve costs about 110–190 ms at the median on 20 threads, up to about 9 s
-  (varies between runs). The warming scan adds partition work.
-  Cost needs attention before the experimental mode (step 8).
 
 ## Replacement contract
 
@@ -624,26 +583,25 @@ owns equations, resource setup, numerical boundary contracts and limitations.
 
 ### Remaining delivery order
 
-4. **Close remaining coverage to at least 99%.** Triage dense-gas refusals, including trace-H/He
-   and H/He-free cases, and hot water/steam limits. Do not assume an H/He EOS
-   alone fixes them. Resolve retention dependencies without replaying loss
-   history. Keep unsupported reasons explicit.
-5. **Validate and expose.** Check mass/radius/inertia, heating and stripping
-   trends, approach to the bare-body limit and conserved boundaries. Extend
-   inspector facts, rerun coverage and project checks, and measure cost.
-   Existing system caching remains; gas-search caching stays reverted and
-   further optimisation remains need-driven. Rendering and cutover stay P3.
+5. **Fallback structure. Done, 28 October 2026.** Every refusal gets a total,
+   closed-form, labelled structure from the same retained inventory
+   ([guide](../simulation/planet-composition.md#fallback-structure)). All
+   164/164 census refusals get a checked fallback; 1,380 layered results are
+   unchanged. 20,000 randomised extreme inventories pass in `check.sh`.
+   Fallback radius vs legacy: median 0%, p95 30%, max 61%, the large ones being
+   bodies with under 1% H/He, where layered solves also exceed legacy.
+6. **Cheap layered wins, time-boxed.** Solver robustness (radial, shooting,
+   gravity and region-mass convergence, work budgets) and a radius reference
+   for bodies with no one-bar level. Stop at the time box; leftovers stay on
+   the fallback. Hard physics (cold dense H/He, H/He melting, density
+   inversion) is parked.
+7. **Validate and close.** Mass/radius/inertia, heating and stripping trends,
+   approach to the bare-body limit and conserved boundaries; rerun coverage and
+   project checks.
 
-| Missing capability | Minimum delivery requirement |
-| --- | --- |
-| H/He envelopes, small to giant | A named compressible prescription with envelope self-gravity, volume and inertia, plausible giant and stripping trends and explicit bounds. A simple justified model suffices; no specific published EOS required |
-| Heavy cores above 20 Earth masses | Widen the radial mass domain or give these bodies a labelled route |
-| Runtime cost and retention | Resolve retention dependencies without rerunning loss history. Cache per system with deterministic keys; validate any loosened tolerances |
-
-**Exit:** at least 99% of the deterministic census solves layered structures,
-remaining holes are explained with a P3 placeholder path specified, and
-mass/radius/inertia, stripping and heating trends pass documented plausibility
-checks. Coverage alone does not establish scientific accuracy.
+**Exit:** about 95% layered, the rest on the labelled fallback, no refusals,
+and step 7 trends pass documented plausibility checks. Coverage alone does not
+establish scientific accuracy.
 
 **Scope control:** before each change, state the observed gap, smallest useful
 prescription, fixtures and stop condition. A slice ships only if it changes
@@ -654,15 +612,17 @@ something visible in game or closes a gap measured by the coverage report.
 - Make the unified result authoritative for generated planets and retention.
   Migrate snapshots, shape and spin, atmosphere and optics, rendering and
   navigation to the same solved facts.
-- Give the remaining unsupported minority a simple, explicitly labelled
-  placeholder, separate from successful layered physics and never counted towards
-  its 99% target. Its mass and composition still come from conserved inventory.
+- Use the fallback as the fast synchronous first answer while the layered solve
+  refines in the background; this replaces legacy's role.
+- Decide the H/He density resource: bundling permission for CMS19, or a
+  shippable replacement. Without it, envelope bodies drop to the fallback.
 - Provide summary-first composition, ordered regions, phase knowledge,
   boundaries and model limitations in the inspector.
 - Require measured generation and search performance suitable for the game, full
   project checks and the user's visual and interactive review before cutover.
-- Remove obsolete whole-body fits, envelope surrogates and heuristic inertia only
-  after all runtime callers migrate. Do not delete working legacy code early.
+- Remove `structure::derive`, its heuristic inertia and legacy consumers only
+  after all runtime callers migrate. The Seager and envelope fits stay: the
+  fallback uses them.
 
 ## Optional deeper physics, not prerequisites
 

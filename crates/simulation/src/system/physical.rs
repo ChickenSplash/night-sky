@@ -7,7 +7,7 @@ use super::{
 use space_shared::{MaterialBudget, Planet, PlanetPhysical, RadiusReference};
 
 mod layered;
-pub use layered::layered;
+pub use layered::{fallback, layered, outcome};
 
 pub fn to_data(body: &Body) -> PlanetPhysical {
     let b = &body.budget;

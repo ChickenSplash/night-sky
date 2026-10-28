@@ -1,4 +1,5 @@
-//! Headless generated-budget entry point. No legacy fallback or runtime switch.
+//! Headless generated-budget entry point. Refusals take the labelled
+//! `fallback` structure, never the legacy model.
 use super::coupled::{
     self, CondensedStructure, Controls, CoupledStructure, Error, Request, Temperature,
 };
@@ -54,6 +55,26 @@ impl Solved {
                 water::PhaseKnowledge::UnresolvedCompression => "unresolved compressed water",
             },
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Layered(Box<Solved>),
+    /// The layered solver refused; carries its reason.
+    Fallback(Box<super::fallback::Fallback>),
+}
+
+/// Every generated body gets a result: layered when supported, else the
+/// explicitly labelled fallback structure. Never a legacy substitution.
+pub fn resolve(budget: &Budget, environment: &PlanetEnvironment, controls: Controls) -> Outcome {
+    match solve(budget, environment, controls) {
+        Ok(solved) => Outcome::Layered(Box::new(solved)),
+        Err(reason) => Outcome::Fallback(Box::new(super::fallback::solve(
+            budget,
+            environment,
+            reason,
+        ))),
     }
 }
 

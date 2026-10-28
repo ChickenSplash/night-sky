@@ -254,6 +254,7 @@ fn census_candidates_and_input_columns() {
             gravity_residual: f64::NAN,
             outer_residual_pa: f64::NAN,
             model: "",
+            fallback_radius_km: f64::NAN,
         }
     }
     let a = sample("a", Category::Envelope);

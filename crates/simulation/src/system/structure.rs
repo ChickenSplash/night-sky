@@ -9,6 +9,7 @@ pub mod coupled;
 mod coverage;
 pub mod dry;
 pub mod envelope;
+pub mod fallback;
 pub mod parameters;
 pub mod prototype;
 mod radial;
@@ -165,34 +166,22 @@ pub fn derive(
             }
         }
         approximations.push(Approximation::EnvelopeSurrogate);
-        let radius = radius::envelope(
-            mass_earth,
-            fraction,
+        match radius::one_bar(
+            mass_kg,
+            h_he,
             condensed_radius_m,
             irradiation_w_m2,
             age_gyr,
             &mut approximations,
-        );
-        // A necessary thin-column supply check, not an estimate of the entire
-        // giant envelope. It also gives a continuous bare-radius stripping limit.
-        let support_radius = (GRAVITATIONAL_CONSTANT * mass_kg * h_he
-            / (4.0 * PI * super::atmosphere::ONE_BAR_PA))
-            .sqrt()
-            .sqrt();
-        if support_radius <= condensed_radius_m {
-            approximations.push(Approximation::SubBarEnvelope);
-            (
-                condensed_radius_m,
-                condensed_reference(inventory.mass_kg(Material::Water)),
-            )
-        } else {
-            let capacity = support_radius - condensed_radius_m;
-            let thickness = radius - condensed_radius_m;
-            let limited_thickness = thickness / (1.0 + (thickness / capacity).powi(4)).powf(0.25);
-            (
-                condensed_radius_m + limited_thickness,
-                RadiusReference::OneBar,
-            )
+        ) {
+            Some(radius) => (radius, RadiusReference::OneBar),
+            None => {
+                approximations.push(Approximation::SubBarEnvelope);
+                (
+                    condensed_radius_m,
+                    condensed_reference(inventory.mass_kg(Material::Water)),
+                )
+            }
         }
     } else {
         let reference = condensed_reference(inventory.mass_kg(Material::Water));

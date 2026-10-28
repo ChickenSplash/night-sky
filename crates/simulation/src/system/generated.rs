@@ -23,6 +23,11 @@ impl PlanetJob {
     pub fn solve(&self) -> Result<prototype::Solved, super::structure::coupled::Error> {
         prototype::solve(&self.budget, &self.environment, Default::default())
     }
+
+    /// Layered result, or the labelled fallback when the layered solver refuses.
+    pub fn resolve(&self) -> prototype::Outcome {
+        prototype::resolve(&self.budget, &self.environment, Default::default())
+    }
 }
 
 pub struct Prepared {

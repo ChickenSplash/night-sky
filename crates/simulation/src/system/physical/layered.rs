@@ -1,4 +1,4 @@
-//! Transport record for an experimental layered solve. Never written into
+//! Transport record for an experimental layered or fallback solve. Never written into
 //! `Planet::physical`, whose validation re-derives the legacy structure.
 use crate::{
     system::{
@@ -7,7 +7,8 @@ use crate::{
         structure::{
             coupled::CondensedStructure,
             dry,
-            prototype::Solved,
+            fallback::{self, Fallback},
+            prototype::{Outcome, Solved},
             water::{self, PhaseKnowledge},
         },
     },
@@ -212,6 +213,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     let surface = solved.surface();
     LayeredPlanet {
         model: solved.model_id().into(),
+        fallback_reason: None,
         // All current planet closures include cold proxies/prescribed thermal
         // states. Checked local equations never certify the whole structure.
         model_fidelity: layers
@@ -272,6 +274,98 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
         greenhouse_optical_depth: s.greenhouse_optical_depth(),
         one_bar_radius_m: s.one_bar_radius_m().ok().flatten(),
         blowoff_kg: solved.blowoff.total_mass_kg(),
+        layers,
+    }
+}
+
+pub fn outcome(outcome: &Outcome) -> LayeredPlanet {
+    match outcome {
+        Outcome::Layered(solved) => layered(solved),
+        Outcome::Fallback(f) => fallback(f),
+    }
+}
+
+pub fn fallback(f: &Fallback) -> LayeredPlanet {
+    let fidelity = if f.extrapolated {
+        ModelFidelity::Extrapolated
+    } else {
+        ModelFidelity::Approximate
+    };
+    let mass = f.mass_kg();
+    let radius = f.radius_m;
+    let layers = f
+        .regions
+        .iter()
+        .rev()
+        .map(|r| {
+            let envelope = r.kind == fallback::Kind::Envelope;
+            Layer {
+                phase_allocations: Vec::new(),
+                model_fidelity: fidelity,
+                model_limitations: vec![
+                    if envelope {
+                        "H/He envelope mass-radius fit; prescribed thinning density profile"
+                    } else {
+                        "Seager-fit compressed density; phase and temperature unresolved"
+                    }
+                    .into(),
+                ],
+                kind: r.kind.id().into(),
+                material: dominant(&r.inventory).into(),
+                inner_radius_m: r.inner_radius_m,
+                outer_radius_m: r.outer_radius_m,
+                mass_kg: r.inventory.total_mass_kg(),
+                inner_pressure_pa: r.inner_pressure_pa,
+                outer_pressure_pa: (!envelope).then_some(r.outer_pressure_pa),
+                temperature_k: envelope.then_some(f.surface_temperature_k),
+                model: fallback::MODEL_ID.into(),
+            }
+        })
+        .collect();
+    let in_kind = |m: Material, kinds: &[fallback::Kind]| -> f64 {
+        f.regions
+            .iter()
+            .filter(|r| kinds.contains(&r.kind))
+            .map(|r| r.inventory.mass_kg(m))
+            .sum()
+    };
+    use fallback::Kind as K;
+    LayeredPlanet {
+        model: fallback::MODEL_ID.into(),
+        fallback_reason: Some(f.reason.to_string()),
+        model_fidelity: fidelity,
+        model_limitations: strings(&f.notes),
+        physical: PlanetPhysical {
+            materials: Material::ALL
+                .into_iter()
+                .map(|m| MaterialBudget {
+                    material: m.id().into(),
+                    source_kg: f.source.mass_kg(m),
+                    retained_kg: f.retained.mass_kg(m),
+                    escaped_kg: f.escaped.mass_kg(m),
+                    interior_kg: in_kind(m, &[K::Core, K::Mantle]),
+                    condensed_kg: in_kind(m, &[K::Water, K::Volatiles]),
+                    gas_kg: in_kind(m, &[K::Envelope]),
+                })
+                .collect(),
+            retained_mass_kg: mass,
+            reference_radius_m: radius,
+            condensed_radius_m: f.condensed_radius_m,
+            mean_density_kg_m3: mass / (4.0 / 3.0 * PI * radius.powi(3)),
+            reference_gravity_m_s2: GRAVITATIONAL_CONSTANT * mass / radius.powi(2),
+            h_he_mass_fraction: (f.retained.mass_kg(Material::Hydrogen)
+                + f.retained.mass_kg(Material::Helium))
+                / mass,
+            inertia_factor: f.inertia_kg_m2 / (mass * radius.powi(2)),
+            radius_reference: f.reference,
+            approximations: vec![fallback::MODEL_ID.into()],
+        },
+        surface: f.surface().into(),
+        surface_temperature_k: f.surface_temperature_k,
+        surface_pressure_pa: f.surface_pressure_pa,
+        greenhouse_optical_depth: None,
+        one_bar_radius_m: f.one_bar_radius_m,
+        blowoff_kg: 0.0,
         layers,
     }
 }

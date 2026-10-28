@@ -1,4 +1,23 @@
 use super::*;
+use space_simulation::system::{
+    composition::{Budget, Inventory},
+    materials::Material,
+    structure::{coupled, fallback},
+};
+
+fn fallback_record() -> Box<LayeredPlanet> {
+    let host = Inventory::new(&[(Material::Silicate, 1e21)]).unwrap();
+    let budget = Budget::new(host, host, Inventory::default(), Inventory::default()).unwrap();
+    let environment = space_shared::PlanetEnvironment {
+        irradiation_w_m2: 1361.0,
+        assumed_bond_albedo: 0.3,
+        equilibrium_temperature_k: 250.0,
+        age_gyr: 4.5,
+        atmosphere: None,
+    };
+    let f = fallback::solve(&budget, &environment, coupled::Error::DenseGasUnsupported);
+    Box::new(physical::fallback(&f))
+}
 
 #[test]
 fn disabled_by_default_and_switching_discards_stale_results() {
@@ -34,20 +53,23 @@ fn results_change_the_revision_and_reach_status_and_readout() {
         .send(Message::Planet {
             epoch: l.epoch,
             id: "sys/1".into(),
-            result: Ok(Err(coupled::Error::DenseGasUnsupported)),
+            result: Ok(fallback_record()),
         })
         .unwrap();
     l.receive();
     assert_ne!(l.status("sys/1").key(), before);
     assert!(matches!(
         l.status("sys/1"),
-        Layered::State(PlanetState::Unsupported(_))
+        Layered::State(PlanetState::Fallback(_))
     ));
     let readout = l.readout();
     let planet = &readout["system"]["planets"][0];
     assert_eq!(planet["designation"], "sys b");
-    assert_eq!(planet["state"], "unsupported");
-    assert!(planet["layered"].is_null());
+    assert_eq!(planet["state"], "fallback");
+    assert_eq!(
+        planet["layered"]["fallback_reason"],
+        "coupled structure solve: DenseGasUnsupported"
+    );
     l.enabled = false;
     assert!(matches!(l.status("sys/1"), Layered::Off));
 }
@@ -56,10 +78,11 @@ fn results_change_the_revision_and_reach_status_and_readout() {
 fn cache_is_bounded_and_revisits_keep_finished_refusals() {
     let mut l = PlanetLoading::default();
     l.target(Some("first".into()));
-    l.cache.get_mut("first").unwrap().planets.insert(
-        "p".into(),
-        PlanetState::Unsupported(coupled::Error::DenseGasUnsupported),
-    );
+    l.cache
+        .get_mut("first")
+        .unwrap()
+        .planets
+        .insert("p".into(), PlanetState::Fallback(fallback_record()));
     l.cache
         .get_mut("first")
         .unwrap()
@@ -69,7 +92,7 @@ fn cache_is_bounded_and_revisits_keep_finished_refusals() {
     l.target(Some("first".into()));
     assert!(matches!(
         l.cache["first"].planets["p"],
-        PlanetState::Unsupported(_)
+        PlanetState::Fallback(_)
     ));
     assert!(!l.cache["first"].planets.contains_key("unfinished"));
     for i in 0..10 {
@@ -88,7 +111,7 @@ fn result_drain_is_bounded_per_frame_and_errors_are_explicit() {
             .send(Message::Planet {
                 epoch: l.epoch,
                 id: i.to_string(),
-                result: Ok(Err(coupled::Error::DenseGasUnsupported)),
+                result: Ok(fallback_record()),
             })
             .unwrap();
     }
@@ -129,10 +152,6 @@ fn completed_cache_needs_no_new_preparation() {
 
 #[test]
 fn selected_planet_runs_first_and_solves_off_thread() {
-    use space_simulation::system::{
-        composition::{Budget, Inventory},
-        materials::Material,
-    };
     let mut l = PlanetLoading::default();
     l.budget = Arc::new(background::Budget::new(2));
     l.target(Some("system".into()));
@@ -171,7 +190,9 @@ fn selected_planet_runs_first_and_solves_off_thread() {
         .unwrap()
         .recv_timeout(std::time::Duration::from_secs(10))
         .unwrap();
-    assert!(matches!(&message, Message::Planet { id, result: Ok(Ok(_)), .. } if id == "selected"));
+    assert!(
+        matches!(&message, Message::Planet { id, result: Ok(l), .. } if l.fallback_reason.is_none() && id == "selected")
+    );
     l.sender.send(message).unwrap();
     l.receive();
     assert!(matches!(

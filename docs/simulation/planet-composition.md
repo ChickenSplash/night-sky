@@ -1631,8 +1631,9 @@ experimental planet loading, with `ns planets on` or `set_layered_planets true`.
 It resets off on restart. Results reach the planet inspector and developer
 snapshot only. Rendering, shape, spin, atmosphere optics, navigation and landing
 keep reading the legacy `Planet` record for every planet (moving them is P3).
-A refusal retains its typed reason and shows as "Legacy model (unsupported: …)",
-never as a successful solve.
+A refusal gets the [fallback structure](#fallback-structure), labelled
+"Fallback (layered unsupported: …)" with its typed reason, never shown as a
+successful solve.
 
 ### Layered transport record
 
@@ -1692,7 +1693,7 @@ prevents independent ¾-CPU worker allocations from competing unchecked.
 
 Results live in a four-system, least-recently-targeted in-memory cache, keyed by
 stable natural-system ID for the one compiled prototype model. Completed solves
-and typed refusals are reused on revisit; incomplete entries prepare only their
+and fallbacks are reused on revisit; incomplete entries prepare only their
 missing jobs. There is no disk cache or cross-version reuse. Changing targets or
 disabling the mode cancels queued work, marks running work obsolete and rejects
 its results using a request epoch. Running numerical calls finish under their
@@ -1714,6 +1715,52 @@ show hitches. The debug readout separately times background input preparation.
 The user runs visual/frame-time/star-flight benchmarks; no such test has been
 launched as part of this implementation.
 
+## Fallback structure
+
+`structure::prototype::resolve` returns the layered solve, or, when
+`prototype::solve` refuses, `structure::fallback::solve` with the refusal reason.
+`system::physical::outcome` converts either to `LayeredPlanet`; fallback records
+carry `model: fallback_mass_radius_v1` and `fallback_reason`, and never count as
+layered coverage. The fallback is total by construction: closed-form fits and
+fixed quadrature, no iteration, work budget, external data or error path.
+
+- **Condensed stack**, centre outwards: metal core, silicate mantle, water,
+  then secondary volatiles (N₂, CO₂, CH₄, O₂, Ar) at a water-density proxy.
+  Each region's volume is its mass share of the Seager et al. (2007) pure-
+  material radius at the whole condensed mass, as in the
+  [cold compressed radius](#cold-compressed-heavy-material-radius), with the
+  same power-law continuation above 20 Earth masses (labelled).
+- **H/He envelope**, when present: the one-bar radius from the envelope fit and
+  thin-column support limit shared with the legacy model
+  ([light envelopes](#light-envelopes-and-the-giant-transition)). Sub-bar gas
+  is represented as one isothermal scale height (capped at the condensed
+  radius) above a condensed reference.
+- **Profiles:** uniform density per condensed region; gas density falling
+  linearly to zero at its top. Pressures integrate hydrostatically from zero at
+  the top; inertia uses the same profiles. A full linear-profile sphere has
+  inertia factor 0.267, close to Jupiter's 0.254.
+- **Inputs:** non-finite or non-positive irradiation, age or equilibrium
+  temperature take neutral fit values. These and fit-bound clamping mark the
+  record `extrapolated` with a limitation note; otherwise it is `approximate`.
+  Temperature is the equilibrium estimate (at least 20 K), with no greenhouse.
+- **Surface:** `envelope` at a one-bar reference, else `rock` (solid surface),
+  `unresolved water` or `unresolved volatiles`.
+
+Checks (`structure/fallback/tests.rs`, in `check.sh`): an Earth twin within 5%
+of Earth's radius with inertia factor 0.30–0.36; a Jupiter twin at 9–13 Earth
+radii with inertia factor 0.2–0.3; every single constituent at 10⁻⁶, 1 and
+3,000 Earth masses under NaN/negative environments; 20,000 random inventories
+from 10⁻⁶ to 10⁵ Earth masses with missing constituents and hostile
+environments. Each asserts exact per-material closure, contiguous layers from
+the centre, finite positive radius, density, gravity and inertia (at most 2/3),
+and monotone non-negative pressures. The coverage report also checks every
+census refusal's fallback record.
+
+Limitations: no separate secondary atmosphere, phase, thermal structure or
+greenhouse. For bodies with under 1% H/He, fallback radii exceed legacy (which
+treats that gas as a thin column) by up to 61%; layered solves of similar
+bodies exceed legacy by a median 32%, so the legacy value is the outlier.
+
 ## Prototype coverage report
 
 An opt-in report measures how much of the generated population the
@@ -1730,6 +1777,11 @@ census keys `composition-calibration:{component:?}:{index}`).
 printed and written to `data/tmp/composition-coverage.md`, with one row per
 planet in `data/tmp/composition-coverage.tsv` for diffing between steps.
 Use `NS_COVERAGE_THREADS=20` for comparisons on the development machine.
+
+Every refusal also runs the fallback structure and checks its record. The
+summary's Fallback section counts checked fallbacks and their radius difference
+from legacy; the TSV's last column, `fallback_radius_km`, is `NaN` for layered
+solves.
 
 The same run writes `data/tmp/composition-census.md` for P2 requirements:
 envelope first blockers, legacy classes, intersections of mass/H/He fraction/

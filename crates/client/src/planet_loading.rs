@@ -8,7 +8,6 @@ use space_simulation::{
     system::{
         generated::{self, Mode, PlanetJob},
         physical,
-        structure::coupled,
     },
 };
 use std::{
@@ -28,17 +27,29 @@ pub enum PlanetState {
     Queued,
     Running,
     Solved(Box<LayeredPlanet>),
-    Unsupported(coupled::Error),
+    /// The layered solver refused; the labelled fallback structure stands in.
+    Fallback(Box<LayeredPlanet>),
     Failed(String),
 }
 
 impl PlanetState {
+    fn from_record(record: Box<LayeredPlanet>) -> Self {
+        if record.fallback_reason.is_some() {
+            Self::Fallback(record)
+        } else {
+            Self::Solved(record)
+        }
+    }
+
     pub fn label(&self) -> String {
         match self {
             Self::Queued => "Queued".into(),
             Self::Running => "Calculating".into(),
             Self::Solved(_) => "Solved".into(),
-            Self::Unsupported(e) => format!("Unsupported: {e}"),
+            Self::Fallback(l) => format!(
+                "Fallback (layered unsupported: {})",
+                l.fallback_reason.as_deref().unwrap_or_default()
+            ),
             Self::Failed(e) => format!("Worker failed: {e}"),
         }
     }
@@ -63,7 +74,7 @@ impl Layered<'_> {
             Self::State(PlanetState::Queued) => 2,
             Self::State(PlanetState::Running) => 3,
             Self::State(PlanetState::Solved(_)) => 4,
-            Self::State(PlanetState::Unsupported(_)) => 5,
+            Self::State(PlanetState::Fallback(_)) => 5,
             Self::State(PlanetState::Failed(_)) => 6,
         }
     }
@@ -88,7 +99,7 @@ enum Message {
     Planet {
         epoch: u64,
         id: String,
-        result: Result<Result<Box<LayeredPlanet>, coupled::Error>, String>,
+        result: Result<Box<LayeredPlanet>, String>,
     },
 }
 
@@ -180,12 +191,12 @@ impl PlanetLoading {
                             PlanetState::Queued => "queued",
                             PlanetState::Running => "calculating",
                             PlanetState::Solved(_) => "solved",
-                            PlanetState::Unsupported(_) => "unsupported",
+                            PlanetState::Fallback(_) => "fallback",
                             PlanetState::Failed(_) => "failed",
                         },
                         "status": state.label(),
                         "layered": match state {
-                            PlanetState::Solved(l) => json!(l),
+                            PlanetState::Solved(l) | PlanetState::Fallback(l) => json!(l),
                             _ => json!(null),
                         },
                     }))
@@ -270,8 +281,7 @@ impl PlanetLoading {
                 Message::Planet { epoch, id, result } if epoch == self.epoch => {
                     if let Some(c) = self.active.as_ref().and_then(|id| self.cache.get_mut(id)) {
                         let state = match result {
-                            Ok(Ok(s)) => PlanetState::Solved(s),
-                            Ok(Err(e)) => PlanetState::Unsupported(e),
+                            Ok(record) => PlanetState::from_record(record),
                             Err(e) => PlanetState::Failed(e),
                         };
                         c.planets.insert(id, state);
@@ -341,10 +351,9 @@ impl PlanetLoading {
                     if cancel.load(Ordering::Relaxed) {
                         return;
                     }
-                    let result = std::panic::catch_unwind(|| {
-                        job.solve().map(|s| Box::new(physical::layered(&s)))
-                    })
-                    .map_err(|_| "Planet solver worker panicked".into());
+                    let result =
+                        std::panic::catch_unwind(|| Box::new(physical::outcome(&job.resolve())))
+                            .map_err(|_| "Planet solver worker panicked".into());
                     if !cancel.load(Ordering::Relaxed) {
                         let _ = sender.send(Message::Planet {
                             epoch,

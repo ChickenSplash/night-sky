@@ -58,6 +58,10 @@ pub struct PlanetPhysical {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayeredPlanet {
     pub model: String,
+    /// Present only for the fallback structure: why the layered solver refused.
+    /// Such records never count as layered solves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
     pub model_fidelity: ModelFidelity,
     /// Global closure assumptions, in addition to each layer's limitations.
     pub model_limitations: Vec<String>,
@@ -67,6 +71,7 @@ pub struct LayeredPlanet {
     pub physical: PlanetPhysical,
     /// `rock`, `ocean`, `ice`, `frost`, `deep ice`, `water coexistence` or
     /// `unresolved hot water`, or `envelope` (one-bar reference, not ground).
+    /// The fallback adds `unresolved water` and `unresolved volatiles`.
     pub surface: String,
     pub surface_temperature_k: f64,
     /// Gas pressure on the surface, or one bar for an envelope reference.
@@ -90,7 +95,8 @@ pub struct Layer {
     /// Physical limitations of this region, not numerical solver diagnostics.
     pub model_limitations: Vec<String>,
     /// `atmosphere`, `frost`, `ocean`, `ice`, `deep_ice`, `hot_water`,
-    /// `water_coexistence`, `water_compression`, `envelope`, `mantle` or `core`.
+    /// `water_coexistence`, `water_compression`, `envelope`, `mantle` or `core`,
+    /// or the fallback's `volatiles`.
     pub kind: String,
     /// Material catalogue ID holding most of the layer's mass.
     pub material: String,
