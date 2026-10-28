@@ -1,6 +1,16 @@
 //! Transport records only. Simulation owns validation and physical prescriptions.
 use serde::{Deserialize, Serialize};
 
+/// Model provenance/scope, NOT a numerical tolerance or physical error bar.
+/// ReferenceChecked does not certify a whole planet against observations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelFidelity {
+    ReferenceChecked,
+    Approximate,
+    Extrapolated,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RadiusReference {
@@ -46,6 +56,9 @@ pub struct PlanetPhysical {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayeredPlanet {
     pub model: String,
+    pub model_fidelity: ModelFidelity,
+    /// Global closure assumptions, in addition to each layer's limitations.
+    pub model_limitations: Vec<String>,
     /// Same transport shape as the legacy record. `approximations` lists the
     /// model IDs used. `reference_radius_m` is the top of the condensed surface
     /// (frost included) for thin models, or the explicit one-bar envelope level.
@@ -67,6 +80,9 @@ pub struct LayeredPlanet {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    pub model_fidelity: ModelFidelity,
+    /// Physical limitations of this region, not numerical solver diagnostics.
+    pub model_limitations: Vec<String>,
     /// `atmosphere`, `frost`, `ocean`, `ice`, `deep_ice`, `hot_water`,
     /// `water_coexistence`, `water_compression`, `envelope`, `mantle` or `core`.
     pub kind: String,

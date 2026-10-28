@@ -396,6 +396,14 @@ see the [coupling limits](planet-composition.md#coupling-domain-and-explicit-app
 
 ## Thermal assumptions and radial integration
 
+Envelope-loaded water has a separate
+[shallow barotropic approximation](planet-composition.md#shallow-loaded-water-approximation)
+under 10,000 bar and the previous pressure-only Seager proxy deeper. These
+preserve a separate water parcel without resolving its phase, thermal expansion
+or mixing with H/He. They do not widen any IAPWS API or reuse its scientific
+accuracy claim. Each region exposes its equation identity and physical
+limitations, with fidelity `approximate`.
+
 This module takes **local prescribed temperature**, not irradiation or equilibrium
 temperature. It supplies no climate, greenhouse, convection, entropy or cooling
 model. Refractory temperatures and phases remain unresolved in the cold solver.

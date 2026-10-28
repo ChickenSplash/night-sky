@@ -2,7 +2,7 @@
 //! mode is on; the drawn planet keeps its legacy radius and air.
 use super::{Info, Section, atmosphere::pressure_display, composition::material_label};
 use crate::planet_loading::{Layered, PlanetState};
-use space_shared::{AtmosphereReference, Layer, LayeredPlanet, Planet};
+use space_shared::{AtmosphereReference, Layer, LayeredPlanet, ModelFidelity, Planet};
 
 pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
     info.section = Section::Layered;
@@ -56,6 +56,18 @@ pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
 }
 
 fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
+    info.field(
+        "layered.fidelity",
+        "Model fidelity",
+        None,
+        fidelity_label(l.model_fidelity),
+    );
+    info.field(
+        "layered.limitations",
+        "Model limitations",
+        None,
+        l.model_limitations.join(" · "),
+    );
     let envelope = l.surface == "envelope";
     let radius_km = l.physical.reference_radius_m / 1000.0;
     info.field(
@@ -138,6 +150,17 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
             None,
             layer_text(layer),
         );
+        info.field(
+            &format!("layered.assessment.{index}"),
+            "Region model",
+            None,
+            format!(
+                "{} · {} · {}",
+                fidelity_label(layer.model_fidelity),
+                layer.model,
+                layer.model_limitations.join(" · ")
+            ),
+        );
     }
     info.field(
         "layered.models",
@@ -145,6 +168,16 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
         None,
         l.physical.approximations.join(", "),
     );
+}
+
+fn fidelity_label(fidelity: ModelFidelity) -> &'static str {
+    match fidelity {
+        ModelFidelity::ReferenceChecked => {
+            "Reference-checked local model (not a whole-planet accuracy guarantee)"
+        }
+        ModelFidelity::Approximate => "Approximate (physical uncertainty not quantified)",
+        ModelFidelity::Extrapolated => "Extrapolated (outside original model mask)",
+    }
 }
 
 fn layer_text(layer: &Layer) -> String {

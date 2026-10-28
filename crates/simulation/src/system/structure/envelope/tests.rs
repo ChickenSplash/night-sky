@@ -281,17 +281,25 @@ fn rich_molecular_envelope_conserves_and_refines_without_dropping_water() {
     .unwrap();
     assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
     assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
-    assert_eq!(
-        solve_with_density(
-            &rich_molecular_inventory(1e-6 * EARTH_MASS_KG),
-            &Inventory::default(),
-            350.0,
-            100.0,
-            Default::default(),
-            &density
-        )
-        .unwrap_err(),
-        Error::WaterLoadDomain
+    let (wet, _) = solve_with_density(
+        &rich_molecular_inventory(1e-6 * EARTH_MASS_KG),
+        &Inventory::default(),
+        350.0,
+        100.0,
+        Default::default(),
+        &density,
+    )
+    .unwrap();
+    let water = wet
+        .regions()
+        .iter()
+        .find(|r| r.inventory().mass_kg(Material::Water) > 0.0)
+        .unwrap();
+    assert_eq!(water.density_model_id(), loaded::MODEL_ID);
+    assert_eq!(water.phase(), water::PhaseKnowledge::UnresolvedCompression);
+    assert!(
+        (wet.retained_inventory().mass_kg(Material::Water) / (1e-6 * EARTH_MASS_KG) - 1.0).abs()
+            < 1e-10
     );
 }
 
@@ -359,6 +367,177 @@ fn rich_molecular_reference_and_refinement() {
         record.physical.radius_reference,
         space_shared::RadiusReference::OneBar
     );
+}
+
+#[test]
+fn shallow_loaded_water_conserves_locates_model_seam_and_refines() {
+    shallow_water_checks(false);
+}
+
+#[test]
+#[ignore = "local pinned source resource; run in release"]
+fn shallow_loaded_water_source_backed() {
+    shallow_water_checks(true);
+}
+
+fn shallow_water_checks(source_backed: bool) {
+    let ideal = |p: f64, t: f64, _: f64| Ok(p / (3600.0 * t));
+    let table = source_backed.then(|| hhe::Table::local().unwrap());
+    let density = |p, t, y| match &table {
+        Some(table) => table.density_kg_m3(p, t, y),
+        None => ideal(p, t, y),
+    };
+    for water_mass in [1e-6, 0.03] {
+        let request = inventory(1.0, 1e-5)
+            .checked_add(
+                &Inventory::new(&[
+                    (Material::Water, water_mass * EARTH_MASS_KG),
+                    (Material::CarbonDioxide, 1e-8 * EARTH_MASS_KG),
+                ])
+                .unwrap(),
+            )
+            .unwrap();
+        let protected = Inventory::new(&[(Material::CarbonDioxide, 1e-8 * EARTH_MASS_KG)]).unwrap();
+        let solve = |controls| {
+            solve_with_density(&request, &protected, 350.0, 100.0, controls, &density)
+                .unwrap_or_else(|e| panic!("source={source_backed} water={water_mass}: {e:?}"))
+        };
+        let (interior, envelope) = solve(Default::default());
+        let (fine_interior, fine) = solve(coupled::Controls {
+            radial: dry::Controls {
+                relative_tolerance: 2e-11,
+                max_step: 1.0 / 256.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert!((fine.one_bar_radius_m / envelope.one_bar_radius_m - 1.0).abs() < 1e-7);
+        assert!((fine.inertia_kg_m2 / envelope.inertia_kg_m2 - 1.0).abs() < 1e-7);
+        assert!((fine_interior.radius_m() / interior.radius_m() - 1.0).abs() < 1e-7);
+        assert!(envelope.outer_pressure_residual_pa() <= PRESSURE_TOLERANCE_PA);
+        let retained = interior
+            .retained_inventory()
+            .checked_add(&envelope.inventory)
+            .unwrap();
+        for m in Material::ALL {
+            assert!((retained.mass_kg(m) - request.mass_kg(m)).abs() <= 1e-10 * request.mass_kg(m));
+        }
+        assert_eq!(envelope.inventory.mass_kg(Material::Water), 0.0);
+        assert_eq!(envelope.inventory.mass_kg(Material::CarbonDioxide), 0.0);
+        let waters: Vec<_> = interior
+            .regions()
+            .iter()
+            .filter(|r| r.inventory().mass_kg(Material::Water) > 0.0)
+            .collect();
+        assert_eq!(waters.len(), if water_mass > 0.01 { 2 } else { 1 });
+        let shallow = waters.last().unwrap();
+        assert_eq!(shallow.density_model_id(), loaded::MODEL_ID);
+        assert!(!shallow.approximation_notes().is_empty());
+        if waters.len() == 2 {
+            let deep = waters[0];
+            assert_eq!(deep.outer().pressure_pa, loaded::BOUNDARY_PA);
+            assert_eq!(shallow.inner().pressure_pa, loaded::BOUNDARY_PA);
+            assert_eq!(deep.outer().radius_m, shallow.inner().radius_m);
+            assert_eq!(
+                deep.outer().enclosed_mass_kg,
+                shallow.inner().enclosed_mass_kg
+            );
+            assert!(deep.outer().density_kg_m3 > shallow.inner().density_kg_m3);
+        }
+        for r in &waters {
+            assert_eq!(r.phase(), water::PhaseKnowledge::UnresolvedCompression);
+            let (mass, _, dp) = water_quadrature(r);
+            assert!((mass / r.inventory().total_mass_kg() - 1.0).abs() < 1e-7);
+            assert!((dp / (r.inner().pressure_pa - r.outer().pressure_pa) - 1.0).abs() < 2e-4);
+        }
+        let solved = super::super::prototype::Solved {
+            structure: coupled::CoupledStructure::from_envelope(interior, envelope),
+            source: request,
+            escaped: Inventory::default(),
+            blowoff: Inventory::default(),
+            protected,
+        };
+        let record = crate::system::physical::layered(&solved);
+        assert_eq!(
+            record.model_fidelity,
+            space_shared::ModelFidelity::Approximate
+        );
+        let shallow = record
+            .layers
+            .iter()
+            .find(|l| l.model == loaded::MODEL_ID)
+            .unwrap();
+        assert_eq!(shallow.kind, "water_compression");
+        assert_eq!(
+            shallow.model_fidelity,
+            space_shared::ModelFidelity::Approximate
+        );
+        assert!(
+            shallow
+                .model_limitations
+                .iter()
+                .any(|n| n.contains("vapour"))
+        );
+        assert!(
+            record
+                .model_limitations
+                .iter()
+                .any(|n| n.contains("one bar") || n.contains("One bar"))
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        assert_eq!(
+            serde_json::from_str::<space_shared::LayeredPlanet>(&json).unwrap(),
+            record
+        );
+    }
+}
+
+// Independent radial Gaussian quadrature, using EOS density at new radii and
+// endpoint hydrostatic gradients, not the integrated mass/inertia increments.
+fn water_quadrature(region: &water::Region) -> (f64, f64, f64) {
+    use std::f64::consts::PI;
+    let mut result = [0.0; 3];
+    for pair in region.samples().windows(2) {
+        let [a, b] = [pair[0], pair[1]];
+        let dr = b.radius_m - a.radius_m;
+        let gradient = |s: dry::Sample| {
+            -GRAVITATIONAL_CONSTANT * s.enclosed_mass_kg * s.density_kg_m3 / s.radius_m.powi(2)
+        };
+        for (node, w) in [
+            (0.1834346424956498, 0.362683783378362),
+            (0.525532409916329, 0.3137066458778873),
+            (0.7966664774136267, 0.2223810344533745),
+            (0.9602898564975363, 0.1012285362903763),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let t: f64 = (1.0 + sign * node) * 0.5;
+                let r = a.radius_m + t * dr;
+                let hermite = |x, y, dx, dy| {
+                    (2.0 * t.powi(3) - 3.0 * t * t + 1.0) * x
+                        + (t.powi(3) - 2.0 * t * t + t) * dr * dx
+                        + (-2.0 * t.powi(3) + 3.0 * t * t) * y
+                        + (t.powi(3) - t * t) * dr * dy
+                };
+                let p = hermite(a.pressure_pa, b.pressure_pa, gradient(a), gradient(b));
+                let m = hermite(
+                    a.enclosed_mass_kg,
+                    b.enclosed_mass_kg,
+                    4.0 * PI * a.radius_m.powi(2) * a.density_kg_m3,
+                    4.0 * PI * b.radius_m.powi(2) * b.density_kg_m3,
+                );
+                let rho = if region.density_model_id() == loaded::MODEL_ID {
+                    loaded::density_kg_m3(p).unwrap()
+                } else {
+                    1460.0 + 0.00311 * p.powf(0.513)
+                };
+                let weight = w * dr * 0.5;
+                result[0] += weight * 4.0 * PI * r * r * rho;
+                result[1] += weight * 8.0 * PI / 3.0 * r.powi(4) * rho;
+                result[2] += weight * GRAVITATIONAL_CONSTANT * m * rho / (r * r);
+            }
+        }
+    }
+    (result[0], result[1], result[2])
 }
 
 #[test]

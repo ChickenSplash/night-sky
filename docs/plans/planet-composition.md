@@ -18,6 +18,22 @@ bounded approximations and explicitly unresolved phases are acceptable. Exact
 phase diagrams and publication-grade accuracy are optional improvements, needed
 only when a demonstrated simulation or game problem requires them.
 
+**Policy agreed, 28 October 2026:** target at least **99% layered coverage**,
+not complete microphysical coverage. For this 1,544-body census that means at
+least 1,529 successful conserved structures and at most 15 remaining refusals.
+Use named, scoped approximations/extrapolations with visible global and region
+fidelity/limitations rather than requiring reference-validated material physics
+at every state. Conservation, numerical closure, finite physical quantities and
+no hidden legacy fallback remain non-negotiable. Approximation is an explicit
+model choice, not permission to accept any failed solver or extend every EOS.
+Local reference checks remain; whole-planet observational comparisons supplement
+them, not replace them. No universal physical radius-error tolerance is agreed.
+
+P3 should replace remaining unsupported cases with a simple, explicitly labelled
+placeholder and delete legacy consumers/model once cutover is tested. Placeholder
+results must remain distinguishable and do not count as successful layered
+structures towards 99%. Its exact prescription and validation remain to be chosen.
+
 | Document | Owns |
 | --- | --- |
 | This plan | Delivery order, scope, decisions and acceptance |
@@ -35,9 +51,10 @@ only when a demonstrated simulation or game problem requires them.
 - **Coverage after P2 step 3:** 1,134/1,544 solve: all 1,017 P1 successes plus
   117 envelope-route bodies. The non-envelope baseline remains 1,017/1,032,
   including all 280 water-rich planets. See [step 3](#step-3-coupled-structural-path-implemented-28-october-2026).
-- **Remaining blockers:** 395 envelope-route refusals, plus the original dense
-  gas (8) and bounded-column warming (7). Blow-off resolved all 178 P1
-  weak-binding failures. Larger-giant coverage is not complete.
+- **Current coverage after shallow-water slice:** 1,232/1,544 (79.8%), up 98
+  without lost successes. There are 312 refusals remaining, requiring at least
+  297 more layered solves to reach 99%. See the step-4 slice below. Larger-giant
+  coverage is not complete.
 - **Performance and next step:**
   - Refinement-only warming optimisation is implemented: a paired 20-thread
     run reduced report wall time from 19.5 to 18.2 s and solved median from
@@ -453,8 +470,9 @@ owns equations, resource setup, numerical boundary contracts and limitations.
   molecular-weight limit, compressibility/continuity, trace-overlap comparisons,
   positive-constituent and phase refusals, source-backed full-planet conservation
   and refinement. The dry 2%-secondary fixture solves at about 6,499 km one-bar
-  radius with a 12.30-bar base. Adding positive water explicitly refuses rather
-  than dropping it or folding it into the envelope.
+  radius with a 12.30-bar base. At this initial delivery, adding positive water
+  explicitly refused rather than dropping it or folding it into the envelope;
+  the subsequent shallow-water slice below removes that blanket refusal.
 - **Coverage finding:** no new generated successes. All generated candidates
   retain water, and this molecular pressure domain has no accepted overlap with
   the existing loaded-water floor of 10,000 bar. The original 1,134 successes
@@ -468,14 +486,45 @@ owns equations, resource setup, numerical boundary contracts and limitations.
   mixed-envelope refinement pass. These are reclassified refusals, not wins.
 - **Delivery gate:** do not call the original trace gap closed, widen molecular
   bounds to planetary depths, or proceed to default cutover. Shallow-water
-  coupling and justified component/mixture phase/deeper-density prescriptions
-  remain separate future work. The
+  coupling was subsequently delivered below; component/mixture phase/deeper-density
+  prescriptions remain separate future work. The
   [canonical molecular model](../simulation/planet-composition.md#hhe-rich-molecular-mixtures)
   owns the equations, masks, sources and resulting diagnostic outcomes.
 
+### Step-4 slice 1: shallow loaded water and visible fidelity
+
+- Prior mixture work checkpointed as `8188e43`, nothing pushed.
+- Added `shallow_loaded_water_murnaghan_proxy_v1` below 10,000 bar,
+  a pressure-only condensed-water engineering approximation. Existing deep
+  compression is unchanged, with a located, unblended model interface. All
+  positive water and protected allocations remain represented; no new amount
+  cutoff, relaxed numerical tolerance or legacy fallback was introduced.
+- Global/per-layer `model_fidelity` and `model_limitations` now travel with
+  layered results and appear in the inspector. Current whole-planet closures
+  are at least approximate. Extended-Ih regions are marked extrapolated;
+  reference-checked local equations are not a whole-planet accuracy certificate.
+- The 20-thread census gains 98 solves: 95 of the 111 former water refusals and
+  three prior radial failures, including eight of the original molecular-mixture
+  cohort. The other water cases expose numerical convergence
+  (9), cold dense H/He (5), melting screen (1), or missing one-bar level (1).
+  No old successes are lost; their maximum radius/inertia-factor changes are
+  relative 1.36×10⁻⁹ / 2.72×10⁻⁹ due to altered shooting paths.
+- Full `./scripts/check.sh`, source-backed shallow-water conservation/refinement,
+  source-backed mixture tests and `git diff --check` pass. No interactive client
+  test, renderer change or benchmark was launched.
+- Physical limitations remain explicit: no shallow water thermal expansion,
+  phase equilibrium, steam redistribution or H/He-water mixing. These results
+  do not establish scientifically accurate oceans or interiors. The
+  [canonical guide](../simulation/planet-composition.md#shallow-loaded-water-approximation)
+  owns equations, tests and limitations.
+- Next: choose a bounded heavy-enriched/deeper-envelope approximation and phase
+  treatment for the remaining 136 composition, 42 condensation and 25 molecular
+  state refusals. Numerical and dense-H/He work remain separate. No renderer
+  cutover or placeholder has been implemented in slice 1.
+
 ### Remaining delivery order
 
-4. **Close remaining coverage.** Triage dense-gas refusals, including trace-H/He
+4. **Close remaining coverage to at least 99%.** Triage dense-gas refusals, including trace-H/He
    and H/He-free cases, and hot water/steam limits. Do not assume an H/He EOS
    alone fixes them. Resolve retention dependencies without replaying loss
    history. Keep unsupported reasons explicit.
@@ -491,9 +540,10 @@ owns equations, resource setup, numerical boundary contracts and limitations.
 | Heavy cores above 20 Earth masses | Widen the radial mass domain or give these bodies a labelled route |
 | Runtime cost and retention | Resolve retention dependencies without rerunning loss history. Cache per system with deterministic keys; validate any loosened tolerances |
 
-**Exit:** every generated route has a documented prescription, the coverage
-report has no unexplained holes, and mass/radius/inertia, stripping and heating
-trends are plausible.
+**Exit:** at least 99% of the deterministic census solves layered structures,
+remaining holes are explained with a P3 placeholder path specified, and
+mass/radius/inertia, stripping and heating trends pass documented plausibility
+checks. Coverage alone does not establish scientific accuracy.
 
 **Scope control:** before each change, state the observed gap, smallest useful
 prescription, fixtures and stop condition. A slice ships only if it changes
@@ -504,6 +554,9 @@ something visible in game or closes a gap measured by the coverage report.
 - Make the unified result authoritative for generated planets and retention.
   Migrate snapshots, shape and spin, atmosphere and optics, rendering and
   navigation to the same solved facts.
+- Give the remaining unsupported minority a simple, explicitly labelled
+  placeholder, separate from successful layered physics and never counted towards
+  its 99% target. Its mass and composition still come from conserved inventory.
 - Provide summary-first composition, ordered regions, phase knowledge,
   boundaries and model limitations in the inspector.
 - Require measured generation and search performance suitable for the game, full

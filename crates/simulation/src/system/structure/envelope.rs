@@ -8,7 +8,7 @@ use super::{
 use crate::{
     system::{
         composition::Inventory,
-        materials::{Material, cold, hhe, hhe_mixture},
+        materials::{Material, cold, hhe, hhe_mixture, water::loaded},
     },
     units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT},
 };
@@ -36,7 +36,6 @@ pub enum Error {
     Mixture(hhe_mixture::Error),
     Radial(SolveError),
     TraceDomain,
-    WaterLoadDomain,
     MissingOneBarBoundary,
     NonConvergence,
     BoundaryResolution { residual_pa: f64, central_pa: f64 },
@@ -50,7 +49,6 @@ impl Error {
             Self::Mixture(e) | Self::Radial(SolveError::Mixture(e)) => e.label(),
             Self::InvalidInput(reason) => reason,
             Self::TraceDomain => "secondary envelope trace domain",
-            Self::WaterLoadDomain => "water boundary below 1 GPa",
             Self::MissingOneBarBoundary => "one-bar event unresolved",
             Self::BoundaryResolution { .. } => "central shooting resolution",
             Self::NonConvergence => "reference gravity convergence",
@@ -219,7 +217,7 @@ fn solve_with_density(
             max_eos_evaluations: controls.radial.max_eos_evaluations.min(remaining),
             ..controls.radial
         };
-        let density = |m, p: f64, _, _: &mut dry::Work, _| {
+        let density = |m, p: f64, side, _: &mut dry::Work, _| {
             if m == Material::Hydrogen {
                 let t = thermal
                     .temperature_k(p)
@@ -232,8 +230,16 @@ fn solve_with_density(
                     None => Ok(density),
                 }
             } else if m == Material::Water {
-                // Named pressure-only effective compression, never a phase or
-                // thermal EOS. Final water intervals must all lie above 1 GPa.
+                // Separate shallow and deep barotropes, never phase/thermal EOS.
+                // Honour the one-sided branch at the located model boundary.
+                let shallow = match side {
+                    radial::DensitySide::Branch(i) => i > 0,
+                    radial::DensitySide::Equilibrium => p < loaded::BOUNDARY_PA,
+                };
+                if shallow {
+                    return loaded::density_kg_m3(p)
+                        .ok_or(SolveError::InvalidInput("shallow water pressure"));
+                }
                 if !(0.0..=cold::MAX_PRESSURE_PA).contains(&p) {
                     return Err(SolveError::InvalidInput("heavy water pressure"));
                 }
@@ -250,10 +256,16 @@ fn solve_with_density(
             radial::Policy {
                 pressure_floor_pa: OUTER_PRESSURE_PA,
                 boundary_tolerance_pa: Some(PRESSURE_TOLERANCE_PA),
-                interfaces: vec![radial::PressureInterface {
-                    material: Material::Hydrogen,
-                    pressure_pa: 1e5,
-                }],
+                interfaces: vec![
+                    radial::PressureInterface {
+                        material: Material::Water,
+                        pressure_pa: loaded::BOUNDARY_PA,
+                    },
+                    radial::PressureInterface {
+                        material: Material::Hydrogen,
+                        pressure_pa: 1e5,
+                    },
+                ],
                 ..Default::default()
             },
         );
@@ -263,15 +275,6 @@ fn solve_with_density(
         cumulative.attempted_steps += solver.work.attempted_steps;
         cumulative.shooting_iterations += solver.work.shooting_iterations;
         cumulative.bracket_expansions += solver.work.bracket_expansions;
-        let interface = trial
-            .regions
-            .iter()
-            .find(|r| r.inventory().mass_kg(Material::Hydrogen) > 0.0)
-            .unwrap()
-            .inner();
-        if host.mass_kg(Material::Water) > 0.0 && interface.pressure_pa < 1e9 {
-            return Err(Error::WaterLoadDomain);
-        }
         let reference = trial
             .regions
             .iter()

@@ -25,6 +25,37 @@ to the radial models.
 and [water-bearing hosts](#headless-protected-traces-in-water-bearing-hosts)
 are also headless and opt-in.
 
+## Approximation policy and fidelity labels
+
+The opt-in layered solver uses named, deliberately selected approximations where
+reference-checked local models do not cover a required state. A failed EOS call
+does **not** authorise arbitrary extrapolation or a silent fallback. Each added
+route needs a defined equation, application scope, provenance/assumptions,
+limitations and numerical conservation/refinement checks. Until such a route is
+implemented, unsupported states still refuse. Invalid densities, unclosed mass,
+unresolved numerical intervals and exhausted work budgets remain failures.
+
+`LayeredPlanet` and each `Layer` expose `model_fidelity` and human-readable
+`model_limitations`; layer radii/pressures identify where the approximation applies.
+Stable model IDs remain in `physical.approximations`. Fidelity values are:
+
+- `reference_checked`: local equations checked against reference data in scope,
+  **not** whole-planet observational validation or a percentage error guarantee.
+- `approximate`: a named structural, thermal or material approximation is used.
+- `extrapolated`: a model is explicitly extended beyond its original mask.
+
+The whole-planet label is no stronger than its least-supported layer or global
+closure assumption. All current whole-planet results are at least `approximate`,
+because they use cold structural proxies and prescribed thermal/partition
+closures. Existing extended-Ih regions are explicitly `extrapolated`. No
+automatically generated planet is labelled scientifically validated. The
+inspector shows both global and per-region limitations; rendering is unchanged.
+Numerical precision and physical uncertainty are separate: tighter integration
+does not make an engineering density proxy more physically accurate. Local
+reference tests remain mandatory; eventual Solar System and exoplanet comparisons
+supplement them, accounting for uncertain composition, age, thermal state and
+observed radius reference. Similar mass alone is not an accuracy benchmark.
+
 ## P2 envelope prescription decision probe
 
 P2 step 2 selected the following starting prescriptions using
@@ -209,9 +240,11 @@ cryptographic source authentication.
   Water is never folded into that trace allowance or dropped at a threshold.
   Above this bound the [bounded molecular extension](#hhe-rich-molecular-mixtures)
   is attempted, not a widened passive trace approximation.
-- Water gets its own `loaded_effective_water_compression_v1` region using the
-  existing Seager pressure-only water row, only when its entire region is above
-  10,000 bar and below 100,000,000 bar. Its phase is `UnresolvedCompression`, not
+- Water retains separate regions. Above 10,000 bar,
+  `loaded_effective_water_compression_v1` uses the existing Seager pressure-only
+  water row, through 100,000,000 bar. Below that a separate
+  [shallow loaded-water proxy](#shallow-loaded-water-approximation) applies.
+  Their phase is `UnresolvedCompression`, not
   ice or identified fluid; thermal expansion, internal heat transport and
   mixing are unresolved. Its displayed temperature is the shared outer-boundary
   temperature. The original local water EOS masks and thin solvers are unchanged.
@@ -298,7 +331,7 @@ protected versus accessible traces, positive water layers, work refusal and
 non-landable one-bar transport. Source-backed failures for the cold Jupiter-like
 fixture remain recorded; they are not required successes or accuracy references.
 
-The 28 October census now solves **1,134/1,544** planets: the previous 1,017 thin
+The step-3 28 October census solved **1,134/1,544** planets: the previous 1,017 thin
 successes plus **117/512 envelope-route bodies** (85 sub-Neptunes, 28 envelope
 worlds, four lower-mass gas giants by legacy class). All original non-timing
 columns for the 1,017 thin successes are identical to P1. Four new successes
@@ -413,16 +446,13 @@ cargo test --release -p space-simulation rich_molecular -- --include-ignored --n
 NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
 ```
 
-Adding positive water to the dry fixture retains it and returns the existing
-water-load refusal. This exposes an important limitation: the molecular pressure
-ceiling is 1,000 bar, whereas the current loaded-water region requires its top
-at 10,000 bar or above. There is **no accepted overlap** between these two
-prescriptions. Generated candidates all retain positive water, so this slice
-cannot by itself produce new generated successes. Supporting shallow loaded
-water or a justified deeper impurity EOS is subsequent work, not a reason to
-discard water or widen a molecular EOS beyond its validity.
+At initial mixture delivery, adding positive water returned a water-load refusal:
+the molecular pressure ceiling is 1,000 bar, whereas the deep loaded-water
+prescription required its top at 10,000 bar or above. All generated candidates
+retain positive water. The subsequent shallow-water slice below closes that
+particular domain mismatch without discarding water or widening molecular bounds.
 
-The final 20-thread rerun still solves **1,134/1,544**, with every original
+The mixture-only 20-thread rerun solved **1,134/1,544**, with every original
 non-timing coverage column identical for all 1,134 previous successes. Current
 outcomes of the original 212-body trace cohort:
 
@@ -440,6 +470,58 @@ arise during rejected shooting trials; they are not measured deep conditions of
 an accepted planet. The original cohort stays in the diagnostic TSV with its
 current outcome so that reclassification cannot masquerade as coverage gain.
 Full project checks and the source-backed mixed-envelope refinement test pass.
+
+### Shallow loaded-water approximation
+
+`water::loaded`, model `shallow_loaded_water_murnaghan_proxy_v1`, replaces the
+blanket refusal for a separate water parcel whose envelope load is below
+**10,000 bar**. Its pressure-only engineering Murnaghan law is:
+
+`rho(P) = 1000 [1 + 7 P / (2.2e9)]^(1/7)` (SI).
+
+The ambient liquid-like density (1,000 kg/m³), bulk modulus (2.2 GPa) and pressure
+derivative (7) are plausible engineering assumptions, **not a fitted published
+thermal EOS**. The application pressure range is 0–10,000 bar, with the envelope
+solver retaining its existing 10 mbar outer pressure. A room-temperature overlap
+check differs from the existing IF97 liquid density by less than 1% at 1, 100 and
+1,000 bar; this is not a physical-error bound away from those three points.
+
+Temperature is deliberately absent from the compression law. The parcel remains
+unresolved water, even where actual water could freeze, become steam, mix into
+H/He or react at depth. It is especially uncertain for hot, weakly loaded water;
+it does not establish a stable condensed boundary or a thermal/phase solution.
+The displayed temperature is the envelope prescription at the region's top,
+not a solution for heat transport inside the water. No ocean, solidity or landing
+permission follows from this result. The label is `approximate`, with the above
+limitations recorded per layer, not `reference_checked`.
+
+Where the water interval crosses 10,000 bar, the existing kernel locates a model
+interface with separate one-sided densities and disjoint, conserved water
+allocations. The deep Seager density is about 1,589 kg/m³ and the shallow proxy
+about 1,227 kg/m³ there. This intentional, unblended model discontinuity is not
+a phase boundary or matched thermodynamic equilibrium. No step crosses it using
+one EOS and no density offset conceals it. Water that remains entirely deeper
+uses the previous compression law unchanged; different rejected shooting trials
+can change work and roundoff in the accepted profiles.
+
+The 20-thread census now solves **1,232/1,544 (79.8%)**, up **98**, with no lost
+successes, including eight from the original molecular-mixture cohort. Of 111
+former shallow-water refusals, 95 solve; the other 16 expose
+radial convergence (9), cold dense H/He (5), pure melting screen (1), or missing
+one-bar event (1). Three previous radial failures also solve after the changed
+trial paths. All previous successes remain numerically stable: maximum relative
+radius change is 1.36×10⁻⁹ and inertia-factor change 2.72×10⁻⁹. This does not
+close the remaining composition, phase, dense-H/He or numerical gaps.
+
+Headless fixtures check constituent/protected allocation closure, located model
+interfaces, independent radial water-mass/hydrostatic quadrature, transport
+labels and fourfold-step/fivefold-tolerance refinement. Source-backed tests use
+the existing local H/He resource; standalone material checks need no resource:
+
+```sh
+cargo test --release -p space-simulation materials::water::loaded
+cargo test --release -p space-simulation shallow_loaded -- --include-ignored --nocapture
+```
 
 ### Secondary trace input investigation
 

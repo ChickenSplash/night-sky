@@ -1134,6 +1134,8 @@ mod tests {
             "layered.temperature",
             "layered.pressure",
             "layered.models",
+            "layered.fidelity",
+            "layered.limitations",
         ] {
             assert!(facts.iter().any(|(f, _)| f == id), "{id}");
         }
@@ -1142,6 +1144,18 @@ mod tests {
             .filter(|(f, _)| f.starts_with("layered.layer."))
             .count();
         assert_eq!(layers, physical::layered(&solved).layers.len());
+        assert_eq!(
+            facts
+                .iter()
+                .filter(|(f, _)| f.starts_with("layered.assessment."))
+                .count(),
+            layers
+        );
+        assert!(
+            facts
+                .iter()
+                .any(|(f, text)| f == "layered.fidelity" && text.contains("Approximate"))
+        );
         // The plain readout and the browser never include the experimental section.
         let plain = describe(&object, &galaxy, None, Now::none());
         assert!(!plain.fields.iter().any(|f| f.section == Section::Layered));

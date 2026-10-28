@@ -77,6 +77,7 @@ impl Region {
     /// Physical-model limitations, not numerical error bars.
     pub fn approximation_notes(&self) -> &'static [&'static str] {
         match self.density_model_id {
+            eos::loaded::MODEL_ID => eos::loaded::APPROXIMATION_NOTES,
             super::envelope::WATER_MODEL_ID => &[
                 "Pressure-only effective water compression under at least 1 GPa envelope load",
                 "Water phase, thermal expansion and H/He mixing unresolved; no solid surface claim",
@@ -175,7 +176,11 @@ pub(super) fn envelope_interior(
                     } else {
                         PhaseKnowledge::Unresolved
                     },
-                    density_model_id: if water {
+                    density_model_id: if water
+                        && profile.inner().pressure_pa <= eos::loaded::BOUNDARY_PA
+                    {
+                        eos::loaded::MODEL_ID
+                    } else if water {
                         super::envelope::WATER_MODEL_ID
                     } else {
                         cold::MODEL_ID

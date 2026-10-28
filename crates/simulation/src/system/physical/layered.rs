@@ -13,7 +13,9 @@ use crate::{
     },
     units::GRAVITATIONAL_CONSTANT,
 };
-use space_shared::{Layer, LayeredPlanet, MaterialBudget, PlanetPhysical, RadiusReference};
+use space_shared::{
+    Layer, LayeredPlanet, MaterialBudget, ModelFidelity, PlanetPhysical, RadiusReference,
+};
 use std::f64::consts::PI;
 
 pub fn layered(solved: &Solved) -> LayeredPlanet {
@@ -44,6 +46,8 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             .flatten()
             .map_or(s.surface_radius_m(), |c| s.surface_radius_m() + c.extent_m);
         layers.push(Layer {
+            model_fidelity: ModelFidelity::Approximate,
+            model_limitations: strings(s.approximation_notes()),
             kind: "atmosphere".into(),
             material: dominant(s.gas_inventory()).into(),
             inner_radius_m: s.surface_radius_m(),
@@ -57,6 +61,10 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     }
     if s.deposit_thickness_m() > 0.0 {
         layers.push(Layer {
+            model_fidelity: ModelFidelity::Approximate,
+            model_limitations: vec![
+                "Prescribed deposit density; phase and internal thermal state unresolved".into(),
+            ],
             kind: "frost".into(),
             material: dominant(s.deposit_inventory()).into(),
             inner_radius_m: s.condensed().radius_m(),
@@ -90,14 +98,23 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             w.regions()
                 .iter()
                 .map(|r| {
-                    region(
+                    let mut layer = region(
                         r.inventory(),
                         r.inner(),
                         r.outer(),
                         r.temperature_k(),
                         water_kind(r),
                         r.density_model_id(),
-                    )
+                    );
+                    layer
+                        .model_limitations
+                        .extend(strings(r.approximation_notes()));
+                    if r.density_model_id()
+                        == crate::system::materials::water::cold_ice::IH_MODEL_ID
+                    {
+                        layer.model_fidelity = ModelFidelity::Extrapolated;
+                    }
+                    layer
                 })
                 .collect(),
         ),
@@ -140,6 +157,12 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     let surface = solved.surface();
     LayeredPlanet {
         model: solved.model_id().into(),
+        // All current planet closures include cold proxies/prescribed thermal
+        // states. Checked local equations never certify the whole structure.
+        model_fidelity: layers
+            .iter()
+            .fold(ModelFidelity::Approximate, |a, l| a.max(l.model_fidelity)),
+        model_limitations: strings(s.approximation_notes()),
         physical: PlanetPhysical {
             materials: Material::ALL
                 .into_iter()
@@ -202,6 +225,12 @@ fn region(
     model: &str,
 ) -> Layer {
     Layer {
+        model_fidelity: ModelFidelity::Approximate,
+        model_limitations: vec![match kind {
+            "envelope" => "Prescribed thermal profile and uniform composition; no cooling evolution or full mixture phase equilibrium",
+            "core" | "mantle" => "Cold compression proxy; temperature, mineralogy and phase unresolved",
+            _ => "Prescribed water temperature/structure; not a thermal evolution solution",
+        }.into()],
         kind: kind.into(),
         material: dominant(inventory).into(),
         inner_radius_m: inner.radius_m,
@@ -212,6 +241,10 @@ fn region(
         temperature_k,
         model: model.into(),
     }
+}
+
+fn strings(notes: &[&str]) -> Vec<String> {
+    notes.iter().map(|s| (*s).into()).collect()
 }
 
 fn dominant(inventory: &Inventory) -> &'static str {
