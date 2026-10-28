@@ -7,7 +7,11 @@ use super::{
 use space_shared::{MaterialBudget, Planet, PlanetPhysical, RadiusReference};
 
 mod layered;
+mod result;
 pub use layered::{fallback, layered, outcome};
+pub use result::{
+    initial_result, resolved_result, validate_record, validate_refinement, validate_result,
+};
 
 pub fn to_data(body: &Body) -> PlanetPhysical {
     let b = &body.budget;
@@ -44,7 +48,8 @@ pub fn to_data(body: &Body) -> PlanetPhysical {
 }
 
 /// Missing and invalid records are distinct. No label-based physical defaults.
-/// Re-derive structure at the boundary, also validating reference/caveat semantics.
+/// Legacy consumer compatibility only: re-derives the legacy boundary. New-model
+/// callers use `validate_result`/`validate_record`, which never run a solver.
 pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str> {
     let Some(data) = &planet.physical else {
         return Ok(None);

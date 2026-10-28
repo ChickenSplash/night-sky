@@ -1,6 +1,23 @@
 use super::*;
 use crate::system::physical;
 
+#[test]
+fn zero_irradiation_uses_the_cold_fit_bound_not_earth_flux() {
+    let b = budget(&[
+        (Material::Silicate, 5.0),
+        (Material::Hydrogen, 0.75),
+        (Material::Helium, 0.25),
+    ]);
+    let cold = initial(&b, &environment(0.0, 0.0, 4.5));
+    let tiny = initial(&b, &environment(1e-12, 0.0, 4.5));
+    let warm = initial(&b, &environment(1361.0, 250.0, 4.5));
+    assert_eq!(cold.radius_m, tiny.radius_m);
+    assert!(cold.radius_m < warm.radius_m);
+    assert_eq!(cold.surface_temperature_k, MIN_TEMPERATURE_K);
+    assert!(cold.extrapolated);
+    physical::validate_record(&physical::fallback(&cold)).unwrap();
+}
+
 fn environment(
     irradiation_w_m2: f64,
     equilibrium_temperature_k: f64,

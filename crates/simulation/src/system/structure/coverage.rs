@@ -18,7 +18,9 @@ use std::{collections::BTreeMap, fmt::Write as _, time::Instant};
 const DEFAULT_SYSTEMS_PER_COMPONENT: usize = 20;
 
 mod census;
+mod plausibility;
 mod traces;
+mod validation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Category {
@@ -128,14 +130,8 @@ struct Solved {
 }
 
 /// Every converted record must be conserved, contiguous and finite.
-fn check_record(layered: &space_shared::LayeredPlanet) {
-    let layer_mass: f64 = layered.layers.iter().map(|l| l.mass_kg).sum();
-    assert!((layer_mass / layered.physical.retained_mass_kg - 1.0).abs() < 1e-9);
-    assert!(layered.layers.windows(2).all(|p| {
-        (p[0].inner_radius_m - p[1].outer_radius_m).abs() <= 1e-9 * p[0].inner_radius_m
-    }));
-    assert!(layered.physical.reference_radius_m.is_finite());
-    assert!(layered.physical.inertia_factor.is_finite() && layered.physical.inertia_factor > 0.0);
+fn check_record(layered: &space_shared::LayeredPlanet, p: &Hosted) {
+    validation::check_record(layered, &p.body.budget, &p.id());
 }
 
 /// Every reported planet uses the same entry point intended for generation.
@@ -155,7 +151,13 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String, f64)> {
                 environment,
                 e,
             ));
-            check_record(&fallback);
+            check_record(&fallback, p);
+            assert!(
+                fallback
+                    .fallback_reason
+                    .as_ref()
+                    .is_some_and(|s| !s.is_empty())
+            );
             let radius = fallback.physical.reference_radius_m;
             if light && matches!(category, Category::GasDomain | Category::MassDomain) {
                 (Category::Envelope, detail, radius)
@@ -166,8 +168,8 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String, f64)> {
     let atmosphere = &escaping.structure;
     let escaped = escaping.blowoff;
     let t = atmosphere.surface_temperature_k();
-    let pressure = if atmosphere.envelope().is_some() {
-        1e5
+    let pressure = if let Some(envelope) = atmosphere.envelope() {
+        envelope.reference_pressure_pa()
     } else {
         atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa())
     };
@@ -176,7 +178,8 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String, f64)> {
     let surface = escaping.surface();
     // Every solve must also convert to a conserved, contiguous transport record.
     let layered = crate::system::physical::layered(&escaping);
-    check_record(&layered);
+    check_record(&layered, p);
+    assert!(layered.fallback_reason.is_none());
     assert_eq!(layered.surface, surface);
     Ok(Solved {
         suspended: atmosphere
@@ -665,6 +668,7 @@ fn table(rows: &[Row]) -> String {
 #[test]
 #[ignore = "opt-in report; run in release"]
 fn composition_coverage() {
+    use std::io::Write;
     let systems = env_usize("NS_COVERAGE_SYSTEMS", DEFAULT_SYSTEMS_PER_COMPONENT);
     let threads = env_usize(
         "NS_COVERAGE_THREADS",
@@ -676,6 +680,18 @@ fn composition_coverage() {
         .collect();
     let start = Instant::now();
     let next = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/tmp");
+    std::fs::create_dir_all(&dir).unwrap();
+    // Completed systems survive interruption. Keep the final reports untouched
+    // until the entire probe finishes, and never count an in-flight system.
+    let mut checkpoint =
+        std::fs::File::create(dir.join("composition-coverage-partial.tsv")).unwrap();
+    checkpoint.write_all(table(&[]).as_bytes()).unwrap();
+    let checkpoint = std::sync::Mutex::new((checkpoint, 0usize, 0usize));
+    eprintln!(
+        "Coverage: starting {} systems on {threads} threads; completed-system rows saved to data/tmp/composition-coverage-partial.tsv",
+        keys.len()
+    );
     let mut rows: Vec<Row> = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..threads)
             .map(|_| {
@@ -687,7 +703,20 @@ fn composition_coverage() {
                             break rows;
                         };
                         let key = format!("composition-calibration:{component:?}:{index}");
-                        rows.extend(galactic_bodies(&key, component).planets.iter().map(row));
+                        let system_rows: Vec<_> = galactic_bodies(&key, component).planets.iter().map(row).collect();
+                        {
+                            let mut checkpoint = checkpoint.lock().unwrap();
+                            let output = table(&system_rows);
+                            let (_, records) = output.split_once('\n').unwrap();
+                            checkpoint.0.write_all(records.as_bytes()).unwrap();
+                            checkpoint.0.flush().unwrap();
+                            checkpoint.1 += 1;
+                            checkpoint.2 += system_rows.len();
+                            if checkpoint.1.is_multiple_of(10) || checkpoint.1 == keys.len() {
+                                eprintln!("Coverage: {}/{} systems complete, {} planets checked, {:.1} s elapsed", checkpoint.1, keys.len(), checkpoint.2, start.elapsed().as_secs_f64());
+                            }
+                        }
+                        rows.extend(system_rows);
                     }
                 })
             })

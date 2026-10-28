@@ -41,8 +41,11 @@ accreting into planets. For each permitted host (a star or close pair):
    store its formation inventory and continue outward.
 7. Once the entire hierarchy and final orbits exist, share all-star heating
    samples with the atmosphere model. Account for accessible secondary volatile
-   escape, solve H/He survival and structure together, then assign independently
-   seeded spin and descriptions. Partition retained gas and condensates.
+    escape, solve H/He survival and structure together, then assign independently
+    seeded spin and descriptions. Partition retained gas and condensates.
+    Retention trials now use fast fallback facts and independent forcing inputs;
+    the final live geometry/atmosphere still uses a legacy compatibility projection
+    while P3 consumer migration is in progress.
 8. Recheck stability using final retained masses. Escape only reduces masses,
    so the formation-mass spacing remains conservative.
 

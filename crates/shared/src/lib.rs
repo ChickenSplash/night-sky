@@ -2,12 +2,16 @@ use serde::{Deserialize, Serialize};
 
 mod atmosphere;
 mod composition;
+mod planet_result;
 pub use atmosphere::{
     AerosolData, AerosolKind, AtmosphereData, AtmosphereReference, GasFraction, PlanetEnvironment,
 };
 pub use composition::{
     Layer, LayeredPlanet, MaterialBudget, ModelFidelity, PhaseAllocation, PlanetPhysical,
     RadiusReference,
+};
+pub use planet_result::{
+    PhysicalRevision, PlanetResult, RefinementStatus, ResultProvenance, SurfaceKnowledge,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

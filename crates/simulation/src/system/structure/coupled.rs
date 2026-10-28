@@ -152,7 +152,10 @@ impl CoupledStructure {
             deposit: Default::default(),
             gas: envelope.inventory,
             atmosphere: None,
-            surface_temperature_k: envelope.thermal.temperature_k(1e5).unwrap(),
+            surface_temperature_k: envelope
+                .thermal
+                .temperature_k(envelope.reference_pressure_pa())
+                .unwrap(),
             optical_depth: None,
             diagnostics: Diagnostics {
                 iterations: envelope.iterations,
@@ -193,10 +196,10 @@ impl CoupledStructure {
     pub fn deposit_thickness_m(&self) -> f64 {
         self.deposit.thickness_m(self.condensed.radius_m())
     }
-    /// Top of the deposit, where the gas column starts.
+    /// Top of the deposit, or the envelope's one-bar/condensed reference.
     pub fn surface_radius_m(&self) -> f64 {
         if let Some(e) = &self.envelope {
-            return e.one_bar_radius_m;
+            return e.reference_radius_m;
         }
         self.deposit.top_radius_m(self.condensed.radius_m())
     }
@@ -242,7 +245,7 @@ impl CoupledStructure {
     /// Absent when one bar lies below the condensed boundary or there is no gas.
     pub fn one_bar_radius_m(&self) -> Result<Option<f64>, AtmosphereError> {
         if let Some(e) = &self.envelope {
-            return Ok(Some(e.one_bar_radius_m));
+            return Ok(e.one_bar_radius_m());
         }
         self.atmosphere
             .map(|a| {

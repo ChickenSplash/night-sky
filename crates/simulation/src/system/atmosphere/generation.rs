@@ -5,6 +5,7 @@ use crate::{
     light, orbit,
     seed::Rng,
     star::multiple::Bodies,
+    system::forcing::Forcing,
     units::{EARTH_SOLAR, SUN_GM},
 };
 use glam::DVec3;
@@ -13,12 +14,12 @@ use std::f64::consts::TAU;
 
 pub(crate) mod partition;
 
-/// SI Stefan-Boltzmann constant (rounded).
+/// SI Stefan-Boltzmann constant (rounded), used by independent heating checks.
+#[cfg(test)]
 const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
 /// Fixed quadrature budget over independent mean anomalies, not clock time.
 const PHASE_SAMPLES: usize = 32;
 const MIN_PRESSURE_PA: f64 = 0.1;
-const SOLAR_FLUX_W_M2: f64 = 1361.0;
 
 #[derive(Clone, Copy, Debug)]
 struct Heating {
@@ -44,17 +45,22 @@ pub(crate) fn populate(bodies: &mut Bodies, age_gyr: f64) {
     for hosted in &mut bodies.planets {
         let heating = heating(&system, &samples, &hosted.host, hosted.body.orbit, age_gyr);
         let id = hosted.id();
+        let mut rng = Rng::new(&format!("{id}:atmosphere:v1"));
+        let forcing = Forcing::new(
+            heating.flux,
+            heating.loss_flux,
+            rng.range(0.1, 0.6),
+            age_gyr,
+        )
+        .expect("generated stellar forcing must be finite and valid");
         crate::system::generation::retention::finalise(
             &mut hosted.body,
             &id,
             system.member_mass(0, &hosted.host),
-            heating.flux,
-            heating.loss_flux,
-            age_gyr,
+            &forcing,
         );
-        let mut rng = Rng::new(&format!("{}:atmosphere:v1", hosted.id()));
         hosted.environment = Some(
-            generate(&mut rng, &mut hosted.body, heating, age_gyr)
+            generate(&mut hosted.body, &forcing)
                 .expect("generated atmospheric inputs and columns must be finite and valid"),
         );
         crate::system::generation::retention::refresh_spin(
@@ -165,29 +171,18 @@ fn activity_history(star: &Star, age_gyr: f64) -> f64 {
     (integrated / 0.48).max(0.05) * hot
 }
 
-/// Empirical shoreline-inspired trend, not a universal survival boundary.
-/// At Earth's escape speed, the nominal transition is ten present solar fluxes.
-pub(crate) fn secondary_retention(escape_m_s: f64, loss_flux: f64) -> f64 {
-    let threshold = 10.0 * (escape_m_s / 11_200.0).powi(4);
-    1.0 / (1.0 + (loss_flux / SOLAR_FLUX_W_M2 / threshold).powf(1.5))
-}
-
 fn generate(
-    rng: &mut Rng,
     body: &mut crate::system::Body,
-    heating: Heating,
-    age_gyr: f64,
+    forcing: &Forcing,
 ) -> Result<PlanetEnvironment, AtmosphereError> {
-    let albedo = rng.range(0.1, 0.6);
-    let equilibrium_temperature_k =
-        (heating.flux * (1.0 - albedo) / (4.0 * STEFAN_BOLTZMANN)).powf(0.25);
+    let mut environment = forcing.environment();
     // No greenhouse, internal-heat or climate solution yet. Floor the column
     // estimate at 20 K rather than extending an ideal gas to absolute zero.
-    let temperature = equilibrium_temperature_k.max(20.0);
+    let temperature = environment.equilibrium_temperature_k.max(20.0);
     let (structure, budget, atmosphere) = crate::system::structure::boundary::resolve(
         &body.budget,
-        heating.flux,
-        age_gyr,
+        forcing.irradiation_w_m2,
+        forcing.age_gyr,
         temperature,
     )?;
     body.radius_km = structure.radius_m() / 1e3;
@@ -196,13 +191,8 @@ fn generate(
     let gm = body.mass_earth * EARTH_SOLAR * SUN_GM;
     let radius = body.radius_km * 1e3;
     let atmosphere = atmosphere.map(|air| air.to_data(gm, radius)).transpose()?;
-    Ok(PlanetEnvironment {
-        irradiation_w_m2: heating.flux,
-        assumed_bond_albedo: albedo,
-        equilibrium_temperature_k,
-        age_gyr,
-        atmosphere,
-    })
+    environment.atmosphere = atmosphere;
+    Ok(environment)
 }
 
 #[cfg(test)]

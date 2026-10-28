@@ -44,6 +44,13 @@ struct Step {
     error: State,
 }
 
+/// An invalid RK stage rejects only the proposed step, never the central load.
+#[derive(Debug, PartialEq)]
+enum StepError {
+    InvalidState,
+    Solve(SolveError),
+}
+
 pub(super) struct Trial {
     pub regions: Vec<Region>,
     pub density_sides: Vec<DensitySide>,
@@ -278,6 +285,7 @@ impl<'a> Solver<'a> {
             }
             let mut h = self.controls.max_step.min(x * 0.25).min(end - x);
             let mut pressure_blocked = false;
+            let mut invalid_stage = false;
             while x < end {
                 if steps == self.controls.max_steps_per_trial {
                     return Err(SolveError::WorkBudgetExhausted(WorkLimit::Integration));
@@ -359,7 +367,7 @@ impl<'a> Solver<'a> {
                     h = h.min(0.5 * gap / slope);
                 }
                 if h < 1e-14 * x.max(1e-6) || x + h == x {
-                    if self.next_interface.is_some() {
+                    if self.next_interface.is_some() || invalid_stage {
                         // Failure to resolve an interface is numerical, not a
                         // low central-pressure bracket or a missing phase mass.
                         return Err(SolveError::NonConvergence {
@@ -381,12 +389,24 @@ impl<'a> Solver<'a> {
                         mass_fraction: x.powi(3),
                     });
                 }
-                let Some(Step { state: next, error }) = self.step(material, x, y, h)? else {
-                    pressure_blocked = true;
-                    h *= 0.25;
-                    continue;
+                let Step { state: next, error } = match self.step(material, x, y, h) {
+                    Ok(Some(step)) => step,
+                    Ok(None) => {
+                        pressure_blocked = true;
+                        invalid_stage = false;
+                        h *= 0.25;
+                        continue;
+                    }
+                    Err(StepError::InvalidState) => {
+                        pressure_blocked = false;
+                        invalid_stage = true;
+                        h *= 0.25;
+                        continue;
+                    }
+                    Err(StepError::Solve(error)) => return Err(error),
                 };
                 pressure_blocked = false;
+                invalid_stage = false;
                 let norm = error
                     .iter()
                     .enumerate()
@@ -434,18 +454,16 @@ impl<'a> Solver<'a> {
         material: Material,
         x: f64,
         y: [f64; 3],
-    ) -> Result<Option<[f64; 3]>, SolveError> {
+    ) -> Result<Option<[f64; 3]>, StepError> {
         // Pressure-floor stages are rejected and retried at smaller step.
-        // The restricted-water policy treats invalid volume/nonfinite stages as
-        // numerical failure, never evidence that central pressure is too low.
+        // Invalid volume/nonfinite stages also reject the proposed step. If
+        // shrinking cannot recover, fail numerically, never classify the load
+        // as too low. EOS errors and work limits remain fatal.
         // Never clamp pressure or extrapolate the EOS.
         if self.policy.boundary_tolerance_pa.is_some()
             && (y[0] <= 0.0 || !y.iter().all(|value| value.is_finite()))
         {
-            return Err(SolveError::NonConvergence {
-                material,
-                mass_fraction: x.powi(3),
-            });
+            return Err(StepError::InvalidState);
         }
         let pressure = self.physical_pressure(material, y[1]);
         if pressure < self.policy.pressure_floor_pa || y[0] <= 0.0 {
@@ -457,7 +475,7 @@ impl<'a> Solver<'a> {
         {
             return Ok(None);
         }
-        let rho = self.density(material, pressure)?;
+        let rho = self.density(material, pressure).map_err(StepError::Solve)?;
         Ok(Some([
             3.0 * x.powi(2) * 4100.0 / rho,
             -x.powi(5) / y[0].powf(4.0 / 3.0),
@@ -471,7 +489,7 @@ impl<'a> Solver<'a> {
         x: f64,
         y: [f64; 3],
         h: f64,
-    ) -> Result<Option<Step>, SolveError> {
+    ) -> Result<Option<Step>, StepError> {
         rk_step(x, y, h, |x, y| self.derivative(material, x, y))
     }
 
@@ -526,12 +544,12 @@ impl<'a> Solver<'a> {
     }
 }
 
-fn rk_step(
+fn rk_step<E>(
     x: f64,
     y: State,
     h: f64,
-    mut derivative: impl FnMut(f64, State) -> Result<Option<State>, SolveError>,
-) -> Result<Option<Step>, SolveError> {
+    mut derivative: impl FnMut(f64, State) -> Result<Option<State>, E>,
+) -> Result<Option<Step>, E> {
     const C: [f64; 7] = [0.0, 1.0 / 5.0, 3.0 / 10.0, 4.0 / 5.0, 8.0 / 9.0, 1.0, 1.0];
     const A: [[f64; 6]; 7] = [
         [0.0; 6],
@@ -601,3 +619,6 @@ fn rk_step(
     }
     Ok(Some(Step { state: next, error }))
 }
+
+#[cfg(test)]
+mod tests;

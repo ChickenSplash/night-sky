@@ -2,6 +2,213 @@ use super::*;
 
 mod condensation;
 mod enriched;
+mod trends;
+
+#[test]
+fn radius_reference_distinguishes_sub_bar_shells_from_missed_events() {
+    let shell = |inner, outer| Region {
+        inventory: Inventory::new(&[(Material::Hydrogen, 1.0)]).unwrap(),
+        samples: vec![
+            dry::Sample {
+                radius_m: 1e7,
+                enclosed_mass_kg: 1e25,
+                pressure_pa: inner,
+                density_kg_m3: 1.0,
+            },
+            dry::Sample {
+                radius_m: 2e7,
+                enclosed_mass_kg: 2e25,
+                pressure_pa: outer,
+                density_kg_m3: 0.1,
+            },
+        ],
+    };
+    for pressure in [1001.0, 5e4, 1e5] {
+        let region = shell(pressure, OUTER_PRESSURE_PA);
+        assert_eq!(
+            reference_sample(std::slice::from_ref(&region)).unwrap(),
+            region.inner()
+        );
+    }
+    assert_eq!(
+        reference_sample(&[shell(2e5, OUTER_PRESSURE_PA)]),
+        Err(Error::MissingOneBarBoundary)
+    );
+    let deep = shell(2e5, 1e5);
+    assert_eq!(
+        reference_sample(&[deep.clone(), shell(1e5, OUTER_PRESSURE_PA)]).unwrap(),
+        deep.outer()
+    );
+    assert_eq!(reference_sample(&[]), Err(Error::MissingOneBarBoundary));
+}
+
+#[test]
+fn sub_bar_envelope_reports_condensed_radius_and_actual_boundary_facts() {
+    use crate::system::{physical, structure::prototype};
+    let request = inventory(5.0, 1e-7);
+    let (interior, envelope) = solve_with_density(
+        &request,
+        &Inventory::default(),
+        250.0,
+        100.0,
+        Default::default(),
+        &|p, t, _| Ok(p / (3600.0 * t)),
+    )
+    .unwrap();
+    let radius = interior.radius_m();
+    let pressure = interior.regions().last().unwrap().outer().pressure_pa;
+    assert!((OUTER_PRESSURE_PA..1e5).contains(&pressure));
+    assert_eq!(envelope.one_bar_radius_m(), None);
+    let temperature = envelope.thermal.temperature_k(pressure).unwrap();
+    let expected_gravity = GRAVITATIONAL_CONSTANT * interior.mass_kg() / radius.powi(2);
+    assert!((envelope.reference_gravity_m_s2() / expected_gravity - 1.0).abs() < 1e-14);
+    let solved = prototype::Solved {
+        structure: coupled::CoupledStructure::from_envelope(interior, envelope),
+        source: request,
+        escaped: Inventory::default(),
+        blowoff: Inventory::default(),
+        protected: Inventory::default(),
+    };
+    let record = physical::layered(&solved);
+    physical::validate_record(&record).unwrap();
+    assert_eq!(record.physical.reference_radius_m, radius);
+    assert!((record.physical.reference_gravity_m_s2 / expected_gravity - 1.0).abs() < 1e-14);
+    assert_eq!(
+        record.physical.radius_reference,
+        space_shared::RadiusReference::SolidSurface
+    );
+    assert_eq!(record.one_bar_radius_m, None);
+    assert_eq!(record.surface, "rock");
+    assert_eq!(record.surface_pressure_pa, pressure);
+    assert_eq!(record.surface_temperature_k, temperature);
+    assert!(
+        record
+            .model_limitations
+            .iter()
+            .any(|s| s.contains("below one bar"))
+    );
+    assert_eq!(record.physical.retained_mass_kg, request.total_mass_kg());
+}
+
+#[test]
+#[ignore = "local pinned source resource; run in release"]
+fn sub_bar_water_references_close_and_refine() {
+    use crate::{
+        galaxy::Component,
+        system::{galactic_bodies, physical, structure::prototype},
+    };
+    for (component, index, suffix) in [
+        (Component::Nucleus, 6, "/2"),
+        (Component::ThinDisc, 9, "/4"),
+    ] {
+        let key = format!("composition-calibration:{component:?}:{index}");
+        let system = galactic_bodies(&key, component);
+        let planet = system
+            .planets
+            .iter()
+            .find(|p| p.id().ends_with(suffix))
+            .unwrap();
+        let solve = |controls| {
+            let solved = prototype::solve(
+                &planet.body.budget,
+                planet.environment.as_ref().unwrap(),
+                controls,
+            )
+            .unwrap();
+            physical::layered(&solved)
+        };
+        let record = solve(coupled::Controls::default());
+        let fine = solve(coupled::Controls {
+            radial: dry::Controls {
+                relative_tolerance: 2e-11,
+                max_step: 1.0 / 256.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert_eq!(record.one_bar_radius_m, None);
+        assert_eq!(
+            record.physical.reference_radius_m,
+            record.physical.condensed_radius_m
+        );
+        assert_eq!(
+            record.physical.radius_reference,
+            space_shared::RadiusReference::UnresolvedVolatileBoundary
+        );
+        assert_eq!(record.surface, "unresolved compressed water");
+        assert!((OUTER_PRESSURE_PA..1e5).contains(&record.surface_pressure_pa));
+        assert!(
+            (fine.physical.reference_radius_m / record.physical.reference_radius_m - 1.0).abs()
+                < 1e-7
+        );
+        assert!((fine.physical.inertia_factor / record.physical.inertia_factor - 1.0).abs() < 1e-7);
+        assert_eq!(record.physical.materials, fine.physical.materials);
+        assert!(
+            record
+                .layers
+                .windows(2)
+                .all(|p| p[0].inner_radius_m == p[1].outer_radius_m)
+        );
+        let mass: f64 = record.layers.iter().map(|r| r.mass_kg).sum();
+        assert!((mass / record.physical.retained_mass_kg - 1.0).abs() < 1e-10);
+    }
+}
+
+#[test]
+#[ignore = "local pinned source resource; run in release"]
+fn recovered_envelope_steps_close_and_refine() {
+    use crate::{
+        galaxy::Component,
+        system::{galactic_bodies, physical, structure::prototype},
+    };
+    for (component, index, suffix) in [
+        (Component::Nucleus, 15, "/0"),
+        (Component::NuclearDisc, 17, "/1"),
+    ] {
+        let key = format!("composition-calibration:{component:?}:{index}");
+        let system = galactic_bodies(&key, component);
+        let planet = system
+            .planets
+            .iter()
+            .find(|p| p.id().ends_with(suffix))
+            .unwrap();
+        let solve = |controls| {
+            let solved = prototype::solve(
+                &planet.body.budget,
+                planet.environment.as_ref().unwrap(),
+                controls,
+            )
+            .unwrap();
+            physical::layered(&solved)
+        };
+        let baseline = solve(coupled::Controls::default());
+        let fine = solve(coupled::Controls {
+            radial: dry::Controls {
+                relative_tolerance: 2e-11,
+                max_step: 1.0 / 256.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let p = &baseline.physical;
+        let q = &fine.physical;
+        assert!(baseline.fallback_reason.is_none());
+        assert!((q.reference_radius_m / p.reference_radius_m - 1.0).abs() < 1e-7);
+        let inertia = |p: &space_shared::PlanetPhysical| {
+            p.inertia_factor * p.retained_mass_kg * p.reference_radius_m.powi(2)
+        };
+        assert!((inertia(q) / inertia(p) - 1.0).abs() < 1e-7);
+        assert_eq!(p.materials, q.materials);
+        let layer_mass: f64 = baseline.layers.iter().map(|r| r.mass_kg).sum();
+        assert!((layer_mass / p.retained_mass_kg - 1.0).abs() < 1e-10);
+        assert!(
+            baseline
+                .layers
+                .windows(2)
+                .all(|r| r[0].inner_radius_m == r[1].outer_radius_m)
+        );
+    }
+}
 
 fn inventory(core: f64, gas: f64) -> Inventory {
     Inventory::new(&[
@@ -176,7 +383,7 @@ fn unified_kernel_closes_interfaces_origins_and_shell_inertia() {
         &density,
     )
     .unwrap();
-    assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
+    assert!((fine.reference_radius_m / e.reference_radius_m - 1.0).abs() < 1e-7);
     assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
 }
 
@@ -352,7 +559,7 @@ fn rich_molecular_envelope_conserves_and_refines_without_dropping_water() {
         &density,
     )
     .unwrap();
-    assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
+    assert!((fine.reference_radius_m / e.reference_radius_m - 1.0).abs() < 1e-7);
     assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
     let (wet, _) = solve_with_density(
         &rich_molecular_inventory(1e-6 * EARTH_MASS_KG),
@@ -397,13 +604,13 @@ fn rich_molecular_reference_and_refinement() {
         ..Default::default()
     };
     let (_, fine) = solve(&request, &Inventory::default(), 350.0, 100.0, fine_controls).unwrap();
-    assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
+    assert!((fine.reference_radius_m / e.reference_radius_m - 1.0).abs() < 1e-7);
     assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
     eprintln!(
         "mixed R={} km base={} bar I={} residual={}",
-        e.one_bar_radius_m / 1000.0,
+        e.reference_radius_m / 1000.0,
         interior.regions().last().unwrap().outer().pressure_pa / 1e5,
-        e.inertia_kg_m2 / (request.total_mass_kg() * e.one_bar_radius_m.powi(2)),
+        e.inertia_kg_m2 / (request.total_mass_kg() * e.reference_radius_m.powi(2)),
         e.gravity_residual
     );
     let solved = super::super::prototype::Solved {
@@ -484,7 +691,7 @@ fn shallow_water_checks(source_backed: bool) {
             },
             ..Default::default()
         });
-        assert!((fine.one_bar_radius_m / envelope.one_bar_radius_m - 1.0).abs() < 1e-7);
+        assert!((fine.reference_radius_m / envelope.reference_radius_m - 1.0).abs() < 1e-7);
         assert!((fine.inertia_kg_m2 / envelope.inertia_kg_m2 - 1.0).abs() < 1e-7);
         assert!((fine_interior.radius_m() / interior.radius_m() - 1.0).abs() < 1e-7);
         assert!(envelope.outer_pressure_residual_pa() <= PRESSURE_TOLERANCE_PA);
@@ -634,8 +841,8 @@ fn envelope_reference_cases() {
         Default::default(),
     )
     .unwrap();
-    assert!((15000.0..18000.0).contains(&(baseline.one_bar_radius_m / 1000.0)));
-    assert!(core.radius_m() < baseline.one_bar_radius_m);
+    assert!((15000.0..18000.0).contains(&(baseline.reference_radius_m / 1000.0)));
+    assert!(core.radius_m() < baseline.reference_radius_m);
     let refined = coupled::Controls {
         radial: dry::Controls {
             relative_tolerance: 2e-11,
@@ -652,7 +859,7 @@ fn envelope_reference_cases() {
         refined,
     )
     .unwrap();
-    assert!((fine.one_bar_radius_m / baseline.one_bar_radius_m - 1.0).abs() < 1e-7);
+    assert!((fine.reference_radius_m / baseline.reference_radius_m - 1.0).abs() < 1e-7);
     assert!((fine.inertia_kg_m2 / baseline.inertia_kg_m2 - 1.0).abs() < 1e-7);
     for (core, gas, teq, tint) in [
         (5.0, 0.1, 250.0, 100.0),
@@ -670,8 +877,8 @@ fn envelope_reference_cases() {
         match result {
             Ok((interior, e)) => eprintln!(
                 "core={core} gas={gas} Tint={tint}: R={} km I={} iterations={} work={} coreR={} km residual={}",
-                e.one_bar_radius_m / 1000.0,
-                e.inertia_kg_m2 / ((core + gas) * EARTH_MASS_KG * e.one_bar_radius_m.powi(2)),
+                e.reference_radius_m / 1000.0,
+                e.inertia_kg_m2 / ((core + gas) * EARTH_MASS_KG * e.reference_radius_m.powi(2)),
                 e.iterations,
                 e.evaluations,
                 interior.radius_m() / 1000.0,

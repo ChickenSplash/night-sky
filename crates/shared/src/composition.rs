@@ -58,8 +58,9 @@ pub struct PlanetPhysical {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayeredPlanet {
     pub model: String,
-    /// Present only for the fallback structure: why the layered solver refused.
-    /// Such records never count as layered solves.
+    /// Why a layered attempt refused. Initial/unavailable/worker-failed fallback
+    /// has no solver refusal; authoritative provenance lives in `PlanetResult`.
+    /// Fallback records never count as layered solves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,
     pub model_fidelity: ModelFidelity,
@@ -67,14 +68,16 @@ pub struct LayeredPlanet {
     pub model_limitations: Vec<String>,
     /// Same transport shape as the legacy record. `approximations` lists the
     /// model IDs used. `reference_radius_m` is the top of the condensed surface
-    /// (frost included) for thin models, or the explicit one-bar envelope level.
+    /// (frost included) for thin models, or the explicit one-bar envelope level
+    /// when present. Sub-bar envelopes reference their condensed/gas boundary.
     pub physical: PlanetPhysical,
     /// `rock`, `ocean`, `ice`, `frost`, `deep ice`, `water coexistence` or
     /// `unresolved hot water`, or `envelope` (one-bar reference, not ground).
     /// The fallback adds `unresolved water` and `unresolved volatiles`.
     pub surface: String,
     pub surface_temperature_k: f64,
-    /// Gas pressure on the surface, or one bar for an envelope reference.
+    /// Gas pressure on the surface, or one bar for a one-bar envelope reference.
+    /// Sub-bar envelopes expose the actual condensed/gas boundary pressure.
     pub surface_pressure_pa: f64,
     pub greenhouse_optical_depth: Option<f64>,
     /// Absent when one bar lies below the surface or there is no gas.

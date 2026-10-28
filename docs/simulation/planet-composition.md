@@ -9,7 +9,8 @@ The [replacement plan](../plans/planet-composition.md) owns remaining work and t
 region/boundary contract; the [scientific reference](planet-composition-reference.md)
 owns input bounds, selected/candidate sources and future acceptance requests.
 Implemented radial solvers are separate headless APIs, described below.
-Default generation still uses the approximate reservoir/radius model. Opt-in
+Default generation now uses fast fallback facts for retention trials, but still
+exports the legacy approximate reservoir/radius model. Opt-in
 background loading exposes new solved records in the inspector beside legacy
 facts; rendering, navigation and the authoritative planet record remain legacy.
 The separate [water-shell solver](#headless-restricted-water-shell-solver) uses
@@ -24,6 +25,60 @@ to the radial models.
 [Protected secondary traces in dry hosts](#headless-protected-traces-in-dry-hosts)
 and [water-bearing hosts](#headless-protected-traces-in-water-bearing-hosts)
 are also headless and opt-in.
+
+## Authoritative result contract and validation
+
+P3's headless contract is implemented in shared `planet_result.rs` and simulation
+`system/physical/result.rs`. It does **not** yet replace live generation, rendering
+or the experimental loader. The [cutover plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal)
+tracks that migration.
+
+`PlanetResult` owns one `LayeredPlanet` physical/layer record, with typed
+layered/fallback provenance and refinement status. `PhysicalRevision` carries
+caller-owned immutable input and model/resource identities plus an adoption
+sequence. These are not automatically computed hashes, time stamps or proof of
+safe adoption. The caller must include body identity, retained supply, forcing
+and resource/prescription changes in those keys. A new input/model identity
+starts a new lineage; candidate work from another lineage must be discarded.
+
+`physical::initial_result` computes the cheap fallback without attempting a
+layered solve or manufacturing a refusal. `resolved_result` converts an actual
+layered/refused outcome into a candidate. Their common validation establishes
+transport consistency only. All physical fit prescriptions remain unchanged.
+
+- Initial fallback can be pending/running. A worker failure or unavailable
+  resource retains that usable result with a separate reason. A true layered
+  refusal alone sets `fallback_reason`; completed layered results have no refusal.
+  Provenance is explicit, never inferred from the absence of a refusal.
+- `SurfaceKnowledge` is distinct from the older geometric `RadiusReference`:
+  one bar is a gas reference; liquid water is liquid; ice-Ih is a modelled solid
+  phase. Cold-mechanics rock, frost, unresolved water and fallback boundaries
+  remain phase-unresolved. No temperature threshold invents a refractory melting
+  law. **Even a known solid phase is not safe-landing permission.**
+- `validate_record` checks supported model identity, finite physical quantities,
+  complete unique materials, species-local source/retained/escaped/reservoir
+  conservation, total and layer mass, bulk density, bounded reference gravity
+  and inertia, contiguous geometry/pressure, phase allocations, boundary/surface
+  consistency, reference-pressure semantics and model limitations. Gravity at an
+  envelope reference is bounded by fully enclosed and total mass, not forced
+  equal to exterior `GM_total/R²`. Exact local gravity or EOS/phase accuracy
+  cannot be reconstructed from these transport fields.
+- `validate_result` additionally checks provenance, refinement status, nonempty
+  revision keys and justified surface knowledge. `validate_refinement` requires
+  the same input/model identities, exactly the next adoption sequence, unchanged
+  formation supply, preserved prior loss and accounted additional blow-off.
+  It rejects stale/unrelated candidates without modifying either result.
+- No validator re-runs a structure, EOS, retention or atmosphere-partition solve.
+  Accepting an internally coherent nonlegacy radius and small positive inertia
+  is intentional, not an invitation to skip independent solver regressions.
+  The population census keeps its independent input-budget checks as well.
+
+These APIs create and validate **candidates**. Updating `Planet` projections,
+environment, spin, geometry, craft fields, routes and caches together, and
+deferring unsafe growth around an eye/craft, remain later P3 work. No live
+adoption API is provided yet. Existing `physical::validate(Planet)` is explicitly
+legacy compatibility for unmigrated consumers and still re-derives the old
+boundary model; new result validation is independent of that path.
 
 ## Approximation policy and fidelity labels
 
@@ -252,8 +307,9 @@ cryptographic source authentication.
   This experimental route uses a **100 K intrinsic reference**, not the 50 K
   decision-probe experiment, and does not claim it is right for every mass/age.
   The headless API accepts 20–200 K for sensitivity work. Reference gravity is
-  iterated with bounded secant updates from newly integrated enclosed mass at
-  one bar. Require relative gravity closure below 10⁻⁸. No legacy radius seeds
+   iterated with bounded secant updates from newly integrated enclosed mass at
+   the radius reference (one bar, or the condensed boundary for a sub-bar gas
+   shell). Require relative gravity closure below 10⁻⁸. No legacy radius seeds
   this fixed point. Molecular heat-capacity variation and true deep adiabats
   remain unresolved, so radius accuracy is not established.
 
@@ -308,13 +364,177 @@ inertia pass tighter-integration/half-step refinement checks at relative 10⁻�
 in the source-backed small-envelope fixture. More extreme ill-conditioned
 shoots explicitly fail rather than loosening their acceptance further.
 
-The radius and inertia factor use the one-bar reference; reference gravity uses
-mass actually enclosed there. Material inventories include the outer shell as
-well. There is no assertion of landable ground. Integration remains at relative
+The radius and inertia factor use the one-bar reference when it exists. If the
+gas base is at less than one bar, they use the shared condensed/gas boundary
+instead: `one_bar_radius_m` is absent, while reference pressure and temperature
+are the actual boundary values. Reference gravity uses the mass enclosed at
+the selected reference. A base exactly at one bar uses that boundary as the
+one-bar reference; a thicker shell without a located one-bar event still fails.
+No interpolation, new pressure cutoff or extrapolation into the interior is used.
+The gas shell retains its full inventory, profiles and inertia above the
+reference. The selected condensed surface keeps its existing phase knowledge:
+unresolved compressed water is not labelled as solid ground. The existing
+10 mbar shell endpoint and all EOS/closure gates remain unchanged.
+
+Integration remains at relative
 10⁻¹⁰ by default, with bounded 32 gravity iterations, 128 shooting iterations,
 2 million EOS evaluations per radial solve and 16 million across the request.
 An independent sample quadrature checks total inertia within 0.1%; it is not
 the delivered inertia and does not relax integration tolerances.
+
+Invalid intermediate RK volumes or non-finite stages reject the proposed mass
+step and retry at one quarter of its size, without altering the accepted state.
+These retries consume the existing step/EOS budgets. Failure to recover before
+the minimum step is a numerical refusal, never evidence that central pressure
+is too low. EOS/domain errors and exhausted budgets propagate unchanged; phase
+events and the pressure-coordinate bridge retain their existing contracts.
+This changes no physical prescription or accuracy tolerance.
+
+The step-recovery checkpoint is **1,416/1,544 layered (91.7%)**, with all 128 remaining
+bodies on the checked fallback. It recovers 35 of 36 radial refusals and one
+previous pure-melting-screen refusal whose shooting path had been cut short by
+an invalid stage. All 1,380 previous successes retain exactly identical full
+transport records and non-timing census fields. Mock-EOS regression tests cover
+rejection/retry, EOS error propagation and work accounting; two recovered
+source-backed bodies pass radius/inertia refinement at relative 10⁻⁷. One
+outer-envelope minimum-step failure remains unresolved.
+
+Sub-bar references raise the census to **1,437/1,544 layered (93.1%)**, with all
+107 remaining bodies on checked fallbacks. All 24 formerly unresolved one-bar
+cases genuinely start below one bar (initial base pressures 0.011–0.857 bar).
+Twenty-one now solve; three expose a separate region-mass resolution refusal.
+All 1,416 previous full transport records and non-timing census fields are
+exactly unchanged. Tests distinguish sub-bar, exactly-one-bar and missed-event
+cases, verify actual boundary radius/pressure/temperature/gravity, and check
+two recovered water-bearing bodies under tighter integration at relative 10⁻⁷.
+
+### P2 final validation
+
+The coverage probe now independently checks every layered and fallback transport
+record against its generated budget: all constituent source/retained/escaped
+and reservoir allocations, prior escape plus additional blow-off, total layer
+mass, finite positive physical quantities, ordered radii/pressures, central and
+shared boundaries, phase suballocation bounds, provenance and JSON round trips.
+Fallback reasons must be present and layered results must not carry one. Shared
+thin-boundary pressures retain their existing absolute 0.02 Pa numerical
+contract, including nearly airless surfaces; this is not a new solver tolerance.
+
+`source_backed_mass_heating_and_stripping_trends` adds 17 full-envelope
+experiments using the local pinned density resource. At 0.1% gas/heavy mass,
+1–10 Earth masses of heavy material give increasing radius and dimensional
+inertia. A fixed 5-Earth-mass heavy interior plus 0.01 Earth masses of gas
+expands from 11,886 to 13,542 km under equilibrium heating from 250 to 750 K,
+and from 11,503 to 13,638 km under intrinsic forcing from 50 to 200 K.
+Stripping gas from 0.1 to 10⁻⁷ Earth masses reduces the selected radius from
+17,429 to 9,819 km. The final sub-bar reference (0.110 bar) agrees with bare
+rock radius and dimensional inertia within relative 10⁻⁵. Every experiment
+checks constituent conservation and reference-gravity closure. These selected
+trends are plausibility evidence, not a cooling model, exhaustive continuity
+proof or observational accuracy measurement. Existing thin stripping,
+water-mass, independent quadrature and tightened-integration regressions remain.
+
+The original validation sample is **140 systems / 1,544 planets**. The expanded
+P2 probe is **57 systems per component, 399 systems total**, with the same
+deterministic key prefix and full checks on every generated planet. An initial
+15,001-system attempt was cancelled without final results; it is not validation
+evidence. The probe now logs progress every ten completed systems and flushes
+their rows to `data/tmp/composition-coverage-partial.tsv`, so an interrupted run
+retains all completed systems (not in-flight work). Final reports are replaced
+only after the whole run completes. Checkpoint order is worker completion order,
+not a balanced sample if interrupted; the normal final table is sorted by ID.
+
+```sh
+NS_COVERAGE_SYSTEMS=57 NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
+cargo test --release -p space-simulation source_backed_mass_heating_and_stripping_trends -- --ignored --nocapture
+```
+
+The expanded run completed in **82.9 s on 20 threads**: **4,052/4,367 layered
+(92.8%)**, plus **315/315 checked labelled fallbacks**, with no missing result.
+All record checks passed, and all 1,544 original rows are exactly unchanged in
+every non-timing field. The completed-system checkpoint contains all 4,367 final
+rows with matching values. This is a deterministic, component-balanced probe,
+not a population-weighted statistical accuracy estimate.
+
+Remaining first blockers: cold dense H/He 102, conservative melting screen 53,
+outward density inversion 37, envelope work budget 28, warming outside domain
+26, H/He-free dense gas 25, central shooting resolution 19, region mass resolution
+13, reference-gravity convergence 11 and radial integration convergence 1.
+No new failure category appeared. These are fallback reasons, not dropped
+planets; no further numerical or physics change was made for this validation.
+Evidence is saved locally in `data/tmp/p2-step7-399/`, with run logs at
+`data/tmp/p2-step7-{399,trends,envelope,density,check}.log`.
+
+#### Saved-population plausibility audit
+
+The post-validation audit scans **all 4,367 saved results**, not just fixtures.
+It reconstructs the 315 inexpensive fallback records from the original inputs
+and confirms unchanged radii. Layered retained masses account for the saved
+additional escape. Density is recomputed from retained mass and selected radius;
+`GM_total/R²` is explicitly an **upper bound** on envelope reference gravity,
+because the census omits the enclosed reference mass. Four selected layered
+outliers are re-solved to inspect complete records; no population re-solve or
+physical prescription change is made.
+
+Reproduce after the 399-system census is saved at `data/tmp/p2-step7-399/`:
+
+```sh
+cargo test --release -p space-simulation saved_census_fallback_audit -- --ignored --nocapture
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/audit-composition-plausibility.py
+```
+
+Outputs: `data/tmp/p2-plausibility-{audit.tsv,summary.json,fallbacks.jsonl,outliers.jsonl}`.
+The reconstructed fallback's diagnostic reason is an audit placeholder; its
+separate `original_refusal` preserves the original census reason.
+
+**Findings, not an all-planets physical validation certificate:**
+
+- Layered radii span 794–90,670 km, bulk densities 13.7–10,067 kg/m³,
+  reference inertia factors 0.0156–0.3734 and temperatures 20–1,861 K.
+  Fallback radii span 1,740–72,699 km, densities 262–8,270 kg/m³, inertia
+  factors 0.0684–0.3710 and temperatures 20–1,136 K. These are broad planetary
+  scales, not evidence that each envelope radius is physically accurate.
+- **58 distinct layered bodies trigger review**, with overlapping categories:
+  20 have density below 100 kg/m³; 28 have a total-mass molecular-H/He binding
+  parameter below 20; nine have reference inertia below 0.03; 13 expose rock
+  at at least 1,500 K. These are deliberately broad audit triggers, not EOS
+  validity limits, new fallback criteria or proven phase/escape diagnoses.
+  No body triggers the broad condensed-density (below 500 or above 20,000 kg/m³)
+  or inertia (outside 0.01–2/3) screens as implemented in the script.
+- **Very puffy envelopes remain a physical concern.** The worst is
+  `composition-calibration:ThinDisc:5/1`: 7.14 Earth masses, 13.2% H/He,
+  90,670 km at one bar and 812 K, density 13.7 kg/m³. Its condensed boundary
+  is 10,309 km and its operational 10 mbar shell reaches 158,540 km.
+  Full-record mass/boundary checks reproduce, but tighter integration
+  (`2e-11`, maximum step `1/256`) exhausts the unchanged work budget. Thus
+  **no tightened-refinement pass is claimed for this extreme**, and neither
+  the physical radius nor long-term atmospheric retention is established.
+- The smallest-inertia case, `composition-calibration:Arms:38#A/1`, has
+  3.39 Earth masses, a 44,183 km reference radius and an 8,098 km condensed
+  radius. Its small inertia factor is consistent with normalising a compact
+  heavy interior by an extended reference radius, not negative/lost mass.
+  Tighter integration changes radius/inertia by 5.18×10⁻⁹ / 3.64×10⁻⁸.
+  This verifies numerical stability, not the thermal prescription's accuracy.
+- The densest case is a 7.53-Earth-mass compressed metal-rich planet with
+  radius 10,217 km and density 10,067 kg/m³, plausible for the cold proxy.
+  The hottest rock is at 1,861 K and 59.1 bar. Cold refractory mechanics cannot
+  determine melting or guarantee a solid landable surface at that temperature;
+  this remains an explicit limitation before the P3 consumer/landing cutover.
+- All 315 fallback ranges pass the broad physical screens. **279 are labelled
+  extrapolated**, using explicitly bounded fit inputs, and 16 also use the
+  heavy-mass continuation. All use the documented condensed-secondary proxy.
+  Their equilibrium-only temperatures and absent secondary atmospheres are
+  known limitations, not greenhouse predictions. No universal accuracy is implied.
+
+The audit therefore supports broad plausibility **with explicit exceptions and
+uncertainty**, not the stronger claim that every generated physical value has
+been validated. Puffy-envelope thermal/escape plausibility, the extreme's
+refinement refusal and hot-rock solidity need acceptance as limitations or
+separate follow-up work. No pressure cap, radius rescaling, relaxed work limit
+or silent fallback substitution was added to hide them.
+
+The user signed off P2 with these limitations explicitly accepted; future
+physics improvements remain targeted follow-up work. No authoritative generation, rendering,
+retention or legacy-consumer cutover is included in this validation.
 
 ### Checks and coverage
 
@@ -798,7 +1018,7 @@ cargo test --release -p space-simulation suspended -- --include-ignored --nocapt
 NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
 ```
 
-The final 20-thread census with this route solves **1,380/1,544 (89.4%)**, gaining **76**
+At the suspended-condensation checkpoint, the 20-thread census solves **1,380/1,544 (89.4%)**, gaining **76**
 from the original 106 condensation refusals, with no previous successes lost.
 Of the 76 new solves, 51 have integrated CO₂ condensate and 25 have none anywhere
 in their accepted profile. Across all 125 accepted cold-route planets, 51
@@ -809,8 +1029,9 @@ Among previous successes, 49 cold explicit mixtures intentionally change their
 density prescription: maximum relative radius change is **0.01144%**, and
 inertia-factor change **0.02287%**. These are model differences, not physical
 error bars. The other previous successes retain their reported physical results.
-There are 164 refusals left; at least **149** more layered solves are needed for
-99%. Coverage diagnostics also write `composition-condensation.tsv` (observed
+That checkpoint leaves 164 layered refusals; subsequent numerical recovery is
+described above. The current target is about 95% layered with a labelled fallback
+for the rest, not 99%. Coverage diagnostics also write `composition-condensation.tsv` (observed
 pure-screen trial states) and `composition-suspended.tsv` (accepted cold-route
 phase totals), without altering runtime generation.
 Full project checks, all 17 envelope tests (including source-backed cases) and
@@ -1652,8 +1873,10 @@ validation re-derives the legacy structure and would reject it).
   column and each region's density model), not legacy caveat IDs.
 - `radius_reference` is `solid_surface` only for bare rock or bare ice-Ih. An
   ocean, a frost deposit (phase not modelled) and unresolved water stay
-  `unresolved_volatile_boundary`, so this record can never grant ground to a
-  liquid or unresolved phase. Envelopes use `one_bar`, never `solid_surface`,
+  `unresolved_volatile_boundary`. This older reference enum is geometric, not
+  certification of refractory solidity or landing permission; the new
+  [result contract](#authoritative-result-contract-and-validation) carries
+  separate surface knowledge. Envelopes use `one_bar`, never `solid_surface`,
   and label reference temperature/pressure accordingly in the inspector.
 - `layers` run outermost first: the atmosphere's operational finite shell (its
   top pressure is not resolved, so absent), the frost deposit, then each
@@ -2109,10 +2332,17 @@ placement, and the 1,000 AU compact retry remains. The proposed formation locati
 is retained even when spacing moves the final orbit outward. Evolved hosts keep
 their existing progenitor snow/inner scales rather than using present luminosity.
 
-Final structure shares the atmosphere model's cached 32-phase all-star heating
-and activity/history-weighted loss forcing. For original gas mass `M_g`, solve
+Retention shares the cached 32-phase all-star heating and activity/history-weighted
+loss forcing. `system/forcing.rs` holds validated thermal/loss inputs, prepared
+before retention or atmosphere partition: flux, loss forcing, age and the original
+per-body seeded albedo. Its atmosphere-free environment adapter cannot import
+previous pressure, partition or boundary geometry into a trial. Derived atmosphere
+output is built separately from the same inputs.
+
+For original gas mass `M_g`, solve
 retained fraction `s` such that `s=1/[1+(25/λ)^4]`, where `λ=GM μ_H2/(R kT_exo)`
-is evaluated at the **retained** mass and radius. The structure solve uses
+is evaluated at the **retained** mass and radius. Every trial now uses
+`fallback::initial`, not `structure::derive` or a layered/EOS solve. The fallback uses
 current flux and age, while `T_exo=max(1000 max(F_loss/1361,0.01)^0.2,2T_eq)`
 and `T_eq=max(20,[0.7F/(4σ)]^0.25)` are fixed-albedo heuristic estimates.
 These are not actual XUV spectra, Jeans escape rates or integrated evolution.
@@ -2128,14 +2358,26 @@ survival residual or bracket width is ≤1e-8. This bounds gas-mass uncertainty 
 criterion is met. A residual stop only bounds the survival equation's residual,
 not distance to a unique solution. It does not establish physical uncertainty.
 The stripped endpoint is continuous in radius; bisection does not require a
-monotonic radius law. No-envelope inputs bypass iteration. Unsupported structure
-or exhaustion returns an explicit error; production asserts its supported draws
-cannot reach that failure, rather than substituting an invented fallback world.
+monotonic radius law. No-envelope inputs bypass iteration. Trial structure is
+explicitly fallback, with no fabricated layered refusal. Exhaustion returns an
+explicit error; production asserts its draws converge rather than accepting the
+last trial silently. No external H/He data is needed by retention.
 Re-evaluation always starts from immutable source H/He, so loss is not compounded.
 Mass, radius, inertia and descriptive classification are updated together; neighbour
 stability is checked again with retained masses, without moving any orbits.
-The cost is bounded algebraic structure work per bisection step, not numerical
-interior integration or repeated stellar phase sampling.
+Work is bounded by 40 fallback evaluations, each using fits and fixed profile
+quadrature, plus one pre-loss secondary reference and the no-envelope shortcut.
+There is no adaptive interior integration or repeated stellar phase sampling.
+Valid zero irradiation reaches the fit's documented low-flux bound rather than
+being replaced with Earth flux; equilibrium zero remains separate from the
+fallback's 20 K temperature floor.
+
+The live cutover is **not complete**. Initial formation structures and the final
+legacy compatibility projection still use `structure::derive`; classification,
+spin, atmosphere partition/boundary correction and both wire exporters still
+consume that projection. It never feeds back into retention. Installing the
+unified result and migrating those consumers remains P3 work. Retained population
+values can change; archived P2 census evidence belongs to its original inputs.
 
 ## Secondary escape and reservoir partition
 
@@ -2149,7 +2391,7 @@ For source mass `S_i`, accessible survival `r` gives retained mass
 
 `r=1/[1+(F_loss/(1361 × 10 × (v_escape/11200)^4))^1.5]` is the existing
 shoreline-inspired trend, now used as a surviving **mass fraction**, not a random
-probability that air exists. Escape speed uses immutable pre-loss source structure
+probability that air exists. Escape speed uses fallback for immutable pre-loss source structure
 at current flux/age. This fixed reference avoids a second nonlinear solve but
 does not reproduce feedback from secondary loss, envelope shielding or differential
 escape. It is not an integrated escape rate or a fitted universal shoreline.

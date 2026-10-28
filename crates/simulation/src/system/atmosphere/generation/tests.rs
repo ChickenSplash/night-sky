@@ -3,6 +3,7 @@ use crate::system::{
     Body, Class,
     atmosphere::ColumnValidity,
     composition::{Budget, Inventory, Material, Reservoir},
+    generation::retention::secondary_retention,
 };
 use space_shared::{Barycentre, Orbit, Spin};
 
@@ -413,7 +414,8 @@ fn secondary_escape_debits_only_accessible_source_and_does_not_compound() {
     use crate::system::generation::retention::{accessible_fraction, finalise};
     let initial = volatile_body();
     let mut body = initial.clone();
-    finalise(&mut body, "escape-test", 1.0, 1361.0, 1e12, 4.5);
+    let forcing = Forcing::new(1361.0, 1e12, 0.3, 4.5).unwrap();
+    finalise(&mut body, "escape-test", 1.0, &forcing);
     assert_conserved(&body);
     assert!(body.budget.escaped().mass_kg(Material::Nitrogen) > 0.0);
     for material in [Material::Water, Material::Nitrogen, Material::CarbonDioxide] {
@@ -426,7 +428,7 @@ fn secondary_escape_debits_only_accessible_source_and_does_not_compound() {
     assert_eq!(body.budget.escaped().mass_kg(Material::Metal), 0.0);
     let first = body.clone();
     partition::atmosphere(&mut body, 90.0).unwrap();
-    finalise(&mut body, "escape-test", 1.0, 1361.0, 1e12, 4.5);
+    finalise(&mut body, "escape-test", 1.0, &forcing);
     assert_eq!(body.budget, first.budget);
     assert_eq!(body.structure, first.structure);
     assert_eq!(body.spin, first.spin);
@@ -450,6 +452,9 @@ fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
             assert_eq!(planet.body.orbit, repeated.body.orbit);
             assert_eq!(planet.environment, repeated.environment);
             let environment = planet.environment.as_ref().unwrap();
+            let expected_albedo =
+                Rng::new(&format!("{}:atmosphere:v1", planet.id())).range(0.1, 0.6);
+            assert_eq!(environment.assumed_bond_albedo, expected_albedo);
             assert_eq!(environment.age_gyr, expected_age);
             assert!(environment.irradiation_w_m2.is_finite() && environment.irradiation_w_m2 > 0.0);
             assert!(environment.equilibrium_temperature_k.is_finite());

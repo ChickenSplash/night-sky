@@ -22,8 +22,8 @@ use std::f64::consts::PI;
 pub fn layered(solved: &Solved) -> LayeredPlanet {
     let s = &solved.structure;
     let air = s.atmosphere();
-    let surface_pressure_pa = if s.envelope().is_some() {
-        1e5
+    let surface_pressure_pa = if let Some(envelope) = s.envelope() {
+        envelope.reference_pressure_pa()
     } else {
         air.map_or(0.0, |a| a.pressure_pa())
     };
@@ -211,6 +211,10 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
         }
     }
     let surface = solved.surface();
+    let mut limitations = strings(s.approximation_notes());
+    if s.envelope().is_some_and(|e| e.one_bar_radius_m().is_none()) {
+        limitations.push("Gas base is below one bar: radius, pressure, temperature and gravity reference the condensed boundary; water, when present, remains phase-unresolved".into());
+    }
     LayeredPlanet {
         model: solved.model_id().into(),
         fallback_reason: None,
@@ -219,7 +223,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
         model_fidelity: layers
             .iter()
             .fold(ModelFidelity::Approximate, |a, l| a.max(l.model_fidelity)),
-        model_limitations: strings(s.approximation_notes()),
+        model_limitations: limitations,
         physical: PlanetPhysical {
             materials: Material::ALL
                 .into_iter()
@@ -259,7 +263,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             inertia_factor: s.inertia_kg_m2() / (mass * radius.powi(2)),
             // Only bare rock and bare ice-Ih count as ground. Liquid, frost of
             // unmodelled phase and unresolved water never grant a solid surface.
-            radius_reference: if s.envelope().is_some() {
+            radius_reference: if s.envelope().is_some_and(|e| e.one_bar_radius_m().is_some()) {
                 RadiusReference::OneBar
             } else if matches!(surface, "rock" | "ice") {
                 RadiusReference::SolidSurface
@@ -332,7 +336,7 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
     use fallback::Kind as K;
     LayeredPlanet {
         model: fallback::MODEL_ID.into(),
-        fallback_reason: Some(f.reason.to_string()),
+        fallback_reason: f.reason.as_ref().map(ToString::to_string),
         model_fidelity: fidelity,
         model_limitations: strings(&f.notes),
         physical: PlanetPhysical {

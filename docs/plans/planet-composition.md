@@ -2,8 +2,9 @@
 
 ## Status and goal
 
-**P1 complete and signed off on 27 October 2026. Next: P2 step 6, cheap
-layered wins.** The live, generator-backed rock-and-water prototype provides
+**P1 and P2 complete and signed off. Next: P3, default cutover and legacy
+removal. P3 contract and model-independent validation implemented; synchronous
+generation/retention migration is in progress.** The live, generator-backed rock-and-water prototype provides
 conserved, layered planets alongside the legacy model. Population-wide cutover
 and legacy removal remain P3.
 
@@ -49,8 +50,19 @@ is still legacy.
   Nothing is pushed: neither
   the main branch nor `park/methane-physics` (parked methane physics). Ask the
   user before pushing either.
-- **Current coverage:** 1,380/1,544 layered (89.4%), 164 on the fallback,
-  no refusals. Next: step 6, time-boxed.
+- **Current coverage:** 1,437/1,544 layered (93.1%), 107 on the fallback,
+  no refusals. Step 6: invalid RK-stage recovery and sub-bar radius references
+  are done. The user stopped further quick wins and authorised step 7, including
+  an expanded probe. The initial 15,001-system run was cancelled after about
+  23 minutes without a final report. The user reduced the target to about 400:
+  **399 systems (57 per component)**, with completed-system checkpoints and
+  progress output. The old sample is 140 systems, not 1,544 systems.
+  Remaining numerical and physics failures stay on fallback.
+  **P2 signed off by the user:** expanded coverage is 4,052/4,367 layered
+  (92.8%) plus 315 labelled fallbacks. Diffuse envelopes, the extreme's
+  tighter-refinement work limit, hot-rock solidity and fallback fit limits are
+  accepted limitations, not claims of universal physical accuracy. Further
+  physics improvements stay optional. Next is P3 planning, not an automatic cutover.
 - **Performance and next step:**
   - Refinement-only warming optimisation is implemented: a paired 20-thread
     run reduced report wall time from 19.5 to 18.2 s and solved median from
@@ -590,24 +602,242 @@ owns equations, resource setup, numerical boundary contracts and limitations.
    unchanged. 20,000 randomised extreme inventories pass in `check.sh`.
    Fallback radius vs legacy: median 0%, p95 30%, max 61%, the large ones being
    bodies with under 1% H/He, where layered solves also exceed legacy.
-6. **Cheap layered wins, time-boxed.** Solver robustness (radial, shooting,
+6. **Cheap layered wins, stopped by user at 93.1%.** Solver robustness (radial, shooting,
    gravity and region-mass convergence, work budgets) and a radius reference
    for bodies with no one-bar level. Stop at the time box; leftovers stay on
    the fallback. Hard physics (cold dense H/He, H/He melting, density
-   inversion) is parked.
-7. **Validate and close.** Mass/radius/inertia, heating and stripping trends,
-   approach to the bare-body limit and conserved boundaries; rerun coverage and
-   project checks.
+    inversion) is parked.
+   - **Invalid RK-stage recovery done:** reject and shrink invalid intermediate
+     steps, preserving EOS errors, work limits and tolerances. Recovers 35/36
+     radial refusals plus one interrupted shooting path previously labelled as
+     a melting refusal. All 1,380 prior full transport records and non-timing
+     census fields are exactly unchanged; two recovered source-backed bodies
+     pass radius/inertia refinement at 10⁻⁷. One radial precision case remains.
+   - **Sub-bar radius references done:** all 24 missing-one-bar cases genuinely
+     start below one bar. Use their condensed boundary with actual pressure,
+     temperature and enclosed-mass gravity, never an invented one-bar level.
+     Recovers 21; three expose region-mass resolution failures and stay on
+     fallback. All 1,416 previous full records and non-timing fields are
+     unchanged; recovered water fixtures pass 10⁻⁷ refinement checks.
+7. **Validate and close, complete and signed off by the user.**
+   - The 399-system run checks 4,367 planets: **4,052 layered (92.8%) plus 315
+     checked labelled fallbacks**, no missing result. All 1,544 original rows
+     retain exactly unchanged non-timing fields. The run took 82.9 s on 20
+     threads; all completed-system checkpoint rows match the final output.
+   - Strengthened population checks cover each material's source, retained,
+     escaped and reservoir mass, prior escape/blow-off, finite complete records,
+     shared boundaries, phase mass bounds, labels and JSON round trips.
+   - Seventeen source-backed mass, heating and stripping experiments pass,
+     including approach to bare-rock radius and dimensional inertia within
+     relative 10⁻⁵. Existing water/thin-atmosphere/refinement checks remain.
+   - All 22 envelope tests (including ignored source-backed fixtures), pinned
+     density and negative-phase fixtures pass. Final `./scripts/check.sh` passes
+     after the checkpoint/progress addition, including 445 simulation tests.
+   - All remaining failures are in known categories, not an obvious new large
+     quick win. Preserve fallback and numerical/physics restrictions. Canonical
+     evidence and limitations are in the [validation guide](../simulation/planet-composition.md#p2-final-validation).
+   - **Population plausibility audit completed after the numerical checks:** all
+     4,367 results screened; 315 fallbacks reconstructed and four layered
+     extremes inspected. Broad fallback ranges are plausible, with 279 labelled
+     extrapolations. Layered review flags cover 58 distinct bodies, including
+     20 very diffuse envelopes and 13 hot rock surfaces with unresolved solidity.
+     The largest (7.14 Earth masses, 90,670 km) reproduces but exhausts the
+     unchanged budget under tighter integration; its refinement is not certified.
+     A second extreme passes tighter radius/inertia refinement. These physical
+     caveats prevent an unqualified all-planets validation claim. The user
+     accepted the [audit limitations](../simulation/planet-composition.md#saved-population-plausibility-audit)
+     and signed off P2, leaving improvements for future targeted work.
+     No production physics was changed.
 
 **Exit:** about 95% layered, the rest on the labelled fallback, no refusals,
 and step 7 trends pass documented plausibility checks. Coverage alone does not
 establish scientific accuracy.
+
+**Exit accepted:** 92.8% layered on the expanded sample, all remaining bodies on
+checked labelled fallbacks, passing project and trend checks, with the physical
+audit limitations explicitly accepted. No further coverage or physics work is
+required to close P2. P3 investigation and cutover design are recorded below;
+the headless contract/validation slice and fallback-based retention trials are
+implemented. Live geometry/export cutover and legacy removal remain pending.
 
 **Scope control:** before each change, state the observed gap, smallest useful
 prescription, fixtures and stop condition. A slice ships only if it changes
 something visible in game or closes a gap measured by the coverage report.
 
 ## P3. Default cutover and legacy removal
+
+**Step 1 investigation complete: consumer map and proposed cutover design.**
+This section records source-verified dependencies and the implementation order,
+with completed slices marked below. No further P2 physics work is required. The scope is
+planet structure, retention and their consumers, not replacement of stellar,
+orbital or formation-inventory generation.
+
+### Consumer map
+
+Paths below are relative to `crates/`.
+
+| Consumer / owner | Current dependency | Required cutover |
+| --- | --- | --- |
+| Formation and final retention: `simulation/src/system/generation.rs`, `generation/retention.rs` | Secondary-loss escape speed and every H/He trial now use fallback. Initial structure and final compatibility projection still call `structure::derive`; classification and spin read `Structure`. | Finish moving synchronous structure to the unified result. Preserve immutable formation supply and non-compounding loss accounting; adapt classification/spin to model-neutral facts. Do not run layered solves inside retention bisection. |
+| Environment generation: `simulation/src/system/atmosphere/generation.rs`, `generation/partition.rs`, `structure/boundary.rs` | Environment preparation calls legacy boundary resolution, which overwrites structure/radius and partitions the retained budget. | Separate all-star forcing/albedo/age preparation from structure and optical-column export. The chosen result owns final mass, partition, reference and thermal facts; old boundary resolution must not overwrite them. |
+| Natural systems and overlays: `simulation/src/system/generated.rs`, `overlay.rs` | Both export legacy `Body` facts; experimental mode only prepares separate jobs. | Share one model-to-planet export path, including metadata/layers. Natural IDs, host/orbit, designation and overlay tasks remain independent of refinement. |
+| Validation and snapshots: `shared/src/composition.rs`, `simulation/src/system/physical.rs`, `physical/layered.rs` | `LayeredPlanet` is a side record; `physical::validate` reconstructs the legacy boundary model and compares against it. | Carry model provenance, fidelity and surface knowledge with the authoritative planet. Validate transported invariants without re-solving either model. Keep independent solver regression tests, rather than treating transport validation as physical verification. |
+| Background loading: `client/src/planet_loading.rs` | Opt-in inspector cache; completed records do not update the system. | Always expose a valid initial fallback. Track queued/running/refused/worker-failed separately from that result. Cache candidate refinements by inputs/model revision, discard stale jobs and publish through one coherent adoption path. |
+| Shape and spin: `simulation/src/system/shape.rs`, `generation.rs` | `planet_shape` accepts inertia only in 0.1–0.4 and otherwise substitutes a neutral/class value; spin limits use legacy facts. | Accept validated new-model inertia, including the audited values below 0.1. Recompute dependent spin limits and shapes consistently, preserving deterministic spin seeds and locked-period semantics. Keep the existing bounded shape approximation explicitly labelled. |
+| Ground, discs and lighting: `client/src/scene/draw.rs`, `render/ground.rs`, `simulation/src/system/surface.rs`, `light.rs` | A single reference spheroid supplies drawing and ground; atmosphere reference suppresses terrain. Reflectance calls legacy validation. | Distinguish a condensed drawable boundary, a gas reference and an opaque visual proxy. Rendering must not promote any of them to certified landable ground. Keep reflectance/scattering prescriptions separate from structure. |
+| Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | Reconstruct columns using total GM and `Planet::radius_km`; descent permission uses a legacy gas-fraction threshold. | Export gas inputs at the selected reference with actual pressure/temperature and enclosed-mass gravity. Use a named optical approximation for unresolved profiles; never infer a resolved column or clouds from bulk gas mass or suspended condensate alone. Replace legacy threshold-based descent eligibility with explicit geometry/surface knowledge. |
+| Camera and craft: `simulation/src/system/clearance.rs`, `craft.rs`, `craft/route.rs`, `craft/voyage.rs`, `client/src/scene/location.rs`, `client/src/craft.rs` | Clearance, gravity, spawn altitude, body reach and routes consume copied systems/fields. Camera field invalidation currently checks system ID/page and list changes, not a physical revision. | Adopt one revision across view and physical fields; rebuild mass/reach/clearance/route caches. Keep camera pose and craft state stable; never silently embed them in enlarged geometry or leave craft on a different mass revision. |
+| Search and distant generation: `simulation/src/search/{engine,live}.rs`, `craft/voyage.rs` | Radius, mass and class predicates use synchronous generated bodies; remote systems may never enter the client loader. | Use the new synchronous fallback, not hidden legacy or background EOS work. Disclose the result basis for searchable physical properties; a fallback match is not a guaranteed layered match. Reconcile/revalidate when a loaded result changes. |
+| Inspector and developer tools: `client/src/ui/inspector/`, `devtools/`, planet loader readout | Separate legacy and experimental reports, plus derived UI caches. | Show the active authoritative revision and any pending candidate distinctly; export the same facts in snapshots. Remove obsolete comparison/toggle paths after migration. |
+
+### Proposed authoritative contract
+
+- One active planet result, either labelled fallback or layered, with explicit
+  model/input revision. Convenience mass/radius/inertia, environment and layers
+  are projections of that same result, not independently mutable sources.
+- Keep forcing inputs separate from derived atmosphere output. Otherwise the
+  current retention → environment → legacy boundary cycle survives the cutover.
+  Extract the smallest forcing input type needed by fallback and retention;
+  do not invent a fake legacy atmosphere just to construct new-model inputs.
+- Distinguish provisional fallback (refinement pending), final fallback
+  (layered refusal/unavailable resource) and worker failure (retain the valid
+  active result). The existing fallback reason assumes a solver refusal, so
+  synchronous startup needs honest provenance rather than a fabricated error.
+- Preserve the selected-reference convention: one bar when present, otherwise
+  condensed/gas boundary with its actual pressure, temperature and local gravity.
+  Keep condensed radius, frost-top boundary, gas reference, optical extent and
+  navigation exclusion distinct. Neither optical extent nor one bar is ground.
+- Add explicit surface/phase knowledge for consumers. Existing `SolidSurface`
+  and string `rock` are insufficient: cold refractory mechanics do not certify
+  hot-rock solidity, and liquid/unresolved/fallback boundaries are not certified
+  solid terrain. Do not introduce an arbitrary temperature cutoff as a phase law.
+- Exterior gravity still uses retained total mass. A gas reference inside an
+  extended envelope uses enclosed mass for local gravity; current optics/column
+  interfaces need adapting rather than substituting total GM everywhere.
+- Fallback secondary volatiles remain the accepted condensed proxy. Do not
+  copy the old secondary atmosphere onto its new radius and claim a consistent
+  partition. Any visual continuation must be explicit, inventory-compatible and
+  labelled; fallback need not reproduce the legacy appearance.
+
+### Refinement adoption and safety
+
+Recommended first implementation: separate a completed **candidate** from the
+**active** result. Publish a whole planet revision, including all dependent facts,
+at a controlled update boundary. No radius-only patches or independently updated
+render and craft records; no visual interpolation masquerading as physical data.
+
+Before adoption, check camera position, craft positions and active routes against
+the candidate geometry/clearance, and invalidate every revision-dependent cache.
+If safe simultaneous adoption is not available, retain the active revision and
+show the candidate as pending. The conservative implementation may defer the
+whole system while a craft/route uses it. Do not teleport the camera/craft, silently
+change a trajectory's field, or allow cache eviction/revisit to bypass that pin.
+The exact adoption guard belongs with the camera/craft migration and its tests;
+it must be demonstrated before enabling live updates by default.
+
+Search remains bounded and deterministic on the synchronous new-model basis.
+Candidate results must not silently change query semantics according to worker
+completion order. Result provenance and loaded-result revalidation are required;
+a unified exact layered search across the galaxy is not part of this cutover.
+
+### Implementation slices and stop conditions
+
+1. **Authoritative contract and validation, implemented.** Add result provenance, surface
+   knowledge and revision semantics; model-neutral transport checks and a shared
+   export adapter. Fixtures cover layered/fallback round trips, corrupt records,
+   sub-bar/exact-one-bar references, hot rock, frost and low inertia. No default
+   behaviour switch yet; stop when new records can be validated without legacy.
+   - `space_shared::PlanetResult` wraps the physical/layer record with typed
+     layered/fallback provenance, input/model identities, adoption sequence,
+     refinement status and separate surface knowledge. It is not installed into
+     the live `Planet` yet. Cold rock and fallback phases stay unresolved; ice-Ih
+     is a known solid phase, not permission to land.
+   - `physical::{initial_result,resolved_result}` create validated candidates.
+     Startup uses the same fallback prescription without a fabricated refusal.
+     Pending/running, actual refusal, unavailable resource and worker failure
+     are distinct states. A usable fallback remains available on failure.
+   - `physical::{validate_record,validate_result}` check transport invariants,
+     not EOS agreement. `validate_refinement` checks matching input/model keys,
+     the next adoption sequence, immutable supply and prior escape/blow-off.
+     It does not apply a candidate or certify camera/craft safety.
+   - The existing `physical::validate(Planet)` remains explicitly legacy-only
+     for unmigrated consumers. Replacing those callers before migrating their
+     records would change the current game; new-model validation never calls it.
+     Remove it with the legacy consumer path, not before.
+   - Focused tests cover honest fallback lifecycle, JSON round trips, dry/hot
+     rock, ice/ocean, frost geometry, gas reference, sub-bar and exact-one-bar
+     base semantics, low inertia, coherent nonlegacy radii, corrupt species/
+     layers, stale revisions and non-compounding escape. The independent census
+     checks also invoke the production transport validator.
+   - Verification: all nine new contract tests pass; `./scripts/check.sh`
+     passes (454 simulation tests, 373 client tests, strict Clippy/formatting).
+     All envelope tests, including source-backed ignored fixtures, pass. The
+     saved-census audit passes with the new validator on 315 reconstructed
+     fallbacks and four layered extremes; saved radii remain unchanged. The
+     accepted diffuse extreme still exhausts its tighter-refinement work budget,
+     exactly as in P2, not a newly claimed refinement pass. Logs:
+     `data/tmp/p3-contract-{check,audit,envelope}.log`.
+2. **Synchronous generation and retention, in progress.** Separate forcing, replace every
+   retention/initial-structure call and both wire exporters. Keep existing loss
+   priors and shared fits, not a new escape research project. Check constituent
+   conservation, repeated-evaluation stability, deterministic IDs/orbits/seeds,
+   total results, and bounded work with/without H/He data. Output values may
+   change; the P2 census remains archived evidence for its original inputs, not
+    a promised coverage percentage on the changed retained population.
+   - Implemented first slice: validated immutable forcing inputs (all-star flux,
+     activity-weighted loss flux, seeded albedo and age) are prepared before
+     retention, independently of atmosphere output. Albedo still comes from the
+     same per-body stream; the heuristic exosphere retains its fixed 0.3 albedo.
+     Secondary pre-loss escape speed and every H/He trial use
+     `fallback::initial`, without EOS/data access, legacy solves or a fabricated
+     layered refusal. Loss priors and source-based repeated evaluation remain.
+   - A zero-irradiation regression exposed fallback's substitution of Earth flux
+     for valid zero. Zero now reaches the fit's existing lower bound; positive
+     flux prescriptions are unchanged. This is not a new cooling/escape model.
+   - Deliberate migration boundary: final retention still builds one legacy
+     compatibility structure for existing consumers, followed by the existing
+     atmosphere/boundary correction. That projection never feeds back into
+     retention. Initial formation structure, classification/spin, the live
+     `PlanetResult` installation and shared natural/overlay export remain pending.
+     This slice does not make fallback the live geometry authority.
+   - Regression coverage: the 800-case formation/forcing grid validates
+     fallback transport and repeated non-compounding escape, with bounded
+     survival residuals. A below-legacy-domain fixture proves retention no longer
+     depends on that domain or a previous reservoir split. Forcing tests reject
+     invalid inputs, preserve zero equilibrium separately from the thermal floor
+     and keep outputs from mutating inputs; population tests check the original
+     albedo stream, deterministic IDs/orbits, conservation and changed-age replay.
+   - Verification: `./scripts/check.sh` passes (458 simulation tests, 373 client
+     tests, formatting and strict Clippy). All 22 envelope tests, including
+     ignored source-backed fixtures, pass. Logs:
+     `data/tmp/p3-retention-{check,envelope}.log`. No new coverage percentage or
+     visual/performance validation is claimed for the changed generation path.
+3. **Consumer adapters.** Migrate shape/spin, ground/reference geometry, gas optics,
+   light, clearances, spawn/camera/craft fields, search and UI/snapshots. Exercise
+   bare rock, ocean/ice, hot/unresolved surfaces, gas-free fallback, sub-bar gas,
+   a normal envelope and the accepted diffuse extreme. Stop when every consumer
+   can read a coherent new-model system, without fallback to legacy calculations.
+4. **Background authority.** Connect candidates to the revision adoption path;
+   test stale completion, failure, cancellation, revisits/eviction, copied fields,
+   active routes and growth around a nearby eye/craft. Turn default refinement
+   on only after safe adoption or explicit deferral is proven.
+5. **Verification and removal.** Full project checks and the user's visual,
+   interactive and performance review; then delete the legacy structure/boundary
+   solver, heuristic inertia, experimental comparison mode and dead adapters.
+   Review remaining references so runtime, tests, overlays, search and remote
+   craft generation no longer require them. Keep source-backed regression
+   fixtures, formation/heating/orbit logic, and Seager/envelope fits used by
+   fallback. Resolve H/He redistribution before shipping; missing local data
+   continues to mean labelled fallback, never a hidden replacement EOS.
+
+No user decision blocks the contract/validation slice. The adoption guard and
+search provenance above are implementation recommendations, not already shipped
+policies. Escalate if safe deferral cannot preserve coherent camera/craft state,
+or if an adapter requires a new physical prescription beyond accepted model
+limitations. Do not launch the user's visual/performance benchmarks, commit or
+push as part of this investigation.
+
+### P3 completion checklist
 
 - Make the unified result authoritative for generated planets and retention.
   Migrate snapshots, shape and spin, atmosphere and optics, rendering and

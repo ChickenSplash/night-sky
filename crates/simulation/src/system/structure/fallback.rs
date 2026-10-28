@@ -17,7 +17,7 @@ use std::f64::consts::PI;
 
 pub const MODEL_ID: &str = "fallback_mass_radius_v1";
 pub const NOTES: &[&str] = &[
-    "Fallback: the layered model refused this body. Published mass-radius fits, not a hydrostatic EOS solve",
+    "Fallback: published mass-radius fits, not a hydrostatic EOS solve",
     "Uniform condensed layers and a linearly thinning gas layer; pressures follow these prescribed profiles",
     "Temperature is the equilibrium estimate; no greenhouse, phase or thermal structure",
 ];
@@ -79,8 +79,8 @@ pub struct Region {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fallback {
-    /// Why the layered solver refused; always shown with the result.
-    pub reason: Error,
+    /// Present only after a layered refusal. Initial fallback invents no error.
+    pub reason: Option<Error>,
     pub source: Inventory,
     pub retained: Inventory,
     pub escaped: Inventory,
@@ -117,6 +117,16 @@ impl Fallback {
 
 /// Never fails: every retained budget gets finite, conserved, contiguous layers.
 pub fn solve(budget: &Budget, environment: &PlanetEnvironment, reason: Error) -> Fallback {
+    prescribed(budget, environment, Some(reason))
+}
+
+/// Fast first answer before any layered attempt. Same prescription as refusal
+/// fallback, without pretending the layered solver has already failed.
+pub fn initial(budget: &Budget, environment: &PlanetEnvironment) -> Fallback {
+    prescribed(budget, environment, None)
+}
+
+fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<Error>) -> Fallback {
     let retained = *budget.retained();
     let h_he = retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium);
     let mut notes = NOTES.to_vec();
@@ -176,7 +186,13 @@ pub fn solve(budget: &Budget, environment: &PlanetEnvironment, reason: Error) ->
     let condensed_radius_m = regions.last().map_or(0.0, |r| r.outer_radius_m);
     let surface_temperature_k =
         sanitised(environment.equilibrium_temperature_k, MIN_TEMPERATURE_K).max(MIN_TEMPERATURE_K);
-    let flux = sanitised(environment.irradiation_w_m2, EARTH_REFERENCE_FLUX_W_M2);
+    // Zero irradiation is valid. Let the fit apply its documented lower bound,
+    // rather than silently substituting Earth's flux for an unilluminated body.
+    let flux = if environment.irradiation_w_m2 == 0.0 {
+        0.0
+    } else {
+        sanitised(environment.irradiation_w_m2, EARTH_REFERENCE_FLUX_W_M2)
+    };
     let age = sanitised(environment.age_gyr, 5.0);
     let mut clamped = flux != environment.irradiation_w_m2
         || age != environment.age_gyr

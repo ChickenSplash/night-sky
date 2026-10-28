@@ -37,7 +37,11 @@ impl Solved {
 
     /// What sits on top: a frost deposit, else the outermost condensed region.
     pub fn surface(&self) -> &'static str {
-        if self.structure.envelope().is_some() {
+        if self
+            .structure
+            .envelope()
+            .is_some_and(|e| e.one_bar_radius_m().is_some())
+        {
             return "envelope";
         }
         if self.structure.deposit_thickness_m() > 0.0 {

@@ -10,7 +10,11 @@ See [the plan](../plans/atmospheres.md#checkpoint-5--every-planet-with-air)
 for checkpoint history and remaining visual validation.
 
 Composition generation reconciles secondary escape, bulk H/He retention and
-structure first, sharing this module's final-orbit all-star heating samples.
+structure first on fast fallback facts, sharing this module's final-orbit all-star
+heating samples. Flux, activity-weighted loss forcing, seeded albedo and age are
+prepared as independent inputs before retention. Atmosphere output never feeds
+back into that solve. Existing live atmosphere/geometry consumers still receive
+a legacy compatibility projection afterwards, pending the P3 cutover.
 Atmospheric supply and cold condensates use those same budgets. Re-evaluating
 population at a different age can change retained mass, radius and spin, but never
 formation inventories, IDs, orbits or resonances. See the
@@ -134,6 +138,10 @@ does not validate their density profile or the underlying escape prescription.
 Each atmospheric draw uses its planet ID plus `:atmosphere:v1`, independently
 of the orbit/spin streams. Stellar system age is obtained from the same draw
 as companion generation, using a cloned RNG so no existing draws are consumed.
+The same albedo draw is now prepared before retention, not inside atmosphere
+output generation; its seed and range are unchanged. Retention uses fallback
+mass/radius facts, without an EOS or previously generated atmosphere. It keeps
+the fixed-albedo exosphere heuristic, distinct from the drawn thermal input.
 Retention updates physical bodies before the environmental reference correction
 and partition. The correction can change radius/inertia/spin, never retained mass,
 source/escape accounting or orbital elements.

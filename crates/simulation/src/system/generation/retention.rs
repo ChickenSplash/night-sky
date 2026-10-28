@@ -1,8 +1,9 @@
-//! Bounded final-orbit H/He survival, using the atmosphere's all-star forcing.
+//! Bounded final-orbit survival on fast fallback facts and immutable forcing.
 use super::*;
 use crate::system::{
     composition::{Budget, Inventory, Material, Reservoir},
-    structure::{self, Structure, StructureError},
+    forcing::Forcing,
+    structure::{self, StructureError, fallback::Fallback},
 };
 use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K, EARTH_MASS_KG, GRAVITATIONAL_CONSTANT};
 
@@ -20,17 +21,14 @@ pub enum RetentionSolve {
 
 /// Solve survival = Jeans-inspired survival(final mass, final radius).
 /// Bisection needs a sign bracket and continuity, not a monotone radius law.
-/// Failure is explicit, never an unreported plausible-looking fallback planet.
+/// Trial structure is explicitly prescribed fallback, never a layered solve.
+/// Failure to converge remains an error, not a silently accepted trial.
 pub(super) fn reconcile(
     formation: &Budget,
-    flux: f64,
-    loss_flux: f64,
-    age: f64,
-) -> Result<(Budget, Structure, RetentionSolve), StructureError> {
-    if !loss_flux.is_finite() || loss_flux < 0.0 {
-        return Err(StructureError::InvalidValue("loss flux"));
-    }
-    let formation = secondary_budget(formation, flux, loss_flux, age)?;
+    forcing: &Forcing,
+) -> Result<(Budget, Fallback, RetentionSolve), StructureError> {
+    let environment = forcing.environment();
+    let formation = secondary_budget(formation, forcing)?;
     // Always solve against the immutable source, not the previously retained
     // envelope. Re-evaluation must not apply the loss history a second time.
     let gas = Inventory::new(&[
@@ -47,11 +45,11 @@ pub(super) fn reconcile(
     if gas.total_mass_kg() == 0.0 {
         return Ok((
             formation,
-            structure::derive(&formation, flux, age)?,
+            structure::fallback::initial(&formation, &environment),
             RetentionSolve::NoEnvelope,
         ));
     }
-    let at = |survival: f64| -> Result<(Budget, Structure), StructureError> {
+    let at = |survival: f64| -> Result<(Budget, Fallback), StructureError> {
         let gas = gas
             .scaled(survival)
             .map_err(|_| StructureError::InvalidValue("retained gas"))?;
@@ -62,14 +60,14 @@ pub(super) fn reconcile(
             gas,
         )
         .map_err(|_| StructureError::InvalidValue("retained budget"))?;
-        let physical = structure::derive(&budget, flux, age)?;
+        let physical = structure::fallback::initial(&budget, &environment);
         Ok((budget, physical))
     };
     let (mut low, mut high) = (0.0, 1.0);
     for steps in 1..=MAX_STEPS {
         let survival = (low + high) * 0.5;
         let (budget, physical) = at(survival)?;
-        let target = hydrogen_survival(&physical, flux, loss_flux);
+        let target = hydrogen_survival(&physical, forcing);
         if (survival - target).abs() <= SURVIVAL_TOLERANCE || high - low <= SURVIVAL_TOLERANCE {
             return Ok((budget, physical, RetentionSolve::Converged { steps }));
         }
@@ -92,12 +90,7 @@ pub(crate) fn accessible_fraction(material: Material) -> f64 {
     }
 }
 
-fn secondary_budget(
-    previous: &Budget,
-    flux: f64,
-    loss_flux: f64,
-    age: f64,
-) -> Result<Budget, StructureError> {
+fn secondary_budget(previous: &Budget, forcing: &Forcing) -> Result<Budget, StructureError> {
     let source = previous.source();
     let interior = Inventory::new(&Material::ALL.map(|m| {
         (
@@ -130,9 +123,9 @@ fn secondary_budget(
         .map_err(|_| StructureError::InvalidValue("source budget"))?;
     // Fixed pre-loss structure at the final irradiation/age. This deliberately
     // avoids claiming a coupled multi-species evolution/escape solution.
-    let physical = structure::derive(&initial, flux, age)?;
-    let escape = (2.0 * GRAVITATIONAL_CONSTANT * physical.mass_kg() / physical.radius_m()).sqrt();
-    let survival = crate::system::atmosphere::generation::secondary_retention(escape, loss_flux);
+    let physical = structure::fallback::initial(&initial, &forcing.environment());
+    let escape = (2.0 * GRAVITATIONAL_CONSTANT * physical.mass_kg() / physical.radius_m).sqrt();
+    let survival = secondary_retention(escape, forcing.loss_flux_w_m2);
     let condensed = Inventory::new(&Material::ALL.map(|m| {
         (
             m,
@@ -144,30 +137,37 @@ fn secondary_budget(
         .map_err(|_| StructureError::InvalidValue("secondary escape budget"))
 }
 
-fn hydrogen_survival(physical: &Structure, flux: f64, loss_flux: f64) -> f64 {
+fn hydrogen_survival(physical: &Fallback, forcing: &Forcing) -> f64 {
     let gm = GRAVITATIONAL_CONSTANT * physical.mass_kg();
     // Fixed albedo estimate here keeps retention independent of atmosphere RNG.
-    let equilibrium = (flux * 0.7 / (4.0 * 5.670_374_419e-8)).powf(0.25).max(20.0);
-    let exosphere = (1000.0 * (loss_flux / 1361.0).max(0.01).powf(0.2)).max(2.0 * equilibrium);
-    let jeans = gm / physical.radius_m()
+    let equilibrium = (forcing.irradiation_w_m2 * 0.7 / (4.0 * 5.670_374_419e-8))
+        .powf(0.25)
+        .max(20.0);
+    let exosphere =
+        (1000.0 * (forcing.loss_flux_w_m2 / 1361.0).max(0.01).powf(0.2)).max(2.0 * equilibrium);
+    let jeans = gm / physical.radius_m
         * super::super::atmosphere::Gas::Hydrogen.molecular_mass_u()
         * ATOMIC_MASS_KG
         / (BOLTZMANN_J_K * exosphere);
     1.0 / (1.0 + (25.0 / jeans).powi(4))
 }
 
+/// Empirical shoreline-inspired trend, not a universal survival boundary.
+/// At Earth's escape speed, the nominal transition is ten present solar fluxes.
+pub(crate) fn secondary_retention(escape_m_s: f64, loss_flux: f64) -> f64 {
+    let threshold = 10.0 * (escape_m_s / 11_200.0).powi(4);
+    1.0 / (1.0 + (loss_flux / 1361.0 / threshold).powf(1.5))
+}
+
 /// Called once after the complete hierarchy and final orbits exist. The caller
 /// caches stellar phase samples and shares the heating with atmosphere generation.
-pub(crate) fn finalise(
-    body: &mut Body,
-    id: &str,
-    host_mass: f64,
-    flux: f64,
-    loss_flux: f64,
-    age: f64,
-) {
-    let (budget, structure, solve) = reconcile(&body.budget, flux, loss_flux, age)
+pub(crate) fn finalise(body: &mut Body, id: &str, host_mass: f64, forcing: &Forcing) {
+    let (budget, _, solve) = reconcile(&body.budget, forcing)
         .expect("generated inventory must have supported convergent retained structure");
+    // Temporary compatibility projection for unmigrated atmosphere/shape/wire
+    // consumers. It must never feed back into the fallback-based retention solve.
+    let structure = structure::derive(&budget, forcing.irradiation_w_m2, forcing.age_gyr)
+        .expect("retained inventory must support legacy consumer projection");
     body.mass_earth = structure.mass_kg() / EARTH_MASS_KG;
     body.radius_km = structure.radius_m() / 1000.0;
     body.class = materials::classify(&budget, &structure);
@@ -206,7 +206,13 @@ mod tests {
         let initial = formation();
         let mut previous = 1.0;
         for flux in [0.0, 13.61, 1361.0, 1e5, 1e8] {
-            let (budget, structure, status) = reconcile(&initial, flux, flux, 4.5).unwrap();
+            let forcing = Forcing::new(flux, flux, 0.3, 4.5).unwrap();
+            let (budget, structure, status) = reconcile(&initial, &forcing).unwrap();
+            assert_eq!(structure.reason, None);
+            crate::system::physical::validate_record(&crate::system::physical::fallback(
+                &structure,
+            ))
+            .unwrap();
             let RetentionSolve::Converged { steps } = status else {
                 panic!("expected envelope solve")
             };
@@ -214,7 +220,7 @@ mod tests {
             let survival = budget.reservoir(Reservoir::Gas).total_mass_kg()
                 / initial.reservoir(Reservoir::Gas).total_mass_kg();
             assert!(
-                (survival - hydrogen_survival(&structure, flux, flux)).abs()
+                (survival - hydrogen_survival(&structure, &forcing)).abs()
                     < 3.0 * SURVIVAL_TOLERANCE
             );
             assert!(survival <= previous);
@@ -224,16 +230,13 @@ mod tests {
                 let accounted = budget.retained().mass_kg(m) + budget.escaped().mass_kg(m);
                 assert!((source - accounted).abs() <= source * 1e-14);
             }
-            let repeated = reconcile(&budget, flux, flux, 4.5).unwrap();
+            let repeated = reconcile(&budget, &forcing).unwrap();
             assert_eq!((budget, structure, status), repeated);
         }
-        assert!(reconcile(&initial, 1361.0, f64::NAN, 4.5).is_err());
-        assert!(reconcile(&initial, -1.0, 1361.0, 4.5).is_err());
-        assert!(reconcile(&initial, 1361.0, 1361.0, 0.0).is_err());
     }
 
     #[test]
-    fn formation_domain_grid_converges_without_fallback_or_compounded_escape() {
+    fn fallback_trial_grid_converges_without_compounded_escape() {
         let mut solved = 0;
         let mut absent = 0;
         for host in [0.08, 0.2, 1.0, 3.0, 20.0] {
@@ -252,10 +255,14 @@ mod tests {
                         (1361.0, 13610.0, 4.5),
                         (1e8, 1e10, 13.0),
                     ] {
-                        let (budget, physical, status) =
-                            reconcile(&formation, flux, loss, age).unwrap();
+                        let forcing = Forcing::new(flux, loss, 0.3, age).unwrap();
+                        let (budget, physical, status) = reconcile(&formation, &forcing).unwrap();
+                        crate::system::physical::validate_record(
+                            &crate::system::physical::fallback(&physical),
+                        )
+                        .unwrap();
                         assert_eq!(
-                            reconcile(&budget, flux, loss, age).unwrap(),
+                            reconcile(&budget, &forcing).unwrap(),
                             (budget, physical.clone(), status)
                         );
                         match status {
@@ -268,7 +275,7 @@ mod tests {
                                 };
                                 let survival = light(budget.retained()) / light(budget.source());
                                 assert!(
-                                    (survival - hydrogen_survival(&physical, flux, loss)).abs()
+                                    (survival - hydrogen_survival(&physical, &forcing)).abs()
                                         < 3.0 * SURVIVAL_TOLERANCE
                                 );
                             }
@@ -284,5 +291,42 @@ mod tests {
             }
         }
         assert!(solved > 0 && absent > 0);
+    }
+
+    #[test]
+    fn retention_needs_neither_legacy_domain_nor_preexisting_atmosphere_partition() {
+        // Below the legacy total-mass domain, with no meaningful previous split.
+        let inventory = Inventory::new(&[
+            (Material::Silicate, 1e-6 * EARTH_MASS_KG),
+            (Material::Water, 1e-8 * EARTH_MASS_KG),
+            (Material::Nitrogen, 1e-10 * EARTH_MASS_KG),
+        ])
+        .unwrap();
+        let formation = Budget::new(
+            inventory,
+            inventory,
+            Inventory::default(),
+            Inventory::default(),
+        )
+        .unwrap();
+        let forcing = Forcing::new(1361.0, 1e6, 0.4, 4.5).unwrap();
+        assert!(structure::derive(&formation, 1361.0, 4.5).is_err());
+        let (retained, fallback, status) = reconcile(&formation, &forcing).unwrap();
+        assert_eq!(status, RetentionSolve::NoEnvelope);
+        assert_eq!(retained.source(), &inventory);
+        assert!(retained.escaped().mass_kg(Material::Nitrogen) > 0.0);
+        crate::system::physical::validate_record(&crate::system::physical::fallback(&fallback))
+            .unwrap();
+        let repartitioned = Budget::new(
+            *retained.source(),
+            *retained.retained(),
+            Inventory::default(),
+            Inventory::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            reconcile(&repartitioned, &forcing).unwrap(),
+            (retained, fallback, status)
+        );
     }
 }

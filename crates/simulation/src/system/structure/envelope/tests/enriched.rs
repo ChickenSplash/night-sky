@@ -50,7 +50,7 @@ fn check(source_backed: bool) {
             },
             ..Default::default()
         });
-        assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
+        assert!((fine.reference_radius_m / e.reference_radius_m - 1.0).abs() < 1e-7);
         assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
         assert!(e.uses_effective_components());
         assert!(e.uses_extended_mixture());
@@ -143,7 +143,7 @@ fn check(source_backed: bool) {
         assert!((independent_inertia / e.inertia_kg_m2 - 1.0).abs() < 1e-6);
         eprintln!(
             "enriched source={source_backed} z={z}: R={} km base={} bar handoff={} bar",
-            e.one_bar_radius_m / 1000.0,
+            e.reference_radius_m / 1000.0,
             e.regions[0].inner().pressure_pa / 1e5,
             boundary / 1e5
         );

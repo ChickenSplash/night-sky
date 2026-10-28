@@ -69,8 +69,9 @@ pub struct Envelope {
     pub(super) regions: Vec<Region>,
     pub(super) inventory: Inventory,
     pub(super) inertia_kg_m2: f64,
-    pub(super) one_bar_radius_m: f64,
-    one_bar_enclosed_mass_kg: f64,
+    pub(super) reference_radius_m: f64,
+    reference_enclosed_mass_kg: f64,
+    reference_pressure_pa: f64,
     pub(super) thermal: Thermal,
     pub(super) evaluations: usize,
     pub(super) iterations: usize,
@@ -134,7 +135,15 @@ impl Envelope {
         self.condensates[index]
     }
     pub fn reference_gravity_m_s2(&self) -> f64 {
-        GRAVITATIONAL_CONSTANT * self.one_bar_enclosed_mass_kg / self.one_bar_radius_m.powi(2)
+        GRAVITATIONAL_CONSTANT * self.reference_enclosed_mass_kg / self.reference_radius_m.powi(2)
+    }
+    /// None when the whole gas shell is below one bar. Its reference is then
+    /// the condensed boundary, not an extrapolated pressure level inside rock.
+    pub fn one_bar_radius_m(&self) -> Option<f64> {
+        (self.reference_pressure_pa == 1e5).then_some(self.reference_radius_m)
+    }
+    pub fn reference_pressure_pa(&self) -> f64 {
+        self.reference_pressure_pa
     }
     pub fn outer_pressure_residual_pa(&self) -> f64 {
         self.regions.last().unwrap().outer().pressure_pa - OUTER_PRESSURE_PA
@@ -340,13 +349,7 @@ fn solve_with_density(
         cumulative.attempted_steps += solver.work.attempted_steps;
         cumulative.shooting_iterations += solver.work.shooting_iterations;
         cumulative.bracket_expansions += solver.work.bracket_expansions;
-        let reference = trial
-            .regions
-            .iter()
-            .filter(|r| r.inventory().mass_kg(Material::Hydrogen) > 0.0)
-            .map(|r| r.outer())
-            .find(|s| s.pressure_pa == 1e5)
-            .ok_or(Error::MissingOneBarBoundary)?;
+        let reference = reference_sample(&trial.regions)?;
         let gravity =
             GRAVITATIONAL_CONSTANT * reference.enclosed_mass_kg / reference.radius_m.powi(2);
         let residual = gravity / thermal.gravity_m_s2 - 1.0;
@@ -423,8 +426,9 @@ fn solve_with_density(
                 regions: envelope_regions,
                 inventory: gas,
                 inertia_kg_m2: trial.inertia_kg_m2,
-                one_bar_radius_m: reference.radius_m,
-                one_bar_enclosed_mass_kg: reference.enclosed_mass_kg,
+                reference_radius_m: reference.radius_m,
+                reference_enclosed_mass_kg: reference.enclosed_mass_kg,
+                reference_pressure_pa: reference.pressure_pa,
                 thermal,
                 evaluations: total_work,
                 iterations: iteration + 1,
@@ -439,6 +443,25 @@ fn solve_with_density(
         ));
     }
     Err(Error::NonConvergence)
+}
+
+/// Use the located one-bar event when present. A genuinely sub-bar shell uses
+/// its inner condensed boundary; a missed event in a thicker shell stays an
+/// error. No pressure interpolation, radius rescaling or new physical cutoff.
+fn reference_sample(regions: &[Region]) -> Result<dry::Sample, Error> {
+    let mut gas = regions
+        .iter()
+        .filter(|r| r.inventory().mass_kg(Material::Hydrogen) > 0.0);
+    let base = gas.next().ok_or(Error::MissingOneBarBoundary)?.inner();
+    if base.pressure_pa <= 1e5 {
+        return Ok(base);
+    }
+    regions
+        .iter()
+        .filter(|r| r.inventory().mass_kg(Material::Hydrogen) > 0.0)
+        .map(|r| r.outer())
+        .find(|s| s.pressure_pa == 1e5)
+        .ok_or(Error::MissingOneBarBoundary)
 }
 
 /// Mass-coordinate trapezoid of local phase fractions. This is a reporting

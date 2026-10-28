@@ -46,7 +46,7 @@ fn check(source: bool) {
             ..Default::default()
         });
         assert!(e.uses_suspended_condensates());
-        assert!((fine.one_bar_radius_m / e.one_bar_radius_m - 1.0).abs() < 1e-7);
+        assert!((fine.reference_radius_m / e.reference_radius_m - 1.0).abs() < 1e-7);
         assert!((fine.inertia_kg_m2 / e.inertia_kg_m2 - 1.0).abs() < 1e-7);
         let condensate = e
             .condensates
