@@ -3,9 +3,8 @@ use crate::system::{composition::Material, physical};
 use space_shared::{RefinementStatus, ResultProvenance};
 
 #[test]
-fn every_export_has_an_honest_validated_candidate_separate_from_legacy_geometry() {
+fn every_export_projects_one_validated_result() {
     let mut compared = 0;
-    let mut different = 0;
     for seed in 0..8 {
         let bodies = crate::bodies(&format!("initial-result-export:{seed}"));
         for hosted in bodies.planets {
@@ -29,25 +28,20 @@ fn every_export_has_an_honest_validated_candidate_separate_from_legacy_geometry(
             assert_eq!(expected.provenance, ResultProvenance::Fallback);
             assert_eq!(expected.refinement, RefinementStatus::Pending);
             assert_eq!(expected.record.fallback_reason, None);
-            let legacy = physical::to_data(&hosted.body);
             let planet = export_planet(hosted, 7, "Test designation".into(), None);
             assert_eq!(planet.initial_result.as_ref(), Some(&expected));
-            assert_eq!(planet.physical.as_ref(), Some(&legacy));
-            assert_eq!(planet.radius_km, legacy.reference_radius_m / 1000.0);
+            assert_eq!(planet.physical.as_ref(), Some(candidate));
+            assert_eq!(planet.radius_km, candidate.reference_radius_m / 1000.0);
+            assert_eq!(planet.inertia_factor, Some(candidate.inertia_factor));
             physical::validate(&planet).unwrap().unwrap();
             physical::validate_result(planet.initial_result.as_ref().unwrap()).unwrap();
             let decoded: Planet =
                 serde_json::from_str(&serde_json::to_string(&planet).unwrap()).unwrap();
             assert_eq!(decoded, planet);
-            different += usize::from(candidate.reference_radius_m != legacy.reference_radius_m);
             compared += 1;
         }
     }
     assert!(compared > 20);
-    assert!(
-        different > 0,
-        "fixture must exercise distinct candidate and live projections"
-    );
 }
 
 #[test]

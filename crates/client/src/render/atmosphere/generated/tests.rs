@@ -167,11 +167,11 @@ fn dense_boundary_pressure_changes_optics_and_preserves_the_upper_column() {
 #[test]
 fn motivating_generated_boundary_reaches_renderer_and_is_not_an_envelope_proxy() {
     let system =
-        space_simulation::system::generated_system("g13b6ffffcfeba.2.1", [0.0; 3]).unwrap();
+        space_simulation::system::generated_system("g13b6ffffcfeba.2.339", [0.0; 3]).unwrap();
     let world = system
         .planets
         .iter()
-        .find(|p| p.id.ends_with("/1"))
+        .find(|p| p.id.ends_with("/7"))
         .unwrap();
     let data = world
         .environment
@@ -244,11 +244,12 @@ fn one_bar_reference_marks_an_envelope_boundary_not_solid_terrain() {
 
 #[test]
 fn rocky_boundary_and_bulk_envelope_descent_are_distinct_and_label_independent() {
-    let system = space_simulation::system::generated_system("g1e0024924b.2.231", [0.0; 3]).unwrap();
+    let system =
+        space_simulation::system::generated_system("g13b6ffffcfeba.2.59", [0.0; 3]).unwrap();
     let world = system
         .planets
         .iter()
-        .find(|p| p.id == "g1e0024924b.2.231#B/4")
+        .find(|p| p.id == "g13b6ffffcfeba.2.59/7")
         .unwrap();
     assert!(!envelope(world));
     assert!(!deep_envelope(world));

@@ -9,12 +9,12 @@ The [replacement plan](../plans/planet-composition.md) owns remaining work and t
 region/boundary contract; the [scientific reference](planet-composition-reference.md)
 owns input bounds, selected/candidate sources and future acceptance requests.
 Implemented radial solvers are separate headless APIs, described below.
-Default generation now uses fast fallback facts for retention trials, but still
-exports the legacy approximate reservoir/radius model. Opt-in
-background loading exposes new solved records in the inspector beside legacy
-facts; rendering, navigation and live geometry remain legacy. Both export paths
-also carry a validated synchronous fallback candidate as `Planet::initial_result`,
-separate from the legacy fields until their coordinated P3 cutover.
+Default generation is now authoritative on one synchronous
+[labelled fallback result](#synchronous-reference-partition) per planet,
+`Planet::initial_result`. Live mass, radius, inertia, reservoirs, atmosphere and
+spin are all projections of it, installed together; the legacy
+`structure::derive` model no longer feeds generated planets. Opt-in background
+loading exposes layered solves in the inspector but does not yet adopt them.
 The separate [water-shell solver](#headless-restricted-water-shell-solver) uses
 direct [IAPWS water physics](water-physics.md) and an explicitly approximate
 effective deep-ice compression model. The mandatory Earth-mass, 30%-water fixture
@@ -30,9 +30,9 @@ are also headless and opt-in.
 
 ## Authoritative result contract and validation
 
-P3's headless contract is implemented in shared `planet_result.rs` and simulation
-`system/physical/result.rs`. It does **not** yet replace live generation, rendering
-or the experimental loader. The [cutover plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal)
+P3's contract is implemented in shared `planet_result.rs` and simulation
+`system/physical/result.rs`. Generation's synchronous result is now live; the
+experimental loader's layered results are not adopted yet. The [cutover plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal)
 tracks that migration.
 
 `PlanetResult` owns one `LayeredPlanet` physical/layer record, with typed
@@ -75,16 +75,13 @@ transport consistency only. All physical fit prescriptions remain unchanged.
   is intentional, not an invitation to skip independent solver regressions.
   The population census keeps its independent input-budget checks as well.
 
-Generated `Body::initial_result` now stores such a candidate. Formation constructs
-it from provisional forcing; final retention replaces it using all-star forcing
-and retained supply, before legacy atmosphere projection. The final candidate now
-includes its own [reference gas partition](#synchronous-reference-partition), not
-the standalone fallback's all-condensed secondary allocation. Classification uses its
-model-neutral material/mass fractions. A single `physical::export_planet` adapter
-carries the final candidate through both natural and overlay wire paths as
-`Planet::initial_result`. Older records may omit it. **Its presence does not make
-it authoritative for the still-legacy geometry/environment fields.** Consumers
-must not combine one record's radius or reservoirs with the other's atmosphere.
+Generated `Body::initial_result` stores this result. Formation constructs it from
+provisional forcing; final retention replaces it using all-star forcing and
+retained supply, with its own [reference gas partition](#synchronous-reference-partition).
+Classification uses its model-neutral material/mass fractions. A single
+`physical::export_planet` adapter carries it through both natural and overlay
+wire paths as `Planet::initial_result`, and every live field is projected from it
+(see [live projection](#live-projection)).
 
 Synchronous revision keys use exact input bit patterns for body identity, source,
 retained and escaped inventories, bolometric/loss forcing, albedo and age. They
@@ -95,12 +92,28 @@ These candidate identities are not yet wired into background
 adoption or a layered-resource revision. Initial candidates start at sequence zero;
 regeneration is not an adoption or permission to renumber stale worker output.
 
-These APIs create and validate **candidates**. Updating live `Planet` projections,
-environment, spin, geometry, craft fields, routes and caches together, and
-deferring unsafe growth around an eye/craft, remain later P3 work. No live
-adoption API is provided yet. Existing `physical::validate(Planet)` is explicitly
-legacy compatibility for unmigrated consumers and still re-derives the old
-boundary model; new result validation is independent of that path.
+### Live projection
+
+Final retention installs every live field from the one prepared result, in one
+step: `mass_earth` (retained mass), `radius_km` (reference radius),
+`inertia_factor`, `physical` (the result's record, verbatim), the reservoir
+budget, the generated atmosphere and spin (drawn with the result's inertia and
+H/He fraction). No legacy structure or boundary solve runs.
+
+- The live atmosphere is the result's own partitioned column. Positive columns
+  below 0.1 Pa stay in the result (gas inventory and reference pressure) but are
+  omitted from `Planet::environment`. This presentation threshold keeps the live
+  population's rendering and navigation parity with the previous model; it is
+  not a physical erase or an optical-depth visibility rule.
+- `physical::validate(Planet)` checks transport only: the result validates; the
+  live record equals it; mass, radius and inertia match; temperature matches; the
+  atmosphere passes `OpticalColumn::from_result` against the result, or is
+  omitted only below the threshold. It re-runs no solver. A record with
+  `physical` but no result cannot be checked and is invalid, not trusted.
+- Consumers still read the live projections (rendering, navigation, shape,
+  inspector), not the result directly. Their migration, and revision-aware
+  adoption of background layered results with deferral near the camera, craft
+  and routes, remain later P3 work.
 
 ## Approximation policy and fidelity labels
 
@@ -1881,8 +1894,8 @@ successful solve.
 ### Layered transport record
 
 `system::physical::layered` turns a solve into `space_shared::LayeredPlanet`,
-held beside the legacy record, never written into `Planet::physical` (whose
-validation re-derives the legacy structure and would reject it).
+held beside the live record. Background layered results are not yet adopted
+into `Planet::physical` (that needs revision-aware adoption).
 
 - `physical` keeps the `PlanetPhysical` shape. Reservoirs map as interior =
   condensed regions minus water, condensed = condensed water plus the frost
@@ -2008,20 +2021,18 @@ the centre, finite positive radius, density, gravity and inertia (at most 2/3),
 and monotone non-negative pressures. The coverage report also checks every
 census refusal's fallback record.
 
-Limitations: no separate secondary atmosphere, phase, thermal structure or
-greenhouse. For bodies with under 1% H/He, fallback radii exceed legacy (which
+Limitations: no separate secondary atmosphere (the partition below adds one),
+phase, thermal structure or greenhouse. For bodies with under 1% H/He, fallback radii exceed legacy (which
 treats that gas as a thin column) by up to 61%; layered solves of similar
 bodies exceed legacy by a median 32%, so the legacy value is the outlier.
 
 ### Synchronous reference partition
 
-`physical::initial_with_atmosphere` prepares a **staged pair**: the initial
-`PlanetResult` and its matching `PlanetEnvironment`. It starts with the converged
+`physical::initial_with_atmosphere` prepares the initial `PlanetResult` with its
+matching reservoir budget and `PlanetEnvironment`. It starts with the converged
 retention fallback and applies `fallback_reference_partition_v1`, without a
-legacy structure/boundary solve, EOS access, re-running retention or adopting
-live geometry. `Body::initial_result` carries this partitioned candidate through
-both exporters. Its gas allocations, pressure and temperature belong to that
-candidate, not to `Planet::environment`, which is still legacy.
+legacy structure/boundary solve, EOS access or re-running retention. Retention
+installs all of it as the [live projection](#live-projection).
 
 This bounded approximation deliberately holds the fallback's condensed proxy
 volumes, radius and reference meaning fixed. Accessible water/secondary mass
@@ -2044,18 +2055,17 @@ a coupled phase/volume, greenhouse or thermal-structure solution.
   atmospheric self-gravity is not newly solved. Weak-binding pressure retains the
   explicit planar approximation even though inertia uses a normalised finite
   profile. These numerical conventions do not validate a static atmosphere there.
-- Positive trace gas below the legacy population's 0.1 Pa emission threshold
-  remains represented, including its nonzero pressure. Vapour transfers below a
-  reservoir ulp remain condensed and are excluded from the trace pressure solve.
-  This prevents unrepresentable vapour changing the mixture used to satisfy
-  saturation caps. The legacy population's successful numerical path is unchanged.
+- Positive trace gas below the live 0.1 Pa presentation threshold remains
+  represented in the result, including its nonzero pressure. Vapour transfers
+  below a reservoir ulp remain condensed and are excluded from the pressure
+  solve, so unrepresentable vapour cannot change the mixture used to satisfy
+  saturation caps.
 
 The standalone `fallback::initial`/`solve` prescriptions and archived P2 numerical
 outputs are unchanged. The new partition is applied once to an unpartitioned
 retention fallback; repeated preparation from the same input is deterministic,
 and repartitioning its output is refused. The prepared atmosphere passes the
-checked optical adapter against its own result. Live mass/radius/inertia,
-atmosphere, spin and consumer adoption still need a coordinated cutover.
+checked optical adapter against its own result.
 
 ## Prototype coverage report
 
@@ -2445,15 +2455,11 @@ Valid zero irradiation reaches the fit's documented low-flux bound rather than
 being replaced with Earth flux; equilibrium zero remains separate from the
 fallback's 20 K temperature floor.
 
-The live cutover is **not complete**. Formation now starts with a validated
-fallback candidate; its temporary `Structure` is only a labelled projection of
-those facts. Final retention stores a validated candidate and classification
-reads its material/mass fractions. The final legacy compatibility projection
-still uses `structure::derive`; spin, atmosphere partition/boundary correction
-and legacy fields in the shared exporter still consume that projection.
-It never feeds back into retention. Making the
-unified result authoritative and migrating those consumers remains P3 work. Retained population
-values can change; archived P2 census evidence belongs to its original inputs.
+Formation starts with a validated fallback result; final retention replaces it
+and installs every live field from it together (see
+[live projection](#live-projection)). Neither stage runs `structure::derive`.
+Retained population values changed at this cutover; archived P2 census evidence
+belongs to its original inputs.
 
 ## Secondary escape and reservoir partition
 
@@ -2479,9 +2485,10 @@ All retained H₂ and He remain in `Gas`; other molecules not in gas remain in
 `CondensedVolatiles`, including newly cold-trapped material. This reservoir name
 does not assert a resolved phase, ocean or exposed ice layer. Atomic reservoir
 transfers preserve authoritative retained/escaped totals, so partition does not
-change bulk mass. The environmental reference correction below updates radius,
-inertia and spin together, without feeding back into escape. Sub-precision gas transfers are omitted, not
-manufactured. Trace gas below the 0.1 Pa display cutoff remains accounted for.
+change bulk mass. Generation partitions once, at the converged retention
+fallback's fixed reference ([reference partition](#synchronous-reference-partition)),
+without feeding back into escape. Sub-precision gas transfers are omitted, not
+manufactured. Trace gas below the 0.1 Pa display cutoff remains in the result.
 
 Boundary-column pressure is normalised to the finite spherical gas shell,
 `p=M_gas g/(4πR² F)`, with the [profile mass factor and weak-binding fallback](atmospheres.md#pressure-and-cold-trap-solve).
@@ -2497,77 +2504,27 @@ limitations are explicit rather than silently imposing an arbitrary pressure cap
 Emitted columns are checked against saturation and one-bar supply with a 1e-9
 relative roundoff allowance; failure is explicit rather than a fabricated column.
 
-### Supported approximate condensed boundaries
+### Removed legacy boundary correction
 
-After escape, `structure/boundary.rs` tests a column at the cold heavy-material
-radius using the actual generated isothermal temperature and the same conserved
-cold-trap solve. The condensed-boundary inventory domain requires all of:
-
-- Gas reservoir at most **1% of retained mass**, limiting neglected self-gravity.
-- Water at most **1% of retained mass**, limiting use of an unresolved cold-water
-  radius in place of a thermal, phase-dependent hydrosphere.
-- Heavy material at most **20 Earth masses**, within the direct compressed fit.
-
-These are declared engineering validity bounds, not observed divisions between
-planet classes. No pressure or atmospheric-height threshold removes ground. Dense columns still use
-unvalidated ideal-gas/dilute optics and must not be mistaken for solved climates.
-Within the domain, the reference radius becomes the approximate condensed boundary,
-pressure is normalised to the partitioned gas above it, and the column covers the
-height to one bar plus the upper atmosphere. Even trace water keeps phase/ground
-semantics unresolved. Dry inputs have nominal ground, not a solved geology.
-Airless/trace inventory remains conserved even when no visible column is emitted.
-
-The column is marked `thin_boundary_column` only when pressure-aware optical
-extent is at most **0.1 boundary radii**, including the height to one bar. A
-larger extent instead carries `extended_boundary_column` and informational
-`Extended` geometry. It retains the approximate condensed radius,
-inventory-normalised boundary pressure and actual gas reservoir. Supported columns
-use weakening spherical gravity; cases outside the profile's sonic-radius guard
-retain an explicitly unresolved exponential fallback. Extent alone is not evidence
-that the condensed body is absent. Geometry, atmosphere,
-optics and clearance all use that same declared reference. Neither case solves
-greenhouse heating, atmospheric escape or water phases.
-
-Let `s` be the maximum of the three inventory ratios to these domain bounds. At `s<=1`,
-use the boundary column. At `s>=2`, retain the original structural reference and
-mark `deep_boundary_unresolved`. Obviously excessive H₂/He, water or heavy mass
-bypasses the candidate solve entirely: do not test a thin column deep inside a
-giant. Atmospheric extent is not part of this handoff. For original one-bar structures with `1<s<2`, a flagged engineering handoff
-uses `t=s-1`, `w=t²(3-2t)`: blend the candidate's **one-bar radius**
-`R_boundary + h(ln(p_boundary / 1 bar))` using the selected hydrostatic profile,
-towards the original one-bar proxy,
-and blend per-species gas allocations towards the one-bar partition. Transfers
-remain within conserved reservoirs; both endpoint mixtures obey the one-bar
-saturation caps. This compares like pressure levels rather than blending a
-boundary and a one-bar radius as if they were the same quantity. Equivalent
-one-bar radius and gas allocations are continuous across both handoff endpoints.
-The stored radius changes its meaning at the support boundary, so its numerical
-value alone is not a continuity diagnostic. Recomputed gravity, scale height and
-inertia remain reference-level approximations, not a variable-gravity interior.
-
-Non-envelope cold proxies that lack a supported boundary retain their original
-unresolved reference, rather than inventing a one-bar level or integrating deep
-into a water-rich body. This exception includes tenuous extended columns with
-less than one bar of gas. Their pressure is at a cold proxy, not a located ground.
-The inspector explicitly marks the unresolved boundary/model limits.
-
-This correction does **not** rerun escape against a newly shrunken reference radius.
-The original formation/escape radius is a fixed prescribed surrogate; coupling a
-thermal atmosphere to evolution is deferred. Masses, formation inventories, orbital
-spacing, retained/escaped totals and class labels therefore do not change. Final
-inertia and deterministic spin are rebuilt at the corrected geometric reference.
-Partition work remains bounded: at most two 64-step cold-trap solves, after the
-unchanged at-most-40-step retention solve. Geometry, gas optics and flight clearance
-all receive that same final radius and column, with no class-based overrides.
+The legacy `structure/boundary.rs` correction (a condensed-boundary column test
+on the `structure::derive` radius, its 1%/1%/20 Earth-mass domain, the
+`thin_boundary_column`, `extended_boundary_column`,
+`boundary_reference_transition` and `deep_boundary_unresolved` labels, and its
+one-bar handoff blend) was removed at the live cutover. Generated planets now
+take their reference meaning from the fallback result: any H/He envelope gives a
+one-bar reference, and secondary gas forms a column at the condensed proxy.
+Rocky bodies with a small H/He envelope, which the legacy correction gave
+thick boundary columns and ground, are therefore groundless one-bar envelope
+worlds. History: [plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal).
 
 ## Inertia and spin
 
-The structure model adds an explicitly heuristic inertia factor for Darwin-Radau:
-`k=clamp((1-f) k_heavy (R_heavy/R)^2 + 0.25f,0.12,0.36)`, where
-`k_heavy=0.36-0.08 × metal/heavy mass` and `f` is retained H/He fraction.
-The radius ratio represents a compact heavy component under a larger envelope;
-the bounds avoid claiming resolved central concentration. This is not a layered
-moment-of-inertia integration or a prediction of giant interiors.
+Generated inertia factors come from the result: the fallback's layered shell
+integration, including the reference partition's atmosphere column, normalised
+by the reference radius. They range from about 0.06 (centrally condensed
+envelope worlds) to 0.37. The legacy `structure::derive` model keeps its own
+clamped heuristic, `k=clamp((1-f) k_heavy (R_heavy/R)^2 + 0.25f,0.12,0.36)`,
+but no longer feeds generated planets. Neither is a giant-interior prediction.
 
 For spins, set `e=clamp(f/0.5,0,1)`, `q=clamp((0.02-M)/0.02,0,1)` (Earth mass
 units). The lock distance is `(0.3-0.2e)(1-q) M_host^(1/3)` AU. Within 2.5 times
@@ -2581,30 +2538,22 @@ the physical inertia factor and the existing 0.2 flattening cap. Locked/slow
 states keep their assigned periods, with the existing shape cap as a safeguard.
 
 `Planet::inertia_factor` is optional for legacy compatibility, transported early
-on both generated and task-overlay paths. Valid values override all class strings
-in `planet_shape`. Only records without composition may use the isolated legacy
-class fallback; malformed new records use a neutral factor, never their label.
+on both generated and task-overlay paths. Values in the Darwin-Radau domain
+`(0, 2/3]` override all class strings in `planet_shape`, so shape uses the same
+factor that limited spin. Only records without composition may use the isolated
+legacy class fallback; malformed new records use a neutral factor, never their label.
 
 ## Transport and downstream consumers
 
 `Planet::physical` carries stable material IDs with source, retained, escaped,
 interior, condensed and whole-gas masses, plus reference structure and stable
 approximation IDs. It is optional: absent means unknown, not zero inventory.
-`system/physical` reconstructs validated inventories/budgets, re-derives structure
-and boundary partition at transported irradiation/age/column temperature and checks
-all duplicated facts, radius semantics
-and caveats (1e-10 relative roundoff tolerance). Escaped-mass comparisons also
-allow eight machine epsilons of that constituent's source mass: summing split
-reservoirs then subtracting from a much larger source can move a tiny loss by
-one ulp. This allowance is species-local, never scaled to total planet mass;
-reservoir budget validation still forbids overspending, and negative/nonfinite
-escaped masses are refused. Unknown/duplicate/missing materials,
-nonfinite values and inconsistent records are refused explicitly. Partition checks
-also allow species-local source-scale roundoff after reservoir subtraction, while
-the atmospheric mixture must match the actual transported gas reservoir. Pressure,
-temperature and reference level are checked against that inventory and geometry,
-so a pressure-only label edit is rejected. This bounded check does not repeat
-stellar heating or retention iteration.
+For generated planets it is the result's record verbatim; `physical::validate`
+checks it, and every other live projection, against `Planet::initial_result`
+using transport invariants only (see [live projection](#live-projection)). It
+repeats no stellar heating, retention, structure or partition solve. A
+pressure-only label edit is rejected because the atmosphere must pass the
+result's optical adapter.
 
 Generated systems and task overlays use one conversion. Their physical records
 must match for the same body ID; task metadata never alters them. New reflectance
@@ -2619,10 +2568,9 @@ and developer export share presentation fields, separate from these physical rec
 Atmospheric visibility has its own
 [explicit optical boundary contract](atmospheres.md#explicit-renderer-boundary-contract).
 It declares a profile, lower proxy and operational cutoff rather than using
-structural layer edges. Its current client path reads only live projections;
-the separate unified-result adapter checks reference and gas agreement without
-re-solving physics or adopting the result. The live authority cutover remains
-pending, including installing the prepared reference partition and coherent spin.
+structural layer edges. Its client path reads the live projections, which now
+come from the result; moving it onto the checked unified-result adapter is the
+next consumer migration.
 
 ## Calibration census and regression scope
 

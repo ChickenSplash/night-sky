@@ -5,7 +5,8 @@ use crate::system::{
     composition::{Budget, Inventory, Material, Reservoir},
     generation::retention::secondary_retention,
 };
-use space_shared::{Barycentre, Orbit, Spin};
+use crate::{EARTH_SOLAR, SUN_GM};
+use space_shared::{Barycentre, Orbit, PlanetEnvironment, Spin};
 
 fn orbit_at(au: f64) -> Orbit {
     Orbit {
@@ -46,7 +47,6 @@ fn body() -> Body {
     use crate::system::{
         RetentionSolve,
         composition::{Budget, Inventory, Material},
-        structure,
     };
     let inventory = Inventory::from_mass_fractions(
         crate::units::EARTH_MASS_KG,
@@ -68,7 +68,6 @@ fn body() -> Body {
         resonance: None,
         spin: Spin::default(),
         budget,
-        structure: structure::derive(&budget, 1361.0, 5.0).unwrap(),
         initial_result: crate::system::physical::initial_result(
             &budget,
             &Forcing::new(1361.0, 1361.0, 0.3, 5.0)
@@ -263,8 +262,9 @@ fn cold_condensation_reduces_partial_pressures_and_can_leave_airless_worlds() {
         cold.composition().fraction(Gas::CarbonDioxide)
             < warm.composition().fraction(Gas::CarbonDioxide)
     );
+    // Trace vapour is retained, not erased by a presentation threshold.
     let frozen = partition::atmosphere(&mut frozen_body, 20.0).unwrap();
-    assert!(frozen.is_none());
+    assert!(frozen.is_none_or(|air| air.pressure_pa() < 1e-3 * cold.pressure_pa()));
     assert!(
         cold_body
             .budget
@@ -316,15 +316,30 @@ fn volatile_body() -> Body {
         Inventory::default(),
     )
     .unwrap();
-    body.structure = crate::system::structure::derive(&body.budget, 1361.0, 4.5).unwrap();
-    body.mass_earth = body.structure.mass_kg() / crate::units::EARTH_MASS_KG;
-    body.radius_km = body.structure.radius_m() / 1000.0;
+    refresh(&mut body);
     body
+}
+
+/// Fallback reference geometry for a changed test budget.
+fn refresh(body: &mut Body) {
+    let forcing = Forcing::new(1361.0, 1361.0, 0.3, 4.5).unwrap();
+    body.initial_result = crate::system::physical::initial_result(
+        &body.budget,
+        &forcing.environment(),
+        forcing.revision("test/0", &body.budget),
+    )
+    .unwrap();
+    body.mass_earth = body.physical().retained_mass_kg / crate::units::EARTH_MASS_KG;
+    body.radius_km = body.physical().reference_radius_m / 1000.0;
 }
 
 fn assert_conserved(body: &Body) {
     let budget = &body.budget;
-    assert_eq!(body.structure.mass_kg(), budget.retained().total_mass_kg());
+    close(
+        body.physical().retained_mass_kg,
+        budget.retained().total_mass_kg(),
+        1e-14,
+    );
     for material in Material::ALL {
         let retained = budget.retained().mass_kg(material);
         let allocated: f64 = [
@@ -350,12 +365,13 @@ fn boundary_columns_use_mass_to_mole_conversion_and_obey_cold_caps() {
         if let Some(air) = air {
             let gas = body.budget.reservoir(Reservoir::Gas);
             assert_eq!(air.composition(), &gas.gas_composition().unwrap().unwrap());
-            let weight = body.structure.reference_gravity_m_s2()
-                / (4.0 * std::f64::consts::PI * body.structure.radius_m().powi(2));
+            let facts = body.physical();
+            let weight = facts.reference_gravity_m_s2
+                / (4.0 * std::f64::consts::PI * facts.reference_radius_m.powi(2));
             let column = air
                 .column(
-                    crate::units::GRAVITATIONAL_CONSTANT * body.structure.mass_kg(),
-                    body.structure.radius_m(),
+                    crate::units::GRAVITATIONAL_CONSTANT * facts.retained_mass_kg,
+                    facts.reference_radius_m,
                 )
                 .unwrap();
             close(
@@ -390,7 +406,7 @@ fn sub_bar_light_gas_and_giant_columns_are_bounded_by_real_supply() {
             .checked_add(&light)
             .unwrap();
         body.budget = Budget::new(source, interior, condensed, light).unwrap();
-        body.structure = crate::system::structure::derive(&body.budget, 1361.0, 4.5).unwrap();
+        refresh(&mut body);
         let air = partition::atmosphere(&mut body, 90.0).unwrap().unwrap();
         assert_conserved(&body);
         assert_eq!(
@@ -399,16 +415,20 @@ fn sub_bar_light_gas_and_giant_columns_are_bounded_by_real_supply() {
                 .mass_kg(Material::Hydrogen),
             0.75 * light_mass
         );
-        let weight = body.structure.reference_gravity_m_s2()
-            / (4.0 * std::f64::consts::PI * body.structure.radius_m().powi(2));
+        let facts = body.physical();
+        let weight = facts.reference_gravity_m_s2
+            / (4.0 * std::f64::consts::PI * facts.reference_radius_m.powi(2));
         let supply_pressure = body.budget.reservoir(Reservoir::Gas).total_mass_kg() * weight;
         assert!(air.pressure_pa() <= supply_pressure * (1.0 + 1e-12));
-        if light_mass == 1e12 {
-            assert_eq!(air.reference_level(), ReferenceLevel::Surface);
-            assert!(air.pressure_pa() < ONE_BAR_PA);
-        } else {
+        // The reference meaning comes from structure, never from the column.
+        let one_bar = facts.radius_reference == space_shared::RadiusReference::OneBar;
+        assert_eq!(one_bar, light_mass > 1e12);
+        if one_bar {
             assert_eq!(air.reference_level(), ReferenceLevel::OneBar);
             assert_eq!(air.pressure_pa(), ONE_BAR_PA);
+        } else {
+            assert_eq!(air.reference_level(), ReferenceLevel::Surface);
+            assert!(air.pressure_pa() < ONE_BAR_PA);
         }
         for species in Gas::ALL {
             assert!(
@@ -425,7 +445,7 @@ fn secondary_escape_debits_only_accessible_source_and_does_not_compound() {
     let initial = volatile_body();
     let mut body = initial.clone();
     let forcing = Forcing::new(1361.0, 1e12, 0.3, 4.5).unwrap();
-    finalise(&mut body, "escape-test", 1.0, &forcing);
+    let environment = finalise(&mut body, "escape-test", 1.0, &forcing);
     assert_conserved(&body);
     assert!(body.budget.escaped().mass_kg(Material::Nitrogen) > 0.0);
     for material in [Material::Water, Material::Nitrogen, Material::CarbonDioxide] {
@@ -438,9 +458,12 @@ fn secondary_escape_debits_only_accessible_source_and_does_not_compound() {
     assert_eq!(body.budget.escaped().mass_kg(Material::Metal), 0.0);
     let first = body.clone();
     partition::atmosphere(&mut body, 90.0).unwrap();
-    finalise(&mut body, "escape-test", 1.0, &forcing);
+    assert_eq!(
+        finalise(&mut body, "escape-test", 1.0, &forcing),
+        environment
+    );
     assert_eq!(body.budget, first.budget);
-    assert_eq!(body.structure, first.structure);
+    assert_eq!(body.initial_result, first.initial_result);
     assert_eq!(body.spin, first.spin);
 }
 
@@ -473,12 +496,23 @@ fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
                 continue;
             };
             let air = GasAtmosphere::try_from(data).unwrap();
+            crate::system::atmosphere::optics::boundary::OpticalColumn::from_result(
+                &planet.body.initial_result,
+                &air,
+            )
+            .unwrap();
+            let facts = planet.body.physical();
             let column = air
                 .column(
-                    planet.body.mass_earth * EARTH_SOLAR * SUN_GM,
-                    planet.body.radius_km * 1000.0,
+                    facts.reference_gravity_m_s2 * facts.reference_radius_m.powi(2),
+                    facts.reference_radius_m,
                 )
                 .unwrap();
+            close(
+                planet.body.mass_earth * EARTH_SOLAR * SUN_GM,
+                facts.reference_gravity_m_s2 * facts.reference_radius_m.powi(2),
+                1e-9,
+            );
             assert_eq!(data.extended, column.validity == ColumnValidity::Extended);
             assert!(air.composition().fraction(Gas::Oxygen) == 0.0);
             assert!(data.pressure_pa >= MIN_PRESSURE_PA);
@@ -538,10 +572,7 @@ fn changed_loss_history_preserves_orbits_and_source_but_reconciles_structure() {
             before.body.formation_distance_au,
             after.body.formation_distance_au
         );
-        assert_eq!(
-            after.body.structure.mass_kg(),
-            after.body.budget.retained().total_mass_kg()
-        );
+        assert_conserved(&after.body);
         assert_eq!(before.body.resonance, after.body.resonance);
         crate::system::physical::validate_result(&after.body.initial_result).unwrap();
         assert_ne!(
@@ -554,7 +585,6 @@ fn changed_loss_history_preserves_orbits_and_source_but_reconciles_structure() {
     let once = changed.clone();
     populate(&mut changed, 0.01);
     for (before, after) in once.planets.iter().zip(&changed.planets) {
-        assert_eq!(before.body.structure, after.body.structure);
         assert_eq!(before.body.budget, after.body.budget);
         assert_eq!(before.body.spin, after.body.spin);
         assert_eq!(before.body.initial_result, after.body.initial_result);

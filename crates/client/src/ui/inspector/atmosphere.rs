@@ -255,11 +255,11 @@ mod tests {
     #[test]
     fn extended_rocky_boundary_uses_spherical_gravity_without_legacy_warning() {
         let system =
-            space_simulation::system::generated_system("g1e0024924b.2.231", [0.0; 3]).unwrap();
+            space_simulation::system::generated_system("g13b6ffffcfeba.2.59", [0.0; 3]).unwrap();
         let world = system
             .planets
             .iter()
-            .find(|p| p.id == "g1e0024924b.2.231#B/4")
+            .find(|p| p.id == "g13b6ffffcfeba.2.59/7")
             .unwrap();
         let mut info = Info::default();
         facts(&mut info, world.environment.as_ref());
@@ -282,11 +282,11 @@ mod tests {
     #[test]
     fn motivating_boundary_exports_pressure_height_and_model_limits() {
         let system =
-            space_simulation::system::generated_system("g13b6ffffcfeba.2.1", [0.0; 3]).unwrap();
+            space_simulation::system::generated_system("g13b6ffffcfeba.2.339", [0.0; 3]).unwrap();
         let world = system
             .planets
             .iter()
-            .find(|p| p.id.ends_with("/1"))
+            .find(|p| p.id.ends_with("/7"))
             .unwrap();
         let mut info = Info::default();
         facts(&mut info, world.environment.as_ref());

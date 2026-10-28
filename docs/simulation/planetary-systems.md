@@ -39,19 +39,15 @@ accreting into planets. For each permitted host (a star or close pair):
    optionally place it at an allowed resonant period ratio.
 6. Stop if the orbit's farthest point exceeds the host's stable zone. Otherwise
     store its formation inventory and continue outward.
-    Provisional structure is a validated fallback result, with a temporary
-    compatibility view of the same facts rather than a legacy structure solve.
+    Provisional structure is a validated fallback result, not a legacy solve.
 7. Once the entire hierarchy and final orbits exist, share all-star heating
    samples with the atmosphere model. Account for accessible secondary volatile
     escape, solve H/He survival and structure together, then assign independently
     seeded spin and descriptions. Partition retained gas and condensates.
-    Retention trials now use fast fallback facts and independent forcing inputs;
-    the final live geometry/atmosphere still uses a legacy compatibility projection
-    while P3 consumer migration is in progress.
-    The retained fallback candidate now has its own gas/condensate partition,
-    pressure, temperature and updated inertia at fixed proxy geometry. It is kept
-    on the body and exported separately as `Planet::initial_result`; its presence
-    does not switch live geometry or attach the legacy atmosphere to that result.
+    Retention trials use fast fallback facts and independent forcing inputs.
+    The converged fallback, with its own gas/condensate partition, becomes the
+    planet's result (`Planet::initial_result`); mass, radius, inertia,
+    atmosphere and spin are all installed from it together.
 8. Recheck stability using final retained masses. Escape only reduces masses,
    so the formation-mass spacing remains conservative.
 
@@ -85,9 +81,10 @@ current irradiation are deliberately different inputs.
 
 ### Mass and radius are linked
 
-Radius is derived from the retained constituent inventory, using compressed
-heavy-material fits, mixture interpolation and a bounded light-envelope/giant
-surrogate. There is no independent radius scatter or class-based radius lookup.
+Radius is derived from the retained constituent inventory by the labelled
+fallback structure: compressed heavy-material fits, mixture interpolation and a
+bounded light-envelope/giant surrogate. Any H/He envelope gives a one-bar
+reference radius. There is no independent radius scatter or class-based radius lookup.
 Escaped H/He and secondary volatiles are tracked separately and excluded from gravitational mass.
 See the [composition guide](planet-composition.md) for exact formation priors,
 retention convergence bounds, reservoir partition, radius conventions and limitations.

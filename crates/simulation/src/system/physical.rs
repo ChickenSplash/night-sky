@@ -1,10 +1,10 @@
 //! Validated transport boundary for inventories and reference structure.
 use super::{
     Body,
-    composition::{Budget, Inventory, Material, Reservoir},
-    structure,
+    atmosphere::{GasAtmosphere, generation::MIN_PRESSURE_PA, optics::boundary::OpticalColumn},
 };
-use space_shared::{MaterialBudget, Planet, PlanetPhysical, RadiusReference};
+use crate::units::EARTH_MASS_KG;
+use space_shared::{Planet, PlanetPhysical};
 
 mod export;
 mod layered;
@@ -18,203 +18,64 @@ pub use result::{
 };
 pub use synchronous::{PreparedInitial, initial_with_atmosphere};
 
-/// Legacy consumer projection only. The new-model candidate is carried
-/// separately as `initial_result` until coordinated live adoption is implemented.
+/// The live physical record is the authoritative result's record, verbatim.
 pub fn to_data(body: &Body) -> PlanetPhysical {
-    let b = &body.budget;
-    let s = &body.structure;
-    PlanetPhysical {
-        materials: Material::ALL
-            .into_iter()
-            .map(|m| MaterialBudget {
-                material: m.id().into(),
-                source_kg: b.source().mass_kg(m),
-                retained_kg: b.retained().mass_kg(m),
-                escaped_kg: b.escaped().mass_kg(m),
-                interior_kg: b.reservoir(Reservoir::Interior).mass_kg(m),
-                condensed_kg: b.reservoir(Reservoir::CondensedVolatiles).mass_kg(m),
-                gas_kg: b.reservoir(Reservoir::Gas).mass_kg(m),
-            })
-            .collect(),
-        retained_mass_kg: s.mass_kg(),
-        reference_radius_m: s.radius_m(),
-        condensed_radius_m: s.condensed_radius_m(),
-        mean_density_kg_m3: s.mean_density_kg_m3(),
-        reference_gravity_m_s2: s.reference_gravity_m_s2(),
-        h_he_mass_fraction: s.h_he_mass_fraction(),
-        inertia_factor: s.inertia_factor(),
-        radius_reference: match s.reference() {
-            structure::RadiusReference::SolidSurface => RadiusReference::SolidSurface,
-            structure::RadiusReference::UnresolvedVolatileBoundary => {
-                RadiusReference::UnresolvedVolatileBoundary
-            }
-            structure::RadiusReference::OneBar => RadiusReference::OneBar,
-        },
-        approximations: s.approximations().iter().map(|a| a.id().into()).collect(),
-    }
+    body.physical().clone()
 }
 
 /// Missing and invalid records are distinct. No label-based physical defaults.
-/// Legacy consumer compatibility only: re-derives the legacy boundary. New-model
-/// callers use `validate_result`/`validate_record`, which never run a solver.
+/// Checks that every live projection is the transported result's: no
+/// structure, EOS or partition solve is re-run.
 pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str> {
     let Some(data) = &planet.physical else {
         return Ok(None);
     };
+    // Records written before the cutover cannot be checked without re-running
+    // the removed legacy model; they are invalid, not silently trusted.
+    let result = planet
+        .initial_result
+        .as_ref()
+        .ok_or("physical record without its result")?;
+    validate_result(result)?;
+    let record = &result.record;
+    if *data != record.physical {
+        return Err("physical record differs from its result");
+    }
+    let close = |a: f64, b: f64| {
+        a.is_finite() && b.is_finite() && (a - b).abs() <= a.abs().max(b.abs()) * 1e-12
+    };
+    if !close(planet.mass_earth * EARTH_MASS_KG, data.retained_mass_kg)
+        || !close(planet.radius_km * 1000.0, data.reference_radius_m)
+        || planet.inertia_factor != Some(data.inertia_factor)
+    {
+        return Err("inconsistent reference facts");
+    }
     let env = planet
         .environment
         .as_ref()
         .ok_or("missing structure forcing")?;
-    let inventory = |mass: fn(&MaterialBudget) -> f64| -> Result<Inventory, &'static str> {
-        let parts = data
-            .materials
-            .iter()
-            .map(|p| {
-                Ok((
-                    Material::from_id(&p.material).ok_or("unknown material")?,
-                    mass(p),
-                ))
-            })
-            .collect::<Result<Vec<_>, &'static str>>()?;
-        Inventory::new(&parts).map_err(|_| "invalid material inventory")
-    };
-    if data.materials.len() != Material::ALL.len() {
-        return Err("incomplete catalogue");
-    }
-    let budget = Budget::new(
-        inventory(|p| p.source_kg)?,
-        inventory(|p| p.interior_kg)?,
-        inventory(|p| p.condensed_kg)?,
-        inventory(|p| p.gas_kg)?,
-    )
-    .map_err(|_| "invalid reservoir budget")?;
-    let close = |a: f64, b: f64| {
-        a.is_finite() && b.is_finite() && (a - b).abs() <= a.abs().max(b.abs()) * 1e-10
-    };
-    for p in &data.materials {
-        let m = Material::from_id(&p.material).unwrap();
-        // Reservoir transfers preserve authoritative escaped mass, but summing
-        // split retained reservoirs can move one ulp. Re-subtracting a tiny loss
-        // from its much larger source magnifies that roundoff relative to loss.
-        // Scale only this subtraction allowance to the same species' source,
-        // never total planet mass; it cannot create reservoir supply.
-        let escaped = budget.escaped().mass_kg(m);
-        let loss_roundoff = 8.0 * f64::EPSILON * p.source_kg;
-        if !close(p.retained_kg, budget.retained().mass_kg(m))
-            || !p.escaped_kg.is_finite()
-            || p.escaped_kg < 0.0
-            || (p.escaped_kg - escaped).abs() > loss_roundoff + 1e-10 * p.escaped_kg.max(escaped)
-        {
-            return Err("inconsistent material totals");
-        }
-    }
-    if !env.equilibrium_temperature_k.is_finite() || env.equilibrium_temperature_k < 0.0 {
-        return Err("invalid boundary temperature");
-    }
-    let (s, partitioned, atmosphere) = structure::boundary::resolve(
-        &budget,
-        env.irradiation_w_m2,
-        env.age_gyr,
+    if !close(
         env.equilibrium_temperature_k.max(20.0),
-    )
-    .map_err(|_| "invalid reference structure")?;
-    for p in &data.materials {
-        let material = Material::from_id(&p.material).unwrap();
-        // Repartitioning near a protected reservoir can lose source-scale ulps.
-        let allowance = 8.0 * f64::EPSILON * p.source_kg;
-        for (actual, expected) in [
-            (
-                p.gas_kg,
-                partitioned.reservoir(Reservoir::Gas).mass_kg(material),
-            ),
-            (
-                p.condensed_kg,
-                partitioned
-                    .reservoir(Reservoir::CondensedVolatiles)
-                    .mass_kg(material),
-            ),
-        ] {
-            if (actual - expected).abs() > allowance + 1e-10 * actual.max(expected) {
-                return Err("inconsistent boundary partition");
-            }
+        record.surface_temperature_k,
+    ) {
+        return Err("inconsistent boundary temperature");
+    }
+    match &env.atmosphere {
+        None if record.surface_pressure_pa >= MIN_PRESSURE_PA => Err("missing boundary atmosphere"),
+        None => Ok(Some(data)),
+        Some(air) => {
+            let air = GasAtmosphere::try_from(air).map_err(|_| "invalid boundary atmosphere")?;
+            OpticalColumn::from_result(result, &air)
+                .map_err(|_| "inconsistent boundary atmosphere")?;
+            Ok(Some(data))
         }
     }
-    // Compare molecular fractions to the actual transported reservoir, not a
-    // second subtraction of tiny cold-trapped traces from protected supplies.
-    let mixture = budget
-        .reservoir(Reservoir::Gas)
-        .gas_composition()
-        .map_err(|_| "invalid boundary mixture")?;
-    match (&env.atmosphere, &atmosphere) {
-        (None, None) => {}
-        (Some(actual), Some(expected)) => {
-            use super::atmosphere::{Gas, GasAtmosphere, ONE_BAR_PA, ReferenceLevel};
-            let actual =
-                GasAtmosphere::try_from(actual).map_err(|_| "invalid boundary atmosphere")?;
-            let mixture = mixture.ok_or("missing boundary gas")?;
-            let pressure = if actual.reference_level() == ReferenceLevel::OneBar {
-                ONE_BAR_PA
-            } else {
-                budget.reservoir(Reservoir::Gas).total_mass_kg() * s.reference_gravity_m_s2()
-                    / (4.0 * std::f64::consts::PI * s.radius_m().powi(2))
-                    / actual
-                        .column(
-                            s.mass_kg() * crate::units::GRAVITATIONAL_CONSTANT,
-                            s.radius_m(),
-                        )
-                        .map_err(|_| "invalid boundary column")?
-                        .profile
-                        .mass_factor(actual.pressure_pa())
-            };
-            if actual.reference_level() != expected.reference_level()
-                || !close(actual.pressure_pa(), pressure)
-                || !close(actual.temperature_k(), expected.temperature_k())
-                || !Gas::ALL
-                    .iter()
-                    .all(|&gas| close(actual.composition().fraction(gas), mixture.fraction(gas)))
-            {
-                return Err("inconsistent boundary atmosphere");
-            }
-        }
-        _ => return Err("inconsistent boundary atmosphere"),
-    }
-    if ![
-        (data.retained_mass_kg, s.mass_kg()),
-        (data.reference_radius_m, s.radius_m()),
-        (data.condensed_radius_m, s.condensed_radius_m()),
-        (data.mean_density_kg_m3, s.mean_density_kg_m3()),
-        (data.reference_gravity_m_s2, s.reference_gravity_m_s2()),
-        (data.h_he_mass_fraction, s.h_he_mass_fraction()),
-        (data.inertia_factor, s.inertia_factor()),
-        (planet.mass_earth * crate::units::EARTH_MASS_KG, s.mass_kg()),
-        (planet.radius_km * 1000.0, s.radius_m()),
-        (
-            planet.inertia_factor.ok_or("missing physical inertia")?,
-            s.inertia_factor(),
-        ),
-    ]
-    .into_iter()
-    .all(|(a, b)| close(a, b))
-    {
-        return Err("inconsistent reference facts");
-    }
-    let reference = match s.reference() {
-        structure::RadiusReference::SolidSurface => RadiusReference::SolidSurface,
-        structure::RadiusReference::UnresolvedVolatileBoundary => {
-            RadiusReference::UnresolvedVolatileBoundary
-        }
-        structure::RadiusReference::OneBar => RadiusReference::OneBar,
-    };
-    let caveats: Vec<_> = s.approximations().iter().map(|a| a.id()).collect();
-    if data.radius_reference != reference || data.approximations != caveats {
-        return Err("inconsistent reference semantics");
-    }
-    Ok(Some(data))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use space_shared::RadiusReference;
 
     #[test]
     fn small_escaped_remainders_allow_species_local_subtraction_roundoff_only() {
@@ -233,36 +94,85 @@ mod tests {
         planet.mass_earth = p.body.mass_earth;
         planet.radius_km = p.body.radius_km;
         planet.environment = p.environment.clone();
-        planet.inertia_factor = Some(p.body.structure.inertia_factor());
+        planet.inertia_factor = Some(p.body.physical().inertia_factor);
         planet.physical = Some(to_data(&p.body));
+        planet.initial_result = Some(p.body.initial_result.clone());
         validate(&planet).unwrap().unwrap();
         let round_trip: Planet =
             serde_json::from_str(&serde_json::to_string(&planet).unwrap()).unwrap();
         validate(&round_trip).unwrap().unwrap();
-        for value in [-1.0, f64::NAN, f64::INFINITY, 1e20] {
+        // Corrupt the result and its live copy together, so the result's own
+        // transport checks are what reject it, not a copy mismatch.
+        let corrupt = |material: &str, escaped: f64| {
             let mut corrupt = planet.clone();
+            let result = corrupt.initial_result.as_mut().unwrap();
+            for record in [
+                corrupt.physical.as_mut().unwrap(),
+                &mut result.record.physical,
+            ] {
+                record
+                    .materials
+                    .iter_mut()
+                    .find(|p| p.material == material)
+                    .unwrap()
+                    .escaped_kg = escaped;
+            }
             corrupt
-                .physical
-                .as_mut()
-                .unwrap()
-                .materials
-                .iter_mut()
-                .find(|p| p.material == "methane")
-                .unwrap()
-                .escaped_kg = value;
-            assert!(validate(&corrupt).is_err());
+        };
+        for value in [-1.0, f64::NAN, f64::INFINITY, 1e20] {
+            assert!(validate(&corrupt("methane", value)).is_err());
         }
         // An absent species cannot borrow tolerance from the massive planet.
-        planet
-            .physical
-            .as_mut()
-            .unwrap()
-            .materials
-            .iter_mut()
-            .find(|p| p.material == "oxygen")
-            .unwrap()
-            .escaped_kg = 1e-100;
-        assert!(validate(&planet).is_err());
+        assert!(validate(&corrupt("oxygen", 1e-100)).is_err());
+    }
+
+    #[test]
+    fn live_projections_must_all_come_from_the_one_result() {
+        let galaxy = crate::demo_galaxy();
+        let planets: Vec<_> = galaxy.systems.iter().flat_map(|s| &s.planets).collect();
+        let air = planets
+            .iter()
+            .find(|p| {
+                p.environment
+                    .as_ref()
+                    .is_some_and(|e| e.atmosphere.is_some())
+            })
+            .unwrap();
+        type Corrupt = fn(&mut Planet);
+        let corruptions: [Corrupt; 7] = [
+            |p| p.radius_km *= 1.0 + 1e-9,
+            |p| p.mass_earth *= 1.0 + 1e-9,
+            |p| *p.inertia_factor.as_mut().unwrap() *= 1.0 + 1e-9,
+            |p| p.initial_result = None,
+            |p| p.environment.as_mut().unwrap().equilibrium_temperature_k += 50.0,
+            |p| p.environment.as_mut().unwrap().atmosphere = None,
+            |p| {
+                let air = p.environment.as_mut().unwrap().atmosphere.as_mut().unwrap();
+                air.pressure_pa *= 2.0;
+            },
+        ];
+        for (index, corrupt) in corruptions.into_iter().enumerate() {
+            let mut bad = (*air).clone();
+            corrupt(&mut bad);
+            assert!(validate(&bad).is_err(), "corruption {index}");
+        }
+        // A positive sub-threshold column stays in the result but is omitted
+        // from the live projection; an omitted column above it is invalid.
+        let mut trace = 0;
+        for index in 0..40 {
+            let key = format!("g13b6ffffcfeba.2.{index}");
+            let Some(system) = super::super::generated_system(&key, [0.0; 3]) else {
+                continue;
+            };
+            for p in &system.planets {
+                let record = &p.initial_result.as_ref().unwrap().record;
+                let omitted = p.environment.as_ref().unwrap().atmosphere.is_none();
+                validate(p).unwrap().unwrap();
+                assert_eq!(omitted, record.surface_pressure_pa < MIN_PRESSURE_PA);
+                trace += usize::from(omitted && record.surface_pressure_pa > 0.0);
+            }
+        }
+        assert!(trace > 0);
     }
 
     #[test]

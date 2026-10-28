@@ -85,16 +85,35 @@ fn exact(air: &Air, impact: f32, start: f32, span: f32) -> DVec3 {
         .sum()
 }
 
+/// Extreme deep, extended light-gas boundary column, independent of
+/// generation: the renderer must handle such columns whatever the population.
 fn selected_air() -> Air {
-    let system = space_simulation::system::generated_system("g1e0024924b.2.113", [0.0; 3]).unwrap();
-    let planet = system
-        .planets
-        .iter()
-        .find(|p| p.id == "g1e0024924b.2.113#A/1")
-        .unwrap();
-    generated::atmosphere(planet)
-        .unwrap()
-        .scaled(planet.radius_km * 1e3)
+    use space_simulation::{
+        system::atmosphere::{Composition, Gas, GasAtmosphere, ReferenceLevel},
+        units::{EARTH_SOLAR, SUN_GM},
+    };
+    let (gm, radius) = (1e13, 3e6);
+    let gas = GasAtmosphere::new(
+        Composition::new(&[(Gas::Hydrogen, 0.85), (Gas::Helium, 0.15)]).unwrap(),
+        ReferenceLevel::Surface,
+        1e9,
+        1000.0,
+        None,
+    )
+    .unwrap();
+    let planet = space_shared::Planet {
+        mass_earth: gm / (EARTH_SOLAR * SUN_GM),
+        radius_km: radius / 1e3,
+        environment: Some(space_shared::PlanetEnvironment {
+            irradiation_w_m2: 1e5,
+            assumed_bond_albedo: 0.3,
+            equilibrium_temperature_k: 1000.0,
+            age_gyr: 4.5,
+            atmosphere: Some(gas.to_data(gm, radius).unwrap()),
+        }),
+        ..default()
+    };
+    generated::atmosphere(&planet).unwrap().scaled(radius)
 }
 
 fn check(air: &Air, impact: f32, start: f32, end: f32) -> Path {

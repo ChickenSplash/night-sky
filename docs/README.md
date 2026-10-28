@@ -32,7 +32,8 @@ seed helpers, object identities and photometry stay at the crate root; see
   formation/retained budgets, approximate generated radii, bounded H/He retention
   and separate headless dry/water radial solvers, protected traces in dry and
   water-bearing hosts, atmosphere coupling and opt-in background refinement
-  shown in the inspector (rendering and navigation still use legacy data).
+  shown in the inspector. Live planets use one synchronous fallback result each;
+  background layered results are not adopted yet.
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.

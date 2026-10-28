@@ -1,5 +1,5 @@
 use super::{Info, Section};
-use space_shared::{Planet, RadiusReference};
+use space_shared::{AtmosphereReference, Planet, RadiusReference};
 
 pub(super) fn facts(info: &mut Info, planet: &Planet) {
     info.section = Section::Composition;
@@ -52,14 +52,6 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
         "Radius meaning",
         None,
         match data.radius_reference {
-            RadiusReference::SolidSurface | RadiusReference::UnresolvedVolatileBoundary
-                if data
-                    .approximations
-                    .iter()
-                    .any(|a| a == "deep_boundary_unresolved") =>
-            {
-                "Unresolved condensed proxy (not a located ground/phase boundary)"
-            }
             RadiusReference::SolidSurface => "Approximate condensed boundary (nominal dry ground)",
             RadiusReference::UnresolvedVolatileBoundary => {
                 "Approximate condensed boundary (water phases unresolved)"
@@ -69,22 +61,11 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
             }
         },
     );
-    if data
-        .approximations
-        .iter()
-        .any(|a| a == "deep_boundary_unresolved")
-    {
-        info.field(
-            "composition.boundary",
-            "Deep boundary",
-            None,
-            "Unresolved: outside thin boundary model, not proof that ground is absent",
-        );
-    }
-    if data
-        .approximations
-        .iter()
-        .any(|a| a == "extended_boundary_column")
+    if planet
+        .environment
+        .as_ref()
+        .and_then(|e| e.atmosphere.as_ref())
+        .is_some_and(|air| air.reference_level == AtmosphereReference::Surface && air.extended)
     {
         info.field(
             "composition.boundary_column",

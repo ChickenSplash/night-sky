@@ -3,15 +3,16 @@
 ## Status and goal
 
 **P1 and P2 complete and signed off. Next: P3, default cutover and legacy
-removal. P3 contract and model-independent validation implemented; synchronous
-generation/retention migration is in progress.** The live, generator-backed rock-and-water prototype provides
-conserved, layered planets alongside the legacy model. Population-wide cutover
-and legacy removal remain P3.
+removal. P3 contract, model-independent validation and the synchronous live
+cutover are implemented; consumer migration, background adoption and legacy
+removal remain.** Every generated planet's live mass, radius, inertia,
+reservoirs, atmosphere and spin now come from one synchronous fallback result.
 
-Generated planets still use the approximate model in `structure::derive` by
-default. The opt-in prototype joins dry, water, protected-trace and
-atmosphere-coupling solvers, with background loading and live inspector results.
-Rendering and navigation still use the legacy model.
+`structure::derive` no longer feeds generated planets; its code remains until
+the final removal step. The opt-in prototype joins dry, water, protected-trace
+and atmosphere-coupling solvers, with background loading and live inspector
+results that are not adopted yet. Rendering and navigation read the new live
+projections through their existing adapters.
 
 This is a simulator, not a thermodynamics research project. Prefer the simplest
 scientifically plausible model that supports the needed behaviour. Named,
@@ -678,14 +679,14 @@ Paths below are relative to `crates/`.
 
 | Consumer / owner | Current dependency | Required cutover |
 | --- | --- | --- |
-| Formation and final retention: `simulation/src/system/generation.rs`, `generation/retention.rs` | Formation and retention use fallback, with a validated `Body::initial_result`; classification reads its physical record. Final legacy compatibility projection still calls `structure::derive`; spin still uses that view. | Finish coordinated live geometry/atmosphere cutover and spin adaptation. Preserve immutable formation supply and non-compounding loss accounting. Do not run layered solves inside retention bisection. |
-| Environment generation: `simulation/src/system/atmosphere/generation.rs`, `generation/partition.rs`, `structure/boundary.rs` | Forcing/albedo/age preparation is separate. Live environment export still calls legacy boundary resolution, which overwrites compatibility structure/radius and partitions the retained budget, not the candidate. | Make the chosen result own final mass, partition, reference and thermal facts; old boundary resolution must not overwrite them. Adapt optical-column export to that reference. |
-| Natural systems and overlays: `simulation/src/system/generated.rs`, `overlay.rs` | One exporter now carries identical legacy live projections plus `initial_result` candidates; experimental mode only prepares separate jobs. | Switch the shared exporter's live authority coherently with atmosphere/geometry consumers. Natural IDs, host/orbit, designation and overlay tasks remain independent of refinement. |
-| Validation and snapshots: `shared/src/composition.rs`, `simulation/src/system/physical.rs`, `physical/layered.rs` | `LayeredPlanet` is a side record; `physical::validate` reconstructs the legacy boundary model and compares against it. | Carry model provenance, fidelity and surface knowledge with the authoritative planet. Validate transported invariants without re-solving either model. Keep independent solver regression tests, rather than treating transport validation as physical verification. |
+| Formation and final retention: `simulation/src/system/generation.rs`, `generation/retention.rs` | **Done:** formation and retention use fallback; final retention installs mass, radius, inertia, reservoirs, atmosphere and spin from one partitioned result. `Body::structure` was removed. | Keep it so. Preserve immutable formation supply and non-compounding loss accounting. Do not run layered solves inside retention bisection. |
+| Environment generation: `simulation/src/system/atmosphere/generation.rs`, `generation/partition.rs`, `structure/boundary.rs` | **Done:** live environment is the result's own partition; `structure/boundary.rs` was removed. Sub-0.1 Pa columns stay in the result but are omitted from the live environment for rendering/navigation parity. | Revisit that presentation threshold when rendering/navigation move to opacity-based visibility. |
+| Natural systems and overlays: `simulation/src/system/generated.rs`, `overlay.rs` | **Done:** one exporter projects every live field from `initial_result` and validates it. Experimental mode only prepares separate jobs. | Keep that. Natural IDs, host/orbit, designation and overlay tasks remain independent of refinement. |
+| Validation and snapshots: `shared/src/composition.rs`, `simulation/src/system/physical.rs`, `physical/layered.rs` | **Done:** `physical::validate` checks the live record and projections against the result by transport invariants and `OpticalColumn::from_result`; it re-runs no solver. A record without its result is invalid. | Carry model provenance, fidelity and surface knowledge with the authoritative planet. Validate transported invariants without re-solving either model. Keep independent solver regression tests, rather than treating transport validation as physical verification. |
 | Background loading: `client/src/planet_loading.rs` | Opt-in inspector cache; completed records do not update the system. | Always expose a valid initial fallback. Track queued/running/refused/worker-failed separately from that result. Cache candidate refinements by inputs/model revision, discard stale jobs and publish through one coherent adoption path. |
-| Shape and spin: `simulation/src/system/shape.rs`, `generation.rs` | `planet_shape` accepts inertia only in 0.1–0.4 and otherwise substitutes a neutral/class value; spin limits use legacy facts. | Accept validated new-model inertia, including the audited values below 0.1. Recompute dependent spin limits and shapes consistently, preserving deterministic spin seeds and locked-period semantics. Keep the existing bounded shape approximation explicitly labelled. |
+| Shape and spin: `simulation/src/system/shape.rs`, `generation.rs` | **Done:** spin uses the result's inertia and H/He fraction; `planet_shape` accepts the Darwin-Radau domain (0, 2/3], including the ~2% of factors below 0.1. | Accept validated new-model inertia, including the audited values below 0.1. Recompute dependent spin limits and shapes consistently, preserving deterministic spin seeds and locked-period semantics. Keep the existing bounded shape approximation explicitly labelled. |
 | Ground, discs and lighting: `client/src/scene/draw.rs`, `render/ground.rs`, `simulation/src/system/surface.rs`, `light.rs` | A single reference spheroid supplies drawing and ground; atmosphere reference suppresses terrain. Reflectance calls legacy validation. | Distinguish a condensed drawable boundary, a gas reference and an opaque visual proxy. Rendering must not promote any of them to certified landable ground. Keep reflectance/scattering prescriptions separate from structure. |
-| Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | Explicit optical boundary contract now carries reference conditions, named profile, lower proxy and outer cutoff. Live inputs still use total GM and `Planet::radius_km`; descent permission retains the legacy threshold. A separate checked unified-result adapter uses reference gravity but does not adopt candidates. | Complete coherent live atmosphere/partition cutover before using the unified adapter. Never infer resolved profiles/clouds from structural edges or suspended bulk condensate. Replace threshold-based descent eligibility with explicit geometry/surface knowledge. |
+| Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | Explicit optical boundary contract now carries reference conditions, named profile, lower proxy and outer cutoff. Live inputs (total GM, `Planet::radius_km`) now come from the result; fallback reference gravity equals total-mass gravity, so they agree. Descent permission retains the legacy threshold. A separate checked unified-result adapter uses reference gravity but does not adopt candidates. | Complete coherent live atmosphere/partition cutover before using the unified adapter. Never infer resolved profiles/clouds from structural edges or suspended bulk condensate. Replace threshold-based descent eligibility with explicit geometry/surface knowledge. |
 | Camera and craft: `simulation/src/system/clearance.rs`, `craft.rs`, `craft/route.rs`, `craft/voyage.rs`, `client/src/scene/location.rs`, `client/src/craft.rs` | Clearance, gravity, spawn altitude, body reach and routes consume copied systems/fields. Camera field invalidation currently checks system ID/page and list changes, not a physical revision. | Adopt one revision across view and physical fields; rebuild mass/reach/clearance/route caches. Keep camera pose and craft state stable; never silently embed them in enlarged geometry or leave craft on a different mass revision. |
 | Search and distant generation: `simulation/src/search/{engine,live}.rs`, `craft/voyage.rs` | Radius, mass and class predicates use synchronous generated bodies; remote systems may never enter the client loader. | Use the new synchronous fallback, not hidden legacy or background EOS work. Disclose the result basis for searchable physical properties; a fallback match is not a guaranteed layered match. Reconcile/revalidate when a loaded result changes. |
 | Inspector and developer tools: `client/src/ui/inspector/`, `devtools/`, planet loader readout | Separate legacy and experimental reports, plus derived UI caches. | Show the active authoritative revision and any pending candidate distinctly; export the same facts in snapshots. Remove obsolete comparison/toggle paths after migration. |
@@ -893,6 +894,31 @@ a unified exact layered search across the galaxy is not part of this cutover.
      retains its tighter-integration refusal. All 22 envelope fixtures pass.
      Logs: `data/tmp/p3-reference-partition-{check,audit,envelope}.log`. No visual/performance
      run or new population-coverage claim.
+   - **Synchronous live cutover implemented.** `retention::finalise` installs
+     mass, radius, inertia, reservoir budget, atmosphere and spin from the one
+     prepared result and returns the live environment. `Body::structure`,
+     `Structure::provisional`, atmosphere `generate` and `structure/boundary.rs`
+     (with its four boundary approximation labels) were removed; the cold-trap
+     partition keeps only its trace-retaining path. `physical::validate(Planet)`
+     now checks transport against the result instead of re-deriving legacy
+     physics, and `export_planet` validates every export. `planet_shape` accepts
+     inertia in (0, 2/3].
+   - Population effect (2,151 planets, `atmosphere-population:0..199`): 329
+     airless, 1,087 surface columns (101 above 1 bar, highest about 600 bar),
+     735 one-bar envelopes. 535 of those envelopes have under 2% H/He: rocky
+     bodies with small envelopes that legacy gave thick boundary air and ground
+     are now groundless envelopes without descent. Inertia factors span
+     0.063–0.375, 49 below 0.1. Sub-0.1 Pa columns are omitted from the live
+     environment only (rendering/navigation parity); the result keeps them.
+   - Client fixtures that pinned legacy-specific worlds were moved to current
+     generated worlds with the same properties (thick and extended surface
+     columns); the extreme-limb renderer fixtures now use a synthetic column,
+     since the extreme legacy H/He boundary columns no longer occur.
+   - Verification: `./scripts/check.sh` passes (467 simulation tests, 374 client
+     tests, formatting and strict Clippy). Saved audit: 315 fallbacks, radii
+     unchanged; 22 envelope fixtures pass. Logs:
+     `data/tmp/p3-cutover-{check,audit,envelope}.log`. Not run: visual or
+     performance benchmarks, which the user runs.
 3. **Consumer adapters.** Migrate shape/spin, ground/reference geometry, gas optics,
    light, clearances, spawn/camera/craft fields, search and UI/snapshots. Exercise
    bare rock, ocean/ice, hot/unresolved surfaces, gas-free fallback, sub-bar gas,

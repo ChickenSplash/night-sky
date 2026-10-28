@@ -1,11 +1,31 @@
-//! Complete staged synchronous result and its atmosphere. Never mutates live
-//! projections; the eventual adoption must install these facts together.
-use crate::system::{atmosphere::optics::boundary::OpticalColumn, structure::fallback};
+//! Complete synchronous result and its atmosphere. Generation installs these
+//! facts together as the live projections; nothing else may supply them.
+use crate::system::{
+    atmosphere::{generation::MIN_PRESSURE_PA, optics::boundary::OpticalColumn},
+    composition::Budget,
+    structure::fallback,
+};
 use space_shared::{PhysicalRevision, PlanetEnvironment, PlanetResult};
 
 pub struct PreparedInitial {
     pub result: PlanetResult,
+    /// The same reservoir split as `result`, for retention re-evaluation.
+    pub budget: Budget,
+    /// Includes positive trace columns. See `live_environment`.
     pub environment: PlanetEnvironment,
+}
+
+impl PreparedInitial {
+    /// Live projection. Columns below the population's presentation threshold
+    /// are omitted for rendering/navigation parity with the previous live
+    /// population; their gas and pressure remain in the result record.
+    pub fn live_environment(&self) -> PlanetEnvironment {
+        let mut environment = self.environment.clone();
+        environment
+            .atmosphere
+            .take_if(|air| air.pressure_pa < MIN_PRESSURE_PA);
+        environment
+    }
 }
 
 /// Partition at the fallback's fixed reference. Neither legacy boundary
@@ -56,6 +76,7 @@ pub fn initial_with_atmosphere(
         .transpose()?;
     Ok(PreparedInitial {
         result,
+        budget: partitioned.budget,
         environment,
     })
 }

@@ -6,6 +6,7 @@ use crate::system::{
     structure::{self, StructureError, fallback::Fallback},
 };
 use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K, EARTH_MASS_KG, GRAVITATIONAL_CONSTANT};
+use space_shared::PlanetEnvironment;
 
 pub const MAX_STEPS: u8 = 40;
 pub const SURVIVAL_TOLERANCE: f64 = 1e-8;
@@ -160,33 +161,32 @@ pub(crate) fn secondary_retention(escape_m_s: f64, loss_flux: f64) -> f64 {
 }
 
 /// Called once after the complete hierarchy and final orbits exist. The caller
-/// caches stellar phase samples and shares the heating with atmosphere generation.
-pub(crate) fn finalise(body: &mut Body, id: &str, host_mass: f64, forcing: &Forcing) {
+/// caches stellar phase samples. Mass, radius, inertia, reservoirs, atmosphere
+/// and spin all come from one partitioned result and are installed together.
+pub(crate) fn finalise(
+    body: &mut Body,
+    id: &str,
+    host_mass: f64,
+    forcing: &Forcing,
+) -> PlanetEnvironment {
     let (budget, fallback, solve) = reconcile(&body.budget, forcing)
         .expect("generated inventory must have supported convergent retained structure");
-    let initial_result = crate::system::physical::initial_with_atmosphere(
+    let prepared = crate::system::physical::initial_with_atmosphere(
         &fallback,
         &forcing.environment(),
         forcing.revision(id, &budget),
     )
     .unwrap_or_else(|error| panic!("{id}: retained fallback: {error}"));
-    let initial_result = initial_result.result;
-    // Temporary compatibility projection for unmigrated atmosphere/shape/wire
-    // consumers. It must never feed back into the fallback-based retention solve.
-    let structure = structure::derive(&budget, forcing.irradiation_w_m2, forcing.age_gyr)
-        .expect("retained inventory must support legacy consumer projection");
-    body.mass_earth = structure.mass_kg() / EARTH_MASS_KG;
-    body.radius_km = structure.radius_m() / 1000.0;
-    body.class = materials::classify(&initial_result.record.physical);
-    body.budget = budget;
-    body.structure = structure;
-    body.initial_result = initial_result;
+    let environment = prepared.live_environment();
+    let facts = &prepared.result.record.physical;
+    body.mass_earth = facts.retained_mass_kg / EARTH_MASS_KG;
+    body.radius_km = facts.reference_radius_m / 1000.0;
+    body.class = materials::classify(facts);
+    body.budget = prepared.budget;
+    body.initial_result = prepared.result;
     body.retention_solve = solve;
-    refresh_spin(body, id, host_mass);
-}
-
-pub(crate) fn refresh_spin(body: &mut Body, id: &str, host_mass: f64) {
     body.spin = planet_spin(&mut Rng::new(&format!("{id}:spin:v2")), body, host_mass);
+    environment
 }
 
 #[cfg(test)]

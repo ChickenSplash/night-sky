@@ -1,9 +1,8 @@
-//! Planet structure: fast approximate generated radii and a separate headless
-//! `dry` and restricted `water` radial solvers. Generation still uses the
-//! approximate inventory model.
+//! Planet structure: the labelled `fallback` that generation uses, the headless
+//! `dry`/`water`/`envelope` solvers, and the legacy `derive` model, which no
+//! longer feeds generated planets.
 //! Prescriptions, provenance and domains: docs/simulation/planet-composition.md.
 
-pub(crate) mod boundary;
 pub mod coupled;
 #[cfg(test)]
 mod coverage;
@@ -41,13 +40,6 @@ pub enum Approximation {
     EnvelopeFitInputsBounded,
     /// Thin gas cannot support a one-bar column at the condensed boundary.
     SubBarEnvelope,
-    ThinBoundaryColumn,
-    /// Condensed boundary retained outside constant-gravity column geometry.
-    ExtendedBoundaryColumn,
-    BoundaryReferenceTransition,
-    DeepBoundaryUnresolved,
-    /// Temporary formation-only projection of the validated fallback candidate.
-    ProvisionalFallback,
 }
 
 impl Approximation {
@@ -60,11 +52,6 @@ impl Approximation {
             Self::EnvelopeSurrogate => "envelope_surrogate",
             Self::EnvelopeFitInputsBounded => "envelope_fit_inputs_bounded",
             Self::SubBarEnvelope => "sub_bar_envelope",
-            Self::ThinBoundaryColumn => "thin_boundary_column",
-            Self::ExtendedBoundaryColumn => "extended_boundary_column",
-            Self::BoundaryReferenceTransition => "boundary_reference_transition",
-            Self::DeepBoundaryUnresolved => "deep_boundary_unresolved",
-            Self::ProvisionalFallback => "provisional_fallback",
         }
     }
 }
@@ -81,26 +68,6 @@ pub struct Structure {
 }
 
 impl Structure {
-    /// Formation-only compatibility view, replaced after all-star retention.
-    /// No legacy solve or heuristic inertia is used to construct this view.
-    pub(crate) fn provisional(data: &space_shared::PlanetPhysical) -> Self {
-        Self {
-            mass_kg: data.retained_mass_kg,
-            radius_m: data.reference_radius_m,
-            condensed_radius_m: data.condensed_radius_m,
-            h_he_mass_fraction: data.h_he_mass_fraction,
-            inertia_factor: data.inertia_factor,
-            reference: match data.radius_reference {
-                space_shared::RadiusReference::SolidSurface => RadiusReference::SolidSurface,
-                space_shared::RadiusReference::UnresolvedVolatileBoundary => {
-                    RadiusReference::UnresolvedVolatileBoundary
-                }
-                space_shared::RadiusReference::OneBar => RadiusReference::OneBar,
-            },
-            approximations: vec![Approximation::ProvisionalFallback],
-        }
-    }
-
     pub fn mass_kg(&self) -> f64 {
         self.mass_kg
     }
@@ -108,9 +75,7 @@ impl Structure {
     pub fn radius_m(&self) -> f64 {
         self.radius_m
     }
-    /// Cold heavy-material proxy. The environmental correction promotes this to
-    /// an approximate boundary with `ThinBoundaryColumn` or
-    /// `ExtendedBoundaryColumn`, never a core EOS.
+    /// Cold heavy-material proxy, never a core EOS.
     pub fn condensed_radius_m(&self) -> f64 {
         self.condensed_radius_m
     }

@@ -126,9 +126,9 @@ pub struct Planet {
     /// Conserved composition and reference structure; absent means unknown.
     #[serde(default)]
     pub physical: Option<PlanetPhysical>,
-    /// Validated synchronous new-model candidate. During P3 migration this is
-    /// NOT the authority for the legacy geometry/environment projections above.
-    /// Consumers must not mix its radii or reservoirs with those projections.
+    /// Authoritative physical result. Radius, mass, inertia, `physical` and the
+    /// generated atmosphere above are projections of it, installed together.
+    /// A record without it cannot be validated and is treated as invalid.
     #[serde(default)]
     pub initial_result: Option<PlanetResult>,
     /// Period ratio with the next planet in, outer:inner.

@@ -125,10 +125,12 @@ pub(crate) fn star_flattening(mass_solar: f64, radius_solar: f64, period_hours: 
 
 /// Physical inertia for generated planets. Class fallback is restricted to
 /// legacy records without composition; malformed new records use a neutral factor.
+/// Accepts the whole Darwin-Radau domain: centrally condensed envelope worlds
+/// fall well below 0.1 and must keep the factor that limited their spin.
 pub fn planet_shape(planet: &Planet) -> Spheroid {
     let inertia = planet
         .inertia_factor
-        .filter(|k| k.is_finite() && (0.1..=0.4).contains(k))
+        .filter(|k| k.is_finite() && *k > 0.0 && *k <= 2.0 / 3.0)
         .unwrap_or_else(|| {
             if planet.physical.is_some() {
                 // Malformed new data must not turn a display label into physics.
@@ -291,6 +293,21 @@ mod tests {
             planet.class = class.into();
             assert_eq!(planet_shape(&planet), expected);
         }
+        // Centrally condensed envelopes are physical, not malformed records.
+        planet.physical = Some(
+            crate::demo_galaxy().systems[0].planets[0]
+                .physical
+                .clone()
+                .unwrap(),
+        );
+        planet.inertia_factor = Some(0.06);
+        let close = |planet: &Planet, inertia: f64| {
+            let expected = planet_flattening(inertia, 5.0, 10_000.0, 12.0);
+            (planet_shape(planet).flattening() - expected).abs() < 1e-12
+        };
+        assert!(close(&planet, 0.06) && !close(&planet, 0.33));
+        planet.inertia_factor = Some(0.7);
+        assert!(close(&planet, 0.33));
         let mut wire = serde_json::to_value(&planet).unwrap();
         wire.as_object_mut().unwrap().remove("inertia_factor");
         let legacy: Planet = serde_json::from_value(wire).unwrap();

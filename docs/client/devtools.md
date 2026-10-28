@@ -58,7 +58,8 @@ per-planet queue/running/solved/refusal states by designation, in orbit order.
 The separate **CPU threads** section shows the shared star/planet budget and
 star-worker activity once, rather than repeating thread counts in each loader
 section. Solved results appear in the planet inspector's layered section and
-`/state/planet_loading`; the live scene still uses the legacy model. See
+`/state/planet_loading`; the live scene still uses each planet's synchronous
+fallback result, not these layered results. See
 [composition](../simulation/planet-composition.md#experimental-background-loading)
 for target selection, caching, cancellation, the transport record and limits.
 

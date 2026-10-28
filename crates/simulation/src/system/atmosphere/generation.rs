@@ -1,15 +1,9 @@
-//! Inventory-backed atmospheric population with approximate cold trapping.
+//! All-star heating for retention, and the approximate cold-trap partition.
 use super::condensation::vapour_pressure;
 use super::*;
-use crate::{
-    light, orbit,
-    seed::Rng,
-    star::multiple::Bodies,
-    system::forcing::Forcing,
-    units::{EARTH_SOLAR, SUN_GM},
-};
+use crate::{light, orbit, seed::Rng, star::multiple::Bodies, system::forcing::Forcing};
 use glam::DVec3;
-use space_shared::{PlanetEnvironment, Star, StarSystem};
+use space_shared::{Star, StarSystem};
 use std::f64::consts::TAU;
 
 pub(crate) mod partition;
@@ -19,7 +13,8 @@ pub(crate) mod partition;
 const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
 /// Fixed quadrature budget over independent mean anomalies, not clock time.
 const PHASE_SAMPLES: usize = 32;
-const MIN_PRESSURE_PA: f64 = 0.1;
+/// Live presentation threshold, not a physical erase of trace gas.
+pub(crate) const MIN_PRESSURE_PA: f64 = 0.1;
 
 #[derive(Clone, Copy, Debug)]
 struct Heating {
@@ -29,8 +24,8 @@ struct Heating {
 }
 
 /// Fill only after the entire stellar hierarchy and final stable orbits exist.
-/// Reconcile bulk structure and spin first using the same heating samples.
-/// Neither stage changes orbital placement or formation inventories.
+/// Retention installs each planet's structure, atmosphere and spin together
+/// from one result. It never changes orbital placement or formation inventories.
 pub(crate) fn populate(bodies: &mut Bodies, age_gyr: f64) {
     let system = StarSystem {
         id: String::new(),
@@ -53,21 +48,12 @@ pub(crate) fn populate(bodies: &mut Bodies, age_gyr: f64) {
             age_gyr,
         )
         .expect("generated stellar forcing must be finite and valid");
-        crate::system::generation::retention::finalise(
+        hosted.environment = Some(crate::system::generation::retention::finalise(
             &mut hosted.body,
             &id,
             system.member_mass(0, &hosted.host),
             &forcing,
-        );
-        hosted.environment = Some(
-            generate(&mut hosted.body, &forcing)
-                .expect("generated atmospheric inputs and columns must be finite and valid"),
-        );
-        crate::system::generation::retention::refresh_spin(
-            &mut hosted.body,
-            &id,
-            system.member_mass(0, &hosted.host),
-        );
+        ));
     }
     // Formation masses were used during spacing; retained masses can only fall.
     for (host, planets) in bodies.by_host() {
@@ -169,30 +155,6 @@ fn activity_history(star: &Star, age_gyr: f64) -> f64 {
     let hot = (star.temperature_k / 5772.0).powi(4).clamp(1.0, 30.0);
     // A minimum forcing avoids treating newborn systems as loss-free.
     (integrated / 0.48).max(0.05) * hot
-}
-
-fn generate(
-    body: &mut crate::system::Body,
-    forcing: &Forcing,
-) -> Result<PlanetEnvironment, AtmosphereError> {
-    let mut environment = forcing.environment();
-    // No greenhouse, internal-heat or climate solution yet. Floor the column
-    // estimate at 20 K rather than extending an ideal gas to absolute zero.
-    let temperature = environment.equilibrium_temperature_k.max(20.0);
-    let (structure, budget, atmosphere) = crate::system::structure::boundary::resolve(
-        &body.budget,
-        forcing.irradiation_w_m2,
-        forcing.age_gyr,
-        temperature,
-    )?;
-    body.radius_km = structure.radius_m() / 1e3;
-    body.structure = structure;
-    body.budget = budget;
-    let gm = body.mass_earth * EARTH_SOLAR * SUN_GM;
-    let radius = body.radius_km * 1e3;
-    let atmosphere = atmosphere.map(|air| air.to_data(gm, radius)).transpose()?;
-    environment.atmosphere = atmosphere;
-    Ok(environment)
 }
 
 #[cfg(test)]

@@ -113,7 +113,7 @@ struct Sample {
     // Mass, radius, density, water, metal, H/He, escaped/source.
     values: Vec<[f64; 7]>,
     classes: BTreeMap<&'static str, usize>,
-    caveats: BTreeMap<&'static str, usize>,
+    caveats: BTreeMap<String, usize>,
     no_air: usize,
     extended: usize,
     max_steps: u8,
@@ -124,19 +124,19 @@ struct Sample {
 impl Sample {
     fn add(&mut self, p: &Hosted) {
         let b = &p.body;
-        let mass = b.structure.mass_kg();
+        let mass = b.physical().retained_mass_kg;
         self.values.push([
             b.mass_earth,
             b.radius_km / EARTH_RADIUS_KM,
-            b.structure.mean_density_kg_m3(),
+            b.physical().mean_density_kg_m3,
             b.budget.retained().mass_kg(Material::Water) / mass,
             b.budget.retained().mass_kg(Material::Metal) / mass,
-            b.structure.h_he_mass_fraction(),
+            b.physical().h_he_mass_fraction,
             b.budget.escaped().total_mass_kg() / b.budget.source().total_mass_kg(),
         ]);
         *self.classes.entry(b.class.name()).or_default() += 1;
-        for caveat in b.structure.approximations() {
-            *self.caveats.entry(caveat.id()).or_default() += 1;
+        for caveat in &b.physical().approximations {
+            *self.caveats.entry(caveat.clone()).or_default() += 1;
         }
         if let RetentionSolve::Converged { steps } = b.retention_solve {
             assert!(steps <= retention::MAX_STEPS);
@@ -274,10 +274,10 @@ fn deterministic_population_census() {
                 }
                 for (name, value) in [
                     ("radius_max", p.body.radius_km / EARTH_RADIUS_KM),
-                    ("density_max", p.body.structure.mean_density_kg_m3()),
+                    ("density_max", p.body.physical().mean_density_kg_m3),
                     (
                         "inverse_density_max",
-                        1.0 / p.body.structure.mean_density_kg_m3(),
+                        1.0 / p.body.physical().mean_density_kg_m3,
                     ),
                     (
                         "pressure_max",
@@ -326,10 +326,10 @@ fn deterministic_population_census() {
             "outlier {id}: mass_E={:.6} radius_E={:.6} density={:.6} water={:.6} metal={:.6} H_He={:.6} host_Msun={:.6} age_Gyr={:.6} flux={:.6} AU={:.6} pressure_extent_ratio={:?}",
             b.mass_earth,
             b.radius_km / EARTH_RADIUS_KM,
-            b.structure.mean_density_kg_m3(),
-            b.budget.retained().mass_kg(Material::Water) / b.structure.mass_kg(),
-            b.budget.retained().mass_kg(Material::Metal) / b.structure.mass_kg(),
-            b.structure.h_he_mass_fraction(),
+            b.physical().mean_density_kg_m3,
+            b.budget.retained().mass_kg(Material::Water) / b.physical().retained_mass_kg,
+            b.budget.retained().mass_kg(Material::Metal) / b.physical().retained_mass_kg,
+            b.physical().h_he_mass_fraction,
             system.mass(&p.host),
             env.age_gyr,
             env.irradiation_w_m2,

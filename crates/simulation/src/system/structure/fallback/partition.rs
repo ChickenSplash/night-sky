@@ -48,7 +48,7 @@ pub fn resolve(initial: &Fallback) -> Result<Partitioned, AtmosphereError> {
     )
     .map_err(|_| invalid())?;
     let one_bar = initial.reference == RadiusReference::OneBar;
-    let (budget, atmosphere) = partition::solve_including_trace(
+    let (budget, atmosphere) = partition::solve(
         &canonical,
         initial.surface_temperature_k,
         initial.mass_kg(),

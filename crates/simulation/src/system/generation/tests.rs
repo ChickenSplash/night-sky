@@ -4,7 +4,7 @@ use crate::system::{page_capacity, star_id};
 use std::collections::BTreeMap;
 
 #[test]
-fn formation_starts_with_validated_fallback_and_only_projects_compatibility_fields() {
+fn formation_starts_with_validated_fallback_and_projects_its_geometry() {
     for seed in 0..8 {
         let key = format!("formation-initial-result:{seed}");
         let (formed, _, _) = census(&key);
@@ -14,12 +14,6 @@ fn formation_starts_with_validated_fallback_and_only_projects_compatibility_fiel
         {
             crate::system::physical::validate_result(&body.initial_result).unwrap();
             let facts = &body.initial_result.record.physical;
-            assert_eq!(
-                body.structure.approximations(),
-                &[structure::Approximation::ProvisionalFallback]
-            );
-            assert_eq!(body.structure.radius_m(), facts.reference_radius_m);
-            assert_eq!(body.structure.inertia_factor(), facts.inertia_factor);
             assert_eq!(body.radius_km, facts.reference_radius_m / 1000.0);
             assert_eq!(body.class, materials::classify(facts));
             assert!(
@@ -274,7 +268,7 @@ fn spins_follow_tides_and_physical_envelopes() {
             if spin.locked {
                 locked += 1;
                 assert!(spin.tilt_rad < 0.1);
-            } else if body.structure.h_he_mass_fraction() >= 0.5 {
+            } else if body.physical().h_he_mass_fraction >= 0.5 {
                 assert!((9.0..=15.0).contains(&spin.period_hours));
             }
             if spin.tilt_rad > PI / 2.0 {
@@ -301,13 +295,13 @@ fn spins_keep_bodies_round_enough() {
         total += 1;
         let spin = body.spin;
         let f = planet_flattening(
-            body.structure.inertia_factor(),
+            body.physical().inertia_factor,
             body.mass_earth,
             body.radius_km,
             spin.period_hours,
         );
         let fastest = fastest_planet_hours(
-            body.structure.inertia_factor(),
+            body.physical().inertia_factor,
             body.mass_earth,
             body.radius_km,
         );
@@ -344,19 +338,20 @@ fn inventories_match_final_structure_and_regenerate_independently_of_order() {
                 let body = &a.body;
                 assert_eq!(a.id(), b.id());
                 assert_eq!(body.budget, b.body.budget);
-                assert_eq!(body.structure, b.body.structure);
+                assert_eq!(body.initial_result, b.body.initial_result);
                 assert_eq!(body.spin, b.body.spin);
                 assert_eq!(body.orbit, b.body.orbit);
-                assert_eq!(body.mass_earth, body.structure.mass_kg() / EARTH_MASS_KG);
-                assert_eq!(body.radius_km, body.structure.radius_m() / 1000.0);
+                let facts = body.physical();
+                assert_eq!(body.mass_earth, facts.retained_mass_kg / EARTH_MASS_KG);
+                assert_eq!(body.radius_km, facts.reference_radius_m / 1000.0);
                 assert!(body.mass_earth <= body.formation_mass_earth);
                 assert!(
                     body.formation_mass_earth
                         <= MAX_MASS_RATIO * actual.mass(&a.host) / EARTH_MASS_SOLAR * (1.0 + 1e-12)
                 );
-                assert_eq!(
-                    body.structure.mass_kg(),
-                    body.budget.retained().total_mass_kg()
+                assert!(
+                    (facts.retained_mass_kg / body.budget.retained().total_mass_kg() - 1.0).abs()
+                        <= 1e-14
                 );
                 for material in Material::ALL {
                     let original = body.budget.source().mass_kg(material);

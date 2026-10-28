@@ -49,9 +49,9 @@ pub fn atmosphere(planet: &Planet) -> Option<Atmosphere> {
     })
 }
 
-/// Current live projections only. A staged `initial_result` must never provide
-/// radius/gravity/layers for a legacy live atmosphere. Unified candidates have
-/// a separate checked `OpticalColumn::from_result` entry point.
+/// Live projections, which generation installs from the planet's result.
+/// Moving this adapter onto the checked `OpticalColumn::from_result` entry
+/// point is a separate consumer migration.
 pub fn optical_column(planet: &Planet) -> Option<OpticalColumn> {
     let data = planet.environment.as_ref()?.atmosphere.as_ref()?;
     let gas = GasAtmosphere::try_from(data).ok()?;

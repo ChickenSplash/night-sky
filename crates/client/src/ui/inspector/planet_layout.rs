@@ -40,13 +40,8 @@ pub(super) fn organise(info: &mut Info, planet: &Planet) {
     let physical = space_simulation::system::physical::validate(planet);
     match physical {
         Ok(Some(data)) => {
-            let unresolved = data
-                .approximations
-                .iter()
-                .any(|a| a == "deep_boundary_unresolved");
             let surface = match data.radius_reference {
                 RadiusReference::OneBar => "Gas envelope · no resolved ground; radius at 1 bar",
-                _ if unresolved => "Unresolved boundary · radius is an interior proxy",
                 RadiusReference::SolidSurface => "Solid boundary · radius at approximate ground",
                 RadiusReference::UnresolvedVolatileBoundary => {
                     "Unresolved water-rich boundary · surface phase unknown"

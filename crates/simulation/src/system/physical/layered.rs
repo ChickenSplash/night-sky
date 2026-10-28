@@ -1,5 +1,5 @@
-//! Transport record for an experimental layered or fallback solve. Never written into
-//! `Planet::physical`, whose validation re-derives the legacy structure.
+//! Transport record for a layered or fallback solve. A generated planet's
+//! `Planet::physical` is a verbatim copy of its result's record.
 use crate::{
     system::{
         composition::{Inventory, Material},

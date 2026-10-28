@@ -11,53 +11,26 @@ pub(super) fn atmosphere(
     body: &mut crate::system::Body,
     temperature: f64,
 ) -> Result<Option<GasAtmosphere>, AtmosphereError> {
+    let facts = body.physical();
     let (budget, air) = solve(
         &body.budget,
         temperature,
-        body.structure.mass_kg(),
-        body.structure.radius_m(),
-        body.structure.reference() == crate::system::structure::RadiusReference::OneBar,
+        facts.retained_mass_kg,
+        facts.reference_radius_m,
+        facts.radius_reference == space_shared::RadiusReference::OneBar,
     )?;
     body.budget = budget;
     Ok(air)
 }
 
+/// Retains positive trace columns. Presentation thresholds belong to the live
+/// projection and must not erase gas inventory or zero a reference pressure.
 pub(crate) fn solve(
     budget: &Budget,
     temperature: f64,
     mass_kg: f64,
     radius_m: f64,
     one_bar: bool,
-) -> Result<(Budget, Option<GasAtmosphere>), AtmosphereError> {
-    solve_with_threshold(
-        budget,
-        temperature,
-        mass_kg,
-        radius_m,
-        one_bar,
-        MIN_PRESSURE_PA,
-    )
-}
-
-/// Structural candidates retain trace columns too. Visibility/population policy
-/// must not erase their gas inventory or zero their physical reference pressure.
-pub(crate) fn solve_including_trace(
-    budget: &Budget,
-    temperature: f64,
-    mass_kg: f64,
-    radius_m: f64,
-    one_bar: bool,
-) -> Result<(Budget, Option<GasAtmosphere>), AtmosphereError> {
-    solve_with_threshold(budget, temperature, mass_kg, radius_m, one_bar, 0.0)
-}
-
-fn solve_with_threshold(
-    budget: &Budget,
-    temperature: f64,
-    mass_kg: f64,
-    radius_m: f64,
-    one_bar: bool,
-    min_pressure: f64,
 ) -> Result<(Budget, Option<GasAtmosphere>), AtmosphereError> {
     let available = Inventory::new(&Gas::ALL.map(|gas| {
         let material = Material::from_gas(gas);
@@ -90,11 +63,9 @@ fn solve_with_threshold(
             let condensed = budget
                 .reservoir(Reservoir::CondensedVolatiles)
                 .mass_kg(material);
-            // The staged trace-aware solve must bracket the gas that can
-            // actually be transferred, not tiny unrepresentable vapour which
-            // will be left condensed afterwards. Keep the legacy population
-            // prescription's successful numerical path unchanged.
-            let represented = if min_pressure == 0.0 && desired > current {
+            // Bracket the gas that can actually be transferred, not tiny
+            // unrepresentable vapour which will be left condensed afterwards.
+            let represented = if desired > current {
                 let amount = desired - current;
                 if condensed - amount == condensed || current + amount == current {
                     current
@@ -201,8 +172,7 @@ fn solve_with_threshold(
     let mixture = gas
         .gas_composition()
         .map_err(|_| AtmosphereError::InvalidValue("partitioned gas mixture"))?;
-    // Trace gas remains accounted for, even when no rendered column is emitted.
-    if pressure <= 0.0 || pressure < min_pressure || mixture.is_none() {
+    if pressure <= 0.0 || mixture.is_none() {
         return Ok((partitioned, None));
     }
     let mixture = mixture.unwrap();

@@ -13,20 +13,16 @@ Composition generation reconciles secondary escape, bulk H/He retention and
 structure first on fast fallback facts, sharing this module's final-orbit all-star
 heating samples. Flux, activity-weighted loss forcing, seeded albedo and age are
 prepared as independent inputs before retention. Atmosphere output never feeds
-back into that solve. Existing live atmosphere/geometry consumers still receive
-a legacy compatibility projection afterwards, pending the P3 cutover.
-Atmospheric supply and cold condensates use those same budgets. Re-evaluating
+back into that solve. Each planet's live atmosphere is then its result's own
+[reference partition](planet-composition.md#synchronous-reference-partition),
+installed with its radius, inertia and spin. Atmospheric supply and cold
+condensates use those same budgets. Re-evaluating
 population at a different age can change retained mass, radius and spin, but never
 formation inventories, IDs, orbits or resonances. See the
 [composition model](planet-composition.md#formation-priors-and-retained-structure).
 
-Staged synchronous results now also prepare their **own** source-bounded gas and
-condensate partition at the fallback reference, with matching pressure,
-temperature and updated inertia. This does not replace the live compatibility
-atmosphere above. The [reference-partition approximation](planet-composition.md#synchronous-reference-partition)
-holds proxy geometry fixed, retains trace gas and keeps bulk-envelope mass
-distinct from the sampled optical column. It is ready for coherent adoption,
-not permission to mix a candidate with the legacy live environment.
+That partition holds the fallback's proxy geometry fixed, retains trace gas in
+the result and keeps bulk-envelope mass distinct from the sampled optical column.
 
 ## State and reference level
 
@@ -48,14 +44,11 @@ error normalised. No missing gas or arbitrary weight normalisation is inferred.
 Pressure and temperature refer to a defined level:
 
 - **Surface:** a condensed-boundary column, before terrain corrections. Water-rich
-  boundaries have unresolved phase, not necessarily landable solid ground. Tiny
-  H/He inventories that cannot support one bar also use this reference. Supported
-   low-gas condensed worlds use their approximate boundary even above one
-   bar, with the [bounded domain and handoff](planet-composition.md#supported-approximate-condensed-boundaries)
-  determining reference semantics, never their descriptive class. Pressure
-   can be any positive finite value.
-    Extended geometry retains this boundary and its inventory-normalised pressure,
-    not a switch to a groundless one-bar planet.
+  boundaries have unresolved phase, not necessarily landable solid ground.
+  Generated bodies use it when their fallback result has a condensed reference
+  (no H/He envelope); the result, never the descriptive class, decides. Pressure
+  can be any positive finite value. Extended geometry retains this boundary and
+  its inventory-normalised pressure, not a switch to a groundless one-bar planet.
 - **One bar:** a chosen reference level for envelope worlds. Pressure must
   equal `ONE_BAR_PA` (100,000 Pa). This is not solid ground, necessarily a
   visible cloud top, or a promise that every measured giant radius uses it.
@@ -63,8 +56,8 @@ Pressure and temperature refer to a defined level:
 The caller supplies GM in m³/s² and the radius of that level in metres.
 For spheroids use the existing volume-equivalent mean radius; the column
 currently ignores latitude, rotation and atmospheric self-gravity. The column does
-not independently choose geometry. Generation resolves the environmental reference
-first and gives the same final radius to geometry, column, optics and clearance.
+not independently choose geometry. Generation takes the reference from the
+planet's result and gives the same radius to geometry, column, optics and clearance.
 
 The reference temperature is a representative **isothermal gas-column
 temperature**, not an equilibrium-temperature calculation or a solved
@@ -184,13 +177,13 @@ source/escape accounting or orbital elements.
    water partial pressures; the remainder stays in `CondensedVolatiles`. This is
    cold trapping, not a solved phase diagram. Pressure and molecular fractions
    are solved consistently with the actual gas masses, not clipped independently.
-    No aerosols or clouds are inferred from the transferred mass.
-    Test the bounded thin-boundary domain and reconcile its geometric reference
-    before exporting the final atmosphere. Unsupported deep envelopes retain a
-    one-bar reference; no giant interior is inferred from a cold heavy proxy.
-6. **Absence and columns.** Boundary pressure below 0.1 Pa is treated as
-   absent/trace for this population model. This cutoff is not a physical ban
-   on exospheres. Validate the physical state and derive its column. Retain
+    No aerosols or clouds are inferred from the transferred mass. The partition
+    runs once, at the result's fixed reference; envelopes keep a one-bar
+    reference and no giant interior is inferred from a cold heavy proxy.
+6. **Absence and columns.** Boundary pressure below 0.1 Pa is omitted from the
+   live environment (rendering and navigation parity), while the result keeps
+   that trace gas and its pressure. This cutoff is not a physical ban on
+   exospheres. Validate the physical state and derive its column. Retain
     geometric extent and unresolved-hydrostatic diagnostics in the snapshot,
     without silently shrinking it.
 
@@ -282,19 +275,19 @@ independently of structural layers and navigation clearance:
   [existing cutoff](#derived-column), not a new opacity-adaptive outer boundary
   or a guaranteed bound on omitted light.
 
-The current client builds this contract solely from the live atmosphere, mass
-and radius. A staged `Planet::initial_result` supplies none of those inputs.
-This preserves existing numerical optics while the coordinated live cutover
-is pending. The lower proxy does not certify terrain or navigation permission;
-the existing bulk-envelope visual descent policy remains separate and unchanged.
+The client still builds this contract from the live atmosphere, mass and radius,
+which generation now installs from the planet's result. Moving it onto the
+checked `from_result` entry point is a separate consumer migration. The lower
+proxy does not certify terrain or navigation permission; the existing
+bulk-envelope visual descent policy remains separate and unchanged.
 
 `OpticalColumn::from_result` is a separate, checked preparation API for unified
-results, **not adoption**. It validates transported invariants, checks pressure,
+results. It validates transported invariants, checks pressure,
 temperature, reference semantics and well-mixed gas-reservoir composition, then
 uses the result's reference gravity (enclosed mass), not total-mass gravity.
 It does not run structure, EOS, retention or partition solves. In particular,
-a fallback record with condensed secondary proxies cannot borrow a secondary
-atmosphere from a legacy planet. Suspended condensates are explicitly unsupported
+a record without secondary gas cannot borrow an atmosphere from elsewhere.
+`physical::validate` uses it to check every generated live atmosphere. Suspended condensates are explicitly unsupported
 by this entry point until local vapour and cloud optical inputs are defined;
 bulk condensate mass must not silently become gas or cloud opacity.
 

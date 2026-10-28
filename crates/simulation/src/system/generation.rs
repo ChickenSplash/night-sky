@@ -15,16 +15,16 @@ use crate::seed::Rng;
 use crate::star::multiple::{Bodies, assemble};
 use crate::star::{Formation, census, galactic};
 use crate::{period_seconds, stable_hash};
-use space_shared::{MAX_PLANETS, MIN_PLANETS, Orbit, PlanetResult, Spin};
+use space_shared::{MAX_PLANETS, MIN_PLANETS, Orbit, PlanetPhysical, PlanetResult, Spin};
 use std::f64::consts::{PI, TAU};
 
 #[cfg(test)]
 mod calibration;
 mod materials;
 pub(crate) mod retention;
+use super::composition::Budget;
 #[cfg(test)]
 use super::structure;
-use super::{composition::Budget, structure::Structure};
 use crate::units::EARTH_MASS_KG;
 pub use retention::RetentionSolve;
 
@@ -76,18 +76,22 @@ pub struct Body {
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,
+    /// The same reservoir split as `initial_result`.
     pub budget: Budget,
-    /// Temporary legacy consumer view. Before all-star retention this is only
-    /// a projection of `initial_result`, not a legacy structure calculation.
-    pub structure: Structure,
-    /// Synchronous fallback candidate, kept separate from legacy consumer fields
-    /// until the coordinated geometry/atmosphere cutover.
+    /// Authority for mass, radius, inertia and the generated atmosphere.
+    /// Before all-star retention it holds the provisional formation candidate.
     pub initial_result: PlanetResult,
     /// Proposed formation location, never redrawn after orbital spacing.
     pub formation_distance_au: f64,
     /// Conservative pre-escape spacing mass.
     pub formation_mass_earth: f64,
     pub retention_solve: RetentionSolve,
+}
+
+impl Body {
+    pub fn physical(&self) -> &PlanetPhysical {
+        &self.initial_result.record.physical
+    }
 }
 
 /// Number of planets that form around a star or close pair, before any
@@ -293,7 +297,6 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
             forcing.revision(&id, &budget),
         )
         .unwrap_or_else(|error| panic!("{id}: formation fallback: {error}"));
-        let physical = Structure::provisional(&initial_result.record.physical);
         let orbit = Orbit {
             semi_major_au: semi_major,
             eccentricity,
@@ -306,10 +309,9 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
             orbit,
             class: materials::classify(&initial_result.record.physical),
             mass_earth: mass,
-            radius_km: physical.radius_m() / 1000.0,
+            radius_km: initial_result.record.physical.reference_radius_m / 1000.0,
             resonance: resonance.map(|(r, _)| r),
             budget,
-            structure: physical,
             initial_result,
             formation_mass_earth: mass,
             formation_distance_au: tentative,
@@ -331,7 +333,7 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
 /// - None turns so fast that it would be flatter than `shape::MAX_FLATTENING`.
 fn planet_spin(rng: &mut Rng, body: &Body, star_mass: f64) -> Spin {
     let orbit = &body.orbit;
-    let gas = body.structure.h_he_mass_fraction();
+    let gas = body.physical().h_he_mass_fraction;
     let envelope = (gas / 0.5).clamp(0.0, 1.0);
     let small = ((0.02 - body.mass_earth) / 0.02).clamp(0.0, 1.0);
     let orbital_hours = period_seconds(orbit, star_mass) / 3_600.0;
@@ -364,7 +366,7 @@ fn planet_spin(rng: &mut Rng, body: &Body, star_mass: f64) -> Spin {
             isotropic(rng)
         };
         let fastest = crate::system::shape::fastest_planet_hours(
-            body.structure.inertia_factor(),
+            body.physical().inertia_factor,
             body.mass_earth,
             body.radius_km,
         );

@@ -31,7 +31,7 @@ impl PlanetJob {
 }
 
 pub struct Prepared {
-    /// Initial legacy presentation, never represented as a solved prototype.
+    /// Initial synchronous fallback presentation, never a solved prototype.
     pub system: StarSystem,
     pub jobs: Vec<PlanetJob>,
     pub initial_generation: Duration,
