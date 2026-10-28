@@ -8,6 +8,7 @@ pub mod coupled;
 #[cfg(test)]
 mod coverage;
 pub mod dry;
+pub mod envelope;
 pub mod parameters;
 pub mod prototype;
 mod radial;

@@ -151,11 +151,13 @@ The Bevy/egui client in `crates/client`:
   Pressure-melted liquid gaps are covered by a labelled density approximation.
   [Warm/deep and hot-water proxies](simulation/water-physics.md#hot-and-warm-deep-prototype-extension)
   extend the prototype to 2,000 K, without claiming resolved hot phases.
-  Exact deep-ice polymorphs, precise supercooled-liquid physics and dense
-   envelopes remain unresolved.
-   Headless atmosphere coupling matches supported dilute gas inventories to
-   radial condensed boundaries; it does not yet migrate generated planets or
-    resolve dense envelopes or unsupported condensed molecules.
+  Exact deep-ice polymorphs, precise supercooled-liquid physics and complete
+  giant-envelope coverage remain unresolved. An optional locally prepared
+  [H/He density resource and coupled envelope solve](simulation/planet-composition.md#self-gravitating-envelope-and-loaded-interior)
+  now supports a bounded subset of envelopes, without driving live rendering.
+  Thin atmosphere coupling matches supported dilute gas inventories to radial
+  condensed boundaries; it does not itself cover dense envelopes or unsupported
+  condensed molecules.
    A bounded hot ideal-steam approximation extends the column to 2,000 K and
    50 kg/m³ for ≥90%-water gas; denser columns remain unsupported. An opt-in
    [blow-off wrapper](simulation/planet-composition.md#unbound-column-blow-off)

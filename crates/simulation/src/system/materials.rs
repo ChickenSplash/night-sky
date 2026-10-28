@@ -1,6 +1,7 @@
 //! Shared material identities and local constitutive physics, independent of gas columns.
 
 pub mod cold;
+pub mod hhe;
 pub mod water;
 
 /// Stable IDs, not ordinal values, are the external identity of constituents.

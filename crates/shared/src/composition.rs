@@ -30,6 +30,7 @@ pub struct PlanetPhysical {
     /// Cold heavy-material proxy. `thin_boundary_column` or
     /// `extended_boundary_column` promotes it to an approximate atmospheric
     /// boundary; never an unconditionally resolved core.
+    /// In a layered result this is the solved, loaded condensed boundary.
     pub condensed_radius_m: f64,
     pub mean_density_kg_m3: f64,
     pub reference_gravity_m_s2: f64,
@@ -46,14 +47,14 @@ pub struct PlanetPhysical {
 pub struct LayeredPlanet {
     pub model: String,
     /// Same transport shape as the legacy record. `approximations` lists the
-    /// model IDs used, and `reference_radius_m` is the top of the condensed
-    /// surface (frost included), not an atmospheric level.
+    /// model IDs used. `reference_radius_m` is the top of the condensed surface
+    /// (frost included) for thin models, or the explicit one-bar envelope level.
     pub physical: PlanetPhysical,
     /// `rock`, `ocean`, `ice`, `frost`, `deep ice`, `water coexistence` or
-    /// `unresolved hot water`.
+    /// `unresolved hot water`, or `envelope` (one-bar reference, not ground).
     pub surface: String,
     pub surface_temperature_k: f64,
-    /// Gas pressure on the surface, zero only when there is no gas at all.
+    /// Gas pressure on the surface, or one bar for an envelope reference.
     pub surface_pressure_pa: f64,
     pub greenhouse_optical_depth: Option<f64>,
     /// Absent when one bar lies below the surface or there is no gas.
@@ -67,7 +68,7 @@ pub struct LayeredPlanet {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
     /// `atmosphere`, `frost`, `ocean`, `ice`, `deep_ice`, `hot_water`,
-    /// `water_coexistence`, `mantle` or `core`.
+    /// `water_coexistence`, `water_compression`, `envelope`, `mantle` or `core`.
     pub kind: String,
     /// Material catalogue ID holding most of the layer's mass.
     pub material: String,
@@ -78,6 +79,8 @@ pub struct Layer {
     /// Absent for the atmosphere, whose finite shell has no resolved top pressure.
     pub outer_pressure_pa: Option<f64>,
     /// Absent where the model establishes no temperature (cold refractories).
+    /// For envelope/compression layers this is the outer boundary value, not
+    /// an assertion of uniform temperature through the layer.
     pub temperature_k: Option<f64>,
     /// Density or column model ID.
     pub model: String,

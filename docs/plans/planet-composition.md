@@ -2,14 +2,15 @@
 
 ## Status and goal
 
-**Next deliverable: a live, generator-backed rock-and-water prototype.** Replace
-the old whole-body structure approximations with conserved, layered planets that
-are useful in the simulation and game. Do not start another material-physics
-sub-phase before that prototype exists.
+**P1 complete and signed off on 27 October 2026. Next: P2 envelopes and remaining
+coverage.** The live, generator-backed rock-and-water prototype provides
+conserved, layered planets alongside the legacy model. Population-wide cutover
+and legacy removal remain P3.
 
-Generated planets still use the approximate model in `structure::derive`. The new
-dry, water, protected-trace and atmosphere-coupling solvers are headless and
-opt-in. They are building blocks, not yet one generator-ready replacement.
+Generated planets still use the approximate model in `structure::derive` by
+default. The opt-in prototype joins dry, water, protected-trace and
+atmosphere-coupling solvers, with background loading and live inspector results.
+Rendering and navigation still use the legacy model.
 
 This is a simulator, not a thermodynamics research project. Prefer the simplest
 scientifically plausible model that supports the needed behaviour. Named,
@@ -31,11 +32,12 @@ only when a demonstrated simulation or game problem requires them.
   Nothing is pushed: neither
   the main branch nor `park/methane-physics` (parked methane physics). Ask the
   user before pushing either.
-- **Coverage:** 1,017 of 1,032 non-envelope planets solve (99%), including all 280
-  water-rich planets. See
-  [measured starting point](#measured-starting-point).
-- **Remaining blockers:** dense gas (8) and warming beyond the bounded column
-  (7). Blow-off resolved all 178 weak-binding failures.
+- **Coverage after P2 step 3:** 1,134/1,544 solve: all 1,017 P1 successes plus
+  117 envelope-route bodies. The non-envelope baseline remains 1,017/1,032,
+  including all 280 water-rich planets. See [step 3](#step-3-coupled-structural-path-implemented-28-october-2026).
+- **Remaining blockers:** 395 envelope-route refusals, plus the original dense
+  gas (8) and bounded-column warming (7). Blow-off resolved all 178 P1
+  weak-binding failures. Larger-giant coverage is not complete.
 - **Performance and next step:**
   - Refinement-only warming optimisation is implemented: a paired 20-thread
     run reduced report wall time from 19.5 to 18.2 s and solved median from
@@ -52,15 +54,22 @@ only when a demonstrated simulation or game problem requires them.
     one reserved star slot on multi-thread budgets. F3 → perf → experimental
     planet loading enables it. Fast initial generation remains on the main
     thread, logged per system; two preliminary headless samples measured
-    1.4–5.6 ms. Interactive hitches still need the user's tests.
+    1.4–5.6 ms. Interactive hitch testing was not required for P1 sign-off;
+    address any issues as they arise.
   - Step 9 converts each solve to a `LayeredPlanet` record kept beside the
     legacy one, shown in the inspector's layered section and
     `/state/planet_loading` (`ns planets`). Rendering, shape, landing and
     atmosphere optics stay legacy for every planet; unsupported planets show
     "Legacy model (unsupported: …)". Full legacy removal remains P3.
-  - **P1 exit remaining:** the user's in-client review of representative dry,
-    ocean, icy and steam worlds and interactive benchmarks. P2 starts only when
-    the user requests it.
+   - **P1 signed off, 27 October 2026:** the user accepted the dry (Ab) and steam
+     (Ae) in-client reviews as sufficient. Separate ocean/icy reviews and
+     interactive benchmarks are waived for P1, not outstanding exit gates or
+     automatic P2 tasks. Existing benchmarks target atmosphere rendering and
+     galaxy flight/loading rather than the new layered facts. Future issues
+     will be addressed as they arise. P2 steps 1 (input census), 2 (prescription
+     selection) and 3 (first coupled structural delivery) are implemented.
+     Runtime envelopes are opt-in and need a locally prepared EOS resource;
+     step 4 closes the remaining measured domains and numerical gaps.
 - **After each step:** rerun the coverage report
   (`cargo test --release -p space-simulation composition_coverage -- --ignored
   --nocapture`), update the baseline here and in the
@@ -105,7 +114,7 @@ The [coverage report](../simulation/planet-composition.md#prototype-coverage-rep
 (October 2026, 1,544 planets from 140 calibration systems, provisional joined
 route, greenhouse surface temperature) gives the P1 baseline:
 
-**Current, after unbound blow-off:** 1,017/1,032 non-envelope planets solve
+**P1 baseline, after unbound blow-off:** 1,017/1,032 non-envelope planets solve
 (99%), with 512 envelopes. Weakly bound columns lose their lightest exchangeable
 gases (178 planets, at most 3.7% of their mass) instead of failing. Remaining
 first failures: dense gas 8, warming outside the domain 7. Surfaces: frost 422,
@@ -175,7 +184,7 @@ bookkeeping, `materials` local properties, `structure` allocation and mechanics,
 `atmosphere` columns and optics, `generation` inputs and retention, and `physical`
 transport. Do not build a parallel solver framework or a material plugin system.
 
-## P1. Rock-and-water prototype, next
+## P1. Rock-and-water prototype, complete
 
 Each step is small and labelled. Rerun the coverage report after each one.
 
@@ -201,9 +210,8 @@ Each step is small and labelled. Rerun the coverage report after each one.
    an ocean or ice below, or all of it becomes steam over dry rock. Generation's
    protection shields water from escape only. The coupling loop re-solves the
    load; an ocean under pure steam takes the liquid-side limit on the saturation
-   curve. **Open:** small warm bodies (155 after step 2) have a steam column
-   too weakly bound to hold, so the escape prior and exposed water disagree
-   there.
+   curve. Small warm bodies initially had steam columns too weakly bound to
+   hold; the later unbound-column blow-off resolved these failures.
    **Frost:**
    cold-trapped CO₂, N₂, CH₄ and Ar above their vapour-pressure cap settle as a
    labelled [surface deposit](../simulation/planet-composition.md#frost-surface-deposit)
@@ -250,10 +258,11 @@ Each step is small and labelled. Rerun the coverage report after each one.
 Left as a documented limitation: each water layer has one temperature, so a deep
 ocean is as warm as its surface. Revisit only if layer results look wrong.
 
-**Exit:** the coverage report shows about 100% of non-envelope generated planets
-solving, with every origin accounted for and measured cost. Representative dry,
-ocean, icy and steam worlds can be inspected in the client. Run
-`./scripts/check.sh`; the user performs visual review and interactive benchmarks.
+**Exit accepted, 27 October 2026:** 1,017/1,032 non-envelope planets solve (99%),
+with conserved origins, measured cost and passing `./scripts/check.sh`. The user
+signed off after dry and steam world reviews, waiving separate ocean/icy reviews
+and interactive benchmarks. Known unsupported cases remain explicit for P2;
+future issues will be handled as they arise.
 
 **Stop:** no CO₂ or methane phase physics, exact Gibbs audits, envelope physics
 or population-wide cutover in P1.
@@ -261,6 +270,183 @@ or population-wide cutover in P1.
 ## P2. Envelopes and remaining coverage
 
 Prioritise gaps measured by the P1 report.
+
+### Step 1. Generated-input census, complete (28 October 2026)
+
+Extended the existing probe, with no new solver physics. Reproduce with:
+
+```sh
+NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
+```
+
+Outputs in `data/tmp/`: `composition-coverage.{md,tsv}` and
+`composition-census.md`. The census includes grouped bounds and deterministic
+candidate IDs; the TSV retains original columns and appends composition inputs.
+All 1,544 rows match step 9 in every original non-timing column: 1,017 solved,
+512 envelope-labelled refusals and 15 other refusals.
+
+| Observed gap/input | Measured requirement |
+| --- | --- |
+| H/He mass guard | 168 bodies have more than 1% H/He; total masses 1.19–1,089.67 Earth masses |
+| Dense-gas guard with H/He present | 342 bodies, 0.102–19.58 Earth masses, H/He fractions about 5.15 × 10⁻¹³ to 0.00986. These are not all giants; H/He presence alone does not establish which gas causes the refusal |
+| Radial mass guard | Two first failures above 20 Earth masses; 11 envelope-labelled bodies have non-H/He inventory above 20 Earth masses, reaching 26.35. This inventory includes water and secondaries, not just a rock/metal core |
+| H/He mixture | Helium is 25% of retained H/He by mass throughout the sampled envelope-labelled population |
+| Water-bearing interiors | Water reaches 59.38% of non-H/He mass. A dry-core-only envelope model would miss generated inputs |
+| Thermal inputs | Envelope-labelled raw equilibrium temperatures span 0.604–1,073.82 K. The existing prototype floors its thermal input at 20 K; raw irradiation is not deep temperature or evidence for an EOS domain below that floor |
+| Other dense-gas failures | Eight H/He-free bodies, 0.0398–0.0908 Earth masses, equilibrium 80.5–317.6 K |
+| Other warming failures | Seven bodies, 0.267–3.30 Earth masses, equilibrium 176.5–335.7 K; no successful warmed temperature is available |
+
+Legacy classes within the 512 refusals: 38 gas giants, 42 envelope worlds,
+190 sub-Neptunes, 142 rocky, 56 metal-rich and 44 water-rich planets. These
+labels describe generator output, not solved new-model structure. First
+blockers can mask later failures; coverage does not yet prove the sufficiency
+of any proposed envelope prescription.
+
+Representative starting fixtures (calibration IDs, not real galaxy locations):
+
+| Input | Calibration planet ID | Total mass, Earth masses | H/He mass fraction |
+| --- | --- | --- | --- |
+| Trace H/He, dense-gas refusal | `composition-calibration:Bulge:10/4` | 0.102 | 5.15 × 10⁻¹³ |
+| Small envelope | `composition-calibration:ThickDisc:9/2` | 4.91 | 0.0206 |
+| Intermediate envelope | `composition-calibration:Bulge:18/5` | 9.03 | 0.218 |
+| Gas giant | `composition-calibration:ThickDisc:16/8` | 110.52 | 0.875 |
+| Largest giant | `composition-calibration:NuclearDisc:12/5` | 1,089.67 | 0.994 |
+| Largest non-H/He inventory, water-bearing | `composition-calibration:Arms:9/6` | 29.24 | 0.0990 |
+| Hottest envelope-labelled input | `composition-calibration:Arms:10/0` | 8.18 | 0.00141 |
+| Coldest raw irradiation input | `composition-calibration:Halo:3/9` | 1.36 | 0.0492 |
+
+The generated census also selects median-mass examples by legacy class and
+first blocker, input extremes and all 15 other refusals. These are regression
+candidate inputs, not reference answers for envelope structure.
+
+### Step 2. Prescription selection, complete (28 October 2026)
+
+The [canonical prescription and decision probe](../simulation/planet-composition.md#p2-envelope-prescription-decision-probe)
+owns equations, assumptions, reference comparisons and reproduction commands.
+
+- **Observed gap:** 168 H/He mass refusals plus dense-gas failures across thin
+  remnants, intermediate envelopes and giants. Water-rich interiors must remain
+  distinct. Thin molecular gas cannot be extended merely by lifting its limits.
+- **Selected density:** original CMS19 pure H/He densities with HG23 additive
+  volume correction, uniformly mixed with separate conserved species. No heavy
+  mixing. Use existing separately downloaded and hash-audited sources for the
+  decision probe; source packaging/permission remains a gate before runtime use.
+- **Selected thermal form:** grey irradiation plus intrinsic flux, opacity
+  proportional to pressure, joined continuously in value and slope to an
+  effective 2/7 deep temperature gradient. Not table entropy integration or a
+  claim to resolve molecular dissociation and true deep adiabats.
+- **Internal heat:** 50 K intrinsic reference, with 30/100/200 K sensitivity
+  experiments. This is not core temperature or an age prediction. Choose a
+  runtime default only after coupled radius/reference tests, not by guessing
+  an unvalidated cooling law.
+- **Fixtures:** existing source density points, including the negative
+  pure-He melting-screen case, and cold/temperate/giant/hot thermal experiments.
+  Six synthetic regressions run in `check.sh` without external data. These check
+  construction, not physical accuracy against independent planets.
+- **Explicit gaps:** below-table cold atmosphere, cold dense phases and
+  quantum/plasma masks, valid dilute joins, interpolation stability and source
+  packaging. Finite table density or a positive corner derivative does not
+  establish a physically supported envelope. No unlabelled extrapolation.
+- **Stop condition met:** prescriptions selected and executable decision checks
+  provided, with sensitivity assumptions and unresolved domains explicit.
+  No runtime EOS, envelope hydrostatics, giant radii or new coverage successes
+  are claimed. Coverage remains 1,017 solved / 512 envelope-labelled / 15 other
+  refusals; step 3 is the first coupled structural delivery.
+- **Validation:** `./scripts/check.sh` passes. A fresh 20-thread coverage run
+  matches all 1,544 original non-timing rows; source-based probe output is in
+  `data/tmp/p2-step2-prescription.json`.
+
+### Step 3. Coupled structural path implemented (28 October 2026)
+
+- **Observed gap:** thin atmospheres cannot carry envelope self-gravity or
+  consistently compress the heavy interior. The step-2 probe alone solved no
+  planets.
+- **Delivery:** a centre-to-outer-shell integration through the existing radial
+  kernel, with all parcel mass in gravity, volume and RK-integrated inertia.
+  Shared material-boundary pressure/radius/mass are identical by construction.
+  Reference gravity is iterated from the new one-bar pressure event, not legacy
+  geometry. Separate origins, protected heavy traces and accessible envelope
+  traces remain conserved. Positive water always has its own region.
+- **Bounded approximations:** local pinned CMS19/HG23 density resource, dilute
+  sub-100 K volume anchor, explicit pure/quantum screens and pressure-only
+  unresolved water compression under at least 10,000 bar. Accessible secondary
+  traces share host volume without gaining protection. Original thin and local
+  EOS contracts are unchanged. The new route permits heavier interiors, but
+  retains the existing heavy-EOS pressure ceiling.
+- **Thermal reference:** experimental 100 K intrinsic forcing with a prescribed
+  2/7 deep slope. It is not an age/heat-history inference or a validated
+  universal default. Whole-population accuracy and cold/Jupiter-like reference
+  coverage remain open; do not promise a percentage accuracy.
+- **Packaging gate:** no dataset redistribution. A deterministic converter
+  prepares a locally supplied, SHA-pinned resource; missing/corrupt data is
+  explicitly unsupported. Deployable bundled-data permission remains future
+  work, not silently assumed.
+- **Results:** 117 new solves: 85 sub-Neptunes, 28 envelope worlds and four
+  lower-mass gas giants by legacy class, up to 39.07 Earth masses. Four have
+  non-H/He inventory above 20 Earth masses. Total coverage is 1,134/1,544;
+  all 1,017 P1 successes are identical in every original non-timing column.
+  Full giant coverage is not claimed.
+- **Checks:** `./scripts/check.sh`, pinned density/negative-phase fixtures and
+  paired source-backed half-step/tighter-integration checks pass. The small
+  5-Earth-mass heavy body plus 0.1-Earth-mass H/He fixture has a one-bar radius
+  of 16,208 km; radius and inertia refine within relative 10⁻⁷. This is numerical
+  stability, not a physical accuracy measurement. Synthetic checks independently
+  verify shell inertia, conservation, interfaces and non-landable transport.
+- **Cost:** the final 20-thread report took 22.6 s. New-envelope solved times were
+  about 0.92 s median and 1.28 s p95; load-dependent, not an interactive
+  benchmark. No gas-search cache or looser P1 integration tolerances were added.
+
+Current envelope-route first blockers (395 total):
+
+| Reason | Count |
+| --- | ---: |
+| Accessible secondary traces outside bounded envelope prescription | 212 |
+| Water boundary below the effective compression domain | 103 |
+| Radial integration convergence | 25 |
+| Conservative pure melting screen | 22 |
+| Cold dense H/He | 12 |
+| Work budget | 8 |
+| Central shooting resolution | 7 |
+| Reference-gravity convergence | 5 |
+| Region mass resolution | 1 |
+
+The remaining eight H/He-free dense-gas and seven warming failures are unchanged.
+Fix measured blockers next, without a water-amount cutoff or silently accepting
+unsupported giant phases. The [canonical implementation guide](../simulation/planet-composition.md#self-gravitating-envelope-and-loaded-interior)
+owns equations, resource setup, numerical boundary contracts and limitations.
+
+### Step 4 investigation: secondary trace domain (28 October 2026)
+
+- **Scope:** diagnose the 212 first-failure trace cases without changing physical
+  prescriptions, protection, generation or numerical acceptance.
+- **Result:** all 212 exceed the accessible-envelope fraction; none exceed the
+  protected-heavy fraction. The prior thin route refuses 203 for dense gas,
+  eight for gas mass and one for heavy mass.
+- **Key distinction:** 79 have at least 50% accessible secondaries in the outer
+  parcel. A further 57 have 5–50%; only 76 are below 5% (33 below 1%). These are
+  mostly small secondary atmospheres with residual H/He, not giant impurities.
+  CO₂/N₂ dominate; oxygen is absent. No metallic-regime need has been established.
+- **Next model decision:** distinguish an H/He-rich mixed-envelope extension
+  from a dense secondary-atmosphere prescription. Do not raise the trace cap
+  or move material to protected hosts. Existing phase/thermal bounds remain
+  applicable; new prescriptions need justified state ranges and fixtures first.
+- **Stop condition met:** repeatable per-body audit and synthetic allocation
+  checks, with unsupported depth conditions explicitly unknown. Coverage stays
+  1,134/1,544; no additional solves are claimed. Canonical findings and diagnostic
+  output ownership are in the
+  [composition guide](../simulation/planet-composition.md#secondary-trace-input-investigation).
+
+### Remaining delivery order
+
+4. **Close remaining coverage.** Triage dense-gas refusals, including trace-H/He
+   and H/He-free cases, and hot water/steam limits. Do not assume an H/He EOS
+   alone fixes them. Resolve retention dependencies without replaying loss
+   history. Keep unsupported reasons explicit.
+5. **Validate and expose.** Check mass/radius/inertia, heating and stripping
+   trends, approach to the bare-body limit and conserved boundaries. Extend
+   inspector facts, rerun coverage and project checks, and measure cost.
+   Existing system caching remains; gas-search caching stays reverted and
+   further optimisation remains need-driven. Rendering and cutover stay P3.
 
 | Missing capability | Minimum delivery requirement |
 | --- | --- |

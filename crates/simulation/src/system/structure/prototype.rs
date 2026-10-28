@@ -27,11 +27,18 @@ pub struct Solved {
 
 impl Solved {
     pub fn model_id(&self) -> &'static str {
-        MODEL_ID
+        if self.structure.envelope().is_some() {
+            super::envelope::MODEL_ID
+        } else {
+            MODEL_ID
+        }
     }
 
     /// What sits on top: a frost deposit, else the outermost condensed region.
     pub fn surface(&self) -> &'static str {
+        if self.structure.envelope().is_some() {
+            return "envelope";
+        }
         if self.structure.deposit_thickness_m() > 0.0 {
             return "frost";
         }
@@ -44,6 +51,7 @@ impl Solved {
                 water::PhaseKnowledge::EffectiveHighPressureIce => "deep ice",
                 water::PhaseKnowledge::Unresolved => "rock",
                 water::PhaseKnowledge::UnresolvedHotWater => "unresolved hot water",
+                water::PhaseKnowledge::UnresolvedCompression => "unresolved compressed water",
             },
         }
     }
@@ -53,6 +61,68 @@ impl Solved {
 /// is not: repartition from immutable supply, without replaying retention history.
 /// All water exchanges with the atmosphere; only other secondaries are entrained.
 pub fn solve(
+    budget: &Budget,
+    environment: &PlanetEnvironment,
+    controls: Controls,
+) -> Result<Solved, Error> {
+    let error = match solve_thin(budget, environment, controls) {
+        Ok(solved) => return Ok(solved),
+        Err(error) => error,
+    };
+    if !matches!(
+        error,
+        Error::GasMassOutsideDomain
+            | Error::DenseGasUnsupported
+            | Error::Radial(super::dry::SolveError::OutsideMassDomain(_))
+    ) || budget.retained().mass_kg(Material::Hydrogen)
+        + budget.retained().mass_kg(Material::Helium)
+        == 0.0
+    {
+        return Err(error);
+    }
+    let protected = Inventory::new(&Material::ALL.map(|m| {
+        let mass = if matches!(
+            m,
+            Material::CarbonDioxide
+                | Material::Nitrogen
+                | Material::Methane
+                | Material::Oxygen
+                | Material::Argon
+        ) {
+            (budget.source().mass_kg(m) * (1.0 - accessible_fraction(m)))
+                .min(budget.retained().mass_kg(m))
+        } else {
+            0.0
+        };
+        (m, mass)
+    }))
+    .map_err(Error::Composition)?;
+    let (interior, envelope) = super::envelope::solve(
+        budget.retained(),
+        &protected,
+        environment.equilibrium_temperature_k,
+        100.0,
+        controls,
+    )
+    .map_err(Error::Envelope)?;
+    Ok(Solved {
+        structure: CoupledStructure::from_envelope(interior, envelope),
+        source: *budget.source(),
+        escaped: *budget.escaped(),
+        blowoff: Inventory::default(),
+        protected,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn thin_route_diagnostic(
+    budget: &Budget,
+    environment: &PlanetEnvironment,
+) -> Result<Solved, Error> {
+    solve_thin(budget, environment, Controls::default())
+}
+
+fn solve_thin(
     budget: &Budget,
     environment: &PlanetEnvironment,
     controls: Controls,

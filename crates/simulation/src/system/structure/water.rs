@@ -25,6 +25,8 @@ pub enum PhaseKnowledge {
     EffectiveHighPressureIce,
     /// Hot-fluid proxy, no resolved equilibrium phase or solidity claim.
     UnresolvedHotWater,
+    /// Pressure-only envelope-loaded water compression, no temperature/phase EOS.
+    UnresolvedCompression,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +77,11 @@ impl Region {
     /// Physical-model limitations, not numerical error bars.
     pub fn approximation_notes(&self) -> &'static [&'static str] {
         match self.density_model_id {
+            super::envelope::WATER_MODEL_ID => &[
+                "Pressure-only effective water compression under at least 1 GPa envelope load",
+                "Water phase, thermal expansion and H/He mixing unresolved; no solid surface claim",
+                "Temperature is the outer boundary value, not an interior thermal solution",
+            ],
             eos::cold_ice::INTERMEDIATE_MODEL_ID => eos::cold_ice::APPROXIMATION_NOTES,
             eos::cold_ice::IH_MODEL_ID => {
                 &["Ice-Ih pressure domain extended beyond the original 100 MPa mask"]
@@ -140,6 +147,45 @@ impl WaterStructure {
     }
     pub fn diagnostics(&self) -> Diagnostics {
         self.diagnostics
+    }
+}
+
+/// Projection of a unified envelope radial integration, not a second interior
+/// solve. Water uses explicitly unresolved pressure-only effective compression.
+pub(super) fn envelope_interior(
+    regions: Vec<dry::Region>,
+    inertia_kg_m2: f64,
+    diagnostics: Diagnostics,
+    thermal: super::envelope::Thermal,
+) -> WaterStructure {
+    WaterStructure {
+        model_id: "envelope_loaded_heavy_regions_v1",
+        regions: regions
+            .into_iter()
+            .map(|profile| {
+                let water = profile.inventory().mass_kg(Material::Water) > 0.0;
+                Region {
+                    temperature_k: if water {
+                        thermal.temperature_k(profile.outer().pressure_pa).ok()
+                    } else {
+                        None
+                    },
+                    phase: if water {
+                        PhaseKnowledge::UnresolvedCompression
+                    } else {
+                        PhaseKnowledge::Unresolved
+                    },
+                    density_model_id: if water {
+                        super::envelope::WATER_MODEL_ID
+                    } else {
+                        cold::MODEL_ID
+                    },
+                    profile,
+                }
+            })
+            .collect(),
+        inertia_kg_m2,
+        diagnostics,
     }
 }
 

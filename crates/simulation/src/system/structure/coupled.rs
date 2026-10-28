@@ -130,6 +130,7 @@ pub struct Diagnostics {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoupledStructure {
     condensed: CondensedStructure,
+    envelope: Option<Box<super::envelope::Envelope>>,
     deposit: deposit::Deposit,
     gas: Inventory,
     atmosphere: Option<GasAtmosphere>,
@@ -139,10 +140,40 @@ pub struct CoupledStructure {
 }
 
 impl CoupledStructure {
+    pub fn envelope(&self) -> Option<&super::envelope::Envelope> {
+        self.envelope.as_deref()
+    }
+    pub(super) fn from_envelope(
+        interior: water::WaterStructure,
+        envelope: super::envelope::Envelope,
+    ) -> Self {
+        Self {
+            condensed: CondensedStructure::Water(interior),
+            deposit: Default::default(),
+            gas: envelope.inventory,
+            atmosphere: None,
+            surface_temperature_k: envelope.thermal.temperature_k(1e5).unwrap(),
+            optical_depth: None,
+            diagnostics: Diagnostics {
+                iterations: envelope.iterations,
+                total_eos_evaluations: envelope.evaluations,
+                interface_residual_pa: 0.0,
+                partition_relative_residual: 0.0,
+            },
+            envelope: Some(Box::new(envelope)),
+        }
+    }
     pub fn model_id(&self) -> &'static str {
-        MODEL_ID
+        if self.envelope.is_some() {
+            super::envelope::MODEL_ID
+        } else {
+            MODEL_ID
+        }
     }
     pub fn column_model_id(&self) -> &'static str {
+        if self.envelope.is_some() {
+            return crate::system::materials::hhe::MODEL_ID;
+        }
         if self.atmosphere.is_some_and(|air| column::hot_steam(&air)) {
             HOT_STEAM_MODEL_ID
         } else {
@@ -164,10 +195,16 @@ impl CoupledStructure {
     }
     /// Top of the deposit, where the gas column starts.
     pub fn surface_radius_m(&self) -> f64 {
+        if let Some(e) = &self.envelope {
+            return e.one_bar_radius_m;
+        }
         self.deposit.top_radius_m(self.condensed.radius_m())
     }
     /// Gas pressure plus the deposit's weight: the condensed body's outer load.
     pub fn condensed_load_pa(&self) -> f64 {
+        if self.envelope.is_some() {
+            return self.condensed.outer().pressure_pa;
+        }
         self.atmosphere.map_or(0.0, |a| a.pressure_pa())
             + self
                 .deposit
@@ -204,6 +241,9 @@ impl CoupledStructure {
     }
     /// Absent when one bar lies below the condensed boundary or there is no gas.
     pub fn one_bar_radius_m(&self) -> Result<Option<f64>, AtmosphereError> {
+        if let Some(e) = &self.envelope {
+            return Ok(Some(e.one_bar_radius_m));
+        }
         self.atmosphere
             .map(|a| {
                 a.pressure_level_altitude_m(
@@ -223,15 +263,33 @@ impl CoupledStructure {
     }
     /// Includes the deposit and finite gas shells, not just the condensed body.
     pub fn inertia_kg_m2(&self) -> f64 {
+        if let Some(e) = &self.envelope {
+            return e.inertia_kg_m2;
+        }
         self.condensed.inertia_kg_m2()
             + self.deposit.inertia_kg_m2(self.condensed.radius_m())
             + column::inertia_kg_m2(self)
     }
     /// Referenced to the condensed boundary, not the optical or one-bar radius.
     pub fn inertia_factor(&self) -> f64 {
+        if self.envelope.is_some() {
+            return self.inertia_kg_m2() / (self.mass_kg() * self.surface_radius_m().powi(2));
+        }
         self.inertia_kg_m2() / (self.mass_kg() * self.condensed.radius_m().powi(2))
     }
     pub fn approximation_notes(&self) -> &'static [&'static str] {
+        if self.envelope.is_some() {
+            return &[
+                "Uniform H/He mixture with separate conserved origins; no helium rain or heavy-water mixing",
+                "CMS19/HG23 density with bounded conservative pure-fluid and ion-quantum screens",
+                "Pure-He melting screen continued as a labelled conservative restriction through 1e13 Pa, not a mixture phase prediction",
+                "Grey prescribed thermal profile, fixed 2/7 deep slope and 100 K intrinsic reference, not cooling evolution",
+                "Reference gravity iterated from enclosed new-model mass and exact one-bar event",
+                "All water retained below H/He; pressure-only effective compression above 1 GPa, phase and thermal expansion unresolved",
+                "Protected secondaries remain in heavy parcels; accessible secondary traces share envelope host volume without becoming protected",
+                "Finite entire-inventory shell ends near 0.01 bar; one bar is a reference, never ground",
+            ];
+        }
         &[
             "Prescribed isothermal ideal-gas mixture, not a climate solution",
             "Gas self-gravity neglected within the 1% mass mask",
@@ -254,6 +312,7 @@ impl CoupledStructure {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Error {
+    Envelope(super::envelope::Error),
     InvalidInput(&'static str),
     Composition(CompositionError),
     Atmosphere(AtmosphereError),
@@ -453,6 +512,7 @@ pub(super) fn solve_protected(
             }
             let result = CoupledStructure {
                 condensed,
+                envelope: None,
                 deposit,
                 gas,
                 atmosphere: actual_air,

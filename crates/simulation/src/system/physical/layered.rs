@@ -19,8 +19,24 @@ use std::f64::consts::PI;
 pub fn layered(solved: &Solved) -> LayeredPlanet {
     let s = &solved.structure;
     let air = s.atmosphere();
-    let surface_pressure_pa = air.map_or(0.0, |a| a.pressure_pa());
+    let surface_pressure_pa = if s.envelope().is_some() {
+        1e5
+    } else {
+        air.map_or(0.0, |a| a.pressure_pa())
+    };
     let mut layers = Vec::new();
+    if let Some(envelope) = s.envelope() {
+        for r in envelope.regions().iter().rev() {
+            layers.push(region(
+                r.inventory(),
+                r.inner(),
+                r.outer(),
+                envelope.thermal().temperature_k(r.outer().pressure_pa).ok(),
+                "envelope",
+                crate::system::materials::hhe::MODEL_ID,
+            ));
+        }
+    }
     if let Some(air) = air {
         let top = s
             .column()
@@ -94,8 +110,19 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     let mass = s.mass_kg();
     let radius = s.surface_radius_m();
     let mut models: Vec<String> = Vec::new();
+    let envelope_models: &[&str] = if s.envelope().is_some() {
+        &[
+            crate::system::structure::envelope::THERMAL_MODEL_ID,
+            crate::system::structure::envelope::TRACE_MODEL_ID,
+            crate::system::materials::hhe::COLD_MODEL_ID,
+            "bounded_pure_he_melting_screen_extension_v1",
+        ]
+    } else {
+        &[]
+    };
     for model in [solved.model_id(), condensed_model, s.column_model_id()]
         .into_iter()
+        .chain(envelope_models.iter().copied())
         .chain(layers.iter().map(|l| l.model.as_str()))
     {
         if !models.iter().any(|m| m == model) {
@@ -129,14 +156,19 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             reference_radius_m: radius,
             condensed_radius_m: s.condensed().radius_m(),
             mean_density_kg_m3: mass / (4.0 / 3.0 * PI * radius.powi(3)),
-            reference_gravity_m_s2: GRAVITATIONAL_CONSTANT * mass / radius.powi(2),
+            reference_gravity_m_s2: s.envelope().map_or_else(
+                || GRAVITATIONAL_CONSTANT * mass / radius.powi(2),
+                |e| e.reference_gravity_m_s2(),
+            ),
             h_he_mass_fraction: (retained.mass_kg(Material::Hydrogen)
                 + retained.mass_kg(Material::Helium))
                 / mass,
             inertia_factor: s.inertia_kg_m2() / (mass * radius.powi(2)),
             // Only bare rock and bare ice-Ih count as ground. Liquid, frost of
             // unmodelled phase and unresolved water never grant a solid surface.
-            radius_reference: if matches!(surface, "rock" | "ice") {
+            radius_reference: if s.envelope().is_some() {
+                RadiusReference::OneBar
+            } else if matches!(surface, "rock" | "ice") {
                 RadiusReference::SolidSurface
             } else {
                 RadiusReference::UnresolvedVolatileBoundary
@@ -191,6 +223,9 @@ fn refractory(inventory: &Inventory) -> &'static str {
 }
 
 fn water_kind(region: &water::Region) -> &'static str {
+    if region.density_model_id() == crate::system::structure::envelope::WATER_MODEL_ID {
+        return "water_compression";
+    }
     match region.phase() {
         PhaseKnowledge::Unresolved => refractory(region.inventory()),
         PhaseKnowledge::Water(Phase::Liquid) => "ocean",
@@ -198,5 +233,6 @@ fn water_kind(region: &water::Region) -> &'static str {
         PhaseKnowledge::Water(_) => "water_coexistence",
         PhaseKnowledge::EffectiveHighPressureIce => "deep_ice",
         PhaseKnowledge::UnresolvedHotWater => "hot_water",
+        PhaseKnowledge::UnresolvedCompression => "water_compression",
     }
 }

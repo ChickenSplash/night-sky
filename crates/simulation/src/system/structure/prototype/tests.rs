@@ -188,7 +188,7 @@ fn unsupported_and_budget_failures_never_fall_back() {
         .unwrap();
     let envelope = Budget::new(source, source, Inventory::default(), Inventory::default()).unwrap();
     assert_eq!(
-        solve(&envelope, &environment(250.0), Controls::default()).unwrap_err(),
+        solve_thin(&envelope, &environment(250.0), Controls::default()).unwrap_err(),
         Error::GasMassOutsideDomain
     );
 }

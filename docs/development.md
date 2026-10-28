@@ -155,8 +155,8 @@ Keep it in step with Bevy upgrades.
 ./scripts/check.sh
 ```
 
-It runs the `ns` CLI tests and offline ice-VI/H-He/secondary-fluid reference-audit
-regressions, then
+It runs the `ns` CLI tests, offline ice-VI/H-He/secondary-fluid reference-audit
+regressions and synthetic envelope-prescription checks, then
 checks formatting, workspace unit tests and strict Clippy.
 Python checks disable bytecode writes, keeping generated caches out of `scripts/`.
 The optional reference-only `scripts/audit-revised-aqua.py` checks a separately
@@ -173,6 +173,15 @@ unit/reference comparisons, not a physical validity mask or a runtime EOS. See
 the [H/He reference audit](simulation/planet-composition-reference.md#independent-hhe-reference-audit)
 for reproduction, hashes and limits. Its small synthetic parser/math regressions
 run offline in the standard check without those downloads.
+The separate `scripts/probe-envelope-prescription.py` uses those pinned files
+to evaluate P2 density/thermal prescription candidates, not hydrostatic planet
+solutions. Its [equations and reproduction](simulation/planet-composition.md#p2-envelope-prescription-decision-probe)
+are in the composition guide; its synthetic checks require no source downloads.
+`scripts/prepare-hhe-density.py` separately converts the same pinned, locally
+held sources into the optional runtime envelope-density resource. No dataset is
+downloaded or bundled. Missing data leaves envelope routes explicitly
+unsupported; normal project tests still run without it. See the
+[local resource setup](simulation/planet-composition.md#local-data-not-a-redistributed-table).
 Likewise `scripts/audit-secondary-reference.py` checks pinned secondary-fluid
 coefficient files at supplied density/temperature states, independently checking
 pressure and same-temperature Gibbs equality without installing CoolProp. It is

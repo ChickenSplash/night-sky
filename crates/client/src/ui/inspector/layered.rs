@@ -44,7 +44,11 @@ pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
     info.field("layered.status", "Status", None, "Solved");
     info.field(
         "layered.surface",
-        "Surface",
+        if solved.surface == "envelope" {
+            "Reference level"
+        } else {
+            "Surface"
+        },
         None,
         surface_label(&solved.surface),
     );
@@ -52,6 +56,7 @@ pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
 }
 
 fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
+    let envelope = l.surface == "envelope";
     let radius_km = l.physical.reference_radius_m / 1000.0;
     info.field(
         "layered.radius",
@@ -72,7 +77,11 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
     });
     info.field(
         "layered.temperature",
-        "Surface temperature (new vs legacy)",
+        if envelope {
+            "1 bar temperature (new vs legacy)"
+        } else {
+            "Surface temperature (new vs legacy)"
+        },
         Some("K"),
         format!("{:.0} K vs {legacy_temperature}", l.surface_temperature_k),
     );
@@ -83,7 +92,11 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
     };
     info.field(
         "layered.pressure",
-        "Surface pressure (new vs legacy)",
+        if envelope {
+            "Reference pressure (new vs legacy)"
+        } else {
+            "Surface pressure (new vs legacy)"
+        },
         None,
         format!(
             "{} vs {legacy_pressure}",
@@ -158,13 +171,22 @@ fn layer_text(layer: &Layer) -> String {
     parts.push(
         layer
             .temperature_k
-            .map_or("temperature not modelled".into(), |t| format!("{t:.0} K")),
+            .map_or("temperature not modelled".into(), |t| {
+                if layer.kind == "envelope" {
+                    format!("{t:.0} K at top (varies with depth)")
+                } else if layer.kind == "water_compression" {
+                    format!("{t:.0} K at outer boundary (thermal state unresolved)")
+                } else {
+                    format!("{t:.0} K")
+                }
+            }),
     );
     parts.join(" · ")
 }
 
 fn surface_label(surface: &str) -> String {
     match surface {
+        "envelope" => "1 bar in H/He envelope (not ground)".into(),
         "rock" => "Rock".into(),
         "ice" => "Water ice".into(),
         "ocean" => "Liquid water ocean".into(),
@@ -175,6 +197,8 @@ fn surface_label(surface: &str) -> String {
 
 fn layer_label(kind: &str) -> String {
     match kind {
+        "envelope" => "H/He envelope".into(),
+        "water_compression" => "Water-rich layer (phase unresolved)".into(),
         "deep_ice" => "High-pressure ice".into(),
         "hot_water" => "Hot water (unresolved)".into(),
         "water_coexistence" => "Water at a phase boundary".into(),
@@ -187,4 +211,14 @@ fn capitalise(text: &str) -> String {
     chars
         .next()
         .map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn envelope_is_labelled_as_a_reference_not_ground() {
+        assert!(surface_label("envelope").contains("not ground"));
+        assert!(layer_label("water_compression").contains("unresolved"));
+    }
 }

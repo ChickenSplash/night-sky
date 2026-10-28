@@ -1,5 +1,5 @@
 //! Opt-in coverage report for the rock-and-water prototype (plan P1 step 1).
-//! Exercises the unified headless entry point. Generation never calls it yet.
+//! Exercises the unified entry point also used by opt-in background generation.
 //! See docs/simulation/planet-composition.md#prototype-coverage-report.
 
 use super::{coupled, dry, prototype};
@@ -16,6 +16,9 @@ use crate::{
 use std::{collections::BTreeMap, fmt::Write as _, time::Instant};
 
 const DEFAULT_SYSTEMS_PER_COMPONENT: usize = 20;
+
+mod census;
+mod traces;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Category {
@@ -71,11 +74,16 @@ impl Category {
 }
 
 struct Row {
+    traces: traces::Audit,
     id: String,
+    envelope: bool,
     class: &'static str,
     mass_earth: f64,
     water_fraction: f64,
     light_fraction: f64,
+    hydrogen_fraction: f64,
+    helium_fraction: f64,
+    refractory_fraction: f64,
     temperature_k: f64,
     surface_k: f64,
     category: Category,
@@ -89,6 +97,13 @@ struct Row {
     radius_change: Option<f64>,
     eos_evaluations: usize,
     milliseconds: f64,
+    new_radius_km: f64,
+    legacy_radius_km: f64,
+    inertia_factor: f64,
+    interface_pressure_pa: f64,
+    gravity_residual: f64,
+    outer_residual_pa: f64,
+    model: &'static str,
 }
 
 struct Solved {
@@ -100,6 +115,11 @@ struct Solved {
     escaped: String,
     escaped_fraction: f64,
     eos_evaluations: usize,
+    inertia_factor: f64,
+    interface_pressure_pa: f64,
+    gravity_residual: f64,
+    outer_residual_pa: f64,
+    model: &'static str,
 }
 
 /// Every reported planet uses the same entry point intended for generation.
@@ -125,7 +145,11 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     let atmosphere = &escaping.structure;
     let escaped = escaping.blowoff;
     let t = atmosphere.surface_temperature_k();
-    let pressure = atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa());
+    let pressure = if atmosphere.envelope().is_some() {
+        1e5
+    } else {
+        atmosphere.atmosphere().map_or(0.0, |a| a.pressure_pa())
+    };
     let deposit_m = atmosphere.deposit_thickness_m();
     let work = atmosphere.diagnostics().total_eos_evaluations;
     let surface = escaping.surface();
@@ -151,12 +175,22 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
             .join("+"),
         escaped_fraction: escaped.total_mass_kg() / retained.total_mass_kg(),
         eos_evaluations: work,
+        inertia_factor: layered.physical.inertia_factor,
+        interface_pressure_pa: atmosphere.condensed_load_pa(),
+        gravity_residual: atmosphere
+            .envelope()
+            .map_or(f64::NAN, |e| e.gravity_residual()),
+        outer_residual_pa: atmosphere
+            .envelope()
+            .map_or(f64::NAN, |e| e.outer_pressure_residual_pa()),
+        model: escaping.model_id(),
     })
 }
 
 fn coupled_error(t: f64, e: &coupled::Error) -> (Category, String) {
     use coupled::Error as E;
     match e {
+        E::Envelope(e) => (Category::Envelope, e.label().to_owned()),
         E::Radial(e) => radial_error(t, e),
         E::InvalidInput(s) if s.starts_with("column temperature") => {
             (Category::ColumnTemperature, (*s).to_owned())
@@ -225,12 +259,27 @@ fn row(p: &Hosted) -> Row {
         Ok(s) => (Category::Solved, String::new(), Some(s)),
         Err((c, d)) => (c, d, None),
     };
+    let mut trace_audit = traces::Audit::new(&p.body.budget);
+    if detail == "secondary envelope trace domain" {
+        trace_audit.thin_refusal = format!(
+            "{:?}",
+            prototype::thin_route_diagnostic(&p.body.budget, env).unwrap_err()
+        );
+    }
     Row {
+        traces: trace_audit,
         id: p.id(),
+        envelope: category == Category::Envelope
+            || solved.as_ref().is_some_and(|s| s.surface == "envelope"),
         class: p.body.class.name(),
         mass_earth: mass / EARTH_MASS_KG,
         water_fraction: retained.mass_kg(Material::Water) / mass,
         light_fraction: (retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium))
+            / mass,
+        hydrogen_fraction: retained.mass_kg(Material::Hydrogen) / mass,
+        helium_fraction: retained.mass_kg(Material::Helium) / mass,
+        refractory_fraction: (retained.mass_kg(Material::Metal)
+            + retained.mass_kg(Material::Silicate))
             / mass,
         temperature_k: env.equilibrium_temperature_k,
         surface_k: solved.as_ref().map_or(f64::NAN, |s| s.surface_k),
@@ -245,6 +294,15 @@ fn row(p: &Hosted) -> Row {
         radius_change: solved.as_ref().map(|s| s.radius_m / legacy - 1.0),
         eos_evaluations: solved.as_ref().map_or(0, |s| s.eos_evaluations),
         milliseconds,
+        new_radius_km: solved.as_ref().map_or(f64::NAN, |s| s.radius_m / 1000.0),
+        legacy_radius_km: p.body.radius_km,
+        inertia_factor: solved.as_ref().map_or(f64::NAN, |s| s.inertia_factor),
+        interface_pressure_pa: solved
+            .as_ref()
+            .map_or(f64::NAN, |s| s.interface_pressure_pa),
+        gravity_residual: solved.as_ref().map_or(f64::NAN, |s| s.gravity_residual),
+        outer_residual_pa: solved.as_ref().map_or(f64::NAN, |s| s.outer_residual_pa),
+        model: solved.as_ref().map_or("", |s| s.model),
     }
 }
 
@@ -280,12 +338,24 @@ fn ratio(solved: usize, total: usize) -> String {
     }
 }
 
+fn scientific_quantiles(mut values: Vec<f64>) -> String {
+    if values.is_empty() {
+        return "-".into();
+    }
+    values.sort_by(f64::total_cmp);
+    [0.5, 0.95, 1.0]
+        .map(|q| {
+            format!(
+                "{:.3e}",
+                values[((values.len() - 1) as f64 * q).round() as usize]
+            )
+        })
+        .join(" / ")
+}
+
 fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String {
     let mut out = String::new();
-    let rocky: Vec<&Row> = rows
-        .iter()
-        .filter(|r| r.category != Category::Envelope)
-        .collect();
+    let rocky: Vec<&Row> = rows.iter().filter(|r| !r.envelope).collect();
     let solved = rocky
         .iter()
         .filter(|r| r.category == Category::Solved)
@@ -294,12 +364,19 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
         out,
         "# Composition prototype coverage\n\n\
          - Systems: {systems} per component, {} components, {} planets\n\
-         - Non-envelope planets solved: {}\n\
+          - Non-envelope planets solved: {}\n\
+          - Envelope-route planets solved: {}\n\
          - Wall time: {seconds:.1} s on {threads} threads\n\
-         - Surface temperature: grey greenhouse over equilibrium\n",
+          - Thin temperature: grey greenhouse; envelope: radiative/deep profile, 100 K intrinsic\n",
         Component::ALL.len(),
         rows.len(),
         ratio(solved, rocky.len()),
+        ratio(
+            rows.iter()
+                .filter(|r| r.envelope && r.category == Category::Solved)
+                .count(),
+            rows.iter().filter(|r| r.envelope).count()
+        ),
     );
     let mut categories = BTreeMap::<Category, Vec<&Row>>::new();
     for r in rows {
@@ -307,14 +384,10 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
     }
     let _ = writeln!(
         out,
-        "## Outcomes\n\n| Outcome | Planets | Of non-envelope | Plan |\n| --- | --- | --- | --- |"
+        "## Outcomes\n\n| Outcome | Planets | Of all | Plan |\n| --- | --- | --- | --- |"
     );
     for (category, members) in &categories {
-        let share = if *category == Category::Envelope {
-            "-".to_owned()
-        } else {
-            format!("{:.1}%", 100.0 * members.len() as f64 / rocky.len() as f64)
-        };
+        let share = format!("{:.1}%", 100.0 * members.len() as f64 / rows.len() as f64);
         let _ = writeln!(
             out,
             "| {} | {} | {share} | {} |",
@@ -390,7 +463,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
     }
     let _ = writeln!(
         out,
-        "\n## Solved planets\n\n- Outer layer: {}\n\
+        "\n## Solved non-envelope planets\n\n- Outer layer: {}\n\
          - Radius change vs legacy, |relative| p50 / p95 / max: {}\n\
          - Surface pressure, bar, p50 / p95 / max: {}\n\
          - Greenhouse warming, K, p50 / p95 / max: {}\n\
@@ -445,18 +518,50 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
                 .collect()
         ),
     );
+    let envelopes: Vec<_> = rows
+        .iter()
+        .filter(|r| r.envelope && r.category == Category::Solved)
+        .collect();
+    let _ = writeln!(
+        out,
+        "\n## Solved envelopes\n\nAll statistics p50 / p95 / max. Legacy differences are not accuracy measurements.\n\n- One-bar radius, km: {}\n- Inertia factor at one bar: {}\n- Interior interface pressure, bar: {}\n- Absolute reference-gravity residual: {}\n- Outer-shell pressure residual, mbar: {}\n- EOS evaluations: {}\n- Solve time, ms: {}\n\n| Legacy class | Solved envelopes |\n| --- | --- |",
+        quantiles(envelopes.iter().map(|r| r.new_radius_km).collect()),
+        quantiles(envelopes.iter().map(|r| r.inertia_factor).collect()),
+        quantiles(
+            envelopes
+                .iter()
+                .map(|r| r.interface_pressure_pa / 1e5)
+                .collect()
+        ),
+        scientific_quantiles(envelopes.iter().map(|r| r.gravity_residual.abs()).collect()),
+        quantiles(
+            envelopes
+                .iter()
+                .map(|r| r.outer_residual_pa / 100.0)
+                .collect()
+        ),
+        quantiles(envelopes.iter().map(|r| r.eos_evaluations as f64).collect()),
+        quantiles(envelopes.iter().map(|r| r.milliseconds).collect())
+    );
+    let mut classes = BTreeMap::<&str, usize>::new();
+    for r in envelopes {
+        *classes.entry(r.class).or_default() += 1;
+    }
+    for (class, n) in classes {
+        let _ = writeln!(out, "| {class} | {n} |");
+    }
     out
 }
 
 fn table(rows: &[Row]) -> String {
     let mut out =
         "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\tsurface_k\toutcome\tdetail\t\
-                   surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tlegacy_pa\tradius_change\teos_evaluations\tms\n"
+                   surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tlegacy_pa\tradius_change\teos_evaluations\tms\thydrogen_fraction\thelium_fraction\trefractory_fraction\thhe_mass_earth\theavy_mass_earth\thelium_in_hhe\tnew_radius_km\tlegacy_radius_km\tinertia_factor\tinterface_pa\tgravity_residual\touter_residual_pa\tmodel\n"
             .to_owned();
     for r in rows {
         let _ = writeln!(
             out,
-            "{}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{}\t{}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{}\t{}\t{:.2}",
+            "{}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{}\t{}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{}\t{}\t{:.2}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{:.16e}\t{}",
             r.id,
             r.class,
             r.mass_earth,
@@ -476,6 +581,23 @@ fn table(rows: &[Row]) -> String {
                 .map_or(String::new(), |c| format!("{c:.16e}")),
             r.eos_evaluations,
             r.milliseconds,
+            r.hydrogen_fraction,
+            r.helium_fraction,
+            r.refractory_fraction,
+            r.mass_earth * r.light_fraction,
+            r.mass_earth * (1.0 - r.light_fraction),
+            if r.light_fraction > 0.0 {
+                format!("{:.16e}", r.helium_fraction / r.light_fraction)
+            } else {
+                String::new()
+            },
+            r.new_radius_km,
+            r.legacy_radius_km,
+            r.inertia_factor,
+            r.interface_pressure_pa,
+            r.gravity_residual,
+            r.outer_residual_pa,
+            r.model,
         );
     }
     out
@@ -527,5 +649,10 @@ fn composition_coverage() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("composition-coverage.md"), &summary).unwrap();
     std::fs::write(dir.join("composition-coverage.tsv"), table(&rows)).unwrap();
+    let census = census::report(&rows);
+    eprintln!("{census}");
+    std::fs::write(dir.join("composition-census.md"), census).unwrap();
+    std::fs::write(dir.join("composition-traces.tsv"), traces::table(&rows)).unwrap();
+    std::fs::write(dir.join("composition-traces.md"), traces::report(&rows)).unwrap();
     assert!(!rows.is_empty());
 }

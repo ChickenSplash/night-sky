@@ -445,6 +445,15 @@ original grids and the HG23 volume/entropy unit conversion.
 
 ### Independent H/He reference audit
 
+P2's experimental runtime now uses a separately prepared local density subset,
+not a bundled dataset or these audit routines as a fluid validity mask. Its
+[coupled implementation and additional bounds](planet-composition.md#self-gravitating-envelope-and-loaded-interior)
+include a named conservative pure-He screen continuation, a dilute cold-volume
+anchor, interpolation checks and an independent prescribed thermal profile.
+The audit's restricted pure-phase comparisons below are unchanged; the runtime
+extensions are labelled engineering assumptions, not newly established source
+validity or independent planet-radius accuracy.
+
 ```sh
 python scripts/audit-hhe-reference.py data/composition-sources > data/composition-sources/hhe-audit.json
 PYTHONDONTWRITEBYTECODE=1 python scripts/test-hhe-reference.py

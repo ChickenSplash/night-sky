@@ -9,8 +9,9 @@ The [replacement plan](../plans/planet-composition.md) owns remaining work and t
 region/boundary contract; the [scientific reference](planet-composition-reference.md)
 owns input bounds, selected/candidate sources and future acceptance requests.
 Implemented radial solvers are separate headless APIs, described below.
-Generation still uses the approximate reservoir/radius model;
-no planets, snapshots, inspector fields or rendering use the new solver yet.
+Default generation still uses the approximate reservoir/radius model. Opt-in
+background loading exposes new solved records in the inspector beside legacy
+facts; rendering, navigation and the authoritative planet record remain legacy.
 The separate [water-shell solver](#headless-restricted-water-shell-solver) uses
 direct [IAPWS water physics](water-physics.md) and an explicitly approximate
 effective deep-ice compression model. The mandatory Earth-mass, 30%-water fixture
@@ -18,10 +19,347 @@ solves at both 250 K and 300 K. Cold deep ice is explicitly approximate rather
 than resolved into individual polymorphs. The standalone
 Lai ice-VII branch remains separate, not used by the radial solver.
 Opt-in [condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling)
-is implemented without switching generation or consumers to the radial models.
+is implemented without switching default generation or authoritative consumers
+to the radial models.
 [Protected secondary traces in dry hosts](#headless-protected-traces-in-dry-hosts)
 and [water-bearing hosts](#headless-protected-traces-in-water-bearing-hosts)
 are also headless and opt-in.
+
+## P2 envelope prescription decision probe
+
+P2 step 2 selected the following starting prescriptions using
+`scripts/probe-envelope-prescription.py`. That offline decision probe cannot
+predict a planet radius or demonstrate increased coverage. The separately
+implemented [coupled envelope path](#self-gravitating-envelope-and-loaded-interior)
+below now integrates these choices with explicit additional bounds.
+
+### Density and mixture
+
+Use the original CMS19 pure-H and pure-He densities with the HG23 additive-volume
+correction, rather than treating the mixture as one ideal molecular gas at all
+depths. The decision-probe identity is `cms19_hg23_log_density_candidate_v1`:
+
+```text
+Y = M_He / (M_H + M_He); X = 1 - Y
+v = X/rho_H(P,T) + Y/rho_He(P,T) + X Y Vmix(P,T)
+rho = 1/v
+```
+
+Species inventories remain separate; X/Y are normalised within H/He, not the
+whole planet. The region is uniformly mixed and excludes water/heavy material.
+The sampled generator gives Y=0.25, but the mixture equation retains variable Y.
+The probe interpolates pure log-density bilinearly in log-pressure/log-temperature
+and the signed HG23 volume correction linearly with the same weights. No second
+ideal-mixing correction, chemical conversion, helium rain or entropy-derived
+thermal gradient is added.
+
+Why this choice: a dilute molecular ideal gas cannot describe compression
+through the giant's dense interior. The existing source audit provides a
+stronger starting point without inventing a fitted universal compression law.
+This is not a quantitative accuracy claim for the selected interpolation.
+
+The [reference audit](planet-composition-reference.md#independent-hhe-reference-audit)
+owns provenance, hashes, unit conversions and physical warnings. The decision
+probe reads separately downloaded, hash-verified files; no EOS data is bundled
+or redistributed. A density inspection rectangle of 100–100,000 K and
+0.001–1,000,000,000 bar is **not a fluid validity domain**. The probe reports
+restricted pure melting screens and corner compressibility signs, but neither
+certifies mixture phases, interpolation derivatives or quantum/plasma validity.
+Known invalid/unresolved states must not silently become successful runtime
+envelopes. Source redistribution permission and a runtime packaging policy must
+also be settled before bundling tables with the client. The runtime experiment
+below instead uses a separately prepared local resource.
+
+In particular, the cold dilute outer atmosphere below the table's 100 K minimum
+needs a bounded join to the existing gas prescription. Cold dense material needs
+a justified fluid mask or a separately labelled effective approximation, not
+table extrapolation. The runtime path below adds a cold dilute join and bounded
+screens, but cold dense and complete giant coverage still remain unresolved.
+
+### Temperature prescription
+
+Use a simple grey irradiated outer region and a prescribed convective-like deep
+profile. For this **decision probe**, gravity is a fixed supplied reference,
+not inferred from legacy radii or solved self-consistently. Its identity is
+`grey_pressure_opacity_fixed_gradient_candidate_v1`:
+
+```text
+P0 = 1 bar
+kappa(P) = kappa0 P/P0; kappa0 = 0.001 m²/kg
+tau(P) = kappa0 P² / (2 g_ref P0)
+T_rad(P)^4 = T_eq^4 + (3/4) T_int^4 [tau(P) + 2/3]
+nabla_rad = d ln T_rad / d ln P
+nabla_deep = 2/7
+```
+
+Locate the radiative/deep join where `nabla_rad=2/7`. Beyond it,
+`T=T_join (P/P_join)^(2/7)`, giving continuous temperature and first logarithmic
+derivative. A pressure-dependent opacity is deliberate: constant opacity gives
+a deep radiative gradient of 1/4 and would never trigger this 2/7 join.
+This is a grey diffusion closure, not the full Guillot irradiated-atmosphere
+solution, opacity chemistry or a climate model. Irradiation heating, deposited
+above the optically thick region, is represented by the additive `T_eq^4` term.
+
+The 2/7 slope is the molecular-diatomic ideal-gas reference, deliberately used
+as an **effective prescribed slope**, not claimed to be the true H/He adiabat.
+It neglects mixture heat-capacity variation, dissociation, ionisation and
+degenerate thermal behaviour. Do not read the audited table's unreliable/clamped
+entropy gradients to imply otherwise. Reference opacity and gravity are further
+uncertainties; full hydrostatic coupling must assess their impact.
+In step 3, reference gravity must be iterated from the new-model solution,
+not borrowed from legacy geometry to make the coupling appear closed.
+
+Use `T_int=50 K` as the reference experiment, with 30/100/200 K sensitivity
+cases, not an inferred age or a validated universal planet temperature. `T_int`
+represents intrinsic flux (`F_int=sigma T_int^4`), not core temperature. A runtime
+default is gated on coupled radius/reference tests in step 3; no cooling history
+or unvalidated mass-to-age mapping is introduced. Probe forcing bounds are
+20–2,000 K for equilibrium, 20–200 K for intrinsic temperature and
+0.1–1,000 m/s² for reference gravity, with pressure 10⁻⁷–10⁹ bar. These are
+explicit experiment bounds, not demonstrated physical accuracy bounds. Use the
+existing 20 K floor on generated equilibrium inputs.
+
+### Reproduction and acceptance evidence
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/probe-envelope-prescription.py data/composition-sources > data/tmp/p2-step2-prescription.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-envelope-prescription.py
+```
+
+The standard-library probe has no network access and solves no planets. Six
+synthetic tests cover thermal value/slope continuity, analytic versus numerical
+gradients, heating trends, invalid inputs, log-density interpolation, pure
+limits and applying the signed volume correction exactly once. They run in
+`scripts/check.sh` without downloaded data.
+
+Source-based density comparisons reproduce 0.276323 kg/m³ at 10 bar/1,000 K,
+653.393 kg/m³ at 1,000,000 bar/10,000 K, and 1,842.102 kg/m³ at 10,000,000
+bar/19,952.623 K for Y=0.25. The 1,000,000 bar/5,011.872 K negative fixture still
+reports the pure-He melting warning; finite density does not override it.
+These reproduce the source construction, not independent EOS or planet-radius
+accuracy measurements.
+
+At reference intrinsic 50 K, the 20 K/10 m/s² cold scenario joins at 0.432 bar,
+the 250 K/10 m/s² scenario at 14.91 bar, the 110 K/25 m/s² giant scenario at
+4.612 bar and the 1,074 K/10 m/s² hot scenario at 275.12 bar. This verifies that
+irradiation changes the depth of the prescribed radiative region. It does not
+establish those boundaries for generated planets. The cold scenario leaves the
+table rectangle in its outer region, and cold/giant reference deep paths can
+trigger pure-He melting warnings: the probe intentionally exposes these gaps.
+
+**Step-2 stop condition:** prescriptions and equations selected, sensitivity
+inputs explicit, analytic checks passing, and unresolved table/phase/thermal
+assumptions recorded. Step 3 must validate the resulting whole-planet structure
+before selecting runtime defaults or claiming a percentage accuracy.
+
+## Self-gravitating envelope and loaded interior
+
+`structure::envelope` implements `self_gravitating_loaded_hhe_v1` through the
+same adaptive radial kernel as the dry/water solvers. It is used by the opt-in
+prototype after a thin-route gas-mass, density or heavy-mass refusal on an
+H/He-bearing body. Successful thin solves are returned unchanged. There is no
+legacy radius, atmosphere or gas-search cache in the new solve; default
+generation, rendering, shape and navigation remain legacy.
+
+### Local data, not a redistributed table
+
+The runtime resource is generated locally from the existing separately held,
+SHA-256-pinned CMS19/HG23 originals:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/prepare-hhe-density.py data/composition-sources data/composition-sources/hhe-density.bin
+```
+
+No source dataset or converted resource is committed, downloaded automatically
+or bundled with the client. This keeps unresolved upstream redistribution
+permission separate from local experimentation, rather than interpreting a
+third-party metadata licence as original-author permission. A distributable
+data package is still future work. `NS_HHE_DENSITY_PATH` can point to a prepared
+file outside the development default path. Each process loads it once;
+preparing/replacing it after a failed load requires restarting that process.
+Missing or corrupt data produces an explicit unsupported error, never a
+substituted EOS or legacy solve. Standard project tests need no source files.
+
+The 398,041-byte little-endian v1 file contains 61 temperature knots and 261
+pressure knots, storing two original log densities, signed HG23 volume
+correction and pure compressibility flags. SHA-256 of the deterministic output:
+`8237f7f2b20457553d54df10c63ab069fd6bdc5b0e133e38c6ec6c9308c5f9fb`.
+Runtime schema/finite-value checks and pinned FNV-1a corruption checksum
+`b4e7a79ecc35d846` supplement the converter's source SHA checks. FNV is not
+cryptographic source authentication.
+
+### Mechanics, allocations and thermal coupling
+
+- Integrate `dr/dm`, `dP/dm` and `dI/dm` from the regular centre through metal,
+  silicate, water (if positive), then the H/He parcel. The actual enclosed mass
+  includes every parcel, so envelope self-gravity and interior compression are
+  solved together. Shared interface radius, pressure and enclosed mass are
+  identical by construction. Inertia comes from RK integration, including the
+  cumulative interior contribution, not a fitted core or shell formula.
+- Internal carrier coordinates are not origin identities: the heavy parcels
+  include protected secondary mass, while the outer carrier owns the complete
+  H/He mixture and accessible secondary traces. Restore separate inventories
+  before returning and check closure for each origin at relative 10⁻¹⁰. Keep
+  generation's prior escaped inventory unchanged; no retention history is
+  replayed and no gas is silently discarded.
+- Protected secondaries retain P1's host-volume prescription. Accessible
+  secondaries, capped at 0.301% of envelope mass, share H/He host specific
+  volume under `passive_secondary_envelope_host_volume_v1`. This is a mechanical
+  trace approximation, **not** protection, dissolution or condensation physics.
+  Water is never folded into that trace allowance or dropped at a threshold.
+- Water gets its own `loaded_effective_water_compression_v1` region using the
+  existing Seager pressure-only water row, only when its entire region is above
+  10,000 bar and below 100,000,000 bar. Its phase is `UnresolvedCompression`, not
+  ice or identified fluid; thermal expansion, internal heat transport and
+  mixing are unresolved. Its displayed temperature is the shared outer-boundary
+  temperature. The original local water EOS masks and thin solvers are unchanged.
+- The thermal form selected above is prescribed, not a cooling calculation.
+  This experimental route uses a **100 K intrinsic reference**, not the 50 K
+  decision-probe experiment, and does not claim it is right for every mass/age.
+  The headless API accepts 20–200 K for sensitivity work. Reference gravity is
+  iterated with bounded secant updates from newly integrated enclosed mass at
+  one bar. Require relative gravity closure below 10⁻⁸. No legacy radius seeds
+  this fixed point. Molecular heat-capacity variation and true deep adiabats
+  remain unresolved, so radius accuracy is not established.
+
+The new full-planet route admits 0.0001–1,200 Earth masses and up to 100 Earth
+masses of heavy inventory, but never widens the refractory pressure ceiling of
+100,000,000 bar. Both a positive heavy host and positive H/He supply are required;
+core-free pure-gas spheres are not an accepted input. These are request bounds, not a guarantee all such bodies
+solve. The existing standalone dry/water 20-Earth-mass contracts stay unchanged.
+
+### Density restrictions and finite outer boundary
+
+Use log-bilinear pure densities plus the signed mixture correction once.
+Require positive corner compressibilities, positive mixed specific volume and
+positive interpolated mixture compressibility. Returned profiles also reject
+outward density inversions. No table entropy, cp/cv or supplied adiabatic
+gradient is used.
+
+The density-table runtime bounds are 100–100,000 K and **0.01 mbar to
+100,000,000 bar**. The cold dilute prescription below is a separate extension.
+Density-table bounds alone are not a validity mask. The runtime applies:
+
+- CMS19 H₂ melting screen up to 3,000,000 bar; beyond that, require a hot path
+  of at least 10,000 K rather than extrapolating the turning molecular curve.
+- The CMS19 pure-He Simon melting screen, conservatively **continued as an
+  engineering restriction** through the bounded pressure rectangle. This
+  continuation beyond the audit's restricted experimental comparison is named
+  `bounded_pure_he_melting_screen_extension_v1`, not presented as a validated
+  mixture freezing curve. It can exclude real fluid mixtures and remains a
+  known giant-coverage limitation.
+- CMS19 equation 3's ion-quantum temperature screen for each present pure
+  endpoint, with source cgs density units converted explicitly.
+- Below 100 K, `dilute_hhe_100k_volume_anchor_v1` uses the molecular ideal
+  specific volume plus the table's 100 K nonideal volume residual. It is
+  continuous in value at 100 K and allowed only when ideal density is at most
+  0.1 kg/m³, down to 20 K. Cold dense inputs are refused, not extrapolated.
+
+These are labelled conservative restrictions, not complete mixture-phase
+thermodynamics or statistical accuracy bounds. Unsupported phase/quantum/table
+or heavy-water conditions remain errors; no successful partial profile is
+returned. Mathematical shooting trials may use the pressure-only water row
+below its accepted depth, but a final structure outside the depth bound is
+refused, never exposed as a solved water layer.
+
+The whole retained envelope is represented in a finite shell ending near
+**10 mbar**, with an operational endpoint tolerance of **0.01 mbar**. One bar is
+located as an exact pressure event *inside* that shell, not used as a pressure
+floor, ground or an invented material interface. Centre shooting at central
+loads of tens of millions of bar cannot universally resolve a 0.0001 mbar outer
+residual in f64; the new shell's endpoint contract is 0.01 mbar, recorded without pressure translation or radius
+rescaling. Existing P1 tolerances are unchanged. The one-bar radius and total
+inertia pass tighter-integration/half-step refinement checks at relative 10⁻⁷
+in the source-backed small-envelope fixture. More extreme ill-conditioned
+shoots explicitly fail rather than loosening their acceptance further.
+
+The radius and inertia factor use the one-bar reference; reference gravity uses
+mass actually enclosed there. Material inventories include the outer shell as
+well. There is no assertion of landable ground. Integration remains at relative
+10⁻¹⁰ by default, with bounded 32 gravity iterations, 128 shooting iterations,
+2 million EOS evaluations per radial solve and 16 million across the request.
+An independent sample quadrature checks total inertia within 0.1%; it is not
+the delivered inertia and does not relax integration tolerances.
+
+### Checks and coverage
+
+```sh
+cargo test --release -p space-simulation pinned_density_and_negative_phase_fixtures -- --ignored --nocapture
+cargo test --release -p space-simulation envelope_reference_cases -- --ignored --nocapture
+NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
+```
+
+Source-backed density/pure-phase fixtures and the paired small-envelope
+refinement check pass. Data-free regressions cover thermal consistency with the
+decision probe, exact shell-inertia comparison, coupled boundary/origin closure,
+protected versus accessible traces, positive water layers, work refusal and
+non-landable one-bar transport. Source-backed failures for the cold Jupiter-like
+fixture remain recorded; they are not required successes or accuracy references.
+
+The 28 October census now solves **1,134/1,544** planets: the previous 1,017 thin
+successes plus **117/512 envelope-route bodies** (85 sub-Neptunes, 28 envelope
+worlds, four lower-mass gas giants by legacy class). All original non-timing
+columns for the 1,017 thin successes are identical to P1. Four new successes
+have non-H/He inventory above 20 Earth masses. This is a coupled structural
+delivery, **not completed giant coverage**; larger giants remain unsupported.
+
+Remaining first failures among envelope-route bodies: secondary trace domain
+212, shallow water boundary 103, radial integration convergence 25, conservative
+melting screen 22, cold dense gas 12, work budget 8, central shooting resolution
+7, gravity convergence 5 and region mass resolution 1. The original eight
+H/He-free dense-gas and seven warming refusals also remain. These measured gaps
+feed P2 step 4; no new water-amount cutoff is permitted to bypass them.
+
+### Secondary trace input investigation
+
+The coverage probe also writes `data/tmp/composition-traces.{md,tsv}` for the
+trace-domain failures, including per-material protected/accessible inventories,
+both host-relative fractions and the prior thin-route refusal. This is test-only
+instrumentation: it neither changes generation nor bypasses any solver guard.
+The protection floor is reconstructed from the source inventory, not by taking
+90% of the post-escape retained inventory. Synthetic tests distinguish both
+guards, simultaneous failures and accessible loss with unchanged protection.
+
+The 28 October investigation found **all 212 fail the accessible-envelope
+fraction**, not the protected-interior fraction. Protected fractions reach only
+0.2667% of heavy mass, below the 0.301% bound. Their prior thin-route refusals
+are 203 dense-gas, eight gas-mass and one heavy-mass refusal. There are no giant
+classes here: 101 rocky, 39 metal-rich, 34 water-rich and 38 sub-Neptunes by
+legacy labels. Masses span 0.102–23.13 Earth masses.
+
+| Accessible secondary mass fraction of envelope parcel | Bodies |
+| --- | ---: |
+| 0.301% to below 1% | 33 |
+| 1% to below 5% | 43 |
+| 5% to below 10% | 16 |
+| 10% to below 50% | 41 |
+| At least 50% | 79 |
+
+The median is 15.04%, reaching nearly 100%. These are **parcel fractions**, not
+planet mass fractions: median total envelope mass is only 0.01083% of the planet,
+and 174/212 have H/He below 0.1% of planetary mass. All retained secondaries
+combined remain below 0.296% of total planet mass in this sample. Small residual
+H/He supplies make otherwise small secondary inventories non-trace components
+of that outer parcel. CO₂ dominates the accessible secondary mass in 95 bodies,
+nitrogen in 117; both occur in all 212. Methane and argon each contribute at most
+1% of the envelope; oxygen is absent. Ammonia is not a generated constituent.
+
+This changes the practical requirement: a trace extension for H/He-rich
+envelopes alone cannot represent the secondary-dominated end. Dense mixed
+secondary atmospheres with residual H/He need their own justified mechanical
+prescription, condensation handling and thermal bounds. Uniform composition
+within a gas/fluid region is a possible simplification, not permission to use
+H/He density for substantial CO₂/N₂ or to mix protected/water inventories into
+the atmosphere. No new mixture prescription is selected by this investigation.
+
+Irradiation equilibrium spans 1.51–646.05 K (median 184.65 K), but is **not**
+the actual envelope temperature; runtime irradiation flooring and intrinsic
+heat still apply. These refusals happen before envelope integration, so no
+accepted interface pressure, deep temperature or metallic-hydrogen exposure
+exists for this population. Those cannot be inferred from the legacy atmosphere
+or by suppressing the trace guard. Further state-range investigation needs an
+explicitly bounded candidate model and must not count provisional profiles as
+successful planets. The 212 are first blockers, not guaranteed future wins.
 
 ## Conserved inventory, not a classification
 
@@ -39,8 +377,8 @@ explicit catalogue entry and physical prescriptions, not just a density:
 Material identity is centralised, but not all physical-property ownership has
 migrated: legacy fit/gas mappings remain in `composition/catalogue.rs`, molecular
 masses in `atmosphere.rs`, and approximate cold-trap curves in
-`atmosphere/condensation.rs`. Only cold refractory and water EOS currently live
-under `materials`. Methane is already drawn by formation and can enter the gas
+`atmosphere/condensation.rs`. Cold refractory, water and optional H/He density
+physics live under `materials`. Methane is already drawn by formation and can enter the gas
 budget; neither methane liquids/lakes nor condensed CO₂/supercritical CO₂ are
 resolved by the new radial/coupled path. A cold-trap cap is not a phase diagram.
 Methane is treated as an ordinary gas; dedicated methane phase work is parked on
@@ -791,18 +1129,26 @@ validation re-derives the legacy structure and would reject it).
 - `physical` keeps the `PlanetPhysical` shape. Reservoirs map as interior =
   condensed regions minus water, condensed = condensed water plus the frost
   deposit, gas = the coupled gas inventory. `reference_radius_m` is the top of
-  the surface, frost included; density, gravity and inertia factor use it.
+  the surface, frost included, on the thin route. Envelopes instead use the
+  explicit one-bar level, with gravity from mass enclosed there and total
+  inertia referenced to that radius. The full retained mass includes the outer
+  envelope shell as well.
   `approximations` lists the model IDs used (prototype, condensed structure,
   column and each region's density model), not legacy caveat IDs.
 - `radius_reference` is `solid_surface` only for bare rock or bare ice-Ih. An
   ocean, a frost deposit (phase not modelled) and unresolved water stay
   `unresolved_volatile_boundary`, so this record can never grant ground to a
-  liquid or unresolved phase.
+  liquid or unresolved phase. Envelopes use `one_bar`, never `solid_surface`,
+  and label reference temperature/pressure accordingly in the inspector.
 - `layers` run outermost first: the atmosphere's operational finite shell (its
   top pressure is not resolved, so absent), the frost deposit, then each
   condensed region named by phase (`ocean`, `ice`, `deep_ice`, `hot_water`,
   `water_coexistence`) or, for refractories, by its dominant material (`mantle`,
   `core`). Cold refractory regions carry no temperature.
+  Envelopes instead begin with numerical `envelope` segments separated at the
+  one-bar event, not a phase or radiative/convective interface. Loaded water is
+  `water_compression` with unresolved phase.
+  Their temperature fields are outer-boundary values, not isothermal claims.
 - Layer masses sum to the retained mass and adjacent layers share their radius.
   The coverage report checks both, and the surface label, for every solved planet.
 
@@ -857,7 +1203,7 @@ launched as part of this implementation.
 ## Prototype coverage report
 
 An opt-in report measures how much of the generated population the
-rock-and-water prototype path solves, so each P1 step of the
+rock-and-water prototype path solves, so each implementation step of the
 [plan](../plans/planet-composition.md) can be measured against it.
 
 ```sh
@@ -869,15 +1215,32 @@ census keys `composition-calibration:{component:?}:{index}`).
 `NS_COVERAGE_THREADS=1` gives uncontended per-planet timings. The summary is
 printed and written to `data/tmp/composition-coverage.md`, with one row per
 planet in `data/tmp/composition-coverage.tsv` for diffing between steps.
+Use `NS_COVERAGE_THREADS=20` for comparisons on the development machine.
 
-The report uses `structure::prototype::solve`, the same headless entry point
-intended for experimental generation. It is not yet wired into live generation.
+The same run writes `data/tmp/composition-census.md` for P2 requirements:
+envelope first blockers, legacy classes, intersections of mass/H/He fraction/
+equilibrium-temperature bands, composition bounds and deterministic regression
+candidates. It lists every non-envelope refusal as well. The TSV appends
+separate hydrogen, helium and refractory mass fractions, H/He and non-H/He
+masses in Earth masses, and the helium mass fraction within H/He (blank when
+absent). These are retained **input** inventories, before prototype blow-off,
+not calculated envelope allocations. Non-H/He includes water and secondaries,
+so it must not be mistaken for a rock/metal core. Diagnostic bins are not new
+solver thresholds. The census cannot infer deep temperatures or pressures,
+mixing, envelope radii or failures hidden behind the first blocker.
+Raw equilibrium temperatures may be below 20 K; the prototype still applies
+its existing 20 K floor. The P2 census and selected starting fixtures are
+summarised in the [delivery plan](../plans/planet-composition.md#step-1-generated-input-census-complete-28-october-2026).
 
-1. H/He is an ordinary exchangeable gas, with no amount threshold. A body is an
-   **envelope** only when the thin column refuses its gas: H/He alone above the
+The report uses `structure::prototype::solve`, the same entry point used by
+opt-in experimental background generation. Default generation remains legacy.
+
+1. H/He is an ordinary exchangeable gas, with no amount threshold. A body enters
+   the **envelope route** only when the thin column refuses its gas: H/He alone above the
    coupling's 1% gas-mass mask (H/He never condenses, so this is checked first),
    or a coupled refusal for gas mass, dense gas or mass above 20 Earth masses on
-   an H/He-bearing body.
+   an H/He-bearing body. The new coupled envelope route is then attempted;
+   envelope-route totals include both its successes and explicit refusals.
 2. Protected secondaries (90% of CO₂/N₂/CH₄/O₂/Ar source, capped by retained
    supply) stay entrained in the interior. The coupled solver includes that
    mass in every iteration, with H/He, **all** water and all remaining
@@ -938,7 +1301,7 @@ protected heavy material, and escape never removes it exactly. Treating any H/He
 as an envelope therefore misclassified 472 stripped rock, metal and water worlds
 with less than 0.01% H/He by mass.
 
-Current coverage after unbound blow-off and greenhouse refinement optimisation
+P1 baseline after unbound blow-off and greenhouse refinement optimisation
 (October 2026, 20 systems per component):
 **1,017 of 1,032 non-envelope planets solve (99%)**, from 1,544 planets with
 512 H/He-bearing envelopes. Bands by equilibrium temperature: 227/227 below

@@ -7,6 +7,7 @@ export PYTHONDONTWRITEBYTECODE=1
 python3 scripts/test-ns.py
 python3 scripts/test-ice-vi-reference.py
 python3 scripts/test-hhe-reference.py
+python3 scripts/test-envelope-prescription.py
 python3 scripts/test-secondary-reference.py
 cargo fmt --all --check
 cargo test --locked --workspace
