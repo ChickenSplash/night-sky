@@ -51,9 +51,9 @@ structures towards 99%. Its exact prescription and validation remain to be chose
 - **Coverage after P2 step 3:** 1,134/1,544 solve: all 1,017 P1 successes plus
   117 envelope-route bodies. The non-envelope baseline remains 1,017/1,032,
   including all 280 water-rich planets. See [step 3](#step-3-coupled-structural-path-implemented-28-october-2026).
-- **Current coverage after enriched/deep-envelope slice:** 1,304/1,544 (84.5%),
-  up 72 after slice 1 without lost successes. There are 240 refusals remaining,
-  requiring at least 225 more layered solves to reach 99%. See the step-4 slices
+- **Current coverage after suspended-condensation slice:** 1,380/1,544 (89.4%),
+  up 76 after slice 2 without lost successes. There are 164 refusals remaining,
+  requiring at least 149 more layered solves to reach 99%. See the step-4 slices
   below. Larger-giant coverage is not complete.
 - **Performance and next step:**
   - Refinement-only warming optimisation is implemented: a paired 20-thread
@@ -565,6 +565,62 @@ owns equations, resource setup, numerical boundary contracts and limitations.
   and a physically absent reference level cannot be invented.
 - The [canonical enriched model](../simulation/planet-composition.md#enriched-and-deep-secondary-envelopes)
   owns the equations, IDs, physical caveats and measured fixture results.
+
+### Step-4 slice 3: local suspended condensation
+
+- Slice 2 checkpointed as `50984bb` before starting; nothing pushed.
+- **Observed gap:** all 106 pure-condensation refusals involve CO₂, at last
+  observed trial states of 84.17–189.52 K and 10–664.58 mbar. Old-cap
+  partial-pressure estimates indicate 40 undersaturated and 66 supersaturated
+  samples, not accepted planetary phases.
+- **Delivered approximation:** deterministic cold-mixture selection before
+  shooting; simultaneous ideal-partial-pressure saturation and separate,
+  pressure-compressed condensate volumes. Total abundances remain uniform;
+  condensate stays locally suspended, not protected or deposited into water.
+  Phase amounts are recomputed with each radial density and gravity iteration.
+- **Density scope:** ideal secondary vapour and simple liquid/solid-like density
+  proxies in the existing 80–625 K / 0.01 mbar–1,000 bar molecular rectangle,
+  explicitly not a non-ideal flash or PR extension. Deep effective components
+  match the ideal-vapour endpoint, requiring all present secondaries above their
+  critical temperatures there. Near-critical/H/He/numerical screens stay active.
+- **Conservation and visibility:** each layer exposes constituent vapour and
+  suspended-condensate suballocations, whose sum is already in its mass/gravity.
+  Global material budgets distinguish vapour from suspended condensate; the
+  inspector shows local integrated phase ratios and approximation caveats.
+  Perfect suspension, ideal fugacity/activity, unresolved solid/liquid identity,
+  neglected latent heat/settling and unchanged 2/7 thermal slope are explicit.
+- **Measured gain:** 76 additional solves to **1,380/1,544 (89.4%)**, with no
+  previous successes lost. Of these, 51 have integrated CO₂ condensate and 25
+  solve without condensate anywhere in the accepted profile. All 49 previous
+  cold explicit-mixture successes remain; their intentional model changes reach
+  0.01144% in radius and 0.02287% in inertia factor. Warm and passive-trace
+  successes retain their reported physical results.
+- **Remaining original candidates:** cold dense H/He (15), outward envelope
+  density inversion (12), radial convergence (2), central shooting resolution
+  (1). Inversions now have their own label rather than being conflated with
+  H/He interpolation. They remain refusals, not accepted unstable cloud layers.
+- **Fixtures:** saturation onset/evaporation, dilution false alarms, simultaneous
+  component saturation, independent NIST saturation/density spot checks,
+  continuity at the deep handoff, protected/water/origin conservation, phase
+  allocation budget exhaustion, independent envelope quadrature, and relative
+  10⁻⁷ radius/inertia refinement with source-backed H/He. Reporting phase-mass
+  quadrature has a separate relative 10⁻³ refinement check, observed below
+  0.012%; this does not relax numerical structure or mass closure gates.
+- **Next gaps across all 164 refusals:** radial convergence (36), cold dense
+  H/He (32), absent one-bar level (24), H/He melting (23), density inversion
+  (12), work budget (8), H/He-free dense gas (8), central shooting resolution
+  (8), warming domain (7), gravity convergence (5), region mass resolution (1).
+  No work on settling, revised thermal closure or these next gaps is implied.
+- **Verification:** final 20-thread census and comparison, full
+  `./scripts/check.sh`, all 17 envelope tests (including source-backed fixtures),
+  all seven focused suspended-model tests and `git diff --check` pass. No
+  interactive benchmark or visual test was launched. Rendering/default
+  generation stay legacy. Slice 3 checkpointed at session close; nothing pushed.
+  Full CLI JSON (`scripts/ns --json planets` or `scripts/ns state planet_loading`)
+  serializes the complete layered record, including phase suballocations and
+  model fidelity/limitations. Plain `scripts/ns planets` remains a short summary.
+- The [owning suspended-condensate guide](../simulation/planet-composition.md#suspended-secondary-condensates)
+  defines equations, scopes, transport semantics and remaining physical limits.
 
 ### Remaining delivery order
 

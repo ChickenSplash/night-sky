@@ -27,8 +27,10 @@ pub struct MaterialBudget {
     pub retained_kg: f64,
     pub escaped_kg: f64,
     pub interior_kg: f64,
+    /// Includes suspended condensate for a layered envelope, not just ground.
     pub condensed_kg: f64,
-    /// Entire gas reservoir, not additional atmospheric-column mass.
+    /// Gaseous/fluid allocation, not additional atmospheric-column mass.
+    /// Layered records exclude their explicitly resolved suspended condensate.
     pub gas_kg: f64,
 }
 
@@ -80,6 +82,10 @@ pub struct LayeredPlanet {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    /// Optional phase SUB-allocations of the existing layer mass, never added
+    /// to it. Empty when the selected model does not resolve a local partition.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub phase_allocations: Vec<PhaseAllocation>,
     pub model_fidelity: ModelFidelity,
     /// Physical limitations of this region, not numerical solver diagnostics.
     pub model_limitations: Vec<String>,
@@ -100,4 +106,12 @@ pub struct Layer {
     pub temperature_k: Option<f64>,
     /// Density or column model ID.
     pub model: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhaseAllocation {
+    pub material: String,
+    pub vapour_kg: f64,
+    /// Locally suspended liquid/solid-like material, not rainout or ground.
+    pub condensate_kg: f64,
 }

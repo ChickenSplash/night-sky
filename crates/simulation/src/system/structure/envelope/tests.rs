@@ -1,5 +1,6 @@
 use super::*;
 
+mod condensation;
 mod enriched;
 
 fn inventory(core: f64, gas: f64) -> Inventory {

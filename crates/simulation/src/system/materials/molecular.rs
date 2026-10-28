@@ -13,6 +13,20 @@ pub const MIN_TEMPERATURE_K: f64 = 80.0;
 pub const MAX_TEMPERATURE_K: f64 = 625.0;
 pub const MAX_PRESSURE_PA: f64 = 1e8;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static LAST_CONDENSATION: std::cell::Cell<Option<(Material,f64,f64)>> = const { std::cell::Cell::new(None) };
+}
+
+fn error_at(material: Material, pressure: f64, temperature: f64, reason: Reason) -> Error {
+    #[cfg(test)]
+    if reason == Reason::PureCondensationScreen {
+        LAST_CONDENSATION.set(Some((material, pressure, temperature)));
+    }
+    let _ = (pressure, temperature);
+    Error { material, reason }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
     UnsupportedMaterial,
@@ -58,7 +72,7 @@ pub fn density_kg_m3(
     pressure_pa: f64,
     temperature_k: f64,
 ) -> Result<f64, Error> {
-    let error = |reason| Error { material, reason };
+    let error = |reason| error_at(material, pressure_pa, temperature_k, reason);
     let (gas, tc, pc, omega) =
         parameters(material).ok_or_else(|| error(Reason::UnsupportedMaterial))?;
     if !pressure_pa.is_finite()
@@ -127,7 +141,7 @@ pub(super) fn screen_pure_endpoint(
     pressure_pa: f64,
     temperature_k: f64,
 ) -> Result<(), Error> {
-    let error = |reason| Error { material, reason };
+    let error = |reason| error_at(material, pressure_pa, temperature_k, reason);
     let (gas, tc, pc, _) =
         parameters(material).ok_or_else(|| error(Reason::UnsupportedMaterial))?;
     // Conservative pure-endpoint restriction at TOTAL pressure. Dilution can

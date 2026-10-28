@@ -154,7 +154,9 @@ The Bevy/egui client in `crates/client`:
   Exact deep-ice polymorphs, precise supercooled-liquid physics and complete
   giant-envelope coverage remain unresolved. An optional locally prepared
   [H/He density resource and coupled envelope solve](simulation/planet-composition.md#self-gravitating-envelope-and-loaded-interior)
-  now supports a bounded subset of envelopes, without driving live rendering.
+   now supports a bounded subset of envelopes, without driving live rendering.
+   Cold mixed envelopes include approximate [locally suspended condensates](simulation/planet-composition.md#suspended-secondary-condensates),
+   with conserved vapour/condensate splits but no settling or latent-heat closure.
   Thin atmosphere coupling matches supported dilute gas inventories to radial
   condensed boundaries; it does not itself cover dense envelopes or unsupported
   condensed molecules.

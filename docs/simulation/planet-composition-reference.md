@@ -64,6 +64,58 @@ numerical consistency only. The owning guide records application stops and the
 unresolved phase/chemistry/thermal limitations. A whole-planet physical error
 bound remains unknown.
 
+## Suspended-condensate reference checks and assumptions
+
+The [suspended route](planet-composition.md#suspended-secondary-condensates) uses
+an engineering phase/volume closure, not a new published mixture EOS. Pure
+critical constants retain the molecular catalogue above. Representative triple
+anchors and independent saturation comparisons use NIST WebBook phase pages,
+retrieved 28 October 2026:
+
+- [CO₂](https://webbook.nist.gov/cgi/cbook.cgi?ID=C124389&Mask=4): triple
+  216.58 K / 5.185 bar. The 3135 K sublimation slope corresponds to about
+  26.1 kJ/mol, consistent with the listed sublimation enthalpies. The resulting
+  194.65 K frost pressure is within 5% of 1.01325 bar, an independent sparse
+  check rather than a fitted whole-domain accuracy bound.
+- [N₂](https://webbook.nist.gov/cgi/cbook.cgi?ID=C7727379&Mask=4): triple
+  63.14 K / 0.12520 bar. Independent comparisons at 90 K and 110 K use NIST's
+  Edejer and Thodos (1967) Antoine fit, `A=3.7362, B=264.651, C=-6.788`.
+- [CH₄](https://webbook.nist.gov/cgi/cbook.cgi?ID=C74828&Mask=4): 110 K
+  comparison uses the Prydz and Goodwin (1972) fit,
+  `A=3.9895, B=443.028, C=-0.49`.
+- [O₂](https://webbook.nist.gov/cgi/cbook.cgi?ID=C7782447&Mask=4): 90 K
+  comparison uses Brower and Thodos (1968),
+  `A=3.9523, B=340.024, C=-4.144`.
+  A single triple-to-critical Clausius–Clapeyron slope missed that check by
+  about 12%, so the implemented approximation adds a normal-boiling anchor
+  (90.188 K / 1.01325 bar) and continuous slopes on either side.
+- [Ar](https://webbook.nist.gov/cgi/cbook.cgi?ID=C7440371&Mask=4): 100 K
+  comparison uses Drii and Rabinovich (1966),
+  `A=3.29555, B=215.24, C=-22.233`.
+
+Antoine convention: `log10(P_bar)=A-B/(T_K+C)`. Each comparison is inside its
+published fit range; regression allowance is 10% for these simple saturation
+curves, not a numerical solver tolerance. This is not a 10% bound throughout
+the model's temperature range, especially its approximate cold extrapolations.
+The owning guide records every anchor/slope and the unchanged near-critical
+exclusion. Legacy cold-trap curves are not replaced by these branches.
+
+Independent NIST fluid-service checks use gaseous N₂ at 300 K / 1 bar
+(1.1232786 kg/m³, ideal-volume check within 1%) and liquid N₂ at 80 K / 2 bar
+(794.11547 kg/m³, condensate proxy check within 3%). Reproduce the latter using
+the earlier fluid URL with `T=80`, `PLow=PHigh=2`, `PInc=1` and the same N₂ ID
+and units. These points do not validate condensate densities for other species,
+hot/dense material, mixtures or whole-planet radii. Reference condensate
+densities and the common Murnaghan bulk modulus/derivative are explicitly
+engineering choices, not attributed to NIST EOS fits.
+
+Perfect local entrainment, independent pure condensates, ideal secondary
+vapour/fugacity, unit condensate activities and unit Poynting correction are model
+assumptions. No binary mixture data, rainout law, latent-heat closure or physical
+uncertainty bound is supplied. Source-backed H/He fixtures, conservation,
+quadrature and refinement establish numerical consistency, not validation of
+these phase/distribution assumptions. No new resource or dependency is imported.
+
 ## Generated inputs: measurements versus bounds
 
 Reproduce from the repository root:

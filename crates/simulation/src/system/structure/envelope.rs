@@ -8,7 +8,7 @@ use super::{
 use crate::{
     system::{
         composition::Inventory,
-        materials::{Material, cold, hhe, hhe_mixture, water::loaded},
+        materials::{Material, cold, hhe, hhe_mixture, suspended, water::loaded},
     },
     units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT},
 };
@@ -41,6 +41,7 @@ pub enum Error {
     NonConvergence,
     BoundaryResolution { residual_pa: f64, central_pa: f64 },
     WorkBudget,
+    DensityInversion,
 }
 
 impl Error {
@@ -53,6 +54,7 @@ impl Error {
             Self::MissingOneBarBoundary => "one-bar event unresolved",
             Self::BoundaryResolution { .. } => "central shooting resolution",
             Self::NonConvergence => "reference gravity convergence",
+            Self::DensityInversion => "outward envelope density inversion",
             Self::WorkBudget | Self::Radial(SolveError::WorkBudgetExhausted(_)) => {
                 "envelope work budget"
             }
@@ -76,11 +78,20 @@ pub struct Envelope {
     molecular_mixture: bool,
     secondary_enriched: bool,
     effective_boundary_pa: Option<f64>,
+    suspended: bool,
+    /// Disjoint phase SUB-allocations, already included in each region inventory.
+    condensates: Vec<Inventory>,
 }
 
 impl Envelope {
     pub fn density_model_id(&self) -> &'static str {
-        if self.uses_effective_components() {
+        if self.suspended {
+            if self.uses_effective_components() {
+                suspended::DEEP_MODEL_ID
+            } else {
+                suspended::MODEL_ID
+            }
+        } else if self.uses_effective_components() {
             hhe_mixture::COMPOSITE_MODEL_ID
         } else if self.secondary_enriched {
             hhe_mixture::ENRICHED_MODEL_ID
@@ -103,6 +114,8 @@ impl Envelope {
             .is_some_and(|p| region.inner().pressure_pa > p)
         {
             hhe_mixture::EFFECTIVE_MODEL_ID
+        } else if self.suspended {
+            suspended::MODEL_ID
         } else if self.secondary_enriched {
             hhe_mixture::ENRICHED_MODEL_ID
         } else if self.molecular_mixture {
@@ -113,6 +126,12 @@ impl Envelope {
     }
     pub fn uses_molecular_mixture(&self) -> bool {
         self.molecular_mixture
+    }
+    pub fn uses_suspended_condensates(&self) -> bool {
+        self.suspended
+    }
+    pub fn region_condensate(&self, index: usize) -> Inventory {
+        self.condensates[index]
     }
     pub fn reference_gravity_m_s2(&self) -> f64 {
         GRAVITATIONAL_CONSTANT * self.one_bar_enclosed_mass_kg / self.one_bar_radius_m.powi(2)
@@ -261,6 +280,11 @@ fn solve_with_density(
                             .unwrap()
                             .density(mix, p, t, density, work, limit)
                     }
+                    Some(_) if component_route.as_ref().unwrap().suspended => {
+                        suspended::State::new(&gas, p, t, density)
+                            .map(|s| s.density_kg_m3)
+                            .map_err(|e| SolveError::Mixture(hhe_mixture::Error::Suspended(e)))
+                    }
                     Some(mix) => mix
                         .density_kg_m3(p, t, density)
                         .map_err(SolveError::Mixture),
@@ -373,6 +397,20 @@ fn solve_with_density(
             trial.inertia_kg_m2,
         )?;
         let heavy_inertia = trial.hydrogen_inner_inertia_kg_m2.unwrap();
+        let suspended = component_route.as_ref().is_some_and(|r| r.suspended);
+        let condensates = if suspended {
+            phase_allocations(
+                &envelope_regions,
+                &gas,
+                thermal,
+                component_route.as_ref().unwrap().boundary_pa,
+                &mut total_work,
+                controls.max_total_eos_evaluations,
+            )?
+        } else {
+            vec![Inventory::default(); envelope_regions.len()]
+        };
+        cumulative.eos_evaluations = total_work;
         let diagnostics = dry::Diagnostics {
             central_pressure_pa: central,
             boundary_residual_pa: 0.0,
@@ -395,10 +433,81 @@ fn solve_with_density(
                 secondary_enriched: secondary_fraction
                     > hhe_mixture::MAX_SECONDARY_MASS_FRACTION * (1.0 + 8.0 * f64::EPSILON),
                 effective_boundary_pa: component_route.as_ref().map(|r| r.boundary_pa),
+                suspended,
+                condensates,
             },
         ));
     }
     Err(Error::NonConvergence)
+}
+
+/// Mass-coordinate trapezoid of local phase fractions. This is a reporting
+/// suballocation only: the RK density already includes both phases at every
+/// evaluation, including self-gravity. No material is moved between parcels.
+fn phase_allocations(
+    regions: &[Region],
+    gas: &Inventory,
+    thermal: Thermal,
+    boundary: f64,
+    work: &mut usize,
+    limit: usize,
+) -> Result<Vec<Inventory>, Error> {
+    let fractions = gas.scaled(1.0 / gas.total_mass_kg()).unwrap();
+    regions
+        .iter()
+        .map(|region| {
+            if region.outer().pressure_pa >= boundary {
+                return Ok(Inventory::default());
+            }
+            let mut average = [0.0; 5];
+            let mut mass = 0.0;
+            let mut previous: Option<(dry::Sample, Inventory)> = None;
+            for &sample in region.samples() {
+                if *work >= limit {
+                    return Err(Error::WorkBudget);
+                }
+                *work += 1;
+                let p = sample.pressure_pa;
+                let condensate = if p >= boundary {
+                    Inventory::default()
+                } else {
+                    suspended::State::new(gas, p, thermal.temperature_k(p)?, 1.0)
+                        .map_err(|e| Error::Mixture(hhe_mixture::Error::Suspended(e)))?
+                        .condensate
+                };
+                if let Some((old, old_c)) = previous {
+                    let dm = sample.enclosed_mass_kg - old.enclosed_mass_kg;
+                    let weight = dm / (mass + dm);
+                    for (i, m) in hhe_mixture::SECONDARIES.into_iter().enumerate() {
+                        if fractions.mass_kg(m) == 0.0 {
+                            continue;
+                        }
+                        let ratio = (old_c.mass_kg(m) + condensate.mass_kg(m))
+                            / (2.0 * fractions.mass_kg(m));
+                        average[i] = (1.0 - weight) * average[i] + weight * ratio;
+                    }
+                    mass += dm;
+                }
+                previous = Some((sample, condensate));
+            }
+            let entries = hhe_mixture::SECONDARIES.map(|m| {
+                let i = hhe_mixture::SECONDARIES
+                    .iter()
+                    .position(|&a| a == m)
+                    .unwrap();
+                (m, region.inventory.mass_kg(m) * average[i])
+            });
+            let result =
+                Inventory::new(&entries).map_err(|_| Error::InvalidInput("phase allocations"))?;
+            if Material::ALL
+                .into_iter()
+                .any(|m| result.mass_kg(m) > region.inventory.mass_kg(m))
+            {
+                return Err(Error::InvalidInput("phase allocation closure"));
+            }
+            Ok(result)
+        })
+        .collect()
 }
 
 fn shoot(
@@ -482,7 +591,7 @@ fn validate(
         }
         for pair in r.samples.windows(2) {
             if pair[1].density_kg_m3 > pair[0].density_kg_m3 * (1.0 + 1e-9) {
-                return Err(Error::Eos(hhe::Error::UnstableInterpolation));
+                return Err(Error::DensityInversion);
             }
             if pair[1].radius_m <= pair[0].radius_m
                 || pair[1].enclosed_mass_kg <= pair[0].enclosed_mass_kg

@@ -5,6 +5,7 @@ pub mod effective_secondary;
 pub mod hhe;
 pub mod hhe_mixture;
 pub mod molecular;
+pub mod suspended;
 pub mod water;
 
 /// Stable IDs, not ordinal values, are the external identity of constituents.

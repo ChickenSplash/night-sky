@@ -592,7 +592,8 @@ failed PR call is caught and turned into an effective-fluid success. Route
 selection uses the explicit thermal/pressure boundary, and both sides retain
 conservative pure-condensation and near-critical screens. The full PR vapour
 root/stability checks remain on the molecular side. No liquid or solid secondary
-regions are introduced in this slice.
+regions are introduced in this slice. The later [suspended-condensate route](#suspended-secondary-condensates)
+explicitly replaces the cold mixed-envelope closure, not this pure API.
 
 Total density still uses additive specific volumes at common total P–T, with
 CMS19/HG23 H/He evaluated at its internal helium fraction. Cross interactions,
@@ -627,7 +628,7 @@ and **13,369 km**, with component handoffs near **23.29 bar** and **30.67 bar**.
 Radius and integrated inertia refine within relative 10⁻⁷. The new density
 surrogate requires no additional runtime data or library.
 
-The 20-thread census now solves **1,304/1,544 (84.5%)**, up **72**, with no lost
+The slice-2 20-thread census solved **1,304/1,544 (84.5%)**, up **72**, with no lost
 successes. Every prior non-work coverage column, including reported radii and
 inertia factors, is exactly unchanged. Full project checks and all 14 envelope
 tests (including source-backed fixtures) pass.
@@ -642,6 +643,179 @@ cargo test --release -p space-simulation effective -- --nocapture
 cargo test --release -p space-simulation enriched -- --include-ignored --nocapture
 NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
 ```
+
+### Suspended secondary condensates
+
+`materials::suspended` introduces `local_suspended_secondary_saturation_v1` for
+cold mixed envelopes. It is a **perfect-entrainment approximation**: total
+constituent abundances stay uniform, while vapour and condensate fractions vary
+locally with pressure and prescribed temperature. Condensate occupies volume,
+contributes to gravity/inertia and stays in its local parcel. It does not rain
+out, settle into the water layer or gain protection. This is not a cloud-weather
+simulation, non-ideal equilibrium flash or resolved liquid/solid phase diagram.
+
+#### Audit and deterministic selection
+
+Before implementation, all **106** condensation-screen failures involved CO₂.
+Test-only instrumentation recorded the last observed refused trial state per
+body: **84.17–189.52 K**, **10–664.58 mbar**. Using the old saturation cap with
+the uncondensed mixture's CO₂ partial pressure reclassifies 40 sampled states as
+undersaturated and 66 as supersaturated. These are diagnostic estimates at
+rejected shooting trials, not accepted cloud layers or confirmed condensates.
+The raw pre-change audit is retained in the local slice results directory.
+
+The new route is selected **before shooting**, whenever a present secondary's
+critical temperature exceeds the thermal prescription's minimum
+`(T_eq^4 + 0.5 T_int^4)^(1/4)`. This minimum is independent of iterated gravity;
+the route cannot switch on a failed EOS call or between gravity iterations.
+Warm explicit mixtures retain the previous PR/effective closure. The original
+passive trace route through 0.301% secondary mass is unchanged. Selecting the
+cold route does not assert actual condensation. All existing H/He, water,
+one-bar, conservation and work restrictions remain.
+
+#### Local partition and density
+
+For each secondary, let `a_i = w_i / mu_i` be its available molecular abundance
+per unit total parcel mass and `K_i = P_sat_i(T)/P`. For the noncondensing H/He
+let `n_light = w_H/mu_H + w_He/mu_He`. Solve
+
+`n_i_vapour = min(a_i, K_i N)`
+
+`N = n_light + sum_i n_i_vapour`.
+
+A monotonic active-set solve caps saturated constituents simultaneously and
+removes them from the free molecular pool. At most five removals and one closure
+pass are needed. Saturated species have `y_i P = P_sat_i`, and all others remain
+undersaturated; vapour plus condensate retains each origin. Calculating separate
+ratios against the original, undepleted gas would not satisfy this shared mole
+balance. Negative allocations, lost positive fractions or unresolved mole
+closure remain errors.
+
+The phase estimate uses **ideal partial pressures**: vapour fugacity,
+condensate activity and Poynting correction are all set to one. This is an explicit
+approximation even in dense mixtures, not a validated non-ideal correction. It
+is most credible for dilute vapour and separate nearly pure condensates. Dense
+mixture phases, dissolved gases and critical phenomena remain uncertain.
+
+Separate continuous Clausius–Clapeyron branches run through approximate triple
+and critical anchors. Below each triple temperature use the listed sublimation
+slope; above it use the slope fixed by its triple and critical pressures:
+
+`ln(P_sat/P_triple) = -L_over_R (1/T - 1/T_triple)`
+
+`L_over_R_liquid = ln(P_critical/P_triple) / (1/T_triple - 1/T_critical)`.
+
+| Constituent | Triple anchor, K | Triple pressure, bar | Sublimation slope, K | Condensate reference density, kg/m³ |
+| --- | ---: | ---: | ---: | ---: |
+| CO₂ | 216.58 | 5.185 | 3135 | 1560 |
+| N₂ | 63.14 | 0.12520 | 850 | 808 |
+| CH₄ | 90.694 | 0.11696 | 1160 | 450 |
+| O₂ | 54.361 | 0.001463 | 1000 | 1140 |
+| Ar | 83.806 | 0.68891 | 930 | 1400 |
+
+Critical constants retain the bounded molecular catalogue's values. No
+single triple-to-critical slope meets the oxygen spot check closely enough, so
+O₂ additionally joins through **90.188 K / 1.01325 bar**, using a separate
+Clausius–Clapeyron slope on each side of that boiling anchor. Pressure remains
+continuous at every anchor; no condensed-density phase jump is introduced. No
+condensation is assigned at/above a constituent's critical temperature. The
+near-critical exclusion `abs(T/Tc - 1) < 0.1` at `P > 0.5 Pc` is retained for
+every present secondary. This prevents a discontinuous high-pressure critical
+phase assignment from becoming a successful structure. Triple anchors only
+join the saturation branches: no liquid/solid identity, melting curve or density
+jump is inferred there. The existing legacy cold-trap curves are unchanged.
+
+Within **80–625 K** and **0.01 mbar–1,000 bar**, secondary vapour uses ideal
+thermal volume; condensate uses a separate Murnaghan pressure-only proxy:
+
+`rho_cond_i(P) = rho0_i [1 + 7 P/(2e9)]^(1/7)` (SI).
+
+The reference densities are engineering liquid/solid-like values; the shared
+bulk modulus **20,000 bar** and pressure derivative 7 are not constituent EOS
+fits. Thermal expansion and dense solid/liquid differences are unresolved.
+The total specific volume is
+
+`v = w_light/rho_HHe + sum_i [w_i_vapour R_i T/P + w_i_cond/rho_cond_i(P)]`.
+
+H/He still uses the screened CMS19/HG23 density at total P–T and its internal
+helium fraction. Using each secondary's partial pressure directly as its
+additive-volume density would double-count dilution; the formula above instead
+has the correct ideal-mixture molecular-weight limit. Both phase amounts are
+normalised to **total parcel mass**, not just remaining vapour.
+
+At the first inward 625 K or 1,000-bar model boundary, the deep effective
+secondary proxy is normalised to this route's **ideal-vapour** endpoint, not PR.
+A successful deep handoff requires every present secondary to be at/above its
+critical temperature there; otherwise the route refuses. The handoff density is
+continuous and separately event-located, with the unchanged exact one-bar event.
+Continuous saturation-onset kinks use the existing adaptive integration, not a
+density jump or an unlocated mass transfer. This piecewise closure is not a
+continuous planetary evolution model across the warm/cold route-selection bound.
+
+The local partition is evaluated inside every radial density call. Each gravity
+iteration therefore recomputes phases and density along its new thermal profile;
+no outer iteration moves mass between condensate and an invented reservoir.
+The thermal prescription still ignores latent heat, condensate opacity and
+composition-dependent heat capacities, retaining its **2/7** deep slope. A
+profile with an outward density inversion still refuses, explicitly labelled
+`outward envelope density inversion`, rather than blamed on H/He interpolation.
+Such failures can indicate incompatibility of perfect suspension with the
+prescribed thermal structure, not permission to remove the stability check.
+
+#### Transport and checks
+
+`Layer.phase_allocations` reports vapour/fluid and locally suspended condensate
+kilograms per constituent. These are **suballocations** of each layer's existing
+mass, never extra layers or extra gravity. A mass-coordinate profile trapezoid
+estimates the integrated phase amounts; weighted averages remain bounded by
+each available constituent. Vapour is the conserved remainder. The transport
+material budget counts suspended mass under `condensed_kg`, not `gas_kg`, but
+this does not make `condensed_radius_m` the boundary of every condensate or
+grant landing permission. Protected material and separate water stay unchanged.
+
+Each cold-route region is labelled `approximate`, with suspension, phase,
+density and thermal limitations visible in the inspector alongside its phase
+split. Deep regions retain the explicit effective-volume model ID; the whole
+joined envelope uses `suspended_to_effective_secondary_volume_v1`. Standard
+checks need no new data or dependency. Pure PR masks and NIST regressions remain
+unchanged, not silently widened to support this route.
+
+Tests cover simultaneous condensation, dilution false alarms, saturation onset,
+evaporation on warming, ideal molecular weight, independent sparse NIST checks,
+invalid/near-critical states and positive compression. Coupled fixtures include
+separate water and protected CO₂ on a one-Earth-mass refractory host with 0.01
+Earth masses of H/He and 2%/20%-secondary envelopes at 100 K equilibrium and
+intrinsic forcing. Source-backed one-bar radii are about **11,170/10,398 km**.
+They pass independent envelope mass/hydrostatic quadrature and relative 10⁻⁷
+radius/inertia refinement. Integrated condensate fractions refine within
+relative 10⁻³ (observed below 0.012%), a separate reporting-quadrature check,
+**not a relaxation of radial integration or constituent closure**. Tight
+numerical refinement does not validate perfect suspension or the ideal phase law.
+An explicit secondary-dominated inversion fixture remains a required refusal.
+
+```sh
+cargo test --release -p space-simulation suspended -- --include-ignored --nocapture
+NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
+```
+
+The final 20-thread census with this route solves **1,380/1,544 (89.4%)**, gaining **76**
+from the original 106 condensation refusals, with no previous successes lost.
+Of the 76 new solves, 51 have integrated CO₂ condensate and 25 have none anywhere
+in their accepted profile. Across all 125 accepted cold-route planets, 51
+contain condensate, all CO₂; the rest use the mixture-aware vapour law. The
+remaining original candidates refuse on cold dense H/He (15), outward density
+inversion (12), radial convergence (2) or central shooting resolution (1).
+Among previous successes, 49 cold explicit mixtures intentionally change their
+density prescription: maximum relative radius change is **0.01144%**, and
+inertia-factor change **0.02287%**. These are model differences, not physical
+error bars. The other previous successes retain their reported physical results.
+There are 164 refusals left; at least **149** more layered solves are needed for
+99%. Coverage diagnostics also write `composition-condensation.tsv` (observed
+pure-screen trial states) and `composition-suspended.tsv` (accepted cold-route
+phase totals), without altering runtime generation.
+Full project checks, all 17 envelope tests (including source-backed cases) and
+all seven focused suspended-model tests pass. Rendering remains legacy; no
+interactive benchmark or visual test was performed.
 
 ### Secondary trace input investigation
 
@@ -719,7 +893,9 @@ masses in `atmosphere.rs`, and approximate cold-trap curves in
 physics live under `materials`. Methane is already drawn by formation and can enter the gas
 budget; neither methane liquids/lakes nor condensed CO₂/supercritical CO₂ are
 resolved by the new radial/coupled path. A cold-trap cap is not a phase diagram.
-Methane is treated as an ordinary gas; dedicated methane phase work is parked on
+The cold mixed-envelope route above now assigns approximate suspended secondary
+condensates, not separate resolved liquid/solid surfaces. Elsewhere methane is
+treated as an ordinary gas; dedicated methane phase work is parked on
 the `park/methane-physics` branch.
 The [replacement contract](../plans/planet-composition.md#replacement-contract)
 describes the remaining consolidation and extensions, not current behaviour.

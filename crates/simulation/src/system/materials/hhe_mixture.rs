@@ -24,6 +24,7 @@ pub enum Error {
     Component(molecular::Error),
     Effective(effective_secondary::Error),
     InvalidDensity,
+    Suspended(super::suspended::Error),
 }
 
 impl Error {
@@ -33,6 +34,7 @@ impl Error {
             Self::Component(e) => e.label(),
             Self::Effective(e) => e.label(),
             Self::InvalidDensity => "H/He-rich mixture density stability",
+            Self::Suspended(e) => e.label(),
         }
     }
 }

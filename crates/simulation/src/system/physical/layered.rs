@@ -28,7 +28,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     };
     let mut layers = Vec::new();
     if let Some(envelope) = s.envelope() {
-        for r in envelope.regions().iter().rev() {
+        for (index, r) in envelope.regions().iter().enumerate().rev() {
             let mut layer = region(
                 r.inventory(),
                 r.inner(),
@@ -45,6 +45,21 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             if envelope.uses_extended_mixture() {
                 layer.model_limitations.push("Heavy enrichment uses additive volumes and the unchanged H/He-oriented thermal prescription; composition-dependent opacity and heat capacity unresolved".into());
             }
+            if envelope.uses_suspended_condensates() {
+                layer
+                    .model_limitations
+                    .extend(strings(crate::system::materials::suspended::NOTES));
+                let condensate = envelope.region_condensate(index);
+                layer.phase_allocations = Material::ALL
+                    .into_iter()
+                    .filter(|&m| r.inventory().mass_kg(m) > 0.0)
+                    .map(|m| space_shared::PhaseAllocation {
+                        material: m.id().into(),
+                        vapour_kg: r.inventory().mass_kg(m) - condensate.mass_kg(m),
+                        condensate_kg: condensate.mass_kg(m),
+                    })
+                    .collect();
+            }
             layers.push(layer);
         }
     }
@@ -55,6 +70,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             .flatten()
             .map_or(s.surface_radius_m(), |c| s.surface_radius_m() + c.extent_m);
         layers.push(Layer {
+            phase_allocations: Vec::new(),
             model_fidelity: ModelFidelity::Approximate,
             model_limitations: strings(s.approximation_notes()),
             kind: "atmosphere".into(),
@@ -70,6 +86,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     }
     if s.deposit_thickness_m() > 0.0 {
         layers.push(Layer {
+            phase_allocations: Vec::new(),
             model_fidelity: ModelFidelity::Approximate,
             model_limitations: vec![
                 "Prescribed deposit density; phase and internal thermal state unresolved".into(),
@@ -172,6 +189,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
         }
     }
     if s.envelope().is_some_and(|e| e.uses_molecular_mixture())
+        && !s.envelope().is_some_and(|e| e.uses_suspended_condensates())
         && layers.iter().any(|l| {
             l.kind == "envelope"
                 && l.model != crate::system::materials::hhe_mixture::EFFECTIVE_MODEL_ID
@@ -181,6 +199,15 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             .any(|m| m == crate::system::materials::molecular::MODEL_ID)
     {
         models.push(crate::system::materials::molecular::MODEL_ID.into());
+    }
+    if s.envelope().is_some_and(|e| e.uses_suspended_condensates()) {
+        models.retain(|m| m != crate::system::materials::molecular::MODEL_ID);
+        if !models
+            .iter()
+            .any(|m| m == crate::system::materials::suspended::MODEL_ID)
+        {
+            models.push(crate::system::materials::suspended::MODEL_ID.into());
+        }
     }
     let surface = solved.surface();
     LayeredPlanet {
@@ -195,6 +222,11 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             materials: Material::ALL
                 .into_iter()
                 .map(|m| {
+                    let suspended = s.envelope().map_or(0.0, |e| {
+                        (0..e.regions().len())
+                            .map(|i| e.region_condensate(i).mass_kg(m))
+                            .sum::<f64>()
+                    });
                     let water = if m == Material::Water {
                         condensed_inventory.mass_kg(m)
                     } else {
@@ -206,8 +238,8 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
                         retained_kg: retained.mass_kg(m),
                         escaped_kg: solved.escaped.mass_kg(m),
                         interior_kg: condensed_inventory.mass_kg(m) - water,
-                        condensed_kg: water + s.deposit_inventory().mass_kg(m),
-                        gas_kg: s.gas_inventory().mass_kg(m),
+                        condensed_kg: water + s.deposit_inventory().mass_kg(m) + suspended,
+                        gas_kg: s.gas_inventory().mass_kg(m) - suspended,
                     }
                 })
                 .collect(),
@@ -253,6 +285,7 @@ fn region(
     model: &str,
 ) -> Layer {
     Layer {
+        phase_allocations: Vec::new(),
         model_fidelity: ModelFidelity::Approximate,
         model_limitations: vec![match kind {
             "envelope" => "Prescribed thermal profile and uniform composition; no cooling evolution or full mixture phase equilibrium",

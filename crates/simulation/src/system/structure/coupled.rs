@@ -281,6 +281,13 @@ impl CoupledStructure {
         if self
             .envelope
             .as_ref()
+            .is_some_and(|e| e.uses_suspended_condensates())
+        {
+            return crate::system::materials::suspended::NOTES;
+        }
+        if self
+            .envelope
+            .as_ref()
             .is_some_and(|e| e.uses_extended_mixture())
         {
             return &[

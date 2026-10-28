@@ -1,10 +1,11 @@
 //! Explicit molecular/effective component handoff along the prescribed thermal
 //! profile. The event is a model boundary, never a phase transition.
 use super::*;
-use crate::system::materials::{effective_secondary, molecular};
+use crate::system::materials::{effective_secondary, molecular, suspended};
 use std::cell::OnceCell;
 
 pub(super) struct ComponentRoute {
+    pub suspended: bool,
     pub boundary_pa: f64,
     anchor: Option<(f64, f64)>,
     gas: Inventory,
@@ -34,6 +35,10 @@ impl ComponentRoute {
             Some((low, thermal.temperature_k(low)?))
         };
         Ok(Self {
+            suspended: suspended::cold_composition(
+                &gas,
+                (thermal.equilibrium_k.powi(4) + 0.5 * thermal.intrinsic_k.powi(4)).powf(0.25),
+            ),
             boundary_pa: anchor.map_or(OUTER_PRESSURE_PA, |a| a.0),
             anchor,
             gas,
@@ -98,6 +103,11 @@ impl ComponentRoute {
         let Some((p, t)) = self.anchor else {
             return Ok(scales);
         };
+        if self.suspended && suspended::cold_composition(&self.gas, t) {
+            return Err(SolveError::Mixture(hhe_mixture::Error::Suspended(
+                suspended::Error::Domain,
+            )));
+        }
         for (i, m) in hhe_mixture::SECONDARIES.into_iter().enumerate() {
             if self.gas.mass_kg(m) == 0.0 {
                 continue;
@@ -110,8 +120,12 @@ impl ComponentRoute {
                 Ok(())
             };
             charge()?;
-            let molecular = molecular::density_kg_m3(m, p, t)
-                .map_err(|e| SolveError::Mixture(hhe_mixture::Error::Component(e)))?;
+            let molecular = if self.suspended {
+                p / (suspended::gas_constant(m) * t)
+            } else {
+                molecular::density_kg_m3(m, p, t)
+                    .map_err(|e| SolveError::Mixture(hhe_mixture::Error::Component(e)))?
+            };
             charge()?;
             let effective = effective_secondary::density_kg_m3(m, p, t)
                 .map_err(|e| SolveError::Mixture(hhe_mixture::Error::Effective(e)))?;

@@ -222,6 +222,8 @@ fn empty_census_and_diagnostic_edges() {
 fn census_candidates_and_input_columns() {
     fn sample(id: &str, category: Category) -> Row {
         Row {
+            suspended: None,
+            condensation: None,
             traces: Default::default(),
             id: id.to_owned(),
             envelope: category == Category::Envelope,

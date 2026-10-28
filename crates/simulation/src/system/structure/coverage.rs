@@ -7,7 +7,7 @@ use crate::{
     galaxy::Component,
     star::multiple::Hosted,
     system::{
-        composition::Material,
+        composition::{Inventory, Material},
         galactic_bodies,
         materials::water::{self as eos, Unsupported},
     },
@@ -74,6 +74,8 @@ impl Category {
 }
 
 struct Row {
+    suspended: Option<Inventory>,
+    condensation: Option<(Material, f64, f64)>,
     traces: traces::Audit,
     id: String,
     envelope: bool,
@@ -107,6 +109,7 @@ struct Row {
 }
 
 struct Solved {
+    suspended: Option<Inventory>,
     surface_k: f64,
     radius_m: f64,
     surface: &'static str,
@@ -162,6 +165,14 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String)> {
     }));
     assert_eq!(layered.surface, surface);
     Ok(Solved {
+        suspended: atmosphere
+            .envelope()
+            .filter(|e| e.uses_suspended_condensates())
+            .map(|e| {
+                (0..e.regions().len()).fold(Inventory::default(), |sum, i| {
+                    sum.checked_add(&e.region_condensate(i)).unwrap()
+                })
+            }),
         surface_k: t,
         radius_m: atmosphere.surface_radius_m(),
         surface,
@@ -251,7 +262,9 @@ fn row(p: &Hosted) -> Row {
     let retained = p.body.budget.retained();
     let mass = retained.total_mass_kg();
     let start = Instant::now();
+    crate::system::materials::molecular::LAST_CONDENSATION.set(None);
     let outcome = route(p);
+    let condensation = crate::system::materials::molecular::LAST_CONDENSATION.take();
     let milliseconds = start.elapsed().as_secs_f64() * 1e3;
     let legacy = p.body.radius_km * 1e3;
     let env = p.environment.as_ref().unwrap();
@@ -270,6 +283,8 @@ fn row(p: &Hosted) -> Row {
         );
     }
     Row {
+        suspended: solved.as_ref().and_then(|s| s.suspended),
+        condensation,
         traces: trace_audit,
         id: p.id(),
         envelope: category == Category::Envelope
@@ -657,5 +672,35 @@ fn composition_coverage() {
     std::fs::write(dir.join("composition-census.md"), census).unwrap();
     std::fs::write(dir.join("composition-traces.tsv"), traces::table(&rows)).unwrap();
     std::fs::write(dir.join("composition-traces.md"), traces::report(&rows)).unwrap();
+    let mut audit =
+        "id\tmaterial\ttrial_pressure_bar\ttrial_temperature_k\tcurrent_detail\n".to_owned();
+    for r in &rows {
+        if let Some((m, p, t)) = r.condensation {
+            let _ = writeln!(
+                audit,
+                "{}\t{}\t{:.16e}\t{:.16e}\t{}",
+                r.id,
+                m.id(),
+                p / 1e5,
+                t,
+                r.detail
+            );
+        }
+    }
+    std::fs::write(dir.join("composition-condensation.tsv"), audit).unwrap();
+    let mut phases = "id\tcondensate_kg\tco2_condensate_kg\tn2_condensate_kg\n".to_owned();
+    for r in &rows {
+        if let Some(c) = r.suspended {
+            let _ = writeln!(
+                phases,
+                "{}\t{:.16e}\t{:.16e}\t{:.16e}",
+                r.id,
+                c.total_mass_kg(),
+                c.mass_kg(Material::CarbonDioxide),
+                c.mass_kg(Material::Nitrogen)
+            );
+        }
+    }
+    std::fs::write(dir.join("composition-suspended.tsv"), phases).unwrap();
     assert!(!rows.is_empty());
 }

@@ -161,6 +161,27 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
                 layer.model_limitations.join(" · ")
             ),
         );
+        if !layer.phase_allocations.is_empty() {
+            info.field(
+                &format!("layered.phases.{index}"),
+                "Suspended phase split",
+                None,
+                layer
+                    .phase_allocations
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{}: {} condensed (locally suspended)",
+                            material_label(&p.material),
+                            super::composition::percent(
+                                p.condensate_kg / (p.vapour_kg + p.condensate_kg)
+                            )
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+            );
+        }
     }
     info.field(
         "layered.models",

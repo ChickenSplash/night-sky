@@ -6,7 +6,8 @@ pub use atmosphere::{
     AerosolData, AerosolKind, AtmosphereData, AtmosphereReference, GasFraction, PlanetEnvironment,
 };
 pub use composition::{
-    Layer, LayeredPlanet, MaterialBudget, ModelFidelity, PlanetPhysical, RadiusReference,
+    Layer, LayeredPlanet, MaterialBudget, ModelFidelity, PhaseAllocation, PlanetPhysical,
+    RadiusReference,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
