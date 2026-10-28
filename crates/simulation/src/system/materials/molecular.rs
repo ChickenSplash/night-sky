@@ -68,19 +68,7 @@ pub fn density_kg_m3(
     {
         return Err(error(Reason::StateDomain));
     }
-    // Conservative pure-endpoint restriction at TOTAL pressure. Dilution can
-    // prevent condensation in a real mixture; no mixed dew/frost point is claimed.
-    // O2 has no shared cap, so its subcritical range is deliberately unsupported.
-    if temperature_k < tc
-        && (gas == Gas::Oxygen || pressure_pa >= vapour_pressure(gas, temperature_k))
-    {
-        return Err(error(Reason::PureCondensationScreen));
-    }
-    // Cubic-EOS near-critical densities are not precise enough to grant new
-    // planetary coverage. This is an engineering exclusion, not a phase curve.
-    if (temperature_k / tc - 1.0).abs() < 0.1 && pressure_pa > 0.5 * pc {
-        return Err(error(Reason::CriticalRegion));
-    }
+    screen_pure_endpoint(material, pressure_pa, temperature_k)?;
     let kappa = 0.37464 + 1.54226 * omega - 0.26992 * omega * omega;
     let alpha = (1.0 + kappa * (1.0 - (temperature_k / tc).sqrt())).powi(2);
     let a = 0.45724 * alpha * (tc / temperature_k).powi(2) * pressure_pa / pc;
@@ -130,6 +118,32 @@ pub fn density_kg_m3(
         return Err(error(Reason::UnstableRoot));
     }
     Ok(density)
+}
+
+/// Common conservative pure-endpoint screen, not a mixture phase calculation.
+/// Callers own their EOS application domains. It never evaluates PR out of mask.
+pub(super) fn screen_pure_endpoint(
+    material: Material,
+    pressure_pa: f64,
+    temperature_k: f64,
+) -> Result<(), Error> {
+    let error = |reason| Error { material, reason };
+    let (gas, tc, pc, _) =
+        parameters(material).ok_or_else(|| error(Reason::UnsupportedMaterial))?;
+    // Conservative pure-endpoint restriction at TOTAL pressure. Dilution can
+    // prevent condensation in a real mixture; no mixed dew/frost point is claimed.
+    // O2 has no shared cap, so its subcritical range is deliberately unsupported.
+    if temperature_k < tc
+        && (gas == Gas::Oxygen || pressure_pa >= vapour_pressure(gas, temperature_k))
+    {
+        return Err(error(Reason::PureCondensationScreen));
+    }
+    // Cubic-EOS near-critical densities are not precise enough to grant new
+    // planetary coverage. This is an engineering exclusion, not a phase curve.
+    if (temperature_k / tc - 1.0).abs() < 0.1 && pressure_pa > 0.5 * pc {
+        return Err(error(Reason::CriticalRegion));
+    }
+    Ok(())
 }
 
 /// Real roots of z³ + c2 z² + c1 z + c0, with no unbounded inner iteration.

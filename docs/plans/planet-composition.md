@@ -51,10 +51,10 @@ structures towards 99%. Its exact prescription and validation remain to be chose
 - **Coverage after P2 step 3:** 1,134/1,544 solve: all 1,017 P1 successes plus
   117 envelope-route bodies. The non-envelope baseline remains 1,017/1,032,
   including all 280 water-rich planets. See [step 3](#step-3-coupled-structural-path-implemented-28-october-2026).
-- **Current coverage after shallow-water slice:** 1,232/1,544 (79.8%), up 98
-  without lost successes. There are 312 refusals remaining, requiring at least
-  297 more layered solves to reach 99%. See the step-4 slice below. Larger-giant
-  coverage is not complete.
+- **Current coverage after enriched/deep-envelope slice:** 1,304/1,544 (84.5%),
+  up 72 after slice 1 without lost successes. There are 240 refusals remaining,
+  requiring at least 225 more layered solves to reach 99%. See the step-4 slices
+  below. Larger-giant coverage is not complete.
 - **Performance and next step:**
   - Refinement-only warming optimisation is implemented: a paired 20-thread
     run reduced report wall time from 19.5 to 18.2 s and solved median from
@@ -517,10 +517,54 @@ owns equations, resource setup, numerical boundary contracts and limitations.
   do not establish scientifically accurate oceans or interiors. The
   [canonical guide](../simulation/planet-composition.md#shallow-loaded-water-approximation)
   owns equations, tests and limitations.
-- Next: choose a bounded heavy-enriched/deeper-envelope approximation and phase
+- Next at that checkpoint: choose a bounded heavy-enriched/deeper-envelope approximation and phase
   treatment for the remaining 136 composition, 42 condensation and 25 molecular
   state refusals. Numerical and dense-H/He work remain separate. No renderer
   cutover or placeholder has been implemented in slice 1.
+
+### Step-4 slice 2: enriched and deeper envelopes
+
+- Slice 1 checkpointed as `16d101f` before starting; nothing pushed.
+- **Observed gap:** 136 envelopes exceed the first molecular model's 5%
+  secondary-mass scope; 25 hit its component pressure/temperature mask.
+- **Delivered approximation:** an explicit enriched constructor, screened
+  molecular components in their existing mask and an ideal-thermal-volume plus
+  Seager-water-like compression surrogate beyond the first inward 625 K or
+  1,000-bar boundary. Each component retains its identity and mass. This is not
+  a published heavy-mixture EOS or chemistry calculation.
+- **Handoff:** pressure located on each iterated thermal profile; explicit
+  component endpoint normalisation makes density continuous without extrapolating
+  PR. Separate disjoint radial regions, exact one-bar event, charged/cached
+  anchor work and unchanged work ceilings/tolerances. Entirely hot envelopes use
+  the unanchored proxy, labelled approximate, not a fake PR endpoint.
+- **Limits:** no phase/critical refusal is bypassed. Positive H/He is still
+  required. Enrichment retains the H/He-oriented opacity and fixed 2/7 thermal
+  slope, a declared uncertainty even where secondaries dominate. No water or
+  protected allocations are folded into the mixed parcel; no molecular mass is
+  converted into surrogate H₂O. Metallic-depth chemistry remains unresolved.
+- **Measured gain:** 72 new solves, reaching 1,304/1,544 (84.5%), with no lost
+  successes and exactly unchanged prior reported radii/inertia factors. Of the
+  136 composition cases, 50 solve, 62 reach condensation, 23 lack a one-bar event
+  and one fails radial convergence. Of the 25 state-domain cases, 22 solve, two
+  reach condensation and one fails radial convergence. First blockers are still
+  not guaranteed wins.
+- **Fixtures:** enriched dilute molecular-weight limit, compressibility, phase
+  and domain refusals, continuous handoffs above/below the one-bar event, lazy
+  anchor budget accounting; 20% and 90%-secondary full-planet source-backed and
+  synthetic fixtures with separate water/protected material, independent radial
+  mass/inertia/hydrostatic quadrature and relative 10⁻⁷ refinement gates.
+- **Checks:** full `./scripts/check.sh`, all 14 envelope tests including the
+  source-backed fixtures, final 20-thread census and `git diff --check` pass.
+  Every previous non-work coverage column is unchanged. Rendering/default
+  generation remain legacy; no interactive benchmark was launched.
+- **Next:** secondary condensation is now the largest measured blocker (106).
+  The other gaps include radial convergence (34), absent one-bar level (24),
+  H/He melting screen (23), cold dense H/He (17), work budgets (8), dense H/He-free
+  gas (8), warming domain (7), central shooting resolution (7), gravity
+  convergence (5) and region mass resolution (1). Numerical errors remain errors,
+  and a physically absent reference level cannot be invented.
+- The [canonical enriched model](../simulation/planet-composition.md#enriched-and-deep-secondary-envelopes)
+  owns the equations, IDs, physical caveats and measured fixture results.
 
 ### Remaining delivery order
 

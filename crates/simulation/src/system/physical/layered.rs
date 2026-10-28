@@ -29,14 +29,23 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     let mut layers = Vec::new();
     if let Some(envelope) = s.envelope() {
         for r in envelope.regions().iter().rev() {
-            layers.push(region(
+            let mut layer = region(
                 r.inventory(),
                 r.inner(),
                 r.outer(),
                 envelope.thermal().temperature_k(r.outer().pressure_pa).ok(),
                 "envelope",
-                envelope.density_model_id(),
-            ));
+                envelope.region_density_model_id(r),
+            );
+            if layer.model == crate::system::materials::hhe_mixture::EFFECTIVE_MODEL_ID {
+                layer.model_limitations.extend(strings(
+                    crate::system::materials::effective_secondary::APPROXIMATION_NOTES,
+                ));
+            }
+            if envelope.uses_extended_mixture() {
+                layer.model_limitations.push("Heavy enrichment uses additive volumes and the unchanged H/He-oriented thermal prescription; composition-dependent opacity and heat capacity unresolved".into());
+            }
+            layers.push(layer);
         }
     }
     if let Some(air) = air {
@@ -127,7 +136,15 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     let mass = s.mass_kg();
     let radius = s.surface_radius_m();
     let mut models: Vec<String> = Vec::new();
-    let envelope_models: &[&str] = if s.envelope().is_some_and(|e| e.uses_molecular_mixture()) {
+    let envelope_models: &[&str] = if s.envelope().is_some_and(|e| e.uses_effective_components()) {
+        &[
+            crate::system::structure::envelope::THERMAL_MODEL_ID,
+            crate::system::materials::effective_secondary::MODEL_ID,
+            crate::system::materials::hhe::MODEL_ID,
+            crate::system::materials::hhe::COLD_MODEL_ID,
+            "bounded_pure_he_melting_screen_extension_v1",
+        ]
+    } else if s.envelope().is_some_and(|e| e.uses_molecular_mixture()) {
         &[
             crate::system::structure::envelope::THERMAL_MODEL_ID,
             crate::system::materials::molecular::MODEL_ID,
@@ -153,6 +170,17 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
         if !models.iter().any(|m| m == model) {
             models.push(model.into());
         }
+    }
+    if s.envelope().is_some_and(|e| e.uses_molecular_mixture())
+        && layers.iter().any(|l| {
+            l.kind == "envelope"
+                && l.model != crate::system::materials::hhe_mixture::EFFECTIVE_MODEL_ID
+        })
+        && !models
+            .iter()
+            .any(|m| m == crate::system::materials::molecular::MODEL_ID)
+    {
+        models.push(crate::system::materials::molecular::MODEL_ID.into());
     }
     let surface = solved.surface();
     LayeredPlanet {

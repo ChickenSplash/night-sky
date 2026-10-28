@@ -111,3 +111,39 @@ fn overlap_with_the_original_passive_trace_model_is_bounded() {
         assert!((corrected / hhe - 1.0).abs() < 0.0031);
     }
 }
+
+#[test]
+fn explicitly_enriched_mixtures_keep_all_species_and_ideal_molecular_weight() {
+    for z in [0.0, 0.05, 0.1, 0.5, 0.99, 0.999999] {
+        let inventory = gas(z);
+        let mix = Mixture::new_enriched(&inventory).unwrap();
+        let rho = mix
+            .density_kg_m3(1.0, 400.0, ideal_hhe(1.0, 400.0))
+            .unwrap();
+        let reciprocal_mu: f64 = Material::ALL
+            .into_iter()
+            .filter_map(|m| {
+                m.properties()
+                    .gas
+                    .map(|g| inventory.mass_kg(m) / g.molecular_mass_u())
+            })
+            .sum();
+        let ideal = 1.0 / (BOLTZMANN_J_K / ATOMIC_MASS_KG * 400.0 * reciprocal_mu);
+        assert!((rho / ideal - 1.0).abs() < 1e-6);
+    }
+    assert_eq!(
+        Mixture::new_enriched(&gas(1.0)),
+        Err(Error::CompositionDomain)
+    );
+    let wet = gas(0.5)
+        .checked_add(&Inventory::new(&[(Material::Water, 1e-10)]).unwrap())
+        .unwrap();
+    assert_eq!(Mixture::new_enriched(&wet), Err(Error::CompositionDomain));
+    let mixed = Mixture::new_enriched(&gas(0.5)).unwrap();
+    assert!(
+        mixed
+            .density_with_components(1.0, |_| Ok(f64::NAN))
+            .is_err()
+    );
+    assert!(mixed.density_kg_m3(1e5, 100.0, 1.0).is_err());
+}

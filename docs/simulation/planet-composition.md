@@ -351,10 +351,14 @@ generated successes; these counts are the retained step-3 baseline.
 
 `materials::hhe_mixture` adds a uniformly composed molecular envelope model,
 `hhe_rich_additive_molecular_volume_v1`. Its first engineering scope requires
-**at least 95% H/He by envelope mass**. The 5% secondary bound is a conservative
+**at least 95% H/He by envelope mass**. The separately labelled
+[enriched/deep extension](#enriched-and-deep-secondary-envelopes) below now
+handles larger secondary fractions; the original constructor and model ID
+retain this first scope. The 5% secondary bound is a conservative
 scope restriction, not a measured phase threshold or a claim that every
 H/He-dominated envelope is now supported. CO₂/N₂-dominated atmospheres remain
-outside this delivery, as do metallic-depth impurity thermodynamics.
+outside this initial delivery. The extension is an approximate structure route,
+not resolved metallic-depth impurity thermodynamics.
 
 For each present secondary, `materials::molecular` supplies a pure-component
 Peng–Robinson gas/supercritical density at the **same total pressure and
@@ -504,7 +508,7 @@ one EOS and no density offset conceals it. Water that remains entirely deeper
 uses the previous compression law unchanged; different rejected shooting trials
 can change work and roundoff in the accepted profiles.
 
-The 20-thread census now solves **1,232/1,544 (79.8%)**, up **98**, with no lost
+The slice-1 20-thread census solved **1,232/1,544 (79.8%)**, up **98**, with no lost
 successes, including eight from the original molecular-mixture cohort. Of 111
 former shallow-water refusals, 95 solve; the other 16 expose
 radial convergence (9), cold dense H/He (5), pure melting screen (1), or missing
@@ -521,6 +525,122 @@ the existing local H/He resource; standalone material checks need no resource:
 ```sh
 cargo test --release -p space-simulation materials::water::loaded
 cargo test --release -p space-simulation shallow_loaded -- --include-ignored --nocapture
+```
+
+### Enriched and deep secondary envelopes
+
+The next step-4 slice adds an explicit enriched constructor and a separate
+hot/deep component approximation, without changing the standalone molecular EOS
+mask or its source-checked results. The original 5% constructor still refuses
+larger fractions. Runtime envelopes above the passive 0.301% trace allowance now
+use the enriched route, with **positive H/He still required**. Secondary-dominated
+envelopes are allowed, not just H/He-rich ones; H/He-free atmospheres remain a
+separate gap. Protected inventory and all positive water remain separate heavy
+parcels. Using water-like density never converts CO₂/N₂/CH₄/O₂/Ar into H₂O.
+
+#### Explicit component handoff
+
+The radial solver retains screened Peng–Robinson secondary densities wherever
+the prescribed thermal profile is within the existing molecular mask. Going
+inwards, the component boundary is the earlier of **1,000 bar** or **625 K**.
+Its pressure is recomputed for each gravity iteration by bounded bisection of the
+same monotonic thermal prescription. If the entire envelope is already hotter
+than 625 K, it uses the effective model throughout, with no molecular anchor.
+The 80 K lower molecular bound remains unchanged.
+
+`effective_secondary`, model `thermal_plus_water_compression_secondary_proxy_v1`,
+uses a simple specific-volume sum for each secondary component:
+
+`rho_water_proxy(P) = 1460 + 0.00311 P^0.513`
+
+`rho_raw_i(P,T) = 1 / [R_i T/P + 1/rho_water_proxy(P)]`
+
+`R_i = k_B / (m_u mu_i)` (all equations use SI).
+
+The first term gives the dilute molecular-weight limit; the second is the
+existing Seager **water** compression row reused as an explicitly uncertain
+heavy-material surrogate. It is not a published EOS for nitrogen, carbon dioxide
+or their metallic/dissociated mixtures. No molecular survival, chemistry or phase
+is inferred at depth. The effective application scope is **80–100,000 K** and
+**0.01 mbar–100,000,000 bar**, intersected with all unchanged H/He screens,
+thermal and full-planet numerical limits. The upper bounds are engineering stops,
+not source-validated molecular-fluid domains.
+
+Where a molecular endpoint exists, each present component has an explicit
+continuity normalisation:
+
+`s_i = rho_PR_i(P_join,T_join) / rho_raw_i(P_join,T_join)`
+
+`rho_effective_i(P,T) = s_i rho_raw_i(P,T)`.
+
+This makes the handoff continuous in density, not thermodynamically matched.
+The factors are fixed within one gravity iteration and recomputed with the
+thermal boundary; derivatives, entropy and Gibbs potentials are not matched.
+This declared anchoring is part of the approximation, not a hidden density offset
+or empirical fit. An entirely hot envelope has `s_i = 1`, because there is no
+in-domain PR endpoint. Its onset at the outer thermal boundary is not claimed
+continuous as an evolution model. Within a joined profile the effective volume
+decreases inwards for the prescribed gradient, so density is compressive and no
+artificial outward density inversion is introduced at the handoff.
+
+The kernel locates the component event separately from the exact one-bar event,
+with disjoint conserved region allocations and one-sided density evaluation.
+Coincident events are represented only once. Anchor evaluations are lazy, cached
+per gravity iteration and charged to the same EOS work budget, including failures;
+an inaccessible deep state does not reject a shallow successful profile. No
+failed PR call is caught and turned into an effective-fluid success. Route
+selection uses the explicit thermal/pressure boundary, and both sides retain
+conservative pure-condensation and near-critical screens. The full PR vapour
+root/stability checks remain on the molecular side. No liquid or solid secondary
+regions are introduced in this slice.
+
+Total density still uses additive specific volumes at common total P–T, with
+CMS19/HG23 H/He evaluated at its internal helium fraction. Cross interactions,
+excess mixing volume, composition-dependent opacity/heat capacity, dissociation,
+ionisation and phase separation remain unresolved. In particular, the original
+H/He-oriented grey profile and fixed **2/7** deep slope are kept even when
+secondaries dominate. This is a potentially important physical uncertainty,
+not a scientifically validated heavy-atmosphere thermal model.
+
+#### Transport, checks and measured gain
+
+Shallow enriched regions use `secondary_enriched_additive_molecular_volume_v1`;
+effective regions use `additive_effective_secondary_volume_v1`. A whole envelope
+that uses the hot/deep route reports
+`molecular_to_effective_secondary_envelope_v1`. Existing shallow H/He-rich
+successes retain their original IDs. Every extended region remains `approximate`,
+with its compression/thermal/chemistry limitations visible in transport and the
+inspector. Neither the proxy's pressure reach nor tight numerical refinement
+establishes whole-planet physical accuracy.
+
+Data-free tests cover enriched ideal molecular weight, positive constituents,
+compression along the prescribed gradient, refusal outside application bounds,
+phase/critical screens, matched one-sided densities, event ordering on either
+side of one bar, cache accounting and every insufficient anchor budget. Coupled
+20% and 90%-secondary fixtures use a five-Earth-mass refractory host, 0.1 Earth
+masses of H/He, 0.03 Earth masses of separate water and protected CO₂. Independent
+radial mass/inertia/hydrostatic quadrature and refinement check numerical closure,
+not the physical accuracy of the surrogate.
+
+With the local source-backed H/He resource, their radii are about **16,276 km**
+and **13,369 km**, with component handoffs near **23.29 bar** and **30.67 bar**.
+Radius and integrated inertia refine within relative 10⁻⁷. The new density
+surrogate requires no additional runtime data or library.
+
+The 20-thread census now solves **1,304/1,544 (84.5%)**, up **72**, with no lost
+successes. Every prior non-work coverage column, including reported radii and
+inertia factors, is exactly unchanged. Full project checks and all 14 envelope
+tests (including source-backed fixtures) pass.
+Of the 136 composition refusals, 50 solve, 62 reach the condensation screen,
+23 cannot resolve a one-bar event, and one fails radial convergence. Of the 25
+molecular state refusals, 22 solve, two reach condensation and one fails radial
+convergence. A missing one-bar reference is still a refusal, not permission to
+invent ground or return an incomplete structure.
+
+```sh
+cargo test --release -p space-simulation effective -- --nocapture
+cargo test --release -p space-simulation enriched -- --include-ignored --nocapture
+NS_COVERAGE_THREADS=20 cargo test --release -p space-simulation composition_coverage -- --ignored --nocapture
 ```
 
 ### Secondary trace input investigation

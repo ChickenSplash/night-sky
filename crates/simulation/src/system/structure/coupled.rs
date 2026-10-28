@@ -281,6 +281,22 @@ impl CoupledStructure {
         if self
             .envelope
             .as_ref()
+            .is_some_and(|e| e.uses_extended_mixture())
+        {
+            return &[
+                "Uniform enriched envelope: additive H/He and secondary specific volumes, separate conserved molecular origins",
+                "Screened Peng-Robinson components inside their mask; explicit anchored hot/deep effective water-like compression outside it",
+                "No conversion of secondary inventory into water; protected material and all water remain in separate interior parcels",
+                "No validated heavy-mixture phase diagram, excess mixing volume, dissociation, ionisation or metallic-depth chemistry",
+                "Conservative pure-condensation and near-critical screens still refuse; no liquid/solid secondary layers",
+                "Prescribed H/He-oriented grey opacity, fixed 2/7 deep gradient and 100 K intrinsic reference retained even for secondary-dominated mixtures",
+                "Composition-dependent thermal structure unresolved; no whole-planet physical accuracy bound",
+                "One bar is an exact reference level, never ground; the finite envelope ends at 10 mbar",
+            ];
+        }
+        if self
+            .envelope
+            .as_ref()
             .is_some_and(|e| e.uses_molecular_mixture())
         {
             return &[
@@ -300,7 +316,7 @@ impl CoupledStructure {
                 "Pure-He melting screen continued as a labelled conservative restriction through 1e13 Pa, not a mixture phase prediction",
                 "Grey prescribed thermal profile, fixed 2/7 deep slope and 100 K intrinsic reference, not cooling evolution",
                 "Reference gravity iterated from enclosed new-model mass and exact one-bar event",
-                "All water retained below H/He; pressure-only effective compression above 1 GPa, phase and thermal expansion unresolved",
+                "All water retained below H/He; separate shallow/deep pressure-only compression proxies, phase and thermal expansion unresolved",
                 "Protected secondaries remain in heavy parcels; accessible secondary traces share envelope host volume without becoming protected",
                 "Finite entire-inventory shell ends near 0.01 bar; one bar is a reference, never ground",
             ];

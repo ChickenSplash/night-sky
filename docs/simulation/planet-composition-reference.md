@@ -45,6 +45,25 @@ mixtures; no mixed phase diagram is claimed. The
 [owning model guide](planet-composition.md#hhe-rich-molecular-mixtures) defines
 equations, scope, routing and current coverage implications.
 
+## Enriched-envelope engineering surrogate, not new source validation
+
+The [enriched/deep extension](planet-composition.md#enriched-and-deep-secondary-envelopes)
+reuses the documented Seager (2007) **water** compression row as a heavy-secondary
+density surrogate, plus each constituent's ideal molecular thermal volume. Where
+available, a screened PR endpoint explicitly normalises the effective density at
+the model handoff. No source paper is claimed to validate this composite law for
+CO₂, N₂, CH₄, O₂, Ar or arbitrary heavy mixtures. In particular, attributing the
+water row does not attribute the surrogate, normalisation, pressure reach or fixed
+H/He thermal profile to that paper. No new dataset, third-party implementation or
+published parameter fit is imported.
+
+The existing NIST component checks remain checks of the original, bounded PR
+model, not validation of the new effective density or its whole-planet radii.
+Conservation, independent quadrature, compression and refinement establish
+numerical consistency only. The owning guide records application stops and the
+unresolved phase/chemistry/thermal limitations. A whole-planet physical error
+bound remains unknown.
+
 ## Generated inputs: measurements versus bounds
 
 Reproduce from the repository root:

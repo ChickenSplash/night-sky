@@ -13,6 +13,7 @@ use crate::{
     units::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT},
 };
 
+mod mixture;
 mod thermal;
 pub use thermal::MODEL_ID as THERMAL_MODEL_ID;
 pub use thermal::Thermal;
@@ -73,11 +74,38 @@ pub struct Envelope {
     pub(super) iterations: usize,
     pub(super) gravity_residual: f64,
     molecular_mixture: bool,
+    secondary_enriched: bool,
+    effective_boundary_pa: Option<f64>,
 }
 
 impl Envelope {
     pub fn density_model_id(&self) -> &'static str {
-        if self.molecular_mixture {
+        if self.uses_effective_components() {
+            hhe_mixture::COMPOSITE_MODEL_ID
+        } else if self.secondary_enriched {
+            hhe_mixture::ENRICHED_MODEL_ID
+        } else if self.molecular_mixture {
+            hhe_mixture::MODEL_ID
+        } else {
+            hhe::MODEL_ID
+        }
+    }
+    pub fn uses_effective_components(&self) -> bool {
+        self.effective_boundary_pa
+            .is_some_and(|p| self.regions.iter().any(|r| r.inner().pressure_pa > p))
+    }
+    pub fn uses_extended_mixture(&self) -> bool {
+        self.secondary_enriched || self.uses_effective_components()
+    }
+    pub fn region_density_model_id(&self, region: &Region) -> &'static str {
+        if self
+            .effective_boundary_pa
+            .is_some_and(|p| region.inner().pressure_pa > p)
+        {
+            hhe_mixture::EFFECTIVE_MODEL_ID
+        } else if self.secondary_enriched {
+            hhe_mixture::ENRICHED_MODEL_ID
+        } else if self.molecular_mixture {
             hhe_mixture::MODEL_ID
         } else {
             hhe::MODEL_ID
@@ -185,7 +213,7 @@ fn solve_with_density(
     }
     let secondary_fraction = (gas.total_mass_kg() - light) / gas.total_mass_kg();
     let mixture = if secondary_fraction > dry::protected::MAX_TRACE_FRACTION {
-        Some(hhe_mixture::Mixture::new(&gas).map_err(Error::Mixture)?)
+        Some(hhe_mixture::Mixture::new_enriched(&gas).map_err(Error::Mixture)?)
     } else {
         None
     };
@@ -207,6 +235,9 @@ fn solve_with_density(
     let mut cumulative = dry::Work::default();
     let mut previous_gravity: Option<(f64, f64)> = None;
     for iteration in 0..controls.max_iterations {
+        let component_route = mixture
+            .map(|_| mixture::ComponentRoute::new(thermal, gas))
+            .transpose()?;
         let remaining = controls
             .max_total_eos_evaluations
             .saturating_sub(total_work);
@@ -217,13 +248,19 @@ fn solve_with_density(
             max_eos_evaluations: controls.radial.max_eos_evaluations.min(remaining),
             ..controls.radial
         };
-        let density = |m, p: f64, side, _: &mut dry::Work, _| {
+        let density = |m, p: f64, side, work: &mut dry::Work, limit| {
             if m == Material::Hydrogen {
                 let t = thermal
                     .temperature_k(p)
                     .map_err(|_| SolveError::InvalidInput("envelope thermal domain"))?;
                 let density = eos(p, t, y).map_err(SolveError::Envelope)?;
                 match mixture {
+                    Some(mix) if component_route.as_ref().unwrap().effective(p, side) => {
+                        component_route
+                            .as_ref()
+                            .unwrap()
+                            .density(mix, p, t, density, work, limit)
+                    }
                     Some(mix) => mix
                         .density_kg_m3(p, t, density)
                         .map_err(SolveError::Mixture),
@@ -248,6 +285,19 @@ fn solve_with_density(
                 cold::density_kg_m3(m, p).map_err(SolveError::Eos)
             }
         };
+        let mut interfaces = vec![radial::PressureInterface {
+            material: Material::Water,
+            pressure_pa: loaded::BOUNDARY_PA,
+        }];
+        interfaces.extend(component_route.as_ref().map_or_else(
+            || {
+                vec![radial::PressureInterface {
+                    material: Material::Hydrogen,
+                    pressure_pa: 1e5,
+                }]
+            },
+            |route| route.interfaces(),
+        ));
         let mut solver = radial::Solver::new(
             &parcels,
             OUTER_PRESSURE_PA,
@@ -256,16 +306,7 @@ fn solve_with_density(
             radial::Policy {
                 pressure_floor_pa: OUTER_PRESSURE_PA,
                 boundary_tolerance_pa: Some(PRESSURE_TOLERANCE_PA),
-                interfaces: vec![
-                    radial::PressureInterface {
-                        material: Material::Water,
-                        pressure_pa: loaded::BOUNDARY_PA,
-                    },
-                    radial::PressureInterface {
-                        material: Material::Hydrogen,
-                        pressure_pa: 1e5,
-                    },
-                ],
+                interfaces,
                 ..Default::default()
             },
         );
@@ -351,6 +392,9 @@ fn solve_with_density(
                 iterations: iteration + 1,
                 gravity_residual: residual,
                 molecular_mixture: mixture.is_some(),
+                secondary_enriched: secondary_fraction
+                    > hhe_mixture::MAX_SECONDARY_MASS_FRACTION * (1.0 + 8.0 * f64::EPSILON),
+                effective_boundary_pa: component_route.as_ref().map(|r| r.boundary_pa),
             },
         ));
     }

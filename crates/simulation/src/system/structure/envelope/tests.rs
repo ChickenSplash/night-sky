@@ -1,5 +1,7 @@
 use super::*;
 
+mod enriched;
+
 fn inventory(core: f64, gas: f64) -> Inventory {
     Inventory::new(&[
         (Material::Metal, core * 0.3 * EARTH_MASS_KG),
@@ -17,6 +19,76 @@ fn thermal_profile_matches_decision_probe_and_rejects_invalid_inputs() {
     assert!((t.temperature_k(1e11).unwrap() - 4573.963790220213).abs() < 1e-8);
     assert!(Thermal::new(f64::NAN, 50.0, 10.0).is_err());
     assert!(t.temperature_k(0.0).is_err());
+}
+
+#[test]
+fn effective_component_handoff_is_continuous_and_preparation_is_budgeted() {
+    let gas = Inventory::new(&[
+        (Material::Hydrogen, 0.375),
+        (Material::Helium, 0.125),
+        (Material::CarbonDioxide, 0.25),
+        (Material::Nitrogen, 0.25),
+    ])
+    .unwrap();
+    let mix = hhe_mixture::Mixture::new_enriched(&gas).unwrap();
+    for thermal in [
+        Thermal::new(350.0, 100.0, 10.0).unwrap(),
+        Thermal::new(624.0, 100.0, 0.1).unwrap(),
+    ] {
+        let route = mixture::ComponentRoute::new(thermal, gas).unwrap();
+        let p = route.boundary_pa;
+        let t = thermal.temperature_k(p).unwrap();
+        assert!(t <= crate::system::materials::molecular::MAX_TEMPERATURE_K);
+        let mut work = dry::Work::default();
+        let molecular = mix.density_kg_m3(p, t, 1.0).unwrap();
+        let effective = route.density(mix, p, t, 1.0, &mut work, 4).unwrap();
+        assert!((effective / molecular - 1.0).abs() < 1e-14);
+        assert_eq!(work.eos_evaluations, 4);
+        let near = p * (1.0 + 1e-7);
+        let effective = route
+            .density(
+                mix,
+                near,
+                thermal.temperature_k(near).unwrap(),
+                1.0,
+                &mut work,
+                4,
+            )
+            .unwrap();
+        assert!((effective / molecular - 1.0).abs() < 1e-5);
+        assert_eq!(work.eos_evaluations, 4); // cached, no hidden repeated anchor work
+        let interfaces = route.interfaces();
+        assert!(
+            interfaces
+                .windows(2)
+                .all(|p| p[0].pressure_pa > p[1].pressure_pa)
+        );
+        for (i, event) in interfaces.iter().enumerate() {
+            if event.pressure_pa == p {
+                assert!(route.effective(p, radial::DensitySide::Branch(i)));
+                assert!(!route.effective(p, radial::DensitySide::Branch(i + 1)));
+            }
+        }
+        for budget in 0..4 {
+            let route = mixture::ComponentRoute::new(thermal, gas).unwrap();
+            let mut work = dry::Work::default();
+            assert!(matches!(
+                route.density(mix, p, t, 1.0, &mut work, budget),
+                Err(SolveError::WorkBudgetExhausted(_))
+            ));
+            assert_eq!(work.eos_evaluations, budget);
+        }
+    }
+    let thermal = Thermal::new(1000.0, 100.0, 10.0).unwrap();
+    let route = mixture::ComponentRoute::new(thermal, gas).unwrap();
+    assert_eq!(route.boundary_pa, OUTER_PRESSURE_PA);
+    assert_eq!(route.interfaces().len(), 1);
+    assert!(route.effective(1e4, radial::DensitySide::Branch(1)));
+    assert!(
+        route
+            .density(mix, 1e4, 1000.0, 1.0, &mut dry::Work::default(), 0)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -495,13 +567,27 @@ fn shallow_water_checks(source_backed: bool) {
 // Independent radial Gaussian quadrature, using EOS density at new radii and
 // endpoint hydrostatic gradients, not the integrated mass/inertia increments.
 fn water_quadrature(region: &water::Region) -> (f64, f64, f64) {
+    profile_quadrature(region.samples(), |p| {
+        if region.density_model_id() == loaded::MODEL_ID {
+            loaded::density_kg_m3(p).unwrap()
+        } else {
+            1460.0 + 0.00311 * p.powf(0.513)
+        }
+    })
+}
+
+fn profile_quadrature(samples: &[dry::Sample], density: impl Fn(f64) -> f64) -> (f64, f64, f64) {
     use std::f64::consts::PI;
     let mut result = [0.0; 3];
-    for pair in region.samples().windows(2) {
+    for pair in samples.windows(2) {
         let [a, b] = [pair[0], pair[1]];
         let dr = b.radius_m - a.radius_m;
         let gradient = |s: dry::Sample| {
-            -GRAVITATIONAL_CONSTANT * s.enclosed_mass_kg * s.density_kg_m3 / s.radius_m.powi(2)
+            if s.radius_m == 0.0 {
+                0.0
+            } else {
+                -GRAVITATIONAL_CONSTANT * s.enclosed_mass_kg * s.density_kg_m3 / s.radius_m.powi(2)
+            }
         };
         for (node, w) in [
             (0.1834346424956498, 0.362683783378362),
@@ -525,11 +611,7 @@ fn water_quadrature(region: &water::Region) -> (f64, f64, f64) {
                     4.0 * PI * a.radius_m.powi(2) * a.density_kg_m3,
                     4.0 * PI * b.radius_m.powi(2) * b.density_kg_m3,
                 );
-                let rho = if region.density_model_id() == loaded::MODEL_ID {
-                    loaded::density_kg_m3(p).unwrap()
-                } else {
-                    1460.0 + 0.00311 * p.powf(0.513)
-                };
+                let rho = density(p);
                 let weight = w * dr * 0.5;
                 result[0] += weight * 4.0 * PI * r * r * rho;
                 result[1] += weight * 8.0 * PI / 3.0 * r.powi(4) * rho;

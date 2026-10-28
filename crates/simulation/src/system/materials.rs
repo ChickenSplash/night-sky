@@ -1,6 +1,7 @@
 //! Shared material identities and local constitutive physics, independent of gas columns.
 
 pub mod cold;
+pub mod effective_secondary;
 pub mod hhe;
 pub mod hhe_mixture;
 pub mod molecular;
