@@ -162,17 +162,21 @@ pub(crate) fn secondary_retention(escape_m_s: f64, loss_flux: f64) -> f64 {
 /// Called once after the complete hierarchy and final orbits exist. The caller
 /// caches stellar phase samples and shares the heating with atmosphere generation.
 pub(crate) fn finalise(body: &mut Body, id: &str, host_mass: f64, forcing: &Forcing) {
-    let (budget, _, solve) = reconcile(&body.budget, forcing)
+    let (budget, fallback, solve) = reconcile(&body.budget, forcing)
         .expect("generated inventory must have supported convergent retained structure");
+    let initial_result =
+        crate::system::physical::initial_from_fallback(&fallback, forcing.revision(id, &budget))
+            .expect("retained fallback must satisfy the result contract");
     // Temporary compatibility projection for unmigrated atmosphere/shape/wire
     // consumers. It must never feed back into the fallback-based retention solve.
     let structure = structure::derive(&budget, forcing.irradiation_w_m2, forcing.age_gyr)
         .expect("retained inventory must support legacy consumer projection");
     body.mass_earth = structure.mass_kg() / EARTH_MASS_KG;
     body.radius_km = structure.radius_m() / 1000.0;
-    body.class = materials::classify(&budget, &structure);
+    body.class = materials::classify(&initial_result.record.physical);
     body.budget = budget;
     body.structure = structure;
+    body.initial_result = initial_result;
     body.retention_solve = solve;
     refresh_spin(body, id, host_mass);
 }

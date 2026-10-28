@@ -19,7 +19,15 @@ pub fn initial_result(
     environment: &PlanetEnvironment,
     revision: PhysicalRevision,
 ) -> Result<PlanetResult, &'static str> {
-    let record = super::fallback(&structure::fallback::initial(budget, environment));
+    initial_from_fallback(&structure::fallback::initial(budget, environment), revision)
+}
+
+/// Reuse the converged retention trial rather than recomputing its fallback.
+pub(crate) fn initial_from_fallback(
+    fallback: &structure::fallback::Fallback,
+    revision: PhysicalRevision,
+) -> Result<PlanetResult, &'static str> {
+    let record = super::fallback(fallback);
     result(
         record,
         revision,

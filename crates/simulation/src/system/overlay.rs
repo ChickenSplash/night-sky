@@ -2,7 +2,7 @@
 use super::generation::{bodies, planet_count};
 use crate::seed::stable_hash;
 use crate::star::multiple::{Bodies, designation};
-use space_shared::{Galaxy, Planet, StarSystem, Task};
+use space_shared::{Galaxy, StarSystem, Task};
 use std::collections::BTreeMap;
 
 /// ID of a list page's star, which seeds the star and its planets.
@@ -105,23 +105,12 @@ pub fn place(system: &mut StarSystem, tasks: Vec<Task>) {
                 let name = format!("{} {}", system.name, page + 1);
                 designation(&name, "", &hosted.host_letters, hosted.index)
             };
-            planets.push(Planet {
-                id: hosted.id(),
-                designation,
+            planets.push(super::physical::export_planet(
+                hosted,
                 page,
-                orbit_index: hosted.index as u32,
-                host: hosted.host,
-                orbit: hosted.body.orbit,
-                radius_km: hosted.body.radius_km,
-                mass_earth: hosted.body.mass_earth,
-                class: hosted.body.class.name().into(),
-                physical: Some(super::physical::to_data(&hosted.body)),
-                inertia_factor: Some(hosted.body.structure.inertia_factor()),
-                environment: hosted.environment,
-                resonance: hosted.body.resonance,
-                spin: hosted.body.spin,
+                designation,
                 task,
-            });
+            ));
         }
         stars.extend(
             generated

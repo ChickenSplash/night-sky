@@ -83,22 +83,25 @@ pub(super) fn draw(
 }
 
 /// Ordered display rules only, never inputs to any physical prescription.
-pub(super) fn classify(budget: &Budget, structure: &crate::system::structure::Structure) -> Class {
+pub(super) fn classify(physical: &space_shared::PlanetPhysical) -> Class {
     use crate::system::structure::parameters::classification;
-    let fraction = structure.h_he_mass_fraction();
+    let fraction = physical.h_he_mass_fraction;
+    let share = |material: Material| {
+        physical
+            .materials
+            .iter()
+            .find(|m| m.material == material.id())
+            .map_or(0.0, |m| m.retained_kg / physical.retained_mass_kg)
+    };
     if fraction >= classification::H_HE_DOMINATED_MASS_FRACTION {
         Class::GasGiant
     } else if fraction >= classification::ENVELOPE_WORLD_MASS_FRACTION {
         Class::EnvelopeWorld
     } else if fraction >= classification::SIGNIFICANT_H_HE_MASS_FRACTION {
         Class::SubNeptune
-    } else if budget.retained().mass_kg(Material::Water) / structure.mass_kg()
-        >= classification::WATER_RICH_MASS_FRACTION
-    {
+    } else if share(Material::Water) >= classification::WATER_RICH_MASS_FRACTION {
         Class::WaterRich
-    } else if budget.retained().mass_kg(Material::Metal) / structure.mass_kg()
-        >= classification::METAL_RICH_MASS_FRACTION
-    {
+    } else if share(Material::Metal) >= classification::METAL_RICH_MASS_FRACTION {
         Class::MetalRich
     } else {
         Class::Rocky
@@ -131,7 +134,12 @@ mod tests {
                 .checked_add(&gas)
                 .unwrap();
             let b = Budget::new(source, interior, condensed, gas).unwrap();
-            let s = structure::derive(&b, 1361.0, 4.5).unwrap();
+            let s = crate::system::physical::fallback(&structure::fallback::initial(
+                &b,
+                &crate::system::forcing::Forcing::new(1361.0, 1361.0, 0.3, 4.5)
+                    .unwrap()
+                    .environment(),
+            ));
             (b, s)
         };
         for (water, metal, light, expected) in [
@@ -142,8 +150,8 @@ mod tests {
             (0.25, 0.3, 0.2, Class::EnvelopeWorld),
             (0.0, 0.1, 0.6, Class::GasGiant),
         ] {
-            let (b, s) = sample(water, metal, light);
-            assert_eq!(classify(&b, &s), expected);
+            let (_, s) = sample(water, metal, light);
+            assert_eq!(classify(&s.physical), expected);
         }
         // Both sides of label boundaries keep the continuous physical solution.
         for (water, metal, light) in [
@@ -153,18 +161,21 @@ mod tests {
             (0.0, 0.3, 0.1),
             (0.0, 0.3, 0.5),
         ] {
-            let (a, sa) = sample(
+            let (_, sa) = sample(
                 water * (1.0 - 1e-8),
                 metal * (1.0 - 1e-8),
                 light * (1.0 - 1e-8),
             );
-            let (b, sb) = sample(
+            let (_, sb) = sample(
                 water * (1.0 + 1e-8),
                 metal * (1.0 + 1e-8),
                 light * (1.0 + 1e-8),
             );
-            assert_ne!(classify(&a, &sa), classify(&b, &sb));
-            assert!((sa.radius_m() / sb.radius_m() - 1.0).abs() < 1e-6);
+            assert_ne!(classify(&sa.physical), classify(&sb.physical));
+            assert!(
+                (sa.physical.reference_radius_m / sb.physical.reference_radius_m - 1.0).abs()
+                    < 1e-6
+            );
         }
     }
 

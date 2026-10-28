@@ -34,6 +34,10 @@ remain available through the existing `space_simulation` and `system` exports.
   ID has identical physical records in both. Omitted legacy composition is
   unknown, not an empty inventory. Validation and reference meanings are in the
   [composition guide](../simulation/planet-composition.md#transport-and-downstream-consumers).
+- Both paths now use one planet exporter and also carry the identical validated
+  `Planet::initial_result` fallback candidate. During P3 migration it remains
+  separate from live legacy geometry/environment fields, not an adopted revision.
+  Task metadata and page placement do not enter its physical revision identity.
 
 ## Pages and assigned stars
 

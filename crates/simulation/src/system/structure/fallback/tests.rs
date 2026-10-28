@@ -2,6 +2,29 @@ use super::*;
 use crate::system::physical;
 
 #[test]
+fn sub_resolution_condensed_shell_keeps_mass_and_finite_shell_limits() {
+    let mass = 300_000.0;
+    let b = Budget::new(
+        Inventory::new(&[(Material::Silicate, EARTH_MASS_KG), (Material::Water, mass)]).unwrap(),
+        Inventory::new(&[(Material::Silicate, EARTH_MASS_KG)]).unwrap(),
+        Inventory::new(&[(Material::Water, mass)]).unwrap(),
+        Inventory::default(),
+    )
+    .unwrap();
+    let f = initial(&b, &environment(1e8, 4000.0, 4.5));
+    let water = f.regions.last().unwrap();
+    assert_eq!(water.inner_radius_m, water.outer_radius_m);
+    assert_eq!(water.inventory.mass_kg(Material::Water), mass);
+    let shell = Shell::new(water, EARTH_MASS_KG);
+    assert_eq!(
+        shell.inertia_kg_m2(),
+        (2.0 / 3.0) * mass * water.outer_radius_m.powi(2)
+    );
+    assert!(shell.pressure_drop_pa().is_finite() && shell.pressure_drop_pa() > 0.0);
+    physical::validate_record(&physical::fallback(&f)).unwrap();
+}
+
+#[test]
 fn zero_irradiation_uses_the_cold_fit_bound_not_earth_flux() {
     let b = budget(&[
         (Material::Silicate, 5.0),

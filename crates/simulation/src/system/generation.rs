@@ -15,17 +15,16 @@ use crate::seed::Rng;
 use crate::star::multiple::{Bodies, assemble};
 use crate::star::{Formation, census, galactic};
 use crate::{period_seconds, stable_hash};
-use space_shared::{MAX_PLANETS, MIN_PLANETS, Orbit, Spin};
+use space_shared::{MAX_PLANETS, MIN_PLANETS, Orbit, PlanetResult, Spin};
 use std::f64::consts::{PI, TAU};
 
 #[cfg(test)]
 mod calibration;
 mod materials;
 pub(crate) mod retention;
-use super::{
-    composition::Budget,
-    structure::{self, Structure},
-};
+#[cfg(test)]
+use super::structure;
+use super::{composition::Budget, structure::Structure};
 use crate::units::EARTH_MASS_KG;
 pub use retention::RetentionSolve;
 
@@ -78,7 +77,12 @@ pub struct Body {
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,
     pub budget: Budget,
+    /// Temporary legacy consumer view. Before all-star retention this is only
+    /// a projection of `initial_result`, not a legacy structure calculation.
     pub structure: Structure,
+    /// Synchronous fallback candidate, kept separate from legacy consumer fields
+    /// until the coordinated geometry/atmosphere cutover.
+    pub initial_result: PlanetResult,
     /// Proposed formation location, never redrawn after orbital spacing.
     pub formation_distance_au: f64,
     /// Conservative pre-escape spacing mass.
@@ -275,12 +279,21 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
         }
         // Provisional formation structure. Reconciled using all-star heating only
         // after assembly; not used for orbital placement or inventory draws.
-        let physical = structure::derive(
-            &budget,
+        let forcing = super::forcing::Forcing::new(
             1361.0 * formed.star.luminosity_solar / semi_major.powi(2),
+            0.0,
+            0.3,
             5.0,
         )
-        .expect("formation draws stay within structure domains");
+        .expect("provisional forcing must be valid");
+        let id = format!("{star}/{}", bodies.len());
+        let initial_result = super::physical::initial_result(
+            &budget,
+            &forcing.environment(),
+            forcing.revision(&id, &budget),
+        )
+        .unwrap_or_else(|error| panic!("{id}: formation fallback: {error}"));
+        let physical = Structure::provisional(&initial_result.record.physical);
         let orbit = Orbit {
             semi_major_au: semi_major,
             eccentricity,
@@ -291,12 +304,13 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
         bodies.push(Body {
             spin: Spin::default(),
             orbit,
-            class: materials::classify(&budget, &physical),
+            class: materials::classify(&initial_result.record.physical),
             mass_earth: mass,
             radius_km: physical.radius_m() / 1000.0,
             resonance: resonance.map(|(r, _)| r),
             budget,
             structure: physical,
+            initial_result,
             formation_mass_earth: mass,
             formation_distance_au: tentative,
             retention_solve: RetentionSolve::NoEnvelope,

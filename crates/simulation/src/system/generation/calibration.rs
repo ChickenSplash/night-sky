@@ -187,23 +187,7 @@ impl Sample {
 }
 
 fn wire(p: &Hosted) -> Planet {
-    Planet {
-        id: p.id(),
-        designation: p.id(),
-        page: 0,
-        orbit_index: p.index as u32,
-        host: p.host.clone(),
-        orbit: p.body.orbit,
-        radius_km: p.body.radius_km,
-        mass_earth: p.body.mass_earth,
-        class: p.body.class.name().into(),
-        environment: p.environment.clone(),
-        inertia_factor: Some(p.body.structure.inertia_factor()),
-        physical: Some(physical::to_data(&p.body)),
-        resonance: p.body.resonance,
-        spin: p.body.spin,
-        task: None,
-    }
+    physical::export_planet(p.clone(), 0, p.id(), None)
 }
 
 fn check(p: &Hosted) {

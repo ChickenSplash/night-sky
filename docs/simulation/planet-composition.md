@@ -12,7 +12,9 @@ Implemented radial solvers are separate headless APIs, described below.
 Default generation now uses fast fallback facts for retention trials, but still
 exports the legacy approximate reservoir/radius model. Opt-in
 background loading exposes new solved records in the inspector beside legacy
-facts; rendering, navigation and the authoritative planet record remain legacy.
+facts; rendering, navigation and live geometry remain legacy. Both export paths
+also carry a validated synchronous fallback candidate as `Planet::initial_result`,
+separate from the legacy fields until their coordinated P3 cutover.
 The separate [water-shell solver](#headless-restricted-water-shell-solver) uses
 direct [IAPWS water physics](water-physics.md) and an explicitly approximate
 effective deep-ice compression model. The mandatory Earth-mass, 30%-water fixture
@@ -73,7 +75,24 @@ transport consistency only. All physical fit prescriptions remain unchanged.
   is intentional, not an invitation to skip independent solver regressions.
   The population census keeps its independent input-budget checks as well.
 
-These APIs create and validate **candidates**. Updating `Planet` projections,
+Generated `Body::initial_result` now stores such a candidate. Formation constructs
+it from provisional forcing; final retention replaces it using all-star forcing
+and retained supply, before legacy atmosphere projection. Classification uses its
+model-neutral material/mass fractions. A single `physical::export_planet` adapter
+carries the final candidate through both natural and overlay wire paths as
+`Planet::initial_result`. Older records may omit it. **Its presence does not make
+it authoritative for the still-legacy geometry/environment fields.** Consumers
+must not combine one record's radius or reservoirs with the other's atmosphere.
+
+Synchronous revision keys use exact input bit patterns for body identity, source,
+retained and escaped inventories, bolometric/loss forcing, albedo and age. They
+exclude task/page metadata and the mutable atmosphere reservoir split. The model
+key is caller-maintained and must change with generation/retention/fallback
+prescriptions. These candidate identities are not yet wired into background
+adoption or a layered-resource revision. Initial candidates start at sequence zero;
+regeneration is not an adoption or permission to renumber stale worker output.
+
+These APIs create and validate **candidates**. Updating live `Planet` projections,
 environment, spin, geometry, craft fields, routes and caches together, and
 deferring unsafe growth around an eye/craft, remain later P3 work. No live
 adoption API is provided yet. Existing `physical::validate(Planet)` is explicitly
@@ -1962,11 +1981,18 @@ fixed quadrature, no iteration, work budget, external data or error path.
   linearly to zero at its top. Pressures integrate hydrostatically from zero at
   the top; inertia uses the same profiles. A full linear-profile sphere has
   inertia factor 0.267, close to Jupiter's 0.254.
-- **Inputs:** non-finite or non-positive irradiation, age or equilibrium
-  temperature take neutral fit values. These and fit-bound clamping mark the
+- A positive trace constituent can add less than one radius ulp, leaving
+  coincident boundaries. Keep its inventory and use the zero-thickness shell
+  limits `I=2mR²/3` and `ΔP=Gm(M_inner+m/2)/(4πR⁴)`, with a limitation note,
+  instead of dividing by zero volume or inflating geometry. Nonzero-width shell
+  calculations are unchanged.
+- **Inputs:** non-finite/negative irradiation and non-finite/non-positive age
+  take neutral fit values. Zero irradiation is valid and reaches the fit's
+  lower calibration bound. Flux/age repairs, non-finite temperature and fit-bound clamping mark the
   record `extrapolated` with a limitation note; otherwise it is `approximate`.
   Temperature is the equilibrium estimate (at least 20 K), with no greenhouse.
-- **Surface:** `envelope` at a one-bar reference, else `rock` (solid surface),
+- **Surface:** `envelope` at a one-bar reference, else `rock` (nominal boundary,
+  not certified solid phase or landing permission),
   `unresolved water` or `unresolved volatiles`.
 
 Checks (`structure/fallback/tests.rs`, in `check.sh`): an Earth twin within 5%
@@ -2372,11 +2398,14 @@ Valid zero irradiation reaches the fit's documented low-flux bound rather than
 being replaced with Earth flux; equilibrium zero remains separate from the
 fallback's 20 K temperature floor.
 
-The live cutover is **not complete**. Initial formation structures and the final
-legacy compatibility projection still use `structure::derive`; classification,
-spin, atmosphere partition/boundary correction and both wire exporters still
-consume that projection. It never feeds back into retention. Installing the
-unified result and migrating those consumers remains P3 work. Retained population
+The live cutover is **not complete**. Formation now starts with a validated
+fallback candidate; its temporary `Structure` is only a labelled projection of
+those facts. Final retention stores a validated candidate and classification
+reads its material/mass fractions. The final legacy compatibility projection
+still uses `structure::derive`; spin, atmosphere partition/boundary correction
+and legacy fields in the shared exporter still consume that projection.
+It never feeds back into retention. Making the
+unified result authoritative and migrating those consumers remains P3 work. Retained population
 values can change; archived P2 census evidence belongs to its original inputs.
 
 ## Secondary escape and reservoir partition

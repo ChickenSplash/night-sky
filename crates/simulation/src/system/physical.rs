@@ -6,13 +6,18 @@ use super::{
 };
 use space_shared::{MaterialBudget, Planet, PlanetPhysical, RadiusReference};
 
+mod export;
 mod layered;
+pub(crate) use export::export_planet;
 mod result;
 pub use layered::{fallback, layered, outcome};
+pub(crate) use result::initial_from_fallback;
 pub use result::{
     initial_result, resolved_result, validate_record, validate_refinement, validate_result,
 };
 
+/// Legacy consumer projection only. The new-model candidate is carried
+/// separately as `initial_result` until coordinated live adoption is implemented.
 pub fn to_data(body: &Body) -> PlanetPhysical {
     let b = &body.budget;
     let s = &body.structure;
@@ -282,6 +287,7 @@ mod tests {
                 if let Some(natural) = super::super::generated_system(key, [0.0; 3]) {
                     let same = natural.planets.iter().find(|n| n.id == p.id).unwrap();
                     assert_eq!(p.physical, same.physical);
+                    assert_eq!(p.initial_result, same.initial_result);
                     assert_eq!(p.class, same.class);
                     count += 1;
                 }

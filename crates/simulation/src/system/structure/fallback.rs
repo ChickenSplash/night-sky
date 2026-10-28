@@ -258,6 +258,10 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         .collect();
     let mut pressure = 0.0;
     let mut inertia_kg_m2 = 0.0;
+    if regions.iter().any(|r| r.inner_radius_m == r.outer_radius_m) {
+        notes
+            .push("Sub-resolution condensed shells use zero-thickness pressure and inertia limits");
+    }
     for (region, inner_mass) in regions.iter_mut().zip(enclosed.drain(..)).rev() {
         let shell = Shell::new(region, inner_mass);
         region.outer_pressure_pa = pressure;
@@ -306,6 +310,7 @@ fn sanitised(value: f64, neutral: f64) -> f64 {
 /// so thin shells keep their precision.
 struct Shell {
     inner_mass_kg: f64,
+    mass_kg: f64,
     a: f64,
     l: f64,
     rho0: f64,
@@ -319,12 +324,19 @@ impl Shell {
         let gas = region.kind == Kind::Envelope;
         let mut shell = Self {
             inner_mass_kg,
+            mass_kg: region.inventory.total_mass_kg(),
             a,
             l,
             rho0: 1.0,
             gas,
         };
-        shell.rho0 = region.inventory.total_mass_kg() / shell.mass_to(1.0);
+        // A positive trace mass can add less than one radius ulp. Its shell
+        // limits below stay finite without erasing mass or inflating geometry.
+        shell.rho0 = if l == 0.0 {
+            0.0
+        } else {
+            shell.mass_kg / shell.mass_to(1.0)
+        };
         shell
     }
 
@@ -351,6 +363,12 @@ impl Shell {
     }
 
     fn pressure_drop_pa(&self) -> f64 {
+        if self.l == 0.0 {
+            return GRAVITATIONAL_CONSTANT
+                * (self.inner_mass_kg + 0.5 * self.mass_kg)
+                * self.mass_kg
+                / (4.0 * PI * self.a.powi(4));
+        }
         integrate(|t| {
             let r = self.a + self.l * t;
             GRAVITATIONAL_CONSTANT * (self.inner_mass_kg + self.mass_to(t)) * self.density(t)
@@ -360,6 +378,9 @@ impl Shell {
     }
 
     fn inertia_kg_m2(&self) -> f64 {
+        if self.l == 0.0 {
+            return (2.0 / 3.0) * self.mass_kg * self.a.powi(2);
+        }
         integrate(|t| 8.0 * PI / 3.0 * (self.a + self.l * t).powi(4) * self.density(t) * self.l)
     }
 }

@@ -126,6 +126,11 @@ pub struct Planet {
     /// Conserved composition and reference structure; absent means unknown.
     #[serde(default)]
     pub physical: Option<PlanetPhysical>,
+    /// Validated synchronous new-model candidate. During P3 migration this is
+    /// NOT the authority for the legacy geometry/environment projections above.
+    /// Consumers must not mix its radii or reservoirs with those projections.
+    #[serde(default)]
+    pub initial_result: Option<PlanetResult>,
     /// Period ratio with the next planet in, outer:inner.
     pub resonance: Option<[u32; 2]>,
     pub spin: Spin,

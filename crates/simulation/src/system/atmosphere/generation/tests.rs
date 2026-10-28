@@ -69,6 +69,16 @@ fn body() -> Body {
         spin: Spin::default(),
         budget,
         structure: structure::derive(&budget, 1361.0, 5.0).unwrap(),
+        initial_result: crate::system::physical::initial_result(
+            &budget,
+            &Forcing::new(1361.0, 1361.0, 0.3, 5.0)
+                .unwrap()
+                .environment(),
+            Forcing::new(1361.0, 1361.0, 0.3, 5.0)
+                .unwrap()
+                .revision("test/0", &budget),
+        )
+        .unwrap(),
         formation_mass_earth: 1.0,
         formation_distance_au: 1.0,
         retention_solve: RetentionSolve::NoEnvelope,
@@ -533,6 +543,12 @@ fn changed_loss_history_preserves_orbits_and_source_but_reconciles_structure() {
             after.body.budget.retained().total_mass_kg()
         );
         assert_eq!(before.body.resonance, after.body.resonance);
+        crate::system::physical::validate_result(&after.body.initial_result).unwrap();
+        assert_ne!(
+            before.body.initial_result.revision.inputs,
+            after.body.initial_result.revision.inputs
+        );
+        assert_eq!(after.body.initial_result.revision.sequence, 0);
         assert_eq!(after.environment.as_ref().unwrap().age_gyr, 0.01);
     }
     let once = changed.clone();
@@ -541,6 +557,7 @@ fn changed_loss_history_preserves_orbits_and_source_but_reconciles_structure() {
         assert_eq!(before.body.structure, after.body.structure);
         assert_eq!(before.body.budget, after.body.budget);
         assert_eq!(before.body.spin, after.body.spin);
+        assert_eq!(before.body.initial_result, after.body.initial_result);
         assert_eq!(before.environment, after.environment);
     }
 }

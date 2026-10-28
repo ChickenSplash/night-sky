@@ -38,7 +38,9 @@ accreting into planets. For each permitted host (a star or close pair):
 5. Solve the two neighbour-spacing inequalities using formation masses;
    optionally place it at an allowed resonant period ratio.
 6. Stop if the orbit's farthest point exceeds the host's stable zone. Otherwise
-   store its formation inventory and continue outward.
+    store its formation inventory and continue outward.
+    Provisional structure is a validated fallback result, with a temporary
+    compatibility view of the same facts rather than a legacy structure solve.
 7. Once the entire hierarchy and final orbits exist, share all-star heating
    samples with the atmosphere model. Account for accessible secondary volatile
     escape, solve H/He survival and structure together, then assign independently
@@ -46,6 +48,8 @@ accreting into planets. For each permitted host (a star or close pair):
     Retention trials now use fast fallback facts and independent forcing inputs;
     the final live geometry/atmosphere still uses a legacy compatibility projection
     while P3 consumer migration is in progress.
+    The retained fallback candidate is kept on the body and exported separately
+    as `Planet::initial_result`; its presence does not switch live geometry.
 8. Recheck stability using final retained masses. Escape only reduces masses,
    so the formation-mass spacing remains conservative.
 

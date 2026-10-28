@@ -1,6 +1,6 @@
 //! Task-free wire systems shared by the client and background body loaders.
 use super::{composition::Budget, structure::prototype};
-use space_shared::{PageStar, Planet, StarSystem};
+use space_shared::{PageStar, StarSystem};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -62,23 +62,8 @@ pub fn generated_system_with_mode(id: &str, position_ly: [f64; 3], mode: Mode) -
                     environment: environment.clone(),
                 });
             }
-            Planet {
-                id: hosted.id(),
-                designation: crate::galaxy::cells::planet_designation(&hosted.host, hosted.index),
-                page: 0,
-                orbit_index: hosted.index as u32,
-                host: hosted.host,
-                orbit: hosted.body.orbit,
-                radius_km: hosted.body.radius_km,
-                mass_earth: hosted.body.mass_earth,
-                class: hosted.body.class.name().into(),
-                environment: hosted.environment,
-                inertia_factor: Some(hosted.body.structure.inertia_factor()),
-                physical: Some(super::physical::to_data(&hosted.body)),
-                resonance: hosted.body.resonance,
-                spin: hosted.body.spin,
-                task: None,
-            }
+            let designation = crate::galaxy::cells::planet_designation(&hosted.host, hosted.index);
+            super::physical::export_planet(hosted, 0, designation, None)
         })
         .collect();
     let system = StarSystem {

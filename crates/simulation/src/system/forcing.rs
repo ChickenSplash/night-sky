@@ -1,5 +1,7 @@
 //! Immutable thermal/loss inputs, independent of derived atmospheric output.
-use space_shared::PlanetEnvironment;
+use super::composition::{Budget, Material};
+use space_shared::{PhysicalRevision, PlanetEnvironment};
+use std::fmt::Write;
 
 const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
 
@@ -13,6 +15,34 @@ pub(crate) struct Forcing {
 }
 
 impl Forcing {
+    /// Exact deterministic identity, not a lossy hash. Includes source, retained
+    /// supply and prior escape, never the mutable atmosphere reservoir split.
+    /// Bump the model key when generation/retention/fallback prescriptions change.
+    pub fn revision(self, id: &str, budget: &Budget) -> PhysicalRevision {
+        let mut inputs = format!("{id}:physical-inputs:v1");
+        for value in [
+            self.irradiation_w_m2,
+            self.loss_flux_w_m2,
+            self.assumed_bond_albedo,
+            self.age_gyr,
+        ]
+        .into_iter()
+        .chain(Material::ALL.into_iter().flat_map(|m| {
+            [
+                budget.source().mass_kg(m),
+                budget.retained().mass_kg(m),
+                budget.escaped().mass_kg(m),
+            ]
+        })) {
+            write!(&mut inputs, ":{:016x}", value.to_bits()).expect("writing into a string");
+        }
+        PhysicalRevision {
+            inputs,
+            model: "generation_fallback_v1".into(),
+            sequence: 0,
+        }
+    }
+
     pub fn new(
         irradiation_w_m2: f64,
         loss_flux_w_m2: f64,
@@ -56,6 +86,56 @@ impl Forcing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn revision_keys_cover_inputs_but_ignore_partition_and_overlay_metadata() {
+        use crate::system::composition::Inventory;
+        let source =
+            Inventory::new(&[(Material::Silicate, 1e24), (Material::Water, 1e20)]).unwrap();
+        let budget =
+            Budget::new(source, source, Inventory::default(), Inventory::default()).unwrap();
+        let forcing = Forcing::new(1361.0, 1e5, 0.3, 4.5).unwrap();
+        let revision = forcing.revision("body/0", &budget);
+        assert_eq!(revision, forcing.revision("body/0", &budget));
+        let mut split = budget;
+        split
+            .transfer(
+                super::super::composition::Reservoir::Interior,
+                super::super::composition::Reservoir::CondensedVolatiles,
+                Material::Water,
+                1e20,
+            )
+            .unwrap();
+        assert_eq!(revision, forcing.revision("body/0", &split));
+        assert_ne!(revision, forcing.revision("body/1", &budget));
+        for other in [
+            Forcing::new(1362.0, 1e5, 0.3, 4.5).unwrap(),
+            Forcing::new(1361.0, 1e6, 0.3, 4.5).unwrap(),
+            Forcing::new(1361.0, 1e5, 0.4, 4.5).unwrap(),
+            Forcing::new(1361.0, 1e5, 0.3, 5.0).unwrap(),
+        ] {
+            assert_ne!(revision, other.revision("body/0", &budget));
+        }
+        let depleted = Budget::new(
+            source,
+            Inventory::new(&[(Material::Silicate, 1e24), (Material::Water, 0.5e20)]).unwrap(),
+            Inventory::default(),
+            Inventory::default(),
+        )
+        .unwrap();
+        assert_ne!(revision, forcing.revision("body/0", &depleted));
+        let extra_source = source
+            .checked_add(&Inventory::new(&[(Material::Nitrogen, 1e15)]).unwrap())
+            .unwrap();
+        let changed_history = Budget::new(
+            extra_source,
+            source,
+            Inventory::default(),
+            Inventory::default(),
+        )
+        .unwrap();
+        assert_ne!(revision, forcing.revision("body/0", &changed_history));
+    }
 
     #[test]
     fn forcing_rejects_invalid_inputs_before_retention_or_atmosphere_work() {

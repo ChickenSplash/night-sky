@@ -4,6 +4,37 @@ use crate::system::{page_capacity, star_id};
 use std::collections::BTreeMap;
 
 #[test]
+fn formation_starts_with_validated_fallback_and_only_projects_compatibility_fields() {
+    for seed in 0..8 {
+        let key = format!("formation-initial-result:{seed}");
+        let (formed, _, _) = census(&key);
+        for (index, body) in generate_system(&key, &formed, false, f64::INFINITY)
+            .iter()
+            .enumerate()
+        {
+            crate::system::physical::validate_result(&body.initial_result).unwrap();
+            let facts = &body.initial_result.record.physical;
+            assert_eq!(
+                body.structure.approximations(),
+                &[structure::Approximation::ProvisionalFallback]
+            );
+            assert_eq!(body.structure.radius_m(), facts.reference_radius_m);
+            assert_eq!(body.structure.inertia_factor(), facts.inertia_factor);
+            assert_eq!(body.radius_km, facts.reference_radius_m / 1000.0);
+            assert_eq!(body.class, materials::classify(facts));
+            assert!(
+                body.initial_result
+                    .revision
+                    .inputs
+                    .starts_with(&format!("{key}/{index}:"))
+            );
+            assert_eq!(body.formation_mass_earth, body.mass_earth);
+            assert_eq!(body.budget.source(), body.budget.retained());
+        }
+    }
+}
+
+#[test]
 fn systems_are_keyed_by_star() {
     let star = star_id("list", 3);
     assert_eq!(star, "list:page-3");

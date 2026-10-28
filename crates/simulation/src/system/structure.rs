@@ -46,6 +46,8 @@ pub enum Approximation {
     ExtendedBoundaryColumn,
     BoundaryReferenceTransition,
     DeepBoundaryUnresolved,
+    /// Temporary formation-only projection of the validated fallback candidate.
+    ProvisionalFallback,
 }
 
 impl Approximation {
@@ -62,6 +64,7 @@ impl Approximation {
             Self::ExtendedBoundaryColumn => "extended_boundary_column",
             Self::BoundaryReferenceTransition => "boundary_reference_transition",
             Self::DeepBoundaryUnresolved => "deep_boundary_unresolved",
+            Self::ProvisionalFallback => "provisional_fallback",
         }
     }
 }
@@ -78,6 +81,26 @@ pub struct Structure {
 }
 
 impl Structure {
+    /// Formation-only compatibility view, replaced after all-star retention.
+    /// No legacy solve or heuristic inertia is used to construct this view.
+    pub(crate) fn provisional(data: &space_shared::PlanetPhysical) -> Self {
+        Self {
+            mass_kg: data.retained_mass_kg,
+            radius_m: data.reference_radius_m,
+            condensed_radius_m: data.condensed_radius_m,
+            h_he_mass_fraction: data.h_he_mass_fraction,
+            inertia_factor: data.inertia_factor,
+            reference: match data.radius_reference {
+                space_shared::RadiusReference::SolidSurface => RadiusReference::SolidSurface,
+                space_shared::RadiusReference::UnresolvedVolatileBoundary => {
+                    RadiusReference::UnresolvedVolatileBoundary
+                }
+                space_shared::RadiusReference::OneBar => RadiusReference::OneBar,
+            },
+            approximations: vec![Approximation::ProvisionalFallback],
+        }
+    }
+
     pub fn mass_kg(&self) -> f64 {
         self.mass_kg
     }
