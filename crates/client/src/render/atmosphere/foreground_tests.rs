@@ -3,6 +3,31 @@
 use super::{Air, AirSettings, Preset, generated, tables};
 use bevy::{math::DVec3, prelude::*};
 
+#[test]
+fn black_floor_uniform_requires_an_explicit_proxy_not_just_rebased_coordinates() {
+    let air = generated::descending(
+        AirSettings::preset(Preset::HydrogenGiant)
+            .atmosphere()
+            .scaled(7e7),
+    );
+    let mut shell = super::Shell {
+        centre: Vec3::ZERO,
+        radius: 1.0,
+        pole: Vec3::Y,
+        flattening: 0.0,
+        air,
+        fade: 1.0,
+        lights: [Vec4::ZERO; super::MAX_LIGHTS],
+        suns: [Vec4::ZERO; super::MAX_LIGHTS],
+    };
+    let material =
+        |shell: &super::Shell| shell.material(Vec3::Z * 2.0, 0.001, (16, 8), [false; 4], None);
+    assert!(material(&shell).steps.w > 0.0);
+    shell.air.opaque_proxy = false;
+    assert!(shell.air.radius_scale < 1.0);
+    assert_eq!(material(&shell).steps.w, 0.0);
+}
+
 struct Path {
     end: f32,
     depth: Vec3,

@@ -7,15 +7,15 @@ use crate::{
 use bevy_egui::egui;
 
 pub fn planets(ui: &mut egui::Ui, loading: &mut PlanetLoading) {
-    if !terminal::section(ui, "experimental planet loading") {
+    if !terminal::section(ui, "planet refinement") {
         return;
     }
     if terminal::check(
         ui,
         loading.enabled,
-        "layered calculations",
+        "background refinement",
         true,
-        "Opt-in background layered solves, or the labelled fallback structure where unsupported, shown in the planet inspector's layered model section beside the legacy facts. Rendering, shape and landing stay on the legacy model. Stars have priority within the shared CPU budget; running solves finish before releasing their slot.",
+        "Background layered solves publish whole physical revisions when safe. Close cameras, craft system snapshots and retained route geometry defer publication. Unsupported results retain the valid fallback with a reason. Turning this off pauses work/adoption, not already adopted facts. Stars retain priority within the shared CPU budget.",
     ) {
         loading.enabled = !loading.enabled;
     }
@@ -30,7 +30,7 @@ pub fn planets(ui: &mut egui::Ui, loading: &mut PlanetLoading) {
             let Some(state) = c.planets.get(id) else {
                 continue;
             };
-            let text = match state {
+            let mut text = match state {
                 PlanetState::Solved(l) | PlanetState::Fallback(l) => format!(
                     "{}: {}, {:.1} K, {:.1} km",
                     if l.fallback_reason.is_some() {
@@ -44,6 +44,9 @@ pub fn planets(ui: &mut egui::Ui, loading: &mut PlanetLoading) {
                 ),
                 state => state.label(),
             };
+            if let Some(adoption) = c.adoption.get(id) {
+                text.push_str(&format!(" · {adoption}"));
+            }
             rows.push((name, text, None));
         }
     }

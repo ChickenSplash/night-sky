@@ -49,7 +49,9 @@ to `crates/client/src/`.
   scroll area bounds long content to the viewport, reserving the bottom HUD
   inset; wheel/scrollbar input reaches all facts and actions. Its top stays
   anchored at the shared HUD inset. Facts are cached
-  until target/snapshot changes; remote systems are never regenerated per frame.
+   until target/snapshot/active physical revision changes; loaded planets use
+   their actual active system rather than regenerating a remote fallback. Remote
+   systems are never regenerated per frame.
 - `ObjectRef::Star` by system key is the whole system: its star or outermost
   barycentre, labelled with all letters (`System 2 AB`). Below it, both trails
   show the planet's `StarSystem::lineage`: component star (`key#B`), and in
@@ -77,8 +79,12 @@ ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 
 The player-facing order is Overview, Composition, Atmosphere, Orbit and rotation,
 then Model details (closed by default). While experimental layered calculations
-are on, a **Layered model (experimental)** section follows Overview, beside the
-legacy facts; see [the layered record](../../simulation/planet-composition.md#layered-transport-record). Overview identifies the surface/radius
+are on, a **Background refinement** section follows Overview, beside
+the active result; see [the layered record](../../simulation/planet-composition.md#layered-transport-record).
+It distinguishes unapplied candidates, safety deferrals and applied active
+results. Active provenance/refinement status, phase knowledge and condensed-top geometry
+are always available, with ordered regions in Composition and revision/fidelity
+and region model limitations in Model details. Overview identifies the surface/radius
 meaning and gives atmospheric pressure without a separate present/absent row.
 An absent/sub-cutoff model has unknown pressure, not an invented exact zero.
 Composition groups bulk gas species separately from rock, metal and water;

@@ -31,9 +31,9 @@ seed helpers, object identities and photometry stay at the crate root; see
 - [Material inventories and structure](simulation/planet-composition.md): conserved
   formation/retained budgets, approximate generated radii, bounded H/He retention
   and separate headless dry/water radial solvers, protected traces in dry and
-  water-bearing hosts, atmosphere coupling and opt-in background refinement
-  shown in the inspector. Live planets use one synchronous fallback result each;
-  background layered results are not adopted yet.
+   water-bearing hosts, atmosphere coupling and default-on background refinement.
+   Live planets start on one synchronous fallback each; complete layered results
+   are adopted when camera/craft/route safety permits, with visible deferral reasons.
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.
@@ -129,18 +129,21 @@ The Bevy/egui client in `crates/client`:
   inventories. Descriptive labels never select physical properties; composition
   and reference facts are validated in transport and visible in the inspector.
   Table-readiness pop-in, grey view-path transmission and airless point/rim
-   photometry remain (traversable envelopes omit the airless disc rims). Bulk H/He
-   envelopes allow free-camera descent into approximate opaque darkness without
-   a pressure stop, not physically simulated interiors. One-bar pressure references
-   alone do not enable descent. Low-gas rocky bodies keep their approximate ground
-    and inventory-normalised boundary pressure even with extended geometry.
+    photometry remain (traversable opaque gas proxies omit the airless disc rims). Gas-reference
+   envelopes allow free-camera descent through a bounded approximate continuation,
+   ending at a drawable condensed top when reachable or a separate opaque gas
+   proxy otherwise. This uses explicit geometry, not an H/He threshold or a
+   one-bar-as-ground rule. No pressure stop, deep optical/cloud model or landing
+   certification is implied. Condensed-reference bodies retain their own boundary
+   and inventory-normalised pressure even with extended geometry.
    See [physical assumptions](simulation/atmospheres.md)
   and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
-  Layered results can be calculated/cached through the opt-in
+  Layered results are calculated/cached through the
   [background prototype](simulation/planet-composition.md#experimental-background-loading),
-  and shown in the planet inspector, but do not yet drive rendering, shape,
-  atmosphere optics or navigation. The dry solver's
+  and adopted as whole physical revisions when safe. Existing craft system
+  snapshots, active routes and close cameras defer publication. Adopted facts
+  survive revisits and voyage-cache eviction for the session. The dry solver's
   protected-trace extension conserves
   CO₂/N₂/CH₄/O₂/Ar in dry hosts without resolving their chemistry or phase.
   Local water physics, including compressed liquid,

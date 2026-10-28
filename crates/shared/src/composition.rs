@@ -52,8 +52,8 @@ pub struct PlanetPhysical {
     pub approximations: Vec<String>,
 }
 
-/// Experimental layered-model result, alongside and never replacing
-/// `Planet::physical`. Live rendering and navigation do not read it.
+/// Region record owned by the active `PlanetResult` or a separate candidate.
+/// The live `Planet::physical` is a projection, not another physical authority.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayeredPlanet {
     pub model: String,

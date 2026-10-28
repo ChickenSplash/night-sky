@@ -99,6 +99,31 @@ fn descending_envelopes_have_only_a_shell_not_a_false_surface_or_rim() {
 }
 
 #[test]
+fn a_condensed_top_below_the_gas_reference_keeps_its_body_and_reflected_light() {
+    use atmosphere::{AirSettings, Preset, generated::descending};
+    let mut lights = lights();
+    lights.stars.clear();
+    lights.planets.truncate(1);
+    let air = AirSettings::preset(Preset::Earth)
+        .atmosphere()
+        .scaled(6.371e6);
+    let mut rebased = descending(air);
+    rebased.opaque_proxy = false;
+    lights.planets[0].air = Some(rebased);
+    lights.planets[0].ground = Some(42);
+    let frame = resolve(&lights, &Photometry::default(), -10.0, 1.0, PSF_SIGMA_PX);
+    assert_eq!(frame.bodies.len(), 1);
+    assert_eq!(frame.bodies[0].ground, Some(42));
+    assert_eq!(
+        frame.bodies[0].radius,
+        lights.planets[0].radius * rebased.radius_scale
+    );
+    assert_eq!(frame.shells[0].radius, frame.bodies[0].radius);
+    assert!(!frame.shells[0].air.opaque_proxy);
+    assert!(frame.shells[0].air.ground.max_element() > 0.0);
+}
+
+#[test]
 fn multiple_planets_keep_distinct_shells_and_airless_bodies_have_no_shell_index() {
     use atmosphere::{AirSettings, Preset};
     let mut lights = lights();

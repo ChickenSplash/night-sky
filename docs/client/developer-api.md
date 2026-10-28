@@ -120,11 +120,18 @@ physical atmosphere shown in the inspector.
 `ns planets` reads `/state/planet_loading` and lists the target system's planets
 by designation with their [layered result](../simulation/planet-composition.md#experimental-background-loading)
 (surface, temperature, pressure, radius, layer count) or status (queued,
-calculating, unsupported with its reason, failed). `ns planets on|off` sends
+calculating, unsupported with its reason, failed), plus ready/deferred/applied
+adoption status. Background refinement defaults on. `ns planets on|off` sends
 `set_layered_planets true|false` and prints the state from a later snapshot.
 `--json` prints the whole entry: switch, shared CPU threads, cached systems and,
 per planet, the full `LayeredPlanet` record once solved. `ns inspect` includes
-the inspector's layered section while the mode is on.
+the inspector's background-refinement section while the mode is on. Turning it
+off pauses work/adoption without reverting already adopted facts.
+
+`/state/planet_results` exposes the displayed page's authoritative records,
+revision/provenance/refinement, validated boundary geometry and validity. These
+are the active facts, distinct from `/state/planet_loading` candidates. Inspector
+fields likewise distinguish active facts from unapplied candidate comparisons.
 
 `cmd` takes one quoted text/JSON string; refusals exit 1 with the reason.
 `--wait` polls `/state` until a snapshot sampled after the reply has no flight,

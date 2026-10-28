@@ -2,7 +2,7 @@
 //! Bodies are conservatively enclosed in spheres; future ring geometry can
 //! supply an additional enclosing bound without changing route steering.
 use super::{
-    atmosphere::{ColumnValidity, GasAtmosphere},
+    atmosphere::{ColumnValidity, GasAtmosphere, optics::boundary::OpticalColumn},
     shape::{Spheroid, planet_shape, star_shape},
 };
 use crate::{EARTH_SOLAR, SUN_GM, YEAR_SECONDS};
@@ -112,6 +112,8 @@ impl Policy {
 
     pub fn planet(self, planet: &Planet) -> Result<Clearance, String> {
         self.validate()?;
+        super::physical::validate(planet).map_err(str::to_owned)?;
+        let geometry = super::surface::geometry(planet).map_err(str::to_owned)?;
         let gm = planet.mass_earth * EARTH_SOLAR * SUN_GM;
         let radius = planet.radius_km * 1_000.0;
         if !gm.is_finite()
@@ -132,8 +134,25 @@ impl Policy {
             return self.bound(shape, 0.0, false);
         };
         let gas = GasAtmosphere::try_from(data).map_err(|e| format!("Invalid atmosphere: {e}"))?;
+        if planet.initial_result.as_ref().is_some_and(|result| {
+            result.record.layers.iter().any(|layer| {
+                layer
+                    .phase_allocations
+                    .iter()
+                    .any(|p| p.condensate_kg > 0.0)
+            })
+        }) {
+            return Err("Suspended-condensate drag clearance is unresolved".into());
+        }
+        let reference_gm = if let Some(result) = &planet.initial_result {
+            let reference = OpticalColumn::reference_from_result(result, &gas)
+                .map_err(|e| format!("Invalid atmosphere reference: {e}"))?;
+            reference.gravity_m_s2 * reference.radius_m.powi(2)
+        } else {
+            gm
+        };
         let column = gas
-            .column(gm, radius)
+            .column(reference_gm, radius)
             .map_err(|e| format!("Invalid atmosphere column: {e}"))?;
         let omega = if planet.spin.period_hours == 0.0 {
             0.0
@@ -193,14 +212,22 @@ impl Policy {
                 high = mid;
             }
         }
-        self.bound(
+        let mut bound = self.bound(
             shape,
             high,
             column.validity == ColumnValidity::Extended
                 || !column.profile.spherical
                 || high > column.profile.sonic_height_m()
                 || high / radius > super::atmosphere::MAX_THIN_EXTENT_RATIO,
-        )
+        )?;
+        // The reference is not ground, but routes must enclose both it and
+        // the actual condensed top, even if a future model references inside it.
+        let condensed = geometry.condensed_shape(shape);
+        bound.exclusion_m = bound
+            .exclusion_m
+            .max(condensed.equatorial + self.hull_radius_m + self.safety_m);
+        bound.preferred_m = bound.preferred_m.max(KEEP_CLEAR * condensed.equatorial);
+        Ok(bound)
     }
 }
 

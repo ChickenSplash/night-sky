@@ -145,11 +145,17 @@ pub(super) fn clip_strip(
     strips
 }
 
-/// A planet's ground is rebuilt whenever its shape changes.
-fn ground_key(id: &str, shape: &Spheroid) -> u64 {
+/// Geometry and material/terrain inputs belong to one active revision.
+fn ground_key(planet: &space_shared::Planet, shape: &Spheroid) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (id, shape.equatorial.to_bits(), shape.polar.to_bits()).hash(&mut hasher);
+    (
+        &planet.id,
+        shape.equatorial.to_bits(),
+        shape.polar.to_bits(),
+        planet.initial_result.as_ref().map(|r| &r.revision),
+    )
+        .hash(&mut hasher);
     hasher.finish()
 }
 
@@ -603,6 +609,14 @@ impl Canvas<'_> {
                 // Every generated atmosphere, with an opt-in selected override.
                 let selected = matches!(&nav.selection,
                     Some(crate::Selection::Planet(id)) if *id == planet.id);
+                let (air, draw_ground) = render::atmosphere::generated::lower_boundary(
+                    planet,
+                    render::atmosphere::generated::for_planet(planet, selected, self.air, radius),
+                    self.giant_descent,
+                );
+                let ground_shape = space_simulation::system::surface::geometry(planet)
+                    .map_or(shape, |geometry| geometry.condensed_shape(shape));
+                let ground = draw_ground.then(|| ground_key(planet, &ground_shape));
                 lights.planets.push(PlanetLight {
                     centre,
                     radius: disc,
@@ -612,27 +626,14 @@ impl Canvas<'_> {
                     per_pixel,
                     light: self.illumination(orbital, local),
                     surface: space_simulation::light::planet_surface(planet),
-                    air: render::atmosphere::generated::for_planet(
-                        planet, selected, self.air, radius,
-                    )
-                    .map(|air| {
-                        if self.giant_descent
-                            && render::atmosphere::generated::deep_envelope(planet)
-                        {
-                            render::atmosphere::generated::descending(air)
-                        } else {
-                            air
-                        }
-                    }),
-                    // Envelope lower boundary is an opaque cloud proxy, not terrain.
-                    ground: (!render::atmosphere::generated::envelope(planet))
-                        .then(|| ground_key(&planet.id, &shape)),
+                    air,
+                    ground,
                 });
-                if !render::atmosphere::generated::envelope(planet) {
+                if let Some(key) = ground {
                     lights.grounds.push(render::GroundSource {
-                        key: ground_key(&planet.id, &shape),
+                        key,
                         planet: planet.clone(),
-                        shape,
+                        shape: ground_shape,
                         from_eye: galactic - self.pose.eye,
                         basis,
                     });

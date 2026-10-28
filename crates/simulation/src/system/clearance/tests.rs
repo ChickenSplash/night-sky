@@ -31,6 +31,44 @@ fn earth() -> Planet {
 }
 
 #[test]
+fn generated_clearance_uses_enclosed_reference_gravity_not_exterior_total_mass() {
+    let galaxy = crate::demo_galaxy();
+    let world = galaxy
+        .systems
+        .iter()
+        .flat_map(|s| &s.planets)
+        .find(|p| {
+            p.physical
+                .as_ref()
+                .is_some_and(|d| d.h_he_mass_fraction > 0.3)
+        })
+        .unwrap();
+    let original = Policy::default().planet(world).unwrap();
+    let mut lower_gravity = world.clone();
+    let result = lower_gravity.initial_result.as_mut().unwrap();
+    let radius = result.record.physical.reference_radius_m;
+    let enclosed: f64 = result
+        .record
+        .layers
+        .iter()
+        .filter(|l| l.outer_radius_m <= radius)
+        .map(|l| l.mass_kg)
+        .sum();
+    let minimum = crate::units::GRAVITATIONAL_CONSTANT * enclosed / radius.powi(2);
+    let gravity = (minimum + result.record.physical.reference_gravity_m_s2) * 0.5;
+    result.record.physical.reference_gravity_m_s2 = gravity;
+    lower_gravity.physical = Some(result.record.physical.clone());
+    let data = lower_gravity.environment.as_mut().unwrap();
+    let gas = GasAtmosphere::try_from(data.atmosphere.as_ref().unwrap()).unwrap();
+    data.atmosphere = Some(gas.to_data(gravity * radius.powi(2), radius).unwrap());
+    let bound = Policy::default().planet(&lower_gravity).unwrap();
+    assert!(bound.atmosphere_height_m > original.atmosphere_height_m);
+    let mut unchecked = lower_gravity;
+    unchecked.initial_result = None;
+    assert!(Policy::default().planet(&unchecked).is_err());
+}
+
+#[test]
 fn density_extends_smoothly_beyond_the_optical_cutoff() {
     let p = earth();
     let gas = GasAtmosphere::try_from(p.environment.as_ref().unwrap().atmosphere.as_ref().unwrap())

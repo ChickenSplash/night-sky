@@ -4,15 +4,17 @@
 
 **P1 and P2 complete and signed off. Next: P3, default cutover and legacy
 removal. P3 contract, model-independent validation and the synchronous live
-cutover are implemented; consumer migration, background adoption and legacy
-removal remain.** Every generated planet's live mass, radius, inertia,
-reservoirs, atmosphere and spin now come from one synchronous fallback result.
+cutover, consumer adapters and guarded background adoption are implemented.
+Only legacy cleanup and its automated regression checks remain to close P3.
+Targeted interactive adoption review is deferred to P4 by user decision.** Every generated planet
+starts on one synchronous fallback and may adopt one validated layered revision.
+Live mass, radius, inertia, reservoirs and atmosphere belong to that result.
 
 `structure::derive` no longer feeds generated planets; its code remains until
-the final removal step. The opt-in prototype joins dry, water, protected-trace
-and atmosphere-coupling solvers, with background loading and live inspector
-results that are not adopted yet. Rendering and navigation read the new live
-projections through their existing adapters.
+the final removal step. The layered solver joins dry, water, protected-trace
+and atmosphere-coupling solvers, with default-on background loading and whole-result
+publication when safe, otherwise an explicit deferral. Rendering and navigation read the new live
+projections; rendering optics now read the result directly.
 
 This is a simulator, not a thermodynamics research project. Prefer the simplest
 scientifically plausible model that supports the needed behaviour. Named,
@@ -33,9 +35,10 @@ quantities and no hidden legacy substitution remain non-negotiable. Fallback
 results are always distinguishable from layered solves and never counted as
 layered coverage. No universal physical radius-error tolerance is agreed.
 
-Legacy removal waits for P3: rendering, shape, landing, navigation, optics and
-snapshots still read the legacy record, and the fast synchronous first answer
-is still legacy.
+Legacy removal is the remaining P3 implementation task; it does not wait for
+the interactive checks now assigned to P4. The fast
+synchronous answer and live projections now use the new fallback result; optics
+read that result directly. Background layered results can now become authoritative.
 
 | Document | Owns |
 | --- | --- |
@@ -659,7 +662,8 @@ checked labelled fallbacks, passing project and trend checks, with the physical
 audit limitations explicitly accepted. No further coverage or physics work is
 required to close P2. P3 investigation and cutover design are recorded below;
 the headless contract/validation slice and fallback-based retention trials are
-implemented. Live geometry/export cutover and legacy removal remain pending.
+implemented. Synchronous live geometry/export cutover is also implemented;
+consumer adapters and guarded background adoption are implemented. Legacy cleanup remains for P3; targeted interactive adoption review belongs to P4.
 
 **Scope control:** before each change, state the observed gap, smallest useful
 prescription, fixtures and stop condition. A slice ships only if it changes
@@ -683,13 +687,13 @@ Paths below are relative to `crates/`.
 | Environment generation: `simulation/src/system/atmosphere/generation.rs`, `generation/partition.rs`, `structure/boundary.rs` | **Done:** live environment is the result's own partition; `structure/boundary.rs` was removed. Sub-0.1 Pa columns stay in the result but are omitted from the live environment for rendering/navigation parity. | Revisit that presentation threshold when rendering/navigation move to opacity-based visibility. |
 | Natural systems and overlays: `simulation/src/system/generated.rs`, `overlay.rs` | **Done:** one exporter projects every live field from `initial_result` and validates it. Experimental mode only prepares separate jobs. | Keep that. Natural IDs, host/orbit, designation and overlay tasks remain independent of refinement. |
 | Validation and snapshots: `shared/src/composition.rs`, `simulation/src/system/physical.rs`, `physical/layered.rs` | **Done:** `physical::validate` checks the live record and projections against the result by transport invariants and `OpticalColumn::from_result`; it re-runs no solver. A record without its result is invalid. | Carry model provenance, fidelity and surface knowledge with the authoritative planet. Validate transported invariants without re-solving either model. Keep independent solver regression tests, rather than treating transport validation as physical verification. |
-| Background loading: `client/src/planet_loading.rs` | Opt-in inspector cache; completed records do not update the system. | Always expose a valid initial fallback. Track queued/running/refused/worker-failed separately from that result. Cache candidate refinements by inputs/model revision, discard stale jobs and publish through one coherent adoption path. |
+| Background loading: `client/src/planet_loading.rs` | **Implemented:** default-on refinement, captured base/input/model identities and epochs, worker-prepared complete projections, guarded bounded publication, applied/deferred/unavailable diagnostics. | Initial fallback stays usable; adopted session facts survive candidate/voyage LRU eviction and late seeded replies. Targeted visual review remains. |
 | Shape and spin: `simulation/src/system/shape.rs`, `generation.rs` | **Done:** spin uses the result's inertia and H/He fraction; `planet_shape` accepts the Darwin-Radau domain (0, 2/3], including the ~2% of factors below 0.1. | Accept validated new-model inertia, including the audited values below 0.1. Recompute dependent spin limits and shapes consistently, preserving deterministic spin seeds and locked-period semantics. Keep the existing bounded shape approximation explicitly labelled. |
-| Ground, discs and lighting: `client/src/scene/draw.rs`, `render/ground.rs`, `simulation/src/system/surface.rs`, `light.rs` | A single reference spheroid supplies drawing and ground; atmosphere reference suppresses terrain. Reflectance calls legacy validation. | Distinguish a condensed drawable boundary, a gas reference and an opaque visual proxy. Rendering must not promote any of them to certified landable ground. Keep reflectance/scattering prescriptions separate from structure. |
-| Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | Explicit optical boundary contract now carries reference conditions, named profile, lower proxy and outer cutoff. Live inputs (total GM, `Planet::radius_km`) now come from the result; fallback reference gravity equals total-mass gravity, so they agree. Descent permission retains the legacy threshold. A separate checked unified-result adapter uses reference gravity but does not adopt candidates. | Complete coherent live atmosphere/partition cutover before using the unified adapter. Never infer resolved profiles/clouds from structural edges or suspended bulk condensate. Replace threshold-based descent eligibility with explicit geometry/surface knowledge. |
-| Camera and craft: `simulation/src/system/clearance.rs`, `craft.rs`, `craft/route.rs`, `craft/voyage.rs`, `client/src/scene/location.rs`, `client/src/craft.rs` | Clearance, gravity, spawn altitude, body reach and routes consume copied systems/fields. Camera field invalidation currently checks system ID/page and list changes, not a physical revision. | Adopt one revision across view and physical fields; rebuild mass/reach/clearance/route caches. Keep camera pose and craft state stable; never silently embed them in enlarged geometry or leave craft on a different mass revision. |
-| Search and distant generation: `simulation/src/search/{engine,live}.rs`, `craft/voyage.rs` | Radius, mass and class predicates use synchronous generated bodies; remote systems may never enter the client loader. | Use the new synchronous fallback, not hidden legacy or background EOS work. Disclose the result basis for searchable physical properties; a fallback match is not a guaranteed layered match. Reconcile/revalidate when a loaded result changes. |
-| Inspector and developer tools: `client/src/ui/inspector/`, `devtools/`, planet loader readout | Separate legacy and experimental reports, plus derived UI caches. | Show the active authoritative revision and any pending candidate distinctly; export the same facts in snapshots. Remove obsolete comparison/toggle paths after migration. |
+| Ground, discs and lighting: `client/src/scene/draw.rs`, `render/ground.rs`, `simulation/src/system/surface.rs`, `light.rs` | **Done:** explicit reference/condensed geometry, including frost; bounded optical continuation stops at that top or retains a separate opaque gas proxy. Reflectance uses model-neutral validation. | Keep surface existence separate from visibility and landing permission. No deep cloud/EOS optics are inferred. |
+| Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | **Done:** checked result optics and geometry-based descent, without an H/He threshold. A reached condensed top keeps its mesh/reflection; an unresolved proxy alone fades black. Missing optics retain a visible reference proxy. | Keep the bounded continuation labelled, not a full deep profile or cloud deck. Unsupported suspended-cloud optics remain explicit. |
+| Camera and craft: `simulation/src/system/clearance.rs`, `craft.rs`, `craft/route.rs`, `craft/voyage.rs`, `client/src/scene/location.rs`, `client/src/craft.rs` | **Adapters done:** clearance checks projections and uses enclosed reference gravity for gas, total mass for orbital speed. Camera fields refresh on changed system facts/revision. Spawn/readouts identify model-reference altitude; craft retain coherent immutable field/route snapshots. | **Step 4:** adopt one revision across view and craft, or defer it. Never refresh a live craft field independently of its route/state. Suspended-condensate drag remains unsupported, not ignored. |
+| Search and distant generation: `simulation/src/search/{engine,live}.rs`, `craft/voyage.rs` | **Done:** predicates use synchronous fallback generation. Planet hits carry provenance and revision; browser flags a differing loaded basis as not revalidated, without rewriting deterministic results. | An exact layered query is not promised. Any further revalidation/filter reconciliation belongs with step-4 adoption, not worker completion. |
+| Inspector and developer tools: `client/src/ui/inspector/`, `devtools/`, planet loader readout | **Done:** loaded active facts/revision, ordered regions, phase knowledge and limitations; separate unapplied candidates. `/state/planet_results` exports active results/geometry, not loader cache records. | Retire the experimental toggle/comparison path after background authority is delivered. |
 
 ### Proposed authoritative contract
 
@@ -722,7 +726,7 @@ Paths below are relative to `crates/`.
 
 ### Refinement adoption and safety
 
-Recommended first implementation: separate a completed **candidate** from the
+Implemented first policy: separate a completed **candidate** from the
 **active** result. Publish a whole planet revision, including all dependent facts,
 at a controlled update boundary. No radius-only patches or independently updated
 render and craft records; no visual interpolation masquerading as physical data.
@@ -733,8 +737,9 @@ If safe simultaneous adoption is not available, retain the active revision and
 show the candidate as pending. The conservative implementation may defer the
 whole system while a craft/route uses it. Do not teleport the camera/craft, silently
 change a trajectory's field, or allow cache eviction/revisit to bypass that pin.
-The exact adoption guard belongs with the camera/craft migration and its tests;
-it must be demonstrated before enabling live updates by default.
+The implemented guard and its camera/craft/route regressions are described in
+step 4 below. Default refinement is now enabled; interactive acceptance is
+deferred to P4 and is not claimed complete.
 
 Search remains bounded and deterministic on the synchronous new-model basis.
 Candidate results must not silently change query semantics according to worker
@@ -778,7 +783,7 @@ a unified exact layered search across the galaxy is not part of this cutover.
      accepted diffuse extreme still exhausts its tighter-refinement work budget,
      exactly as in P2, not a newly claimed refinement pass. Logs:
      `data/tmp/p3-contract-{check,audit,envelope}.log`.
-2. **Synchronous generation and retention, in progress.** Separate forcing, replace every
+2. **Synchronous generation and retention, implemented.** Separate forcing, replace every
    retention/initial-structure call and both wire exporters. Keep existing loss
    priors and shared fits, not a new escape research project. Check constituent
    conservation, repeated-evaluation stability, deterministic IDs/orbits/seeds,
@@ -919,47 +924,151 @@ a unified exact layered search across the galaxy is not part of this cutover.
      unchanged; 22 envelope fixtures pass. Logs:
      `data/tmp/p3-cutover-{check,audit,envelope}.log`. Not run: visual or
      performance benchmarks, which the user runs.
-3. **Consumer adapters.** Migrate shape/spin, ground/reference geometry, gas optics,
+3. **Consumer adapters, implemented (at-a-glance visuals reviewed; targeted checks deferred to P4).** Migrate shape/spin, ground/reference geometry, gas optics,
    light, clearances, spawn/camera/craft fields, search and UI/snapshots. Exercise
    bare rock, ocean/ice, hot/unresolved surfaces, gas-free fallback, sub-bar gas,
    a normal envelope and the accepted diffuse extreme. Stop when every consumer
    can read a coherent new-model system, without fallback to legacy calculations.
-4. **Background authority.** Connect candidates to the revision adoption path;
+   - **Rendering optics migrated.** `render/atmosphere/generated.rs` builds each
+     generated column with `OpticalColumn::from_result`; `envelope` and the
+     ground decision key on `SurfaceKnowledge::GasReference`. Live air or labels
+     that disagree with the result are not drawn or honoured; a `physical`
+     record without its result draws no air; only bare fixture records use
+     total mass and `radius_km`. Descent eligibility still uses the H/He
+      threshold at that checkpoint; the completed geometry adapter below removes it. Log: `data/tmp/p3-render-check.log`.
+    - Explicit `surface::Geometry` separates the selected reference, condensed top
+      (including frost) and phase knowledge. Bounded optical continuation now
+      stops at the condensed top when reachable, drawing it through the air.
+      Otherwise a separate opaque proxy remains. An explicit proxy flag, not a
+      rebased radius or H/He fraction, selects black-floor behaviour. No new deep
+      optical/cloud prescription or landing permission is claimed.
+    - Clearance shares checked reference conditions/enclosed gravity with optics,
+      while orbital speeds retain total mass. Unsupported suspended-condensate
+      drag refuses routing; transport validation no longer depends on supported
+      cloud optics or equality of layered boundary and equilibrium temperatures.
+    - Camera neighbourhood fields invalidate on changed system facts/revisions;
+      ground caches include revision. Inspector and browser prefer loaded active
+      records, refresh on revision/status and show active provenance, phase,
+      regions and caveats. Candidate comparisons no longer call fallback legacy.
+      Snapshots export active `planet_results` separately from `planet_loading`.
+      Search hits disclose synchronous provenance/revision and mark a changed
+      loaded basis as not revalidated. Craft spawn/readouts identify reference
+      altitude, not safe ground; immutable craft/route fields are not replaced.
+    - Regression fixtures exercise rock/hot rock, liquid/ice, frost, sub-bar and
+      gas references, shallow condensed-top visibility, deep opaque proxies,
+      unchanged upper optical extent, reference gravity, loaded inspector
+      revision changes and search-basis round trips. Verification logs are
+      `data/tmp/p3-consumers-{check,envelope}.log`. User visual/interactive review
+      was still required at this checkpoint and is now deferred to P4; no client
+      window or performance benchmark was launched.
+    - **Verification:** `./scripts/check.sh` passes (474 simulation tests,
+      380 client tests, formatting and strict Clippy). All 22 envelope fixtures
+      pass, including source-backed suspended-cloud transport/refusal checks.
+      The standard 140-system probe remains **1,437/1,544 layered (93.1%) plus
+      107/107 checked fallbacks**. This is not a fresh expanded-population claim.
+      The saved audit reconstructs all 315 fallback radii unchanged; its accepted
+      diffuse extreme still refuses tighter integration at the work budget.
+      Additional logs: `data/tmp/p3-consumers-{coverage,audit}.log`.
+4. **Background authority, implemented (targeted user review deferred to P4).** Connect candidates to the revision adoption path;
    test stale completion, failure, cancellation, revisits/eviction, copied fields,
    active routes and growth around a nearby eye/craft. Turn default refinement
    on only after safe adoption or explicit deferral is proven.
-5. **Verification and removal.** Full project checks and the user's visual,
-   interactive and performance review; then delete the legacy structure/boundary
-   solver, heuristic inertia, experimental comparison mode and dead adapters.
+   - Workers capture the immutable initial result and prepare the complete next
+     result/atmosphere projection. The pipeline model identity now includes the
+     refinement adapter and checksum-pinned local H/He resource. Publication
+     requires the exact captured base facts/forcing, next sequence and a matching
+     lineage across every loaded copy. Changed inputs restart preparation and
+     reject stale epochs; no stale result is renumbered to fit.
+   - Publication runs after camera placement and before neighbourhood/render/UI
+     consumers. A nearby camera defers within twice the larger old/new spheroid,
+     optical top and preferred clearance bound. Flights, layout transitions and
+     unavailable clearance also defer. It never moves the eye or target.
+     Both checks and publications are limited to two per frame; round-robin
+     retries prevent a deferred entry from starving later candidates.
+   - Any craft retaining the affected system pins it, even far from the planet.
+     Any active route conservatively pins all adoption until destination/obstacle
+     rebasing is implemented. No existing craft field/route/state is replaced.
+   - Session-adopted projections live outside both candidate and voyage LRUs.
+     Backend refresh, revisits, remote inspection, spawning and incoming voyage
+     replies replay them onto the exact initial base. Origins/pages stay fixed;
+     late seeded fallback output cannot silently downgrade authority. This
+     registry is session-local, not a bounded candidate or persistent disk cache.
+   - Solver refusals retain the existing partitioned fallback geometry and
+     complete its refusal status. Adapter/worker failures retain active facts
+     with reasons. The inspector, debug panel and CLI expose applied/deferred/
+     unavailable status; disabling work never rolls back an adopted revision.
+   - Search remains synchronous and deterministic, explicitly marking loaded or
+     session-adopted differences not revalidated, without silently certifying,
+     reordering or removing matches. Exact layered search is not delivered here.
+   - **Verification:** `./scripts/check.sh` passes: 478 simulation tests,
+     391 client tests, 16 CLI tests, formatting and strict Clippy. All 22 envelope
+     fixtures also pass, including the source-backed cases. New regressions cover
+     the inspected cold-water planet's ice-boundary adoption, preserved forcing/
+     spin/orbits/metadata, refusal/failure retention, stale bases and epochs,
+     close/growing-body camera bounds, flights/layouts, craft and active-route
+     pins, bounded/fair retries, unchanged-frame cache invalidation, eviction/
+     revisits and late voyage replies. Logs:
+     `data/tmp/p3-adoption-{check,envelope}.log`. No new population census,
+     interactive client, visual run or performance benchmark was launched.
+5. **Legacy cleanup, the remaining P3 closure task.** Delete the obsolete legacy
+   structure/boundary solver, heuristic inertia, experimental comparison plumbing
+   and dead adapters. Keep useful active-result, candidate and deferral diagnostics.
+   Run full automated project checks after removal; the targeted interactive
+   checks in P4 are not prerequisites for this cleanup or P3 closure.
    Review remaining references so runtime, tests, overlays, search and remote
    craft generation no longer require them. Keep source-backed regression
    fixtures, formation/heating/orbit logic, and Seager/envelope fits used by
    fallback. Resolve H/He redistribution before shipping; missing local data
    continues to mean labelled fallback, never a hidden replacement EOS.
 
-No user decision blocks the contract/validation slice. The adoption guard and
-search provenance above are implementation recommendations, not already shipped
-policies. Escalate if safe deferral cannot preserve coherent camera/craft state,
+**P3 closure scope, user decision:** finish legacy cleanup and its automated
+regression checks, then close P3. Move the three targeted interactive adoption
+checks to P4. This changes phase acceptance scope, not implemented safety guards,
+and does not mark the deferred checks as passed.
+
+The conservative guard above remains implemented and enabled.
+Escalate if safe deferral cannot preserve coherent camera/craft state,
 or if an adapter requires a new physical prescription beyond accepted model
 limitations. Do not launch the user's visual/performance benchmarks, commit or
 push as part of this investigation.
 
 ### P3 completion checklist
 
-- Make the unified result authoritative for generated planets and retention.
-  Migrate snapshots, shape and spin, atmosphere and optics, rendering and
-  navigation to the same solved facts.
-- Use the fallback as the fast synchronous first answer while the layered solve
-  refines in the background; this replaces legacy's role.
-- Decide the H/He density resource: bundling permission for CMS19, or a
-  shippable replacement. Without it, envelope bodies drop to the fallback.
-- Provide summary-first composition, ordered regions, phase knowledge,
-  boundaries and model limitations in the inspector.
-- Require measured generation and search performance suitable for the game, full
-  project checks and the user's visual and interactive review before cutover.
-- Remove `structure::derive`, its heuristic inertia and legacy consumers only
-  after all runtime callers migrate. The Seager and envelope fits stay: the
-  fallback uses them.
+- **Source review checkpoint:** synchronous authority, consumer adapters and guarded background publication are
+  implemented. The earlier staging notes above describe historical migration
+  boundaries, not current behaviour.
+  The P2 92.8% figure belongs to its archived population, not a fresh census of
+  the changed retention path.
+- [x] Unified authoritative result and migrated consumers.
+- [x] Fast synchronous fallback with guarded background refinement.
+- [x] Inspector composition, regions, phase knowledge and model limitations.
+- [ ] Remove obsolete legacy solvers, heuristic inertia, consumers, adapters and
+  comparison plumbing; update references and owning guides. Keep the Seager and
+  envelope fits used by the fallback, scientific regression fixtures and useful
+  active/candidate/deferral diagnostics.
+- [ ] Run `./scripts/check.sh` and verify no runtime callers require removed code.
+  With cleanup and automated checks complete, P3 can close independently of P4.
+
+## P4. Targeted interactive adoption acceptance
+
+Deferred from P3 by user decision. These checks are **not yet performed or
+accepted**, even though automated regressions pass and the consumer visuals
+looked good at a glance:
+
+- [ ] Confirm solved candidates apply correctly when safe, with rendered facts,
+  inspector and physical consumers on the same adopted revision.
+- [ ] Confirm close cameras, craft and active routes defer changes correctly,
+  with clear reasons and no camera/craft relocation or trajectory disruption.
+- [ ] Confirm revisits retain adopted results, including after cache eviction.
+
+Address regressions found during these checks without weakening the implemented
+safety policy. Mid-flight craft/route rebasing remains absent; conservative
+deferral is the delivered behaviour, not unfinished P3 implementation.
+
+Shipping follow-ups remain separate from P3 cleanup: resolve CMS19 redistribution
+permission or a shippable replacement, and retain the user's generation/search
+performance and broader visual review gates before release. Missing local data
+continues to mean labelled fallback, never a hidden replacement EOS.
 
 ## Optional deeper physics, not prerequisites
 

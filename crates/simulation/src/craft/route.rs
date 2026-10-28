@@ -163,7 +163,7 @@ pub struct Target {
     pub reach_m: Option<f64>,
     /// GM of everything inside it, in m³/s².
     pub gm: f64,
-    /// Surface radius; zero for a barycentre.
+    /// Model reference radius, not certified ground; zero for a barycentre.
     pub radius_m: f64,
     /// The page star of its system; empty for a craft.
     pub system: String,

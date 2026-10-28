@@ -85,6 +85,36 @@ fn request(text: &str) -> SearchRequest {
     }
 }
 
+#[test]
+fn planet_search_discloses_its_synchronous_basis_and_detects_a_changed_loaded_revision() {
+    let key = "g13b6ffffcfeba.2.1";
+    let (cell, component, _) = crate::galaxy::cells::parse_cell_star(key).unwrap();
+    let plan = Query::parse(&format!("kind=planet system={key}"))
+        .unwrap()
+        .plan()
+        .unwrap();
+    let hits = evaluate(&plan, key, (cell, component), home(), 0.0);
+    let system = crate::system::generated_system(key, [0.0; 3]).unwrap();
+    assert!(!hits.is_empty());
+    for hit in hits {
+        let result = hit.result;
+        let ObjectRef::Planet { id } = &result.object else {
+            panic!("planet hit");
+        };
+        let mut planet = system.planets.iter().find(|p| p.id == *id).unwrap().clone();
+        assert!(result.matches_physical_basis(&planet));
+        assert_eq!(
+            result.physical_basis.as_ref().unwrap().provenance,
+            space_shared::ResultProvenance::Fallback
+        );
+        let encoded = serde_json::to_string(&result).unwrap();
+        let decoded: SearchResult = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, result);
+        planet.initial_result.as_mut().unwrap().revision.sequence += 1;
+        assert!(!result.matches_physical_basis(&planet));
+    }
+}
+
 fn run(request: SearchRequest, budget: u64, threads: usize) -> (Progress, Vec<SearchResult>) {
     let mut search = Search::new(request).unwrap();
     loop {
@@ -711,6 +741,7 @@ fn live_ship() -> (live::LiveObject, crate::star::multiple::Hosted) {
             system: key.clone(),
             distance_ly: 0.0,
             position_pc,
+            physical_basis: None,
         },
         system_key: key,
         altitude_km: 400.0,

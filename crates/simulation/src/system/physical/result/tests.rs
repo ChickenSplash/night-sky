@@ -117,6 +117,32 @@ fn layered_phases_and_hot_rock_are_not_inferred_from_legacy_ground_labels() {
 }
 
 #[test]
+fn live_layered_temperature_is_not_replaced_by_equilibrium_forcing() {
+    let forcing = environment(1800.0);
+    let b = budget(0.0, 0.0);
+    let solved = structure::prototype::solve(&b, &forcing, Default::default()).unwrap();
+    let result = resolved_result(
+        &structure::prototype::Outcome::Layered(Box::new(solved)),
+        revision(1),
+    )
+    .unwrap();
+    let facts = &result.record.physical;
+    let planet = space_shared::Planet {
+        mass_earth: facts.retained_mass_kg / EARTH_MASS_KG,
+        radius_km: facts.reference_radius_m / 1000.0,
+        inertia_factor: Some(facts.inertia_factor),
+        physical: Some(facts.clone()),
+        // Stellar forcing and the solved boundary temperature are separate.
+        environment: Some(environment(250.0)),
+        initial_result: Some(result),
+        ..Default::default()
+    };
+    super::super::validate(&planet).unwrap().unwrap();
+    let geometry = crate::system::surface::geometry(&planet).unwrap();
+    assert_eq!(geometry.condensed_phase, SurfaceKnowledge::Unresolved);
+}
+
+#[test]
 fn stale_revisions_and_inconsistent_lifecycle_are_rejected() {
     let b = budget(0.0, 0.0);
     let env = environment(250.0);

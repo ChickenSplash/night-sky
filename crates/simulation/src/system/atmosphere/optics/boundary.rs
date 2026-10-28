@@ -108,8 +108,7 @@ impl OpticalColumn {
         result: &PlanetResult,
         gas: &GasAtmosphere,
     ) -> Result<Self, AtmosphereError> {
-        let invalid = || AtmosphereError::InvalidValue("result optical reference");
-        physical::validate_result(result).map_err(|_| invalid())?;
+        let reference = Self::reference_from_result(result, gas)?;
         let record = &result.record;
         if record.layers.iter().any(|layer| {
             layer
@@ -121,6 +120,22 @@ impl OpticalColumn {
                 "suspended condensates require local vapour and cloud optical inputs",
             ));
         }
+        Self::new(
+            gas,
+            reference.gravity_m_s2 * reference.radius_m.powi(2),
+            reference.radius_m,
+        )
+    }
+
+    /// Transport consistency shared by optics and navigation. Does not require
+    /// a supported optical/cloud model and never substitutes total-mass gravity.
+    pub fn reference_from_result(
+        result: &PlanetResult,
+        gas: &GasAtmosphere,
+    ) -> Result<Reference, AtmosphereError> {
+        let invalid = || AtmosphereError::InvalidValue("result optical reference");
+        physical::validate_result(result).map_err(|_| invalid())?;
+        let record = &result.record;
         let facts = &record.physical;
         let one_bar = facts.radius_reference == RadiusReference::OneBar;
         let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(b.abs());
@@ -148,11 +163,13 @@ impl OpticalColumn {
             return Err(invalid());
         }
         // Enclosed-mass gravity is authoritative. Do not substitute total mass.
-        Self::new(
-            gas,
-            facts.reference_gravity_m_s2 * facts.reference_radius_m.powi(2),
-            facts.reference_radius_m,
-        )
+        Ok(Reference {
+            radius_m: facts.reference_radius_m,
+            gravity_m_s2: facts.reference_gravity_m_s2,
+            pressure_pa: record.surface_pressure_pa,
+            temperature_k: record.surface_temperature_k,
+            level: gas.reference_level(),
+        })
     }
 }
 

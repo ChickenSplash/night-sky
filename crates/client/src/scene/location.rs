@@ -190,7 +190,7 @@ pub fn locate_body(
         }
         let stale = field
             .as_ref()
-            .is_none_or(|f| f.system().id != system.id || f.page() != nav.page);
+            .is_none_or(|f| f.system() != system || f.page() != nav.page);
         if stale || lists.is_changed() {
             *field = Some(space_simulation::craft::Field::new(
                 system.clone(),

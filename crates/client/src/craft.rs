@@ -236,11 +236,11 @@ impl Fleet {
         self.craft.iter_mut().find(|live| live.craft.id == id)
     }
 
-    /// A new ship `altitude` metres above a body's surface, placed at the
+    /// A new ship `altitude` metres above a body's reference level, placed at the
     /// first world step at or after `seconds`. Returns its ID.
     pub fn spawn(
         &mut self,
-        system: StarSystem,
+        mut system: StarSystem,
         page: u32,
         body: &str,
         altitude: f64,
@@ -248,9 +248,13 @@ impl Fleet {
         seconds: f64,
     ) -> Result<String, String> {
         let tick = tick_at(seconds);
+        self.charts.restore_system(&mut system);
         let seconds = tick_seconds(tick);
         let star = objects::star_id(&system, page);
         let mass = body_mass(&system, page, body).ok_or_else(|| format!("No body `{body}`"))?;
+        if let Some(planet) = system.planets.iter().find(|p| p.id == body) {
+            space_simulation::system::physical::validate(planet).map_err(str::to_owned)?;
+        }
         let origin_pc =
             space_simulation::craft::voyage::frame_origin_pc(self.charts.sky(), &system, page);
         let field = Field::new(system, page);
@@ -302,7 +306,7 @@ impl Fleet {
         craft.reference = field
             .select_reference(None, state.position, seconds)
             .map(|reference| reference.id);
-        info!(target: "craft", "Spawned {id} {:.0} km above {body}", altitude / 1_000.0);
+        info!(target: "craft", "Spawned {id} {:.0} km above {body}'s reference level", altitude / 1_000.0);
         self.craft.push(Live {
             previous_orientation: craft.orientation,
             voyage: Voyage::new(craft, field, origin_pc),
@@ -762,6 +766,7 @@ pub fn live_objects(fleet: &Fleet, galaxy: &Galaxy, seconds: f64) -> Vec<LiveObj
                     system: crate::navigation::galaxy_nav::label(galaxy, &key),
                     distance_ly: 0.0,
                     position_pc: live.position_pc(seconds),
+                    physical_basis: None,
                 },
                 system_key: key,
                 altitude_km: altitude,

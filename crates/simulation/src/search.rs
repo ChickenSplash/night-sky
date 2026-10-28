@@ -13,7 +13,8 @@ mod tests;
 mod worker;
 
 pub use engine::{
-    DEFAULT_WORK_CAP, Origin, PC_PER_LY, Progress, Search, SearchRequest, SearchResult, State,
+    DEFAULT_WORK_CAP, Origin, PC_PER_LY, PhysicalBasis, Progress, Search, SearchRequest,
+    SearchResult, State,
 };
 pub use query::{Filter, Query, Scope, Sort, Test};
 pub use runner::SearchUpdate;

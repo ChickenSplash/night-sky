@@ -1,12 +1,17 @@
 //! Player-facing hierarchy over the shared physical facts. No generation changes.
 use super::{Info, Section, Value};
-use space_shared::{Planet, RadiusReference};
+use space_shared::Planet;
 
 pub(super) fn organise(info: &mut Info, planet: &Planet) {
     info.fields.retain(|field| field.id != "atmosphere.state");
     for field in &mut info.fields {
         field.section = match field.id.as_str() {
             "composition.gravity" | "atmosphere.pressure" => Section::Overview,
+            "result.status" | "result.surface" | "result.condensed_radius" => Section::Overview,
+            "result.inputs" | "result.sequence" | "result.limitations" | "result.fidelity" => {
+                Section::ModelDetails
+            }
+            id if id.starts_with("result.assessment.") => Section::ModelDetails,
             "composition.materials" | "composition.density" => Section::Composition,
             id if id.starts_with("composition.material.") => Section::Composition,
             "atmosphere.mixture" | "atmosphere.column_temperature" | "atmosphere.scale_height" => {
@@ -40,12 +45,17 @@ pub(super) fn organise(info: &mut Info, planet: &Planet) {
     let physical = space_simulation::system::physical::validate(planet);
     match physical {
         Ok(Some(data)) => {
-            let surface = match data.radius_reference {
-                RadiusReference::OneBar => "Gas envelope · no resolved ground; radius at 1 bar",
-                RadiusReference::SolidSurface => "Solid boundary · radius at approximate ground",
-                RadiusReference::UnresolvedVolatileBoundary => {
-                    "Unresolved water-rich boundary · surface phase unknown"
+            let surface = match planet.initial_result.as_ref().map(|r| r.surface_knowledge) {
+                Some(space_shared::SurfaceKnowledge::GasReference) => {
+                    "Radius at 1 bar · condensed boundary below, not a cloud deck or ground"
                 }
+                Some(space_shared::SurfaceKnowledge::Liquid) => {
+                    "Liquid boundary · not solid ground"
+                }
+                Some(space_shared::SurfaceKnowledge::SolidPhase) => {
+                    "Known solid phase · not certified landable terrain"
+                }
+                _ => "Condensed boundary · phase and landing safety unresolved",
             };
             info.field("planet.surface", "Surface / radius", None, surface);
             let gases: Vec<_> = data

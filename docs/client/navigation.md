@@ -76,7 +76,15 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
   `scene::locate_body` runs after camera placement, using the same
   simulation instant as the eye, including when following at high time
   rates. Render exaggeration, selection and following never affect it;
-  table/constellation layouts have no physical body location.
+   table/constellation layouts have no physical body location.
+
+The camera's neighbourhood field follows the complete active system record,
+including physical revisions with the same system ID. It is rebuilt when those
+facts change, not just on page/list changes. [Background adoption](../simulation/planet-composition.md#safe-background-adoption)
+defers while craft use the system or any active route retains geometry, and while
+the camera is near the old/new atmosphere or clearance bounds. Adopted facts
+survive revisits through the session registry. Model gas references, optical
+proxies and even known solid phases never grant landing permission.
 
 ## Moving with objects
 

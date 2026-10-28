@@ -6,7 +6,7 @@ use serde::Serialize;
 pub enum Section {
     #[default]
     Overview,
-    /// Experimental layered solve, beside the legacy facts it may disagree with.
+    /// Unapplied refinement candidate, beside the active authoritative result.
     Layered,
     Composition,
     Atmosphere,
@@ -26,7 +26,7 @@ impl Section {
     pub fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
-            Self::Layered => "Layered model (experimental)",
+            Self::Layered => "Background refinement",
             Self::Composition => "Composition",
             Self::Orbit => "Orbit and rotation",
             Self::ModelDetails => "Model details",

@@ -354,9 +354,14 @@ fn detail(
     let theme = &THEME;
     let galaxy = &view.universe.0;
     let position = crate::ui::inspector::position_ly(&result.object, view.nav, galaxy, view.field);
-    let info = browser
-        .inspector
-        .get(&result.object, galaxy, position, view.craft, None);
+    let info = browser.inspector.get(
+        &result.object,
+        galaxy,
+        position,
+        view.craft,
+        None,
+        view.nav.system(galaxy),
+    );
     kit::eyebrow(ui, theme, "Selected");
     let title = if info.title.is_empty() {
         &result.name
@@ -377,6 +382,40 @@ fn detail(
         .font(theme.small.id())
         .color(theme.dim),
     );
+    if let Some(basis) = &result.physical_basis {
+        let loaded = match &result.object {
+            space_simulation::objects::ObjectRef::Planet { id } => view
+                .nav
+                .system(galaxy)
+                .into_iter()
+                .chain(galaxy.systems.iter())
+                .flat_map(|s| &s.planets)
+                .find(|p| p.id == *id),
+            _ => None,
+        };
+        let retained = match &result.object {
+            space_simulation::objects::ObjectRef::Planet { id } => {
+                view.craft.fleet.charts.refinement(id)
+            }
+            _ => None,
+        };
+        let changed = loaded.is_some_and(|p| !result.matches_physical_basis(p))
+            || retained.is_some_and(|r| {
+                r.result.revision != basis.revision || r.result.provenance != basis.provenance
+            });
+        ui.label(
+            egui::RichText::new(if changed {
+                "Active physics differs: this search match is not revalidated".to_owned()
+            } else {
+                format!(
+                    "Search basis: synchronous {:?} · not a layered-match guarantee",
+                    basis.provenance
+                )
+            })
+            .font(theme.small.id())
+            .color(theme.dim),
+        );
+    }
     let actions =
         crate::ui::inspector::actions(&result.object, view.nav, galaxy, view.field, view.craft);
     ui.horizontal_wrapped(|ui| {
@@ -405,9 +444,14 @@ fn detail(
             ui.ctx().copy_text(id);
         }
     });
-    let info = browser
-        .inspector
-        .get(&result.object, galaxy, position, view.craft, None);
+    let info = browser.inspector.get(
+        &result.object,
+        galaxy,
+        position,
+        view.craft,
+        None,
+        view.nav.system(galaxy),
+    );
     let rows: Vec<(&str, String)> = info
         .rows()
         .map(|(label, value)| (label, value.to_owned()))

@@ -276,7 +276,7 @@ mod tests {
                     && value.contains("Inventory-normalised"))
         );
         assert!(info.rows().any(|(label, value)| label == "Radius meaning"
-            && value.contains("Approximate condensed boundary")));
+            && value.contains("Condensed reference boundary")));
     }
 
     #[test]

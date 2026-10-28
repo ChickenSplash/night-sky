@@ -227,7 +227,9 @@ and clock are never touched.
   excess speed $\sqrt{2E}$, the speed it keeps once far away. It is always
   faster than that, so even a slow escape is predicted past the edge. At most 100 years, and at most 6,000 steps, each kept as a sample.
 - **How it ended:** the planned horizon, `Truncated` when the step budget ran
-  out first, or `Impact` at a body's surface. There are no collisions, so
+  out first, or `Impact` at a body's model reference boundary. This historical
+  wire name is not proof of a solid impact: a planet may reference gas or liquid.
+  The inspector labels it a model-boundary crossing. There are no collisions, so
   the real craft would pass through; the forecast stops there instead.
 - **Events:** sampled periapses and apoapses, where the radial speed changes
   sign, placed on the cubic between samples; and predicted reference
@@ -560,6 +562,16 @@ itself, so replays and servers run it from the same inputs.
 `system::clearance` gives each star and planet two radii from its centre,
 worked out once per loaded system. Route steering, standoffs and safety
 stops use them; future collision and approach assists should too.
+Planet records are checked against their active result first. Column gravity
+comes from enclosed mass at the selected reference, while orbital speed uses
+retained total mass. The bound encloses the condensed top as well as the gas
+reference. Suspended-condensate drag is explicitly unsupported, not ignored.
+Craft retain their coherent field/route snapshot; [background adoption](planet-composition.md#safe-background-adoption)
+defers for systems held by a craft, and globally while any active route exists.
+New spawns and voyage arrivals use session-adopted facts, including after cache
+eviction or a late seeded worker reply. Their origin/page is not rebased by this
+projection. Spawn altitude and the `around.radius_basis` readout refer to the
+selected model radius, never certified ground or landing permission.
 
 - **Exclusion:** equatorial radius + atmosphere clearance height + hull
   (30 m) + 1 km safety. The routes never plot into it or past it. A sphere

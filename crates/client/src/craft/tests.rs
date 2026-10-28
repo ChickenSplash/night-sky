@@ -1232,6 +1232,8 @@ fn a_predicted_path_is_anchored_where_its_planet_is_now() {
     planet.mass_earth = 1.0;
     planet.radius_km = 6371.0;
     planet.inertia_factor = Some(0.33);
+    planet.physical = None;
+    planet.initial_result = None;
     planet.environment = None;
     planet.orbit = space_shared::Orbit {
         semi_major_au: 1.0,

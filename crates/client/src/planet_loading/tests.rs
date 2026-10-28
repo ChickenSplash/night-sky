@@ -20,9 +20,9 @@ fn fallback_record() -> Box<LayeredPlanet> {
 }
 
 #[test]
-fn disabled_by_default_and_switching_discards_stale_results() {
+fn enabled_by_default_and_switching_discards_stale_results() {
     let mut l = PlanetLoading::default();
-    assert!(!l.enabled);
+    assert!(l.enabled);
     l.target(Some("first".into()));
     let epoch = l.epoch;
     let cancellation = l.cancel.clone();
@@ -176,6 +176,16 @@ fn selected_planet_runs_first_and_solves_off_thread() {
             designation: id.into(),
             budget,
             environment: environment.clone(),
+            initial_result: physical::initial_result(
+                &budget,
+                &environment,
+                space_shared::PhysicalRevision {
+                    inputs: id.into(),
+                    model: "test".into(),
+                    sequence: 0,
+                },
+            )
+            .unwrap(),
         });
     }
     l.dispatch(Some("selected"));
@@ -191,7 +201,7 @@ fn selected_planet_runs_first_and_solves_off_thread() {
         .recv_timeout(std::time::Duration::from_secs(10))
         .unwrap();
     assert!(
-        matches!(&message, Message::Planet { id, result: Ok(l), .. } if l.fallback_reason.is_none() && id == "selected")
+        matches!(&message, Message::Ready { id, record, refinement: Ok(_), .. } if record.fallback_reason.is_none() && id == "selected")
     );
     l.sender.send(message).unwrap();
     l.receive();

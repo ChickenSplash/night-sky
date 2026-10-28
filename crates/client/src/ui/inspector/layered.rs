@@ -1,5 +1,4 @@
-//! The experimental layered solve beside the legacy facts. Shown only while the
-//! mode is on; the drawn planet keeps its legacy radius and air.
+//! Active result detail and a separately labelled, unapplied refinement candidate.
 use super::{Info, Section, atmosphere::pressure_display, composition::material_label};
 use crate::planet_loading::{Layered, PlanetState};
 use space_shared::{AtmosphereReference, Layer, LayeredPlanet, ModelFidelity, Planet};
@@ -13,7 +12,7 @@ pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
                 "layered.status",
                 "Status",
                 None,
-                "Waiting · legacy model shown",
+                "Waiting · active result unchanged",
             );
             return;
         }
@@ -22,17 +21,30 @@ pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
     let solved = match state {
         PlanetState::Solved(solved) | PlanetState::Fallback(solved) => solved,
         PlanetState::Queued | PlanetState::Running => {
-            let text = format!("{} · legacy model shown", state.label());
+            let text = format!("{} · active result unchanged", state.label());
             info.field("layered.status", "Status", None, text);
             return;
         }
         PlanetState::Failed(e) => {
-            let text = format!("Legacy model (calculation failed: {e})");
+            let text = format!("Active result retained (calculation failed: {e})");
             info.field("layered.status", "Status", None, text);
             return;
         }
     };
-    info.field("layered.status", "Status", None, state.label());
+    if planet
+        .initial_result
+        .as_ref()
+        .is_some_and(|r| r.revision.sequence > 0 && r.record == **solved)
+    {
+        info.field("layered.status", "Status", None, "Applied · active result");
+        return;
+    }
+    info.field(
+        "layered.status",
+        "Status",
+        None,
+        format!("{} · candidate, not applied", state.label()),
+    );
     info.field(
         "layered.surface",
         if solved.surface == "envelope" {
@@ -63,46 +75,46 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
     let radius_km = l.physical.reference_radius_m / 1000.0;
     info.field(
         "layered.radius",
-        "Radius (new vs legacy)",
+        "Radius (candidate vs active)",
         Some("km"),
         format!(
-            "{radius_km:.0} km vs {:.0} km ({:+.2}%) · drawn at legacy radius",
+            "{radius_km:.0} km vs {:.0} km ({:+.2}%) · active radius drawn",
             planet.radius_km,
             (radius_km / planet.radius_km - 1.0) * 100.0
         ),
     );
-    let legacy_air = planet
+    let active_air = planet
         .environment
         .as_ref()
         .and_then(|e| e.atmosphere.as_ref());
-    let legacy_temperature = legacy_air.map_or("no legacy estimate".into(), |air| {
+    let active_temperature = active_air.map_or("no active gas estimate".into(), |air| {
         format!("{:.0} K", air.temperature_k)
     });
     info.field(
         "layered.temperature",
         if envelope {
-            "1 bar temperature (new vs legacy)"
+            "1 bar temperature (candidate vs active)"
         } else {
-            "Surface temperature (new vs legacy)"
+            "Surface temperature (candidate vs active)"
         },
         Some("K"),
-        format!("{:.0} K vs {legacy_temperature}", l.surface_temperature_k),
+        format!("{:.0} K vs {active_temperature}", l.surface_temperature_k),
     );
-    let legacy_pressure = match legacy_air {
-        None => "no legacy air".into(),
+    let active_pressure = match active_air {
+        None => "no active gas column".into(),
         Some(air) if air.reference_level == AtmosphereReference::OneBar => "1 bar reference".into(),
         Some(air) => pressure_display(air.pressure_pa).1,
     };
     info.field(
         "layered.pressure",
         if envelope {
-            "Reference pressure (new vs legacy)"
+            "Reference pressure (candidate vs active)"
         } else {
-            "Surface pressure (new vs legacy)"
+            "Surface pressure (candidate vs active)"
         },
         None,
         format!(
-            "{} vs {legacy_pressure}",
+            "{} vs {active_pressure}",
             if l.surface_pressure_pa > 0.0 {
                 pressure_display(l.surface_pressure_pa).1
             } else {
@@ -130,9 +142,86 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
             ),
         );
     }
+    regions(info, "layered", l);
+    info.field(
+        "layered.models",
+        "Models",
+        None,
+        l.physical.approximations.join(", "),
+    );
+}
+
+pub(super) fn active(info: &mut Info, planet: &Planet) {
+    let Some(result) = &planet.initial_result else {
+        return;
+    };
+    info.section = Section::Composition;
+    if space_simulation::system::physical::validate(planet).is_err() {
+        info.unknown(
+            "result.status",
+            "Active result",
+            "Invalid projections or result",
+        );
+        return;
+    }
+    info.field(
+        "result.status",
+        "Active result",
+        None,
+        format!("{:?} · {:?}", result.provenance, result.refinement),
+    );
+    info.field(
+        "result.sequence",
+        "Physical revision",
+        None,
+        format!(
+            "{} · sequence {}",
+            result.revision.model, result.revision.sequence
+        ),
+    );
+    info.field(
+        "result.inputs",
+        "Input identity",
+        None,
+        result.revision.inputs.clone(),
+    );
+    info.field(
+        "result.surface",
+        "Boundary phase knowledge",
+        None,
+        format!("{:?} · not landing permission", result.surface_knowledge),
+    );
+    info.field(
+        "result.fidelity",
+        "Model fidelity",
+        None,
+        fidelity_label(result.record.model_fidelity),
+    );
+    info.field(
+        "result.limitations",
+        "Model limitations",
+        None,
+        result.record.model_limitations.join(" · "),
+    );
+    if let Ok(geometry) = space_simulation::system::surface::Geometry::from_result(result) {
+        info.field(
+            "result.condensed_radius",
+            "Condensed top",
+            Some("km"),
+            format!(
+                "{:.1} km · {:?} phase · separate from gas reference",
+                geometry.condensed_radius_m / 1000.0,
+                geometry.condensed_phase
+            ),
+        );
+    }
+    regions(info, "result", &result.record);
+}
+
+fn regions(info: &mut Info, prefix: &str, l: &LayeredPlanet) {
     for (index, layer) in l.layers.iter().enumerate() {
         info.field(
-            &format!("layered.layer.{index}"),
+            &format!("{prefix}.layer.{index}"),
             &format!(
                 "{} · {}",
                 layer_label(&layer.kind),
@@ -142,7 +231,7 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
             layer_text(layer),
         );
         info.field(
-            &format!("layered.assessment.{index}"),
+            &format!("{prefix}.assessment.{index}"),
             "Region model",
             None,
             format!(
@@ -154,7 +243,7 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
         );
         if !layer.phase_allocations.is_empty() {
             info.field(
-                &format!("layered.phases.{index}"),
+                &format!("{prefix}.phases.{index}"),
                 "Suspended phase split",
                 None,
                 layer
@@ -174,12 +263,6 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
             );
         }
     }
-    info.field(
-        "layered.models",
-        "Models",
-        None,
-        l.physical.approximations.join(", "),
-    );
 }
 
 fn fidelity_label(fidelity: ModelFidelity) -> &'static str {

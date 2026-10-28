@@ -24,7 +24,7 @@ pub struct Reference {
     pub kind: ReferenceKind,
     /// GM of everything inside it in m³/s²: a pair's is all its stars'.
     pub gm: f64,
-    /// Surface radius; zero for a barycentre.
+    /// Selected model reference radius, not certified ground; zero for a barycentre.
     pub radius_m: f64,
     pub state: State,
     /// Radius of the region around it where it is chosen: a planet's Hill

@@ -148,6 +148,78 @@ fn check(source: bool) {
                 .flat_map(|l| &l.phase_allocations)
                 .any(|p| p.condensate_kg > 0.0)
         );
+        // A supported physical transport is not a supported cloud/drag model.
+        // This supplies only the declared global gas-mixture reference proxy,
+        // not invented local vapour/cloud optics for the resolved condensate.
+        use crate::system::{
+            atmosphere::{
+                Composition, Gas, GasAtmosphere, ReferenceLevel, optics::boundary::OpticalColumn,
+            },
+            physical,
+        };
+        let weights = Gas::ALL.map(|gas| {
+            let mass = record
+                .physical
+                .materials
+                .iter()
+                .find(|m| m.material == Material::from_gas(gas).id())
+                .unwrap()
+                .gas_kg;
+            (gas, mass / gas.molecular_mass_u())
+        });
+        let total: f64 = weights.iter().map(|(_, w)| w).sum();
+        let gas = GasAtmosphere::new(
+            Composition::new(&weights.map(|(g, w)| (g, w / total))).unwrap(),
+            ReferenceLevel::OneBar,
+            record.surface_pressure_pa,
+            record.surface_temperature_k,
+            None,
+        )
+        .unwrap();
+        let result = physical::resolved_result(
+            &super::super::super::prototype::Outcome::Layered(Box::new(solved)),
+            space_shared::PhysicalRevision {
+                inputs: "suspended-consumer".into(),
+                model: "fixture".into(),
+                sequence: 1,
+            },
+        )
+        .unwrap();
+        let reference = OpticalColumn::reference_from_result(&result, &gas).unwrap();
+        assert!(OpticalColumn::from_result(&result, &gas).is_err());
+        let planet = space_shared::Planet {
+            mass_earth: record.physical.retained_mass_kg / EARTH_MASS_KG,
+            radius_km: record.physical.reference_radius_m / 1000.0,
+            inertia_factor: Some(record.physical.inertia_factor),
+            physical: Some(record.physical.clone()),
+            environment: Some(space_shared::PlanetEnvironment {
+                irradiation_w_m2: 1361.0,
+                equilibrium_temperature_k: 100.0,
+                assumed_bond_albedo: 0.3,
+                age_gyr: 4.5,
+                atmosphere: Some(
+                    gas.to_data(
+                        reference.gravity_m_s2 * reference.radius_m.powi(2),
+                        reference.radius_m,
+                    )
+                    .unwrap(),
+                ),
+            }),
+            initial_result: Some(result),
+            ..Default::default()
+        };
+        physical::validate(&planet).unwrap().unwrap();
+        assert!(
+            crate::system::surface::geometry(&planet)
+                .unwrap()
+                .has_gas_depth()
+        );
+        assert!(
+            crate::system::clearance::Policy::default()
+                .planet(&planet)
+                .unwrap_err()
+                .contains("Suspended-condensate")
+        );
         eprintln!(
             "suspended source={source} z={z}: R={} km condensate={} kg phase refinement={}",
             record.physical.reference_radius_m / 1000.0,

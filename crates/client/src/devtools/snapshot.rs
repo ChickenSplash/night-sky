@@ -203,6 +203,20 @@ pub(super) fn publish(
     });
     {
         let mut state = state;
+        // Same authoritative records as the rendered page, not loader candidates.
+        state["planet_results"] = json!(nav.system(&universe.0).map(|system| {
+            system
+                .on_page(nav.page)
+                .map(|planet| {
+                    json!({
+                        "id": planet.id,
+                        "active": planet.initial_result,
+                        "geometry": space_simulation::system::surface::geometry(planet).ok(),
+                        "valid": space_simulation::system::physical::validate(planet).is_ok(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        }));
         state["process_id"] = json!(std::process::id());
         // The prototype air on the selected planet, for `ns atmosphere`.
         state["atmosphere"] = json!(*tuning);
@@ -341,7 +355,7 @@ mod tests {
         assert_eq!(state["inspector"]["title"], "Milky Way");
         assert_eq!(state["inspector"]["inspection"], state["inspection"]);
         assert!(state["inspector"]["facts"].is_array());
-        assert_eq!(state["planet_loading"]["enabled"], false);
+        assert_eq!(state["planet_loading"]["enabled"], true);
         assert!(state["planet_loading"]["system"].is_null());
         assert_eq!(state["inspector"]["actions"][0]["label"], "View from above");
         // Rate-limited publishing must not stop per-frame history recording.

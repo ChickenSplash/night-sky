@@ -25,7 +25,7 @@ crates/client/       Bevy client and egui interface
   src/input/         Named bindings, input capture and ship piloting
   src/format.rs      Shared text formatting
   src/search/        Object search requests, settings and the shared store
-  src/planet_loading.rs Experimental background refinement queue and result cache
+  src/planet_loading.rs Background refinement queue, guarded adoption and candidate cache
   src/scene/         Camera, controls, location, placement and wireframes
   src/stars/         Galactic star streaming, batching, drawing and shaders
     starfield/       Budgeted batches, precise sprites, multiple-system resolution and culling

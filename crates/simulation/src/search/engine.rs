@@ -85,6 +85,27 @@ pub struct SearchResult {
     /// Its system's position, in parsecs from the galactic centre, so it can
     /// be visited without being found again.
     pub position_pc: [f64; 3],
+    /// Planet properties were evaluated on these synchronous facts, never on
+    /// whichever background worker finished first. Absent for non-planets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_basis: Option<PhysicalBasis>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhysicalBasis {
+    pub provenance: space_shared::ResultProvenance,
+    pub revision: space_shared::PhysicalRevision,
+}
+
+impl SearchResult {
+    /// A changed loaded revision is not a certified match to the original
+    /// query. Keep the deterministic search hit, but disclose its stale basis.
+    pub fn matches_physical_basis(&self, planet: &space_shared::Planet) -> bool {
+        matches!((&self.object, &self.physical_basis, &planet.initial_result),
+            (ObjectRef::Planet { id }, Some(basis), Some(result))
+                if *id == planet.id && basis.revision == result.revision
+                    && basis.provenance == result.provenance)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -803,6 +824,10 @@ pub(crate) fn evaluate(
                 system: system.clone(),
                 distance_ly: distance_pc / PC_PER_LY,
                 position_pc,
+                physical_basis: facts.planet.map(|(p, _)| PhysicalBasis {
+                    provenance: p.body.initial_result.provenance,
+                    revision: p.body.initial_result.revision.clone(),
+                }),
             },
         }
     };

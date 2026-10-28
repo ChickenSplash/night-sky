@@ -17,6 +17,7 @@ PLANET_LOADING = {
     "enabled": True, "shared_cpu_threads": 15, "cached_systems": ["g1.2.3"],
     "system": {"id": "g1.2.3", "initial_generation_ms": 1.5, "error": None, "planets": [
         {"id": "g1.2.3/1", "designation": "TS 1-2-3 b", "state": "solved", "status": "Solved",
+         "adoption": "Deferred: camera is near the refined body",
          "layered": {"surface": "ocean", "surface_temperature_k": 288.2, "surface_pressure_pa": 101325.0,
                      "physical": {"reference_radius_m": 6.4e6}, "layers": [{}, {}, {}, {}]}},
         {"id": "g1.2.3/2", "designation": "TS 1-2-3 c", "state": "unsupported",
@@ -210,6 +211,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.server.requests[-1][1], "/state/planet_loading")
         self.assertIn("layered calculations: on · shared CPU threads 15", result.stdout)
         self.assertIn("TS 1-2-3 b: ocean, 288 K, 1.013 bar, 6400 km, 4 layers", result.stdout)
+        self.assertIn("Deferred: camera is near the refined body", result.stdout)
         self.assertIn("TS 1-2-3 c: Unsupported: dense gas", result.stdout)
         result = self.run_cli("planets", "off")
         self.assertEqual(result.returncode, 0, result.stderr)

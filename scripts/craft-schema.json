@@ -1339,6 +1339,16 @@
       },
       {
         "group": "position",
+        "help": "Meaning of altitude zero, never landing permission.",
+        "key": [
+          "around",
+          "radius_basis"
+        ],
+        "kind": "text",
+        "label": "around · radius basis"
+      },
+      {
+        "group": "position",
         "key": [
           "around",
           "altitude_km"

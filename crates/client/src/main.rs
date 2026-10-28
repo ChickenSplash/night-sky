@@ -110,6 +110,7 @@ fn main() {
         Update,
         (
             receive_galaxy,
+            planet_loading::restore,
             actions::apply,
             input::read,
             input::pilot::steer,
@@ -122,7 +123,9 @@ fn main() {
             devtools::gpu_test::run,
             devtools::atmosphere_test::run,
             scene::locate,
+            planet_loading::restore_visit,
             scene::place_camera,
+            planet_loading::update,
             scene::locate_body,
             scene::locate_anchor,
             scene::measure_velocity,
@@ -142,7 +145,6 @@ fn main() {
         (ui::draw_ui, devtools::draw.after(ui::draw_ui)),
     );
     app.add_systems(Update, devtools::smoke::exercise);
-    app.add_systems(Update, planet_loading::update.after(scene::locate));
     devtools::snapshot::install(&mut app);
     devtools::install_http(&mut app);
     app.run();

@@ -112,32 +112,74 @@ fn wire_derived_values_are_recomputed_and_invalid_inputs_do_not_reach_gpu() {
     assert!(for_planet(&planet(Gas::Nitrogen), false, None, f64::INFINITY).is_none());
 }
 
+fn generated(system: &str, id: &str) -> Planet {
+    space_simulation::system::generated_system(system, [0.0; 3])
+        .unwrap()
+        .planets
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap()
+}
+
 #[test]
-fn live_optical_contract_never_uses_staged_candidate_geometry_or_layers() {
+fn generated_optics_come_from_the_result_and_unchecked_records_draw_no_air() {
     use space_simulation::system::atmosphere::optics::boundary::LowerBoundaryKind;
-    let mut world = planet(Gas::Nitrogen);
-    let expected = optical_column(&world).unwrap();
-    let expected_air = atmosphere(&world).unwrap();
+    let world = generated("g13b6ffffcfeba.2.339", "g13b6ffffcfeba.2.339/7");
+    let facts = &world.initial_result.as_ref().unwrap().record.physical;
+    let column = optical_column(&world).unwrap();
+    assert_eq!(column.reference.radius_m, facts.reference_radius_m);
+    let gravity = column.reference.gravity_m_s2 / facts.reference_gravity_m_s2;
+    assert!((gravity - 1.0).abs() < 1e-12);
     assert_eq!(
-        expected.lower_boundary.kind,
+        column.lower_boundary.kind,
         LowerBoundaryKind::CondensedReferenceProxy
     );
-    assert_eq!(expected.reference.radius_m, world.radius_km * 1e3);
-    assert_eq!(expected.outer_cutoff.height_m, expected_air.top);
-    world.initial_result =
-        space_simulation::system::generated_system("g1e0024924b.2.231", [0.0; 3])
-            .unwrap()
-            .planets
-            .into_iter()
-            .find_map(|p| p.initial_result);
-    let staged = world.initial_result.as_mut().unwrap();
-    staged.record.physical.reference_radius_m = 1e12;
-    staged.record.physical.reference_gravity_m_s2 = f64::NAN;
-    staged.record.layers.clear();
-    assert_eq!(optical_column(&world), Some(expected));
-    assert_eq!(atmosphere(&world), Some(expected_air));
-    assert!(!deep_envelope(&world));
+    assert_eq!(
+        column.outer_cutoff.height_m,
+        atmosphere(&world).unwrap().top
+    );
     assert!(!envelope(&world));
+
+    // Mixed projections must not render a shell at a different geometry.
+    let mut moved = world.clone();
+    moved.radius_km *= 2.0;
+    moved.mass_earth *= 3.0;
+    assert!(optical_column(&moved).is_none());
+
+    // Air that disagrees with its result, a corrupt result, or a physical
+    // record without its result is never drawn.
+    let mut mismatched = world.clone();
+    let air = mismatched.environment.as_mut().unwrap();
+    air.atmosphere.as_mut().unwrap().pressure_pa *= 2.0;
+    assert!(atmosphere(&mismatched).is_none());
+    let mut corrupt = world.clone();
+    let result = corrupt.initial_result.as_mut().unwrap();
+    result.record.physical.reference_gravity_m_s2 = f64::NAN;
+    assert!(atmosphere(&corrupt).is_none());
+    let mut unchecked = world.clone();
+    unchecked.initial_result = None;
+    assert!(atmosphere(&unchecked).is_none());
+    assert!(!envelope(&unchecked) && !deep_envelope(&unchecked));
+}
+
+#[test]
+fn envelope_follows_the_results_surface_knowledge() {
+    let envelope_world = (0..40)
+        .filter_map(|i| {
+            space_simulation::system::generated_system(&format!("g13b6ffffcfeba.2.{i}"), [0.0; 3])
+        })
+        .flat_map(|system| system.planets)
+        .find(|p| {
+            p.initial_result.as_ref().unwrap().surface_knowledge
+                == space_shared::SurfaceKnowledge::GasReference
+        })
+        .unwrap();
+    assert!(envelope(&envelope_world));
+    let column = optical_column(&envelope_world).unwrap();
+    assert_eq!(
+        column.lower_boundary.kind,
+        space_simulation::system::atmosphere::optics::boundary::LowerBoundaryKind::GasReferenceProxy
+    );
 }
 
 #[test]
@@ -185,6 +227,8 @@ fn motivating_generated_boundary_reaches_renderer_and_is_not_an_envelope_proxy()
     let generated = atmosphere(world).unwrap();
     assert!((generated.top - data.extent_m).abs() < 1e-8);
     assert!(for_planet(world, false, None, world.radius_km * 1e3).is_some());
+    // A one-bar column at the same result reference, for comparison only:
+    // optics never draw live air that disagrees with the result.
     let mut reference = world.clone();
     reference
         .environment
@@ -194,7 +238,29 @@ fn motivating_generated_boundary_reaches_renderer_and_is_not_an_envelope_proxy()
         .as_mut()
         .unwrap()
         .pressure_pa = 1e5;
-    let one_bar = atmosphere(&reference).unwrap();
+    assert!(atmosphere(&reference).is_none());
+    let column = optical_column(world).unwrap();
+    let gas = GasAtmosphere::try_from(
+        reference
+            .environment
+            .as_ref()
+            .unwrap()
+            .atmosphere
+            .as_ref()
+            .unwrap(),
+    )
+    .unwrap();
+    let thin = OpticalColumn::new(
+        &gas,
+        column.reference.gravity_m_s2 * column.reference.radius_m.powi(2),
+        column.reference.radius_m,
+    )
+    .unwrap();
+    let one_bar = Atmosphere {
+        top: thin.outer_cutoff.height_m,
+        rayleigh: DVec3::from_array(thin.optics.rayleigh_m_inv),
+        ..generated
+    };
     assert!(generated.top > one_bar.top);
     assert!(
         (generated.rayleigh / one_bar.rayleigh - DVec3::splat(data.pressure_pa / 1e5)).length()
@@ -265,9 +331,9 @@ fn rocky_boundary_and_bulk_envelope_descent_are_distinct_and_label_independent()
     assert!(data.extended);
     assert_eq!(air.scaled(world.radius_km * 1e3).radius_scale, 1.0);
 
-    // A different pressure-reference label must not turn trace gas into a giant.
-    let mut unresolved = world.clone();
-    unresolved
+    // Live labels alone do not make an envelope; the result decides.
+    let mut relabelled = world.clone();
+    relabelled
         .environment
         .as_mut()
         .unwrap()
@@ -275,8 +341,15 @@ fn rocky_boundary_and_bulk_envelope_descent_are_distinct_and_label_independent()
         .as_mut()
         .unwrap()
         .reference_level = AtmosphereReference::OneBar;
-    unresolved.physical.as_mut().unwrap().radius_reference = space_shared::RadiusReference::OneBar;
-    assert!(envelope(&unresolved));
+    relabelled.physical.as_mut().unwrap().radius_reference = space_shared::RadiusReference::OneBar;
+    assert!(!envelope(&relabelled));
+
+    // Changing a coordinate without its physical record does not manufacture depth.
+    let mut unresolved = world.clone();
+    let result = unresolved.initial_result.as_mut().unwrap();
+    result.record.physical.radius_reference = space_shared::RadiusReference::OneBar;
+    result.surface_knowledge = space_shared::SurfaceKnowledge::GasReference;
+    assert!(!envelope(&unresolved));
     assert!(!deep_envelope(&unresolved));
 
     let giants =
@@ -306,6 +379,62 @@ fn spherical_rebasing_preserves_gas_extinction_above_the_reference() {
             / f64::from(deep.radius_scale);
         assert!((rebased / original - DVec3::ONE).abs().max_element() < 1e-4);
     }
+}
+
+#[test]
+fn continuation_stops_at_the_condensed_top_not_an_abundance_threshold() {
+    let air = for_planet(&planet(Gas::Nitrogen), false, None, 6.371e6).unwrap();
+    let ratio = 0.9999;
+    let (surface, reached) = rebase(air, ratio);
+    assert!(reached);
+    assert_eq!(surface.radius_scale, ratio);
+    assert!(surface.radius_scale < 1.0);
+    assert!(!surface.opaque_proxy);
+    let (proxy, reached) = rebase(air, 0.1);
+    assert!(!reached);
+    assert!(proxy.opaque_proxy);
+    assert!(proxy.radius_scale > 0.1);
+    // Rebasing only changes coordinates, not the optical radius above them.
+    assert!((surface.top * surface.radius_scale - air.top).abs() < 1e-6);
+}
+
+#[test]
+fn thin_envelopes_can_show_the_condensed_top_through_their_air() {
+    use space_simulation::system::surface::geometry;
+    let world = (0..60)
+        .filter_map(|i| {
+            space_simulation::system::generated_system(&format!("g13b6ffffcfeba.2.{i}"), [0.0; 3])
+        })
+        .flat_map(|s| s.planets)
+        .find(|p| {
+            geometry(p).is_ok_and(|g| {
+                g.has_gas_depth() && g.condensed_radius_m / g.reference_radius_m > 0.8
+            }) && p.physical.as_ref().unwrap().h_he_mass_fraction < 0.02
+        })
+        .unwrap();
+    assert!(deep_envelope(&world));
+    let air = for_planet(&world, false, None, world.radius_km * 1000.0).unwrap();
+    // A wide but explicitly hand-set optical profile reaches this shallow top.
+    let air = Air {
+        rayleigh: air.rayleigh.truncate().extend(0.1),
+        ..air
+    };
+    let (lower, ground) = lower_boundary(&world, Some(air), true);
+    assert!(ground);
+    let g = geometry(&world).unwrap();
+    assert!(
+        (f64::from(lower.unwrap().radius_scale) - g.condensed_radius_m / g.reference_radius_m)
+            .abs()
+            < 1e-7
+    );
+    assert!(!lower_boundary(&world, Some(air), false).1);
+    assert!(!lower_boundary(&world, None, true).1);
+    let mut relabelled = world.clone();
+    relabelled.class = "Completely different label".into();
+    assert_eq!(
+        lower_boundary(&world, Some(air), true),
+        lower_boundary(&relabelled, Some(air), true)
+    );
 }
 
 #[test]

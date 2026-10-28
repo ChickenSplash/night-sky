@@ -23,6 +23,7 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
             return;
         }
     };
+    super::layered::active(info, planet);
     info.field(
         "composition.retained",
         "Retained mass",
@@ -52,9 +53,11 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
         "Radius meaning",
         None,
         match data.radius_reference {
-            RadiusReference::SolidSurface => "Approximate condensed boundary (nominal dry ground)",
+            RadiusReference::SolidSurface => {
+                "Condensed reference boundary (not landing permission)"
+            }
             RadiusReference::UnresolvedVolatileBoundary => {
-                "Approximate condensed boundary (water phases unresolved)"
+                "Condensed reference boundary (see explicit phase knowledge)"
             }
             RadiusReference::OneBar => {
                 "One-bar envelope reference (deep boundary unresolved, not ground/clouds)"

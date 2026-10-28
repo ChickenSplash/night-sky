@@ -646,11 +646,17 @@ pub fn apply(
                             &mut nav, galaxy, &field, star,
                         ))
                 {
+                    if let Some(crate::Visit::Generated(system)) = &mut nav.visit {
+                        fleet.charts.restore_system(system);
+                    }
                     nav.select(Some(Selection::Planet(planet.clone())));
                     nav.focus_selected(galaxy);
                 }
             }
             UiCommand::Follow => {
+                if let Some(crate::Visit::Generated(system)) = &mut nav.visit {
+                    fleet.charts.restore_system(system);
+                }
                 if crate::craft::followed(&nav, galaxy, &fleet, clock.0.seconds).is_some() {
                     nav.follow_craft();
                 } else {

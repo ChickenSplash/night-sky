@@ -57,7 +57,10 @@ The caller supplies GM in m³/s² and the radius of that level in metres.
 For spheroids use the existing volume-equivalent mean radius; the column
 currently ignores latitude, rotation and atmospheric self-gravity. The column does
 not independently choose geometry. Generation takes the reference from the
-planet's result and gives the same radius to geometry, column, optics and clearance.
+planet's result and gives the same reference to column, optics and clearance.
+Their gravity is the result's enclosed-mass reference value, while orbital
+calculations use retained total mass. Condensed-top geometry is separate from
+that gas coordinate; see [consumer boundaries](planet-composition.md#consumer-boundary-semantics).
 
 The reference temperature is a representative **isothermal gas-column
 temperature**, not an equilibrium-temperature calculation or a solved
@@ -275,11 +278,15 @@ independently of structural layers and navigation clearance:
   [existing cutoff](#derived-column), not a new opacity-adaptive outer boundary
   or a guaranteed bound on omitted light.
 
-The client still builds this contract from the live atmosphere, mass and radius,
-which generation now installs from the planet's result. Moving it onto the
-checked `from_result` entry point is a separate consumer migration. The lower
-proxy does not certify terrain or navigation permission; the existing
-bulk-envelope visual descent policy remains separate and unchanged.
+The client builds this contract with `from_result` for every planet that
+carries a result: the live atmosphere supplies the gas, the result the reference
+radius and enclosed gravity. Live air that fails that check is not drawn, and a
+physical record without its result draws none. Only bare records with no
+physical facts (fixtures, hand-built tests) use total mass and `radius_km`.
+Whether the lower proxy is a gas reference (no ground drawn) comes from the
+result's surface knowledge, not the live atmosphere label. The lower proxy does
+not certify terrain or navigation permission; the bulk-envelope visual descent
+threshold is unchanged.
 
 `OpticalColumn::from_result` is a separate, checked preparation API for unified
 results. It validates transported invariants, checks pressure,

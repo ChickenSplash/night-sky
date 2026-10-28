@@ -335,7 +335,7 @@ def parser():
         "planets", help="experimental layered planet calculations: status per planet, or switch them on/off",
         description="Without arguments, lists the target system's planets and their layered results. "
         "on/off switches the experimental mode (off by default, not saved). The full layered records "
-        "are under state/planet_loading; the inspector shows them beside the legacy facts.",
+        "are under state/planet_loading; the inspector shows adoption or safety-deferral status.",
         epilog="example: ns planets on; ns planets")
     planets.add_argument("switch", nargs="?", choices=("on", "off"), help="switch the mode on or off")
     watch = sub.add_parser("watch", help="repeatedly read state or perf, Ctrl+C stops")
@@ -689,6 +689,8 @@ def planets_text(loading):
                       f"{len(layered['layers'])} layers")
         else:
             detail = planet["status"]
+        if planet.get("adoption"):
+            detail += f" · {planet['adoption']}"
         lines.append(f"  {planet['designation']}: {detail}")
     return "\n".join(lines)
 

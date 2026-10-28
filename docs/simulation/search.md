@@ -46,6 +46,14 @@ measurements and future ideas, not the current UI specification.
 - `kind=star` returns individual matching members of multiple systems;
   `kind=system` gives system-level results. Results carry `objects::ObjectRef`,
   display facts, distance and `SearchResult::position_pc`, not UI types.
+- Planet results also carry `physical_basis`: synchronous result provenance and
+  input/model/sequence revision. Physical predicates and relationship generation
+  use the fast fallback, never background EOS work or worker-completion order.
+  This is not a promise of a match after layered refinement. The browser compares
+  the loaded or session-adopted basis and warns when it differs: that hit is not revalidated against
+  new physics. Background adoption does not certify a new match or silently
+  rewrite the original deterministic result set. Exact layered query
+  reconciliation remains separate work.
 - A `SearchRequest` adds a fixed origin in parsecs and a work cap. The origin
   is not part of the reusable query and does not follow the camera afterwards.
 

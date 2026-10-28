@@ -3,7 +3,7 @@
 use crate::LayeredPlanet;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PhysicalRevision {
     /// Caller-owned identity of immutable supply and forcing, not a timestamp.
     pub inputs: String,

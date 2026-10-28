@@ -9,9 +9,11 @@ use space_shared::{Planet, PlanetPhysical};
 mod export;
 mod layered;
 pub(crate) use export::export_planet;
+mod refinement;
 mod result;
 mod synchronous;
 pub use layered::{fallback, layered, outcome};
+pub use refinement::{Refinement, prepare_refinement};
 pub(crate) use result::initial_from_fallback;
 pub use result::{
     initial_result, resolved_result, validate_record, validate_refinement, validate_result,
@@ -28,7 +30,11 @@ pub fn to_data(body: &Body) -> PlanetPhysical {
 /// structure, EOS or partition solve is re-run.
 pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str> {
     let Some(data) = &planet.physical else {
-        return Ok(None);
+        return if planet.initial_result.is_some() {
+            Err("result without its physical projection")
+        } else {
+            Ok(None)
+        };
     };
     // Records written before the cutover cannot be checked without re-running
     // the removed legacy model; they are invalid, not silently trusted.
@@ -54,10 +60,14 @@ pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str
         .environment
         .as_ref()
         .ok_or("missing structure forcing")?;
-    if !close(
-        env.equilibrium_temperature_k.max(20.0),
-        record.surface_temperature_k,
-    ) {
+    if !env.equilibrium_temperature_k.is_finite()
+        || env.equilibrium_temperature_k < 0.0
+        || (result.provenance == space_shared::ResultProvenance::Fallback
+            && !close(
+                env.equilibrium_temperature_k.max(20.0),
+                record.surface_temperature_k,
+            ))
+    {
         return Err("inconsistent boundary temperature");
     }
     match &env.atmosphere {
@@ -65,7 +75,7 @@ pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str
         None => Ok(Some(data)),
         Some(air) => {
             let air = GasAtmosphere::try_from(air).map_err(|_| "invalid boundary atmosphere")?;
-            OpticalColumn::from_result(result, &air)
+            OpticalColumn::reference_from_result(result, &air)
                 .map_err(|_| "inconsistent boundary atmosphere")?;
             Ok(Some(data))
         }
@@ -214,6 +224,8 @@ mod tests {
         let p = &galaxy.systems[0].planets[0];
         let mut legacy = serde_json::to_value(p).unwrap();
         legacy.as_object_mut().unwrap().remove("physical");
+        assert!(validate(&serde_json::from_value::<Planet>(legacy.clone()).unwrap()).is_err());
+        legacy.as_object_mut().unwrap().remove("initial_result");
         let legacy: Planet = serde_json::from_value(legacy).unwrap();
         assert_eq!(validate(&legacy), Ok(None));
         for corrupt in 0..10 {

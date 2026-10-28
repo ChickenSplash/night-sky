@@ -92,6 +92,7 @@ impl Atmosphere {
         Air {
             spherical: self.spherical,
             radius_scale: 1.0,
+            opaque_proxy: false,
             top: 1.0 + over(self.top),
             rayleigh: per(self.rayleigh).extend(over(self.rayleigh_height)),
             mie: per(self.mie).extend((self.mie_absorption * radius) as f32),
@@ -403,6 +404,9 @@ pub struct Air {
     /// freely traversable envelope, whose unresolved interior is rendered black.
     /// Geometry metadata only; tables already use the rebased coefficients.
     pub radius_scale: f32,
+    /// Unresolved gas floor: fade into black, unlike a condensed surface at
+    /// the same rebased coordinates. A radius change alone cannot select this.
+    pub opaque_proxy: bool,
     /// Radius of the top of the air.
     pub top: f32,
     /// Rayleigh scattering, and its scale height.
@@ -580,7 +584,11 @@ impl Shell {
                 self.air.top,
                 steps.0 as f32,
                 steps.1 as f32,
-                1.0 / self.air.radius_scale - 1.0,
+                if self.air.opaque_proxy {
+                    1.0 / self.air.radius_scale - 1.0
+                } else {
+                    0.0
+                },
             ),
             rayleigh: self.air.rayleigh,
             mie: self.air.mie,

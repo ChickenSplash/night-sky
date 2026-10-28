@@ -564,7 +564,7 @@ pub fn resolve(
                 let colour = DVec3::from_array(photometry.colour(l.kelvin));
                 *sun = hdr_colour(colour, exposure.value(l.flux) * balance).extend(0.0);
             }
-            let ground = if air.radius_scale < 1.0 {
+            let ground = if air.opaque_proxy {
                 Vec3::ZERO
             } else {
                 (surface * planet.surface.albedo).min(DVec3::ONE).as_vec3()
@@ -584,12 +584,13 @@ pub fn resolve(
         });
         // An envelope has no opaque reference sphere or its airless limb
         // sprites. The scattering shell provides both radiance and occultation.
-        if planet.air.is_some_and(|air| air.radius_scale < 1.0) {
+        if planet.air.is_some_and(|air| air.opaque_proxy) {
             continue;
         }
+        let body_radius = planet.radius * planet.air.map_or(1.0, |air| air.radius_scale);
         frame.bodies.push(Shaded {
             centre: planet.centre,
-            radius: planet.radius,
+            radius: body_radius,
             flattening: planet.flattening,
             colour: tints[0].truncate(),
             light: directions[0],
@@ -604,7 +605,7 @@ pub fn resolve(
         // brightest.
         let outline = Outline::of(
             planet.centre - lights.eye,
-            planet.radius,
+            body_radius,
             (planet.spin * Vec3::Y, planet.flattening),
             planet.per_pixel,
             lights.facing,

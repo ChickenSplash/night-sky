@@ -14,25 +14,27 @@ Default generation is now authoritative on one synchronous
 `Planet::initial_result`. Live mass, radius, inertia, reservoirs, atmosphere and
 spin are all projections of it, installed together; the legacy
 `structure::derive` model no longer feeds generated planets. Opt-in background
-loading exposes layered solves in the inspector but does not yet adopt them.
+loading refines those results by default and adopts complete revisions when
+[safe](#safe-background-adoption), otherwise retaining the active fallback.
 The separate [water-shell solver](#headless-restricted-water-shell-solver) uses
 direct [IAPWS water physics](water-physics.md) and an explicitly approximate
 effective deep-ice compression model. The mandatory Earth-mass, 30%-water fixture
 solves at both 250 K and 300 K. Cold deep ice is explicitly approximate rather
 than resolved into individual polymorphs. The standalone
 Lai ice-VII branch remains separate, not used by the radial solver.
-Opt-in [condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling)
-is implemented without switching default generation or authoritative consumers
-to the radial models.
+[Condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling)
+is available through the headless solver and background refinement, never as
+an expensive synchronous generation step.
 [Protected secondary traces in dry hosts](#headless-protected-traces-in-dry-hosts)
 and [water-bearing hosts](#headless-protected-traces-in-water-bearing-hosts)
-are also headless and opt-in.
+are available as headless APIs and used by the background layered solver.
 
 ## Authoritative result contract and validation
 
 P3's contract is implemented in shared `planet_result.rs` and simulation
 `system/physical/result.rs`. Generation's synchronous result is now live; the
-experimental loader's layered results are not adopted yet. The [cutover plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal)
+background loader now publishes validated candidates through a guarded adoption
+barrier. The [cutover plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal)
 tracks that migration.
 
 `PlanetResult` owns one `LayeredPlanet` physical/layer record, with typed
@@ -87,9 +89,13 @@ Synchronous revision keys use exact input bit patterns for body identity, source
 retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
-prescriptions. The current generation key is `generation_fallback_partition_v1`.
-These candidate identities are not yet wired into background
-adoption or a layered-resource revision. Initial candidates start at sequence zero;
+prescriptions. The current generation key is
+`generation_physics_v2:fallback_partition_v1:layered_adoption_v1:NSHHE001-b4e7a79ecc35d846`,
+covering the initial partition, refinement adapter and checksum-pinned H/He resource.
+Its availability is process-local and fixed by the table's `OnceLock`: installing
+or changing it requires restarting the process, not reusing an old refusal.
+Background jobs capture the original result and sequence before dispatch;
+initial results start at sequence zero and their refinement at exactly one;
 regeneration is not an adoption or permission to renumber stale worker output.
 
 ### Live projection
@@ -106,18 +112,104 @@ H/He fraction). No legacy structure or boundary solve runs.
   population's rendering and navigation parity with the previous model; it is
   not a physical erase or an optical-depth visibility rule.
 - `physical::validate(Planet)` checks transport only: the result validates; the
-  live record equals it; mass, radius and inertia match; temperature matches; the
-  atmosphere passes `OpticalColumn::from_result` against the result, or is
+  live record equals it; mass, radius and inertia match; fallback thermal forcing
+  matches; the atmosphere passes `OpticalColumn::reference_from_result`, or is
   omitted only below the threshold. It re-runs no solver. A record with
   `physical` but no result cannot be checked and is invalid, not trusted.
-- Consumers still read the live projections (rendering, navigation, shape,
-  inspector), not the result directly. Their migration, and revision-aware
-  adoption of background layered results with deferral near the camera, craft
-  and routes, remain later P3 work.
+- Layered boundary temperature is independent of equilibrium forcing. Transport
+  validation does not require supported optics: suspended condensates can be
+  physically transported while their cloud optics and drag clearance explicitly
+  refuse. No bulk condensate is silently turned into a cloud optical profile.
+- Rendering, navigation clearance, shape/spin and reflectance consume the active
+  result or its checked projections. The inspector prefers the loaded system,
+  follows its revision and separates unapplied candidates. Background adoption
+  applies those same projections through the safety barrier described below.
+
+### Consumer boundary semantics
+
+`system::surface::Geometry` exposes the selected reference and the outermost
+non-gas region, including any frost deposit above the loaded condensed host.
+Gas-reference phases remain unresolved; cold rock, known ice and liquid water
+retain their distinct knowledge. None grants landing permission. The same bounded
+flattening scales the reference and condensed spheroids, not a new internal figure
+solution. Rendering may show a condensed top through its atmosphere, or retain a
+separate [opaque visual proxy](../client/rendering.md#giant-descent) when the
+bounded continuation cannot reach it. A gas coordinate is never terrain.
+
+Clearance validates the active projections and builds its column with enclosed
+reference gravity. Orbital motion/drag speed still use retained total mass.
+Camera neighbourhood fields refresh when the system record changes, including
+physical revision changes with the same system ID. Craft retain an immutable
+field and route snapshot; adoption never replaces those snapshots mid-flight.
+Their readout names the model reference used for altitude zero, not a guaranteed
+solid surface. Their use pins the system against further adoption.
+
+Search stays deterministic on synchronous fallback facts, discloses each planet's
+input/model/sequence basis and flags a differing loaded basis as not revalidated.
+It does not promise an exact layered match. Developer snapshots expose active
+results/geometry separately from the experimental candidate cache.
+
+### Safe background adoption
+
+Background refinement is on by default. The initial synchronous fallback remains
+fully usable throughout preparation, calculation, refusal, adapter failure or
+deferral. Worker output includes the captured base revision, complete next result
+and its atmospheric projection. At publication, the base record and immutable
+forcing must still match, and every loaded copy must pass refinement validation.
+Stale work is discarded, never renumbered. Changed input/model identities restart
+preparation with a new cancellation epoch.
+
+The update barrier runs after camera placement and before camera neighbourhood,
+inspection and drawing consumers. It publishes at most two planets per frame,
+replacing mass, reference radius, inertia, physical record, atmosphere and result
+as one operation. Safety checks themselves are also limited to two per frame,
+rotating through the ready queue so a deferred planet cannot starve later ones.
+Identity, tasks/pages, orbital elements and spin phase/period
+stay fixed; shape is recomputed from the new facts with the existing flattening
+bound. The atmosphere uses the result's gas inventories/reference conditions,
+not the old atmosphere rescaled to a new radius. Unsupported cloud/optical inputs
+retain the active fallback with an explicit unavailable/adoption reason.
+
+Publication is conservatively deferred:
+
+- If any craft retains a field containing the affected planet, the whole system
+  stays on its current facts, regardless of how far that craft is from the planet.
+- Any active route pins all candidate publications, since routes can retain
+  destination/obstacle geometry beyond the craft's current field. Completed
+  routes alone do not impose this global pin. No craft is teleported or given a
+  different mass field under its current trajectory/prediction.
+- On the viewed physical page, the camera must be placed, not flying or in a
+  layout transition, and outside twice the larger old/new bound. That bound
+  encloses the spheroid, optical atmosphere top and preferred navigation
+  clearance. Unavailable clearance defers rather than guesses. Camera position,
+  target, orientation and speed are never corrected to make adoption fit.
+
+Deferrals are retried while the target is loaded and refinement is enabled.
+The inspector and `ns planets` distinguish ready/deferred/unavailable/applied
+states. A solver refusal completes the status of the *existing partitioned
+fallback*, preserving its geometry rather than installing the failed trial's
+different unpartitioned fallback. Worker failure likewise retains the active
+result and exposes a separate failure status.
+
+Adopted projections are retained as session authority in the craft charts,
+separate from the four-system candidate LRU and the evictable voyage cache. They
+are replayed only onto the exact captured base on backend refresh/revisit, remote
+inspection, craft spawning and incoming voyage replies. Late seeded worker output
+cannot undo an adopted result. Rebuilding the candidate LRU reuses committed
+results rather than solving them again or reporting their old base as stale.
+Voyage arrival origins/pages stay fixed and its
+gravity/clearance field is rebuilt as a unit. This session registry is not bounded
+by the candidate LRU and is not persisted to disk; a restart begins with fallback
+facts again. Turning refinement off pauses work/publication, not adopted facts.
+
+Search remains deterministic on its synchronous basis: a differing loaded or
+session-retained revision is marked **not revalidated**. It is not silently
+removed/reordered or advertised as a newly certified match. Exact layered query
+reconciliation and mid-flight craft-field rebasing remain separate work.
 
 ## Approximation policy and fidelity labels
 
-The opt-in layered solver uses named, deliberately selected approximations where
+The layered solver uses named, deliberately selected approximations where
 reference-checked local models do not cover a required state. A failed EOS call
 does **not** authorise arbitrary extrapolation or a silent fallback. Each added
 route needs a defined equation, application scope, provenance/assumptions,
@@ -276,11 +368,13 @@ before selecting runtime defaults or claiming a percentage accuracy.
 ## Self-gravitating envelope and loaded interior
 
 `structure::envelope` implements `self_gravitating_loaded_hhe_v1` through the
-same adaptive radial kernel as the dry/water solvers. It is used by the opt-in
+same adaptive radial kernel as the dry/water solvers. It is used by the background
 prototype after a thin-route gas-mass, density or heavy-mass refusal on an
 H/He-bearing body. Successful thin solves are returned unchanged. There is no
-legacy radius, atmosphere or gas-search cache in the new solve; default
-generation, rendering, shape and navigation remain legacy.
+legacy radius, atmosphere or gas-search cache in the new solve. Default generation
+uses the synchronous new-model fallback and its live projections; this layered
+envelope route may replace it through guarded background adoption when its
+transport, optical adapter and safety checks all succeed.
 
 ### Local data, not a redistributed table
 
@@ -1070,7 +1164,8 @@ for the rest, not 99%. Coverage diagnostics also write `composition-condensation
 pure-screen trial states) and `composition-suspended.tsv` (accepted cold-route
 phase totals), without altering runtime generation.
 Full project checks, all 17 envelope tests (including source-backed cases) and
-all seven focused suspended-model tests pass. Rendering remains legacy; no
+all seven focused suspended-model tests pass. At that historical checkpoint,
+rendering remained legacy; no
 interactive benchmark or visual test was performed.
 
 ### Secondary trace input investigation
@@ -1647,8 +1742,9 @@ coupling, generation/consumer migration and thermal evolution remain later work.
 ## Headless atmosphere and condensed-boundary coupling
 
 `system::structure::coupled::solve(&Request, Controls)` implements layered
-checkpoint 4 as an opt-in API. **Generation, transport, inspector, clearance and
-rendering still use their previous paths.** No camera restriction is introduced.
+checkpoint 4 as a headless API. The background solver now uses it where supported;
+its results can reach live consumers through the [adoption barrier](#safe-background-adoption).
+The physical solver itself introduces no camera restrictions.
 The model is `loaded_condensed_spherical_isothermal_column_v1`.
 
 The immutable request supplies retained inventory, a subset eligible for gas
@@ -1882,20 +1978,21 @@ blend or EOS-domain extension is used.
 
 ## Experimental background loading
 
-The mode is opt-in: enable **layered calculations** under F3 → perf →
-experimental planet loading, with `ns planets on` or `set_layered_planets true`.
-It resets off on restart. Results reach the planet inspector and developer
-snapshot only. Rendering, shape, spin, atmosphere optics, navigation and landing
-keep reading the legacy `Planet` record for every planet (moving them is P3).
-A refusal gets the [fallback structure](#fallback-structure), labelled
+Background refinement is enabled by default. Pause it under F3 → perf →
+planet refinement, with `ns planets off` or `set_layered_planets false`.
+The switch resets on at restart. Completed results reach the inspector and,
+when [safe](#safe-background-adoption), become authoritative for rendering,
+shape, optics and navigation. A refusal retains the initial partitioned
+[fallback structure](#fallback-structure), labelled
 "Fallback (layered unsupported: …)" with its typed reason, never shown as a
 successful solve.
 
 ### Layered transport record
 
 `system::physical::layered` turns a solve into `space_shared::LayeredPlanet`,
-held beside the live record. Background layered results are not yet adopted
-into `Planet::physical` (that needs revision-aware adoption).
+held inside a `PlanetResult` for adoption, or beside the active record while
+deferred/unavailable. The active `Planet::physical` is always its result's verbatim
+physical projection.
 
 - `physical` keeps the `PlanetPhysical` shape. Reservoirs map as interior =
   condensed regions minus water, condensed = condensed water plus the frost
@@ -1925,21 +2022,25 @@ into `Planet::physical` (that needs revision-aware adoption).
 - Layer masses sum to the retained mass and adjacent layers share their radius.
   The coverage report checks both, and the surface label, for every solved planet.
 
-The inspector's **Layered model (experimental)** section compares radius,
-surface temperature and pressure with the legacy values, and notes that the
-planet is still drawn at its legacy radius. It then lists greenhouse optical
+The inspector's **Background refinement** section compares radius,
+surface temperature and pressure with the active values, and notes that the
+planet is still drawn at its active radius. It then lists greenhouse optical
 depth, blow-off losses, one row per layer (thickness, mass, pressure range,
-temperature) and the models used. The section is absent while the mode is off.
+temperature) and the models used. An applied candidate instead says
+**Applied · active result**, without pretending it is still an alternative.
+The section is absent while the mode is off.
 The object browser's detail pane does not show it.
 
 `system::generated::generated_system_with_mode` defaults via the existing
-`generated_system` wrapper to `Mode::Legacy`. `Mode::LayeredPrototype` also
-prepares immutable per-planet budgets and environments, without solving them
+`generated_system` wrapper to the historically named `Mode::Legacy`, now using
+the synchronous new-model fallback. `Mode::LayeredPrototype` also
+prepares immutable per-planet budgets, environments and starting results, without solving them
 inline or changing the initial wire system. The client prepares these inputs
 off-thread by reconstructing the deterministic natural system once, avoiding
 transport-record decoding or changes to live snapshots. This duplicates the
 cheap initial generation on a cache miss, not the expensive physics solve.
-The optional list/task overlay is not refined separately.
+The optional list/task overlay is not solved separately; its matching natural
+planet receives the same adopted projection, preserving page/task metadata.
 
 The current visited system is the target (including during a navigation
 flight). Without a visit, a selected star or remote planet's parent system is
@@ -1950,7 +2051,8 @@ The [shared star/planet budget](../client/streaming.md#shared-star-and-planet-cp
 prevents independent ¾-CPU worker allocations from competing unchecked.
 
 Results live in a four-system, least-recently-targeted in-memory cache, keyed by
-stable natural-system ID for the one compiled prototype model. Completed solves
+stable natural-system ID, with captured per-planet input/model revisions and
+target epochs. Completed solves
 and fallbacks are reused on revisit; incomplete entries prepare only their
 missing jobs. There is no disk cache or cross-version reuse. Changing targets or
 disabling the mode cancels queued work, marks running work obsolete and rejects
@@ -1960,9 +2062,9 @@ interrupted. Worker panics/spawn failures are explicit diagnostic failures.
 The frame thread drains at most two result messages per update and never joins
 unfinished workers or waits for a budget permit. Closing the debug window does
 not stop jobs. Conversion to the transport record runs on the worker too. The
-inspector rebuilds an inspected planet's facts only when that planet's status
-changes; for a generated system this regenerates it on the frame thread, as any
-inspection of an unvisited generated system already does.
+inspector rebuilds facts when status, adoption reason or active revision changes.
+Loaded records take priority; remote generation replays any session-retained
+adoption before reporting facts.
 
 The original fast system-generation path remains synchronous, with an info-level
 timing log at the client generation wrapper. Two headless sample systems took
@@ -2086,7 +2188,8 @@ Use `NS_COVERAGE_THREADS=20` for comparisons on the development machine.
 
 Every refusal also runs the fallback structure and checks its record. The
 summary's Fallback section counts checked fallbacks and their radius difference
-from legacy; the TSV's last column, `fallback_radius_km`, is `NaN` for layered
+from the synchronous generated reference (historical columns still call it
+legacy); the TSV's last column, `fallback_radius_km`, is `NaN` for layered
 solves.
 
 The same run writes `data/tmp/composition-census.md` for P2 requirements:
@@ -2105,7 +2208,27 @@ its existing 20 K floor. The P2 census and selected starting fixtures are
 summarised in the [delivery plan](../plans/planet-composition.md#step-1-generated-input-census-complete-28-october-2026).
 
 The report uses `structure::prototype::solve`, the same entry point used by
-opt-in experimental background generation. Default generation remains legacy.
+background refinement. Synchronous generation uses the
+fallback, without running this layered solve inline.
+
+The consumer-migration regression rerun checks **1,437/1,544 layered (93.1%) plus
+107/107 labelled fallbacks**, unchanged in total outcomes. It is the standard
+140-system calibration probe, not a new 399-system run or a whole-population
+accuracy claim. At that consumer-migration checkpoint, full checks passed
+474 simulation and 380 client tests, plus the
+22 source-backed/data-free envelope fixtures. The saved audit reconstructs all
+315 fallbacks with unchanged radii; the accepted diffuse extreme retains its
+tighter-refinement work refusal. Evidence:
+`data/tmp/p3-consumers-{check,coverage,envelope,audit}.log`.
+
+The subsequent adoption slice passes **478 simulation and 391 client tests**, the
+16 CLI tests, formatting/strict Clippy and all 22 envelope fixtures. Its safety,
+cache/revisit and inspected ice-boundary regressions are recorded in
+`data/tmp/p3-adoption-{check,envelope}.log`. It adds no new EOS prescription or
+population-coverage claim. Targeted user visual/interactive acceptance is deferred
+to [P4](../plans/planet-composition.md#p4-targeted-interactive-adoption-acceptance)
+by user decision; P3 closes with legacy cleanup and its automated checks. The
+deferred checks are not claimed complete.
 
 1. H/He is an ordinary exchangeable gas, with no amount threshold. A body enters
    the **envelope route** only when the thin column refuses its gas: H/He alone above the
@@ -2511,20 +2634,26 @@ on the `structure::derive` radius, its 1%/1%/20 Earth-mass domain, the
 `thin_boundary_column`, `extended_boundary_column`,
 `boundary_reference_transition` and `deep_boundary_unresolved` labels, and its
 one-bar handoff blend) was removed at the live cutover. Generated planets now
-take their reference meaning from the fallback result: any H/He envelope gives a
-one-bar reference, and secondary gas forms a column at the condensed proxy.
-Rocky bodies with a small H/He envelope, which the legacy correction gave
-thick boundary columns and ground, are therefore groundless one-bar envelope
-worlds. History: [plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal).
+take their reference meaning from the active result: gas may use a one-bar
+coordinate, while sub-bar or boundary columns reference the condensed top.
+Neither H/He presence nor a one-bar coordinate erases the condensed boundary.
+The geometry/optics adapter decides whether that top can be drawn through the
+air or stays behind an unresolved opaque proxy. Background refinement may also
+replace a fallback gas reference with a solved condensed boundary and its actual
+pressure. History: [plan](../plans/planet-composition.md#p3-default-cutover-and-legacy-removal).
 
 ## Inertia and spin
 
-Generated inertia factors come from the result: the fallback's layered shell
+Initial generated inertia factors come from the fallback's layered shell
 integration, including the reference partition's atmosphere column, normalised
 by the reference radius. They range from about 0.06 (centrally condensed
 envelope worlds) to 0.37. The legacy `structure::derive` model keeps its own
 clamped heuristic, `k=clamp((1-f) k_heavy (R_heavy/R)^2 + 0.25f,0.12,0.36)`,
 but no longer feeds generated planets. Neither is a giant-interior prediction.
+After adoption, inertia comes from the layered result's region integration.
+The assigned rotation phase/period is preserved, with shape recomputed using
+the same bounded flattening prescription, not a new angular-momentum or spin-
+evolution solution.
 
 For spins, set `e=clamp(f/0.5,0,1)`, `q=clamp((0.02-M)/0.02,0,1)` (Earth mass
 units). The lock distance is `(0.3-0.2e)(1-q) M_host^(1/3)` AU. Within 2.5 times
@@ -2568,9 +2697,10 @@ and developer export share presentation fields, separate from these physical rec
 Atmospheric visibility has its own
 [explicit optical boundary contract](atmospheres.md#explicit-renderer-boundary-contract).
 It declares a profile, lower proxy and operational cutoff rather than using
-structural layer edges. Its client path reads the live projections, which now
-come from the result; moving it onto the checked unified-result adapter is the
-next consumer migration.
+structural layer edges. The renderer builds it through the checked
+unified-result adapter, so a generated planet's air uses the result's reference
+radius and enclosed gravity, and live air that disagrees with the result is not
+drawn.
 
 ## Calibration census and regression scope
 

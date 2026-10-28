@@ -124,9 +124,9 @@ false` draws every body as the sphere of its mean radius, to compare.
 
 ### Planet ground
 
-A condensed-boundary planet's disc is drawn as its ground (`render/ground.rs`,
-`ground.wgsl`, shaded by `body.wgsl`); stars keep the sphere mesh. Bulk H/He
-envelope worlds instead use the traversable atmosphere described below.
+A drawable condensed top is drawn as ground (`render/ground.rs`,
+`ground.wgsl`, shaded by `body.wgsl`); stars keep the sphere mesh. Gas references
+and unresolved optical proxies are separate from that physical boundary.
 Other unresolved one-bar references retain an opaque reference proxy, not
 terrain or a claim of a located solid surface.
 
@@ -174,12 +174,14 @@ Generated atmosphere inputs now pass through the simulation's explicit
 [optical boundary contract](../simulation/atmospheres.md#explicit-renderer-boundary-contract).
 It declares reference conditions, the density/optics approximation, an opaque
 lower reference proxy and a finite density-drop outer cutoff. Neither a solver's
-layer edge nor the presence of H/He defines visibility. Its live inputs are now
-installed from each planet's synchronous result, so most bodies with a small
-H/He envelope render as groundless one-bar envelopes rather than rocky worlds
-with thick boundary air. The proxy is not a detected cloud top or landing surface,
-and this adapter does not change clearance, descent permission or the existing
-approximate deep visual continuation.
+layer edge nor the presence of H/He defines visibility. It is built from each
+planet's synchronous result (reference radius, enclosed gravity and surface
+knowledge) with the live gas and physical projections checked against it.
+`system::surface::Geometry` separately locates the condensed top, including frost,
+from the conserved region stack. The presence of a one-bar reference never erases
+that boundary. Surface and air are drawn together when the bounded optical model
+can reach it; extinction determines visibility, not a mass-fraction threshold.
+Otherwise an opaque proxy remains, not a detected cloud top or landing surface.
 
 A planet drawn as a disc may have an atmosphere: a shell mesh slightly larger
 than the air's top, whose pixels march single scattering along the line of
@@ -354,9 +356,13 @@ Supported extended columns account for weakening spherical gravity. CPU optical
 tables, multiple scattering and WGSL use the same profile; the table cache key
 includes its spherical/exponential choice. Unresolved escape cases retain the
 explicitly flagged exponential approximation, without a radius clamp.
-A bulk H/He envelope has no opaque sphere at its reference
-radius, no terrain chunks and no airless disc-rim sprites. Its atmosphere continues
-below that level using the [deep-descent approximation](#giant-descent) below.
+A gas-reference envelope continues below that level using the
+[deep-descent approximation](#giant-descent) below. A condensed top within that
+bounded continuation gets a mesh at its actual radius, through the air. A deeper
+unresolved top remains behind the opaque gas proxy, with no false reference-ground
+mesh or airless disc-rim sprites. Ground cache identities include the active
+physical revision as well as shape, so geometry/material revisions cannot reuse
+old terrain work.
 Supported [condensed-boundary atmospheres](../simulation/planet-composition.md#supported-approximate-condensed-boundaries)
 instead draw ground at the boundary, with gas density and scattering scaled by
 the full boundary pressure, so a dense column is optically thicker rather than
@@ -394,36 +400,36 @@ albedo variations. See
 
 ### Giant descent
 
-`set_debug giant_descent true` (default) replaces the false one-bar surface
-with traversable air **only for bulk H/He envelopes**: both the physical radius
-and atmosphere must use a one-bar reference, and the retained H/He mass fraction
-must be at least 2%, the upper end of the condensed-boundary inventory handoff.
-This is a conservative rendering eligibility bound, not a physical assertion
-that a 2% envelope has no core. It does not use a gas/ice-giant label. One bar
-alone is merely a pressure reference, not evidence that ground is absent.
-Low-inventory rock-dominated bodies retain their approximate condensed boundary
-and inventory-weight atmospheric pressure even when the column is extended.
-Other unresolved references retain the old opaque proxy. With atmospheres disabled, or with
-`giant_descent false`, the old opaque reference sphere remains for comparison.
+`set_debug giant_descent true` (default) permits the existing bounded optical
+continuation wherever validated geometry places the condensed top below a gas
+reference. There is no H/He amount or class threshold. One bar alone is merely a
+coordinate: the region stack must establish the depth. Condensed-reference
+columns keep their own boundary, even when optically thick or extended.
+With atmospheres disabled, or with `giant_descent false`, the opaque reference
+proxy remains for comparison, never certified ground.
 Missing or invalid optical data also retains that fallback rather than an invisible
 body. Free-camera movement is unchanged: there is no pressure stop or collision
 at either the one-bar reference or the optical lower boundary. Craft safety rules
 are unchanged.
 
 This is a **visual continuation, not a giant-interior model**. The selected gas
-column is rebased six active scale heights below the reference, limited to 20%
-of the equatorial radius. The shortest nonzero gas/haze profile sets that depth
+column is rebased up to six active scale heights below the reference, limited to
+20% of the equatorial radius and never below the condensed top. The shortest nonzero gas/haze profile sets that depth
 to keep coefficient growth bounded. Heights and coefficients are transformed
 together, preserving the upper column and outer shell within f32 precision.
 For spherical gas rebased to `R'=sR`, the density multiplier is
 `exp[(1-s)/(s H/R)]` and the dimensionless scale height becomes `s H/R`.
 Exponential debug/fallback gas instead uses multiplier `exp[(1-s)/(H/R)]`
 and scale height `(H/R)/s`. Haze remains exponential in both cases.
-Absorbing layers retain their original position. The optical lower boundary has
-zero reflecting albedo, not a cloud deck or exposed core. The existing spherical
-tables and spheroidal approximation apply at the rebased radius.
+Absorbing layers retain their original position. If the continuation reaches the
+condensed top, that boundary reflects using the existing appearance proxy and is
+not faded to black. Otherwise the optical lower boundary has zero reflecting
+albedo, not a cloud deck or exposed core. An explicit proxy flag, not a radius
+change, selects this black-floor behaviour. The existing spherical tables and
+spheroidal approximation apply at the rebased radius. No full deep-envelope
+optical profile, cloud model or landing permission is inferred.
 
-In the final two gas scale heights (or the entire resolved depth when shorter),
+For an unresolved gas proxy, in the final two gas scale heights (or the entire resolved depth when shorter),
 the camera's view eases to opaque black. Below that boundary it stays black in
 all directions, including at the centre and before tables finish building. This
 deliberate unresolved-interior treatment avoids extrapolating ideal gas to

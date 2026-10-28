@@ -26,7 +26,12 @@ use space_simulation::{
 
 #[derive(Default)]
 pub struct Cache {
+    adoption: Option<String>,
     key: Option<(ObjectRef, Option<DVec3>, u8)>,
+    physical_revision: Option<(
+        space_shared::PhysicalRevision,
+        space_shared::RefinementStatus,
+    )>,
     info: Info,
     model_details_open: bool,
 }
@@ -46,16 +51,38 @@ impl Cache {
         position_ly: Option<DVec3>,
         now: Now,
         loading: Option<&PlanetLoading>,
+        active: Option<&space_shared::StarSystem>,
     ) -> &Info {
         let revision = match (object, loading) {
             (ObjectRef::Planet { id }, Some(loading)) => loading.status(id).key(),
             _ => 0,
         };
+        // Loaded records may change without changing the object ID or worker
+        // status. Remote inspection remains on deterministic synchronous facts.
+        let physical_revision = match object {
+            ObjectRef::Planet { id } => active
+                .into_iter()
+                .chain(galaxy.systems.iter())
+                .flat_map(|s| &s.planets)
+                .find(|p| p.id == *id)
+                .and_then(|p| p.initial_result.as_ref())
+                .or_else(|| now.fleet.charts.refinement(id).map(|r| &r.result))
+                .map(|r| (r.revision.clone(), r.refinement.clone())),
+            _ => None,
+        };
+        let adoption = match (object, loading) {
+            (ObjectRef::Planet { id }, Some(loading)) => loading.adoption(id).map(str::to_owned),
+            _ => None,
+        };
         if self.key.as_ref() != Some(&(object.clone(), position_ly, revision))
+            || self.adoption != adoption
+            || self.physical_revision != physical_revision
             || matches!(object, ObjectRef::Craft { .. })
         {
-            self.info = describe_with(object, galaxy, position_ly, now, loading);
+            self.info = describe_with(object, galaxy, position_ly, now, loading, active);
             self.key = Some((object.clone(), position_ly, revision));
+            self.physical_revision = physical_revision;
+            self.adoption = adoption;
         }
         &self.info
     }
@@ -129,7 +156,7 @@ pub(crate) fn position_ly(
 /// Without the experimental layered section.
 #[cfg(test)]
 pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>, now: Now) -> Info {
-    describe_with(object, galaxy, position_ly, now, None)
+    describe_with(object, galaxy, position_ly, now, None, None)
 }
 
 fn describe_with(
@@ -138,6 +165,7 @@ fn describe_with(
     position_ly: Option<DVec3>,
     now: Now,
     loading: Option<&PlanetLoading>,
+    active: Option<&space_shared::StarSystem>,
 ) -> Info {
     use crate::format::{luminosity_text, mass_text, period_text, rotation_text, star_radius_text};
     let mut info = Info::default();
@@ -224,7 +252,20 @@ fn describe_with(
         }
         ObjectRef::Planet { id } => {
             if let Some(star) = objects::parent_star(id)
-                && let Some((system, _)) = objects::system(galaxy, star)
+                && let Some((system, _)) = active
+                    .filter(|s| s.planets.iter().any(|p| p.id == *id))
+                    .map(|s| (std::borrow::Cow::Borrowed(s), 0))
+                    .or_else(|| objects::system(galaxy, star))
+                    .map(|(mut system, page)| {
+                        if system
+                            .planets
+                            .iter()
+                            .any(|p| now.fleet.charts.refinement(&p.id).is_some())
+                        {
+                            now.fleet.charts.restore_system(system.to_mut());
+                        }
+                        (system, page)
+                    })
                 && let Some(planet) = system.planets.iter().find(|planet| planet.id == *id)
             {
                 let days = space_simulation::planet_period(&system, planet) / 86400.0;
@@ -334,6 +375,9 @@ fn describe_with(
                 planet_layout::organise(&mut info, planet);
                 let status = loading.map_or(Layered::Off, |l| l.status(&planet.id));
                 layered::facts(&mut info, planet, status);
+                if let Some(reason) = loading.and_then(|l| l.adoption(id)) {
+                    info.field("layered.adoption", "Adoption", None, reason);
+                }
                 info.section = Section::Overview;
                 if let Some(task) = &planet.task {
                     info.field("task.name", "Task", None, task.name.clone());
@@ -635,7 +679,14 @@ pub fn readout(
 ) -> serde_json::Value {
     use serde_json::json;
     let position = position_ly(&inspection.object, nav, galaxy, field);
-    let info = cache.get(&inspection.object, galaxy, position, now, Some(loading));
+    let info = cache.get(
+        &inspection.object,
+        galaxy,
+        position,
+        now,
+        Some(loading),
+        nav.system(galaxy),
+    );
     let export = |action: Action, group: &str| {
         json!({
             "label": action.label, "current": action.current, "available": true,
@@ -698,7 +749,14 @@ pub fn show(
 ) {
     let object = &inspection.object;
     let position = position_ly(object, nav, galaxy, field);
-    cache.get(object, galaxy, position, now, Some(loading));
+    cache.get(
+        object,
+        galaxy,
+        position,
+        now,
+        Some(loading),
+        nav.system(galaxy),
+    );
     let width = ui.available_width().min(480.0);
     halo_wrapped_text(ui, &cache.info.title, width, CURRENT);
     ui.scope(|ui| {
@@ -811,6 +869,12 @@ mod tests {
     use super::*;
     use crate::ui::breadcrumb::TrailSource;
 
+    fn paused_loading() -> PlanetLoading {
+        let mut loading = PlanetLoading::default();
+        loading.enabled = false;
+        loading
+    }
+
     #[test]
     fn typed_planet_fields_share_ids_sections_units_values_and_unknowns() {
         let mut galaxy = space_simulation::demo_galaxy();
@@ -843,7 +907,7 @@ mod tests {
             &Starfield::default(),
             &mut Cache::default(),
             Now::none(),
-            &PlanetLoading::default(),
+            &paused_loading(),
         );
         assert_eq!(
             exported["fields"],
@@ -907,7 +971,7 @@ mod tests {
                 &field,
                 &mut cache,
                 now,
-                &PlanetLoading::default(),
+                &paused_loading(),
             );
             let info = describe(
                 &object,
@@ -1075,7 +1139,7 @@ mod tests {
     }
 
     #[test]
-    fn layered_section_shows_only_when_enabled_and_labels_legacy_fallbacks() {
+    fn layered_section_shows_only_when_enabled_and_labels_unapplied_candidates() {
         use crate::planet_loading::PlanetState;
         use space_simulation::system::{
             generated::{Mode, generated_system_with_mode},
@@ -1093,7 +1157,7 @@ mod tests {
             .unwrap();
         let object = ObjectRef::Planet { id: job.id.clone() };
         let layered = |loading: &PlanetLoading| {
-            describe_with(&object, &galaxy, None, Now::none(), Some(loading))
+            describe_with(&object, &galaxy, None, Now::none(), Some(loading), None)
                 .fields
                 .into_iter()
                 .filter(|f| f.section == Section::Layered)
@@ -1101,17 +1165,18 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let mut loading = PlanetLoading::default();
+        loading.enabled = false;
         assert!(layered(&loading).is_empty());
         let mut cache = Cache::default();
         let off = cache
-            .get(&object, &galaxy, None, Now::none(), Some(&loading))
+            .get(&object, &galaxy, None, Now::none(), Some(&loading), None)
             .fields
             .len();
         loading.enabled = true;
         // The cached facts follow the planet's status.
-        let waiting = cache.get(&object, &galaxy, None, Now::none(), Some(&loading));
+        let waiting = cache.get(&object, &galaxy, None, Now::none(), Some(&loading), None);
         assert_eq!(waiting.fields.len(), off + 1);
-        assert_eq!(layered(&loading)[0].1, "Waiting · legacy model shown");
+        assert_eq!(layered(&loading)[0].1, "Waiting · active result unchanged");
         let planets = &mut loading.cache.entry(system.into()).or_default().planets;
         let fallback = physical::fallback(&fallback::solve(
             &job.budget,
@@ -1128,7 +1193,7 @@ mod tests {
             PlanetState::Solved(Box::new(physical::layered(&solved))),
         );
         let facts = layered(&loading);
-        assert_eq!(facts[0].1, "Solved");
+        assert_eq!(facts[0].1, "Solved · candidate, not applied");
         for id in [
             "layered.radius",
             "layered.temperature",
@@ -1159,6 +1224,33 @@ mod tests {
         // The plain readout and the browser never include the experimental section.
         let plain = describe(&object, &galaxy, None, Now::none());
         assert!(!plain.fields.iter().any(|f| f.section == Section::Layered));
+    }
+
+    #[test]
+    fn inspection_uses_the_loaded_revision_and_refreshes_without_a_worker_status_change() {
+        let galaxy = space_simulation::demo_galaxy();
+        let mut active = galaxy.systems[0].clone();
+        let id = active.planets[0].id.clone();
+        let object = ObjectRef::Planet { id };
+        active.planets[0].designation = "Loaded revision".into();
+        let mut cache = Cache::default();
+        let first = cache.get(&object, &galaxy, None, Now::none(), None, Some(&active));
+        assert_eq!(first.title, "Loaded revision");
+        assert!(first.fields.iter().any(|f| f.id == "result.status"));
+        active.planets[0].designation = "Next revision".into();
+        active.planets[0]
+            .initial_result
+            .as_mut()
+            .unwrap()
+            .revision
+            .sequence += 1;
+        let next = cache.get(&object, &galaxy, None, Now::none(), None, Some(&active));
+        assert_eq!(next.title, "Next revision");
+        assert!(
+            next.fields
+                .iter()
+                .any(|f| f.id == "result.sequence" && f.value.text().contains("sequence 1"))
+        );
     }
 
     fn inspection_for_unreachable() -> Inspection {

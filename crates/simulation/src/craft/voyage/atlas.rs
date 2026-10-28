@@ -124,6 +124,44 @@ impl Atlas for Cache {
 }
 
 impl Cache {
+    /// Host-owned adopted facts override seeded worker replies. Preserve arrival
+    /// origins/pages and invalidate geometry/gravity/clearance together. Applied
+    /// facts are owned by the host, not this evictable voyage cache.
+    pub fn refine_planets(
+        &mut self,
+        refinements: &std::collections::BTreeMap<String, crate::system::physical::Refinement>,
+    ) {
+        for kept in self.arrivals.values_mut() {
+            if !kept.value.field.system().planets.iter().any(|planet| {
+                refinements.get(&planet.id).is_some_and(|r| {
+                    planet
+                        .initial_result
+                        .as_ref()
+                        .is_some_and(|active| active.revision == r.base)
+                })
+            }) {
+                continue;
+            }
+            let mut system = kept.value.field.system().clone();
+            let mut changed = false;
+            for planet in &mut system.planets {
+                if let Some(refinement) = refinements.get(&planet.id)
+                    && planet
+                        .initial_result
+                        .as_ref()
+                        .is_some_and(|r| r.revision == refinement.base)
+                    && let Ok(next) = refinement.project(planet)
+                {
+                    *planet = next;
+                    changed = true;
+                }
+            }
+            if changed {
+                let field = Field::new(system, kept.value.field.page());
+                kept.value = Arrival::new(field, kept.value.origin_pc);
+            }
+        }
+    }
     /// Start a round, at least the last one: a world step on a server, a
     /// frame on a client.
     pub fn round(&mut self, round: i64) {
@@ -302,5 +340,7 @@ impl Atlas for Library {
     }
 }
 
+#[cfg(test)]
+mod refinement_tests;
 #[cfg(test)]
 mod tests;

@@ -17,6 +17,9 @@ pub struct PlanetJob {
     pub designation: String,
     pub budget: Budget,
     pub environment: space_shared::PlanetEnvironment,
+    /// Captured at preparation, never stamped from whichever result is live
+    /// when this worker eventually completes.
+    pub initial_result: space_shared::PlanetResult,
 }
 
 impl PlanetJob {
@@ -60,6 +63,7 @@ pub fn generated_system_with_mode(id: &str, position_ly: [f64; 3], mode: Mode) -
                     ),
                     budget: hosted.body.budget,
                     environment: environment.clone(),
+                    initial_result: hosted.body.initial_result.clone(),
                 });
             }
             let designation = crate::galaxy::cells::planet_designation(&hosted.host, hosted.index);

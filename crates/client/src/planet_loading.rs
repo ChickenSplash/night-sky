@@ -1,5 +1,4 @@
-//! Experimental layered solves in the background, cached per system. Only the
-//! inspector and developer snapshot read them; rendering stays on legacy data.
+//! Bounded background refinement and guarded, whole-result publication.
 use crate::{Navigation, Selection, Universe};
 use bevy::prelude::*;
 use space_shared::LayeredPlanet;
@@ -87,6 +86,10 @@ pub struct CachedSystem {
     pub names: Vec<(String, String)>,
     pub initial_ms: Option<f64>,
     pub error: Option<String>,
+    pub adoption: BTreeMap<String, String>,
+    ready: BTreeMap<String, physical::Refinement>,
+    bases: BTreeMap<String, space_shared::PhysicalRevision>,
+    check_cursor: Option<String>,
     prepared: bool,
     expected: usize,
 }
@@ -100,6 +103,12 @@ enum Message {
         epoch: u64,
         id: String,
         result: Result<Box<LayeredPlanet>, String>,
+    },
+    Ready {
+        epoch: u64,
+        id: String,
+        record: Box<LayeredPlanet>,
+        refinement: Result<Box<physical::Refinement>, String>,
     },
 }
 
@@ -126,7 +135,7 @@ impl Default for PlanetLoading {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
-            enabled: false,
+            enabled: true,
             active: None,
             epoch: 0,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -146,6 +155,64 @@ impl Default for PlanetLoading {
 }
 
 impl PlanetLoading {
+    fn reuse_adopted(&mut self, fleet: &crate::craft::Fleet) {
+        let Some(cache) = self.active.as_ref().and_then(|id| self.cache.get_mut(id)) else {
+            return;
+        };
+        for (id, base) in &cache.bases {
+            let Some(refinement) = fleet.charts.refinement(id).filter(|r| r.base == *base) else {
+                continue;
+            };
+            if cache
+                .adoption
+                .get(id)
+                .is_some_and(|s| s.starts_with("Applied:"))
+            {
+                continue;
+            }
+            cache.planets.insert(
+                id.clone(),
+                PlanetState::from_record(Box::new(refinement.result.record.clone())),
+            );
+            cache.ready.remove(id);
+            cache
+                .adoption
+                .insert(id.clone(), "Applied: active physical revision".into());
+        }
+        self.queue.retain(|job| {
+            fleet
+                .charts
+                .refinement(&job.id)
+                .is_none_or(|r| r.base != job.initial_result.revision)
+        });
+    }
+    fn invalidate_changed_inputs(&mut self, nav: &Navigation, galaxy: &space_shared::Galaxy) {
+        let Some(key) = self.active.clone() else {
+            return;
+        };
+        let Some(cache) = self.cache.get(&key) else {
+            return;
+        };
+        let changed = nav.system(galaxy).into_iter().chain(galaxy.systems.iter())
+            .flat_map(|s| &s.planets).any(|p| {
+                matches!((cache.bases.get(&p.id), p.initial_result.as_ref()), (Some(base), Some(active))
+                    if base.inputs != active.revision.inputs || base.model != active.revision.model)
+            });
+        if changed {
+            self.target(None);
+            self.cache.remove(&key);
+            self.recent.retain(|id| id != &key);
+            self.target(Some(key));
+        }
+    }
+    pub fn adoption(&self, planet: &str) -> Option<&str> {
+        let system = crate::navigation::objects::parent_star(planet)?;
+        self.cache
+            .get(system)?
+            .adoption
+            .get(planet)
+            .map(String::as_str)
+    }
     fn aim(&mut self, visited: Option<String>, selected: Option<String>) {
         if !self.enabled {
             self.last_visit = None;
@@ -195,6 +262,7 @@ impl PlanetLoading {
                             PlanetState::Failed(_) => "failed",
                         },
                         "status": state.label(),
+                        "adoption": c.adoption.get(id),
                         "layered": match state {
                             PlanetState::Solved(l) | PlanetState::Fallback(l) => json!(l),
                             _ => json!(null),
@@ -269,6 +337,8 @@ impl PlanetLoading {
                                 .map(|j| (j.id.clone(), j.designation.clone()))
                                 .collect();
                             for j in jobs {
+                                c.bases
+                                    .insert(j.id.clone(), j.initial_result.revision.clone());
                                 if !c.planets.contains_key(&j.id) {
                                     c.planets.insert(j.id.clone(), PlanetState::Queued);
                                     self.queue.push_back(j);
@@ -285,6 +355,26 @@ impl PlanetLoading {
                             Err(e) => PlanetState::Failed(e),
                         };
                         c.planets.insert(id, state);
+                    }
+                }
+                Message::Ready {
+                    epoch,
+                    id,
+                    record,
+                    refinement,
+                } if epoch == self.epoch => {
+                    if let Some(c) = self.active.as_ref().and_then(|id| self.cache.get_mut(id)) {
+                        c.planets
+                            .insert(id.clone(), PlanetState::from_record(record));
+                        match refinement {
+                            Ok(refinement) => {
+                                c.ready.insert(id.clone(), *refinement);
+                                c.adoption.insert(id, "Ready for safety checks".into());
+                            }
+                            Err(reason) => {
+                                c.adoption.insert(id, format!("Not applied: {reason}"));
+                            }
+                        }
                     }
                 }
                 _ => {} // Old camera target or disabled mode: discard stale results.
@@ -351,15 +441,36 @@ impl PlanetLoading {
                     if cancel.load(Ordering::Relaxed) {
                         return;
                     }
-                    let result =
-                        std::panic::catch_unwind(|| Box::new(physical::outcome(&job.resolve())))
-                            .map_err(|_| "Planet solver worker panicked".into());
+                    let result = std::panic::catch_unwind(|| {
+                        let outcome = job.resolve();
+                        let refinement = physical::prepare_refinement(
+                            &job.initial_result,
+                            &job.environment,
+                            &outcome,
+                        )
+                        .map(Box::new)
+                        .map_err(str::to_owned);
+                        let record = Box::new(refinement.as_ref().map_or_else(
+                            |_| physical::outcome(&outcome),
+                            |r| r.result.record.clone(),
+                        ));
+                        (record, refinement)
+                    });
                     if !cancel.load(Ordering::Relaxed) {
-                        let _ = sender.send(Message::Planet {
-                            epoch,
-                            id: job.id,
-                            result,
-                        });
+                        let message = match result {
+                            Ok((record, refinement)) => Message::Ready {
+                                epoch,
+                                id: job.id,
+                                record,
+                                refinement,
+                            },
+                            Err(_) => Message::Planet {
+                                epoch,
+                                id: job.id,
+                                result: Err("Planet solver worker panicked".into()),
+                            },
+                        };
+                        let _ = sender.send(message);
                     }
                 }) {
                 Ok(h) => {
@@ -386,8 +497,11 @@ impl Drop for PlanetLoading {
 pub fn update(
     mut loading: ResMut<PlanetLoading>,
     mut commands: MessageReader<crate::actions::UiCommand>,
-    nav: Res<Navigation>,
-    universe: Res<Universe>,
+    mut nav: ResMut<Navigation>,
+    mut universe: ResMut<Universe>,
+    mut fleet: ResMut<crate::craft::Fleet>,
+    (rig, pose): (Res<crate::scene::CameraRig>, Res<crate::scene::CameraPose>),
+    clock: Res<crate::Clock>,
 ) {
     for command in commands.read() {
         if let crate::actions::UiCommand::SetLayeredPlanets { on } = command {
@@ -407,13 +521,64 @@ pub fn update(
         _ => None,
     };
     loading.aim(visited, selected);
+    loading.invalidate_changed_inputs(&nav, &universe.0);
     loading.receive();
+    loading.reuse_adopted(&fleet);
     let selected = match &nav.selection {
         Some(Selection::Planet(id)) => Some(id.as_str()),
         _ => None,
     };
     if loading.active.is_some() {
         loading.dispatch(selected);
+    }
+    let status_changed = adoption::refresh_status(
+        &loading,
+        nav.bypass_change_detection(),
+        &mut universe.bypass_change_detection().0,
+    );
+    if adoption::publish(
+        &mut loading,
+        nav.bypass_change_detection(),
+        &mut universe.bypass_change_detection().0,
+        &mut fleet,
+        &rig,
+        &pose,
+        clock.0.seconds,
+    ) || status_changed
+    {
+        nav.set_changed();
+        universe.set_changed();
+    }
+}
+
+mod adoption;
+
+/// Restore authoritative session facts before navigation/physics use a newly
+/// generated visit or refreshed backend snapshot. This is replay, not adoption.
+pub fn restore(
+    mut nav: ResMut<Navigation>,
+    mut universe: ResMut<Universe>,
+    fleet: Res<crate::craft::Fleet>,
+) {
+    let mut changed = false;
+    for system in &mut universe.bypass_change_detection().0.systems {
+        changed |= fleet.charts.restore_system(system);
+    }
+    if changed {
+        universe.set_changed();
+    }
+    if let Some(crate::Visit::Generated(system)) = &mut nav.bypass_change_detection().visit
+        && fleet.charts.restore_system(system)
+    {
+        nav.set_changed();
+    }
+}
+
+pub fn restore_visit(mut nav: ResMut<Navigation>, fleet: Res<crate::craft::Fleet>) {
+    if let Some(crate::Visit::Generated(system)) = &mut nav.bypass_change_detection().visit
+        && fleet.charts.restore_system(system)
+    {
+        nav.set_changed();
     }
 }
 
