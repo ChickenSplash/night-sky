@@ -99,11 +99,21 @@ fn frost_top_is_not_confused_with_its_loaded_host_or_the_atmosphere_edge() {
     let pressure = (outer.inner_pressure_pa + outer.outer_pressure_pa.unwrap()) * 0.5;
     frost.kind = "frost".into();
     frost.inner_radius_m = mid;
-    frost.mass_kg *= 0.5;
     frost.inner_pressure_pa = pressure;
     outer.outer_radius_m = mid;
     outer.outer_pressure_pa = Some(pressure);
-    outer.mass_kg *= 0.5;
+    // Each half keeps half of every material and phase, so its breakdown
+    // still sums to its mass.
+    for layer in [&mut *outer, &mut frost] {
+        layer.mass_kg *= 0.5;
+        for material in &mut layer.materials {
+            material.mass_kg *= 0.5;
+        }
+        for phase in &mut layer.phase_allocations {
+            phase.vapour_kg *= 0.5;
+            phase.condensate_kg *= 0.5;
+        }
+    }
     r.record.layers.insert(0, frost);
     r.record.surface = "frost".into();
     r.record.physical.radius_reference = RadiusReference::UnresolvedVolatileBoundary;
