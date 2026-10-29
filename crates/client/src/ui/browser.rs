@@ -19,10 +19,13 @@ use space_simulation::search::query::{DEFAULT_RADIUS_LY, MAX_LIMIT, MAX_RADIUS_L
 use space_simulation::search::{Query, Scope};
 
 const THEME: Theme = Theme::GAME;
+pub const WINDOW: &str = "browser";
 
 #[derive(Resource, Default)]
 pub struct Browser {
     pub open: bool,
+    /// A `search` command asked to show the browser, even behind a dock tab.
+    reveal: bool,
     query: Query,
     /// The search box: a designation, or `ns search` text.
     text: String,
@@ -62,6 +65,7 @@ fn follow(mut commands: MessageReader<UiCommand>, mut browser: ResMut<Browser>) 
                 browser.problem = None;
                 browser.sent = Some(text);
                 browser.open = true;
+                browser.reveal = true;
             }
             UiCommand::ClearSearch => {
                 browser.reset();
@@ -84,17 +88,19 @@ pub struct View<'a> {
 
 pub fn window(ctx: &egui::Context, browser: &mut Browser, view: View, out: &mut Vec<UiCommand>) {
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
-        browser.open = !browser.open;
+        kit::toggle_window(ctx, WINDOW, &mut browser.open);
+    }
+    if std::mem::take(&mut browser.reveal) {
+        kit::reveal_window(ctx, WINDOW, &mut browser.open);
     }
     let mut open = browser.open;
-    kit::Window {
-        title: "Object browser",
-        eyebrow: "",
-        width: (0.45, 560.0, 920.0),
-        height: (0.78, 440.0, 900.0),
-        min_size: egui::vec2(480.0, 380.0),
-    }
-    .show(ctx, &THEME, &mut open, |ui| browser.body(ui, &view, out));
+    kit::Window::new(WINDOW, "Object browser")
+        .size(
+            kit::Extent::new(0.45, 560.0, 920.0),
+            kit::Extent::new(0.78, 440.0, 900.0),
+        )
+        .min_size(egui::vec2(480.0, 380.0))
+        .show(ctx, &THEME, &mut open, |ui| browser.body(ui, &view, out));
     browser.open = open;
     if browser.open {
         picker::show(ctx, &THEME, &mut browser.picker, &mut browser.query);

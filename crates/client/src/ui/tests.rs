@@ -22,10 +22,10 @@ fn each_icon_toggles_only_its_own_window() {
                     ctx,
                     rect,
                     [
-                        (GLYPHS[0], "Debug console", debug),
-                        (GLYPHS[1], "Tasks", tasks),
-                        (GLYPHS[2], "Object browser", browser),
-                        (GLYPHS[3], "Object Inspector", inspector),
+                        (GLYPHS[0], "Debug console", "debug", debug),
+                        (GLYPHS[1], "Tasks", "tasks", tasks),
+                        (GLYPHS[2], "Object browser", "browser", browser),
+                        (GLYPHS[3], "Object Inspector", "inspector", inspector),
                     ],
                 );
             },
@@ -63,6 +63,19 @@ fn each_icon_toggles_only_its_own_window() {
         assert_eq!(open, expected, "{glyph}");
         assert!(pointer_captured(&ctx));
     }
+}
+
+#[test]
+fn scene_viewport_meets_the_dock_edge_and_stays_inside_the_window() {
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1536.0, 864.0));
+    // 1.25 points per pixel: a dock edge at 1003.7 points is 1254.6 pixels.
+    let scene = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1003.7, 864.0));
+    let docked = viewport(scene, screen, 1.25);
+    assert_eq!(docked.physical_position, UVec2::ZERO);
+    assert_eq!(docked.physical_size, UVec2::new(1255, 1080));
+    // A scene a hair wider than the screen still fits the window.
+    let whole = viewport(screen.expand2(egui::vec2(0.001, 0.0)), screen, 1.25);
+    assert_eq!(whole.physical_size, UVec2::new(1920, 1080));
 }
 
 #[test]

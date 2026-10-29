@@ -39,6 +39,43 @@ fn growing_edge(ui: &Ui, theme: &Theme, rect: Rect, amount: f32, vertical: bool)
         .rect_filled(Rect::from_center_size(rect.center(), size), 0, theme.accent);
 }
 
+/// A border segment lit while `active`, growing along itself from where the
+/// pointer first met it and retracting towards that point afterwards.
+pub(super) fn pointer_edge(
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    id: egui::Id,
+    segment: [egui::Pos2; 2],
+    active: bool,
+    stroke: egui::Stroke,
+) {
+    let [from, to] = segment;
+    let frame = ctx.cumulative_frame_nr();
+    let origin_id = id.with("origin");
+    let pointer = ctx.input(|input| input.pointer.hover_pos());
+    let origin = ctx.data_mut(|data| {
+        let (was_active, mut origin, previous) = data
+            .get_temp::<(bool, f32, u64)>(origin_id)
+            .unwrap_or((false, 0.5, frame));
+        if active
+            && (!was_active || frame > previous + 1)
+            && let Some(pointer) = pointer
+        {
+            let along = to - from;
+            origin = ((pointer - from).dot(along) / along.length_sq().max(1.0)).clamp(0.0, 1.0);
+        }
+        data.insert_temp(origin_id, (active, origin, frame));
+        origin
+    });
+    let amount = ctx.animate_bool_with_time_and_easing(id, active, ANIMATION_SECONDS, ease_out);
+    if amount <= 0.0 {
+        return;
+    }
+    let start = origin * (1.0 - amount);
+    let end = origin + (1.0 - origin) * amount;
+    painter.line_segment([from.lerp(to, start), from.lerp(to, end)], stroke);
+}
+
 /// How lit a control is, 0 to 1. A held press remains lit even when egui no
 /// longer calls the active widget hovered.
 pub(super) fn hover_amount(ui: &Ui, response: &egui::Response, enabled: bool) -> f32 {

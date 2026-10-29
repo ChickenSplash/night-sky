@@ -77,22 +77,42 @@ pub fn draw_ui(
     }
 
     let mut out = Vec::new();
-    let mut rect = ctx.available_rect();
+    // The scene is whatever the docked sidebar leaves.
+    let mut rect = kit::dock::begin(ctx);
     if rect.width() < 1.0 || rect.height() < 1.0 {
         rect = egui::Rect::from_min_size(rect.min, egui::vec2(1.0, 1.0));
     }
     let hud = &mut *hud;
     if actions.just_pressed(crate::input::Action::Inspect) {
-        hud.object_inspector.open = !hud.object_inspector.open;
+        kit::toggle_window(
+            ctx,
+            inspector::window::WINDOW,
+            &mut hud.object_inspector.open,
+        );
     }
     icons(
         ctx,
         rect,
         [
-            ("⚙", "Debug console", &mut tools.open),
-            ("✔", "Tasks", &mut hud.tasks_open),
-            ("🔍", "Object browser (Ctrl+K)", &mut browser.open),
-            ("ⓘ", "Object Inspector (I)", &mut hud.object_inspector.open),
+            (
+                "⚙",
+                "Debug console",
+                crate::devtools::WINDOW,
+                &mut tools.open,
+            ),
+            ("✔", "Tasks", tasks::WINDOW, &mut hud.tasks_open),
+            (
+                "🔍",
+                "Object browser (Ctrl+K)",
+                browser::WINDOW,
+                &mut browser.open,
+            ),
+            (
+                "ⓘ",
+                "Object Inspector (I)",
+                inspector::window::WINDOW,
+                &mut hud.object_inspector.open,
+            ),
         ],
     );
     browser::window(
@@ -130,18 +150,7 @@ pub fn draw_ui(
         },
     );
 
-    let pixels = ctx.pixels_per_point();
-    nav.viewport = Some(bevy::camera::Viewport {
-        physical_position: UVec2::new(
-            (rect.min.x * pixels).max(0.0) as u32,
-            (rect.min.y * pixels).max(0.0) as u32,
-        ),
-        physical_size: UVec2::new(
-            (rect.width() * pixels).max(1.0) as u32,
-            (rect.height() * pixels).max(1.0) as u32,
-        ),
-        ..default()
-    });
+    nav.viewport = Some(viewport(rect, ctx.content_rect(), ctx.pixels_per_point()));
     time_controls(
         ctx,
         rect,
@@ -203,12 +212,27 @@ pub fn draw_ui(
     writer.write_batch(out);
 }
 
+/// The camera's viewport for the scene `rect`, in physical pixels. Edges are
+/// rounded as egui rounds the dock's, so no unrendered column shows between
+/// them, and kept inside the window.
+fn viewport(rect: egui::Rect, screen: egui::Rect, pixels: f32) -> bevy::camera::Viewport {
+    let edge = |point: f32| (point * pixels).round().max(0.0) as u32;
+    let (left, top) = (edge(rect.left()), edge(rect.top()));
+    let right = edge(rect.right()).min(edge(screen.right())).max(left + 1);
+    let bottom = edge(rect.bottom()).min(edge(screen.bottom())).max(top + 1);
+    bevy::camera::Viewport {
+        physical_position: UVec2::new(left, top),
+        physical_size: UVec2::new(right - left, bottom - top),
+        ..default()
+    }
+}
+
 /// ⚙ Debug console, ✔ Tasks, 🔍 Object browser and ⓘ Object Inspector, top to bottom,
-/// free-floating at the top right of the view. Each toggles its window.
+/// free-floating at the top right of the view. Each toggles its window, by key.
 fn icons<const N: usize>(
     ctx: &egui::Context,
     rect: egui::Rect,
-    icons: [(&str, &str, &mut bool); N],
+    icons: [(&str, &str, &str, &mut bool); N],
 ) {
     use kit::TooltipExt;
     use kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_glyph};
@@ -221,7 +245,7 @@ fn icons<const N: usize>(
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
             ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-                for (glyph, hint, open) in icons {
+                for (glyph, hint, key, open) in icons {
                     let colour = |response: &egui::Response| {
                         if response.hovered() {
                             HOVER
@@ -239,12 +263,13 @@ fn icons<const N: usize>(
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text_themed(&kit::Theme::GAME, hint);
                     if response.clicked() {
-                        *open = !*open;
+                        kit::toggle_window(ctx, key, open);
                     }
                 }
             });
         });
     let bounds = area.response.rect;
+    kit::layout::set_icons(ctx, bounds);
     ctx.data_mut(|data| data.insert_temp(egui::Id::new("icons-pointer-capture"), (bounds, false)));
 }
 

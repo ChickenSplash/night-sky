@@ -11,6 +11,7 @@ use space_shared::{Galaxy, StarSystem, Task};
 use std::collections::HashSet;
 
 const ROW: f32 = 30.0;
+pub const WINDOW: &str = "tasks";
 
 fn tint(colour: [u8; 3]) -> egui::Color32 {
     egui::Color32::from_rgb(colour[0], colour[1], colour[2])
@@ -104,7 +105,7 @@ pub fn window(
         state,
         out,
     };
-    kit::Window::new("Tasks").show(ctx, &Theme::GAME, open, |ui| {
+    kit::Window::new(WINDOW, "Tasks").show(ctx, &Theme::GAME, open, |ui| {
         kit::ScrollArea::vertical()
             .id_salt("tasks")
             .scroll_source(kit::SCROLL_SOURCE)

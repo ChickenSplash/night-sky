@@ -2,13 +2,15 @@
 //! the debug console (`Theme::TERMINAL`, through `ui::terminal`) and
 //! player-facing windows such as the object browser (`Theme::GAME`) share
 //! their behaviour: one hover and held-press light, header-only window
-//! dragging, and scroll areas that never steal a control's press. Scene text
-//! uses `halo`.
+//! dragging, docking into one sidebar, and scroll areas that never steal a
+//! control's press. Scene text uses `halo`.
+pub mod dock;
 mod dropdown;
 mod expandable;
 mod facts;
 pub mod halo;
 mod interact;
+pub mod layout;
 mod motion;
 mod number;
 mod pill;
@@ -39,7 +41,9 @@ pub use widgets::{
     eyebrow_text, field, heading, input, item, link, list_row, note, primary_button, progress,
     rule, section, section_with_default, tab, toggle,
 };
-pub use window::Window;
+#[cfg(test)]
+pub use window::window_id;
+pub use window::{Extent, Window, reveal_window, toggle_window};
 
 #[cfg(test)]
 mod tests;

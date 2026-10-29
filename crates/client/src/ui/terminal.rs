@@ -21,10 +21,10 @@ pub fn rule(ui: &mut Ui) {
     kit::rule(ui, &THEME);
 }
 
-/// A floating window, movable and resizable, that opens at the top right,
-/// below the HUD icons. Its title-aligned `×` button clears `open`.
+/// A kit window keyed by its title: floating at the top right below the HUD
+/// icons, or docked. Its title-aligned `×` button clears `open`.
 pub fn window(ctx: &egui::Context, title: &str, open: &mut bool, add: impl FnOnce(&mut Ui)) {
-    kit::Window::new(title).show(ctx, &THEME, open, |ui| {
+    kit::Window::new(title, title).show(ctx, &THEME, open, |ui| {
         // Console rows are contiguous; horizontal controls retain kit spacing.
         ui.spacing_mut().item_spacing.y = 0.0;
         add(ui);

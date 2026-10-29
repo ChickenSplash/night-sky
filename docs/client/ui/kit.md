@@ -2,7 +2,8 @@
 
 The client uses one egui interface over the 3D scene. The visual direction
 is precision: compact controls, consistent spacing and restrained accent motion,
-without changing the simulator's layout into a sidebar or HTML overlay.
+with no HTML overlay. Windows float over the scene or dock into one sidebar
+beside it.
 See [the object browser](browser.md) for its use in query editing and results,
 and [the scene interface](interface.md) for HUD and inspector behaviour.
 
@@ -94,13 +95,41 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 
 ## Windows and scrolling
 
-- `kit::Window` is shared by the browser, Tasks and debug console. Only the
-  padded header moves it, excluding the close hit area; all edges and corners
-  resize it. Bounds are clamped to the viewport and the window minimum.
+- `kit::Window` is shared by the browser, Tasks, Object Inspector and debug
+  console. `Window::new(key, title)` takes a stable key: egui state, the
+  remembered position and the dock choice belong to the key, not the title.
+  Sizes are set with the `size`/`min_size` builder methods.
+- A floating window moves only from its padded header, excluding the header
+  buttons; all edges and corners resize it. Bounds are clamped to the scene
+  (the screen beside any sidebar) and the window minimum.
 - Clicking a window brings it forward. The existing scene-blur registration
   stays in the shared frame; do not replace it when adding a panel.
 - `aligned_close_button` centres the visible glyph on title ink, rather than
-  the whole header block or font line box. Modals use the same helper.
+  the whole header block or font line box. Modals use the same helper. The
+  dock button sits in the next header slot along, aligned the same way.
+
+### Docking
+
+- The dock button moves a window into the right-hand sidebar (`kit::dock`)
+  and back. The sidebar is full height, opaque and unblurred: `dock::begin`
+  reserves its width at the start of the frame and returns the remaining scene
+  rect, which becomes the camera viewport and the HUD's bounds. Nothing of the
+  3D view lies behind it, so keep the sidebar on the right: canvas markers
+  assume the viewport starts at the window's left edge.
+- An empty sidebar takes the docking window's floating width. Its left edge
+  resizes it instantly, between the widest docked window's minimum and half
+  the screen, with the window edges' pointer-origin highlight.
+- Several docked windows share the sidebar as tabs; only the front one draws.
+  A newly docked or reopened window comes to the front. Closing or floating it
+  shows the next tab; the sidebar closes with its last tab.
+- Each window remembers being docked while closed, and reopens there. Open
+  windows check in every frame, so one closed by a shortcut leaves the strip.
+- Shortcuts and icons use `kit::toggle_window`: a window docked behind
+  another tab comes forward rather than closing. `reveal_window` opens and
+  brings forward, as `search` commands do for the browser.
+- Content keeps one egui ID in both modes, so scroll positions, folds and text
+  survive docking. `kit::layout::scene` gives later panels, including the debug
+  console's separate system, the frame's scene rect.
 - Use `kit::ScrollArea`, not raw `egui::ScrollArea`, for application panels.
   It defaults to wheel/scrollbar input with content dragging disabled, so
   scrolling cannot steal a control's held press.
@@ -117,7 +146,7 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 ## Extension checklist
 
 1. Put reusable behaviour in `ui/kit/`, with a focused module for stateful
-   controls (`pill`, `dropdown`, `number`, `range`, `scroll`). Export through
+   controls (`pill`, `dropdown`, `number`, `range`, `scroll`, `dock`). Export through
    `kit.rs`; callers should not depend on private implementation modules.
 2. Use the owning theme and shared spacing/easing. Reserve button slots with
    `button_size` so layout and rendered controls agree in both themes.

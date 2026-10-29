@@ -863,8 +863,8 @@ fn window_close_glyph_aligns_with_title_ink_in_both_themes() {
                         ..Default::default()
                     },
                     |ctx| {
-                        let mut window = super::Window::new("Alignment test");
-                        window.eyebrow = eyebrow;
+                        let window =
+                            super::Window::new("Alignment test", "Alignment test").eyebrow(eyebrow);
                         window.show(ctx, &theme, &mut open, |ui| {
                             ui.label("Content");
                         });
@@ -914,14 +914,7 @@ fn window_moves_only_from_header_and_shows_move_cursor() {
     };
     frame(vec![]);
     frame(vec![]);
-    let position = || {
-        ctx.memory(|memory| {
-            memory
-                .area_rect(egui::Id::new(("window", "test")))
-                .unwrap()
-                .min
-        })
-    };
+    let position = || ctx.memory(|memory| memory.area_rect(super::window_id("test")).unwrap().min);
     let original = position();
     let content = original + vec2(100.0, 90.0);
     frame(vec![
@@ -978,13 +971,8 @@ fn windows_resize_from_top_and_left_without_moving_the_opposite_edge() {
                 },
             )
         };
-        let bounds = || {
-            ctx.memory(|memory| {
-                memory
-                    .area_rect(egui::Id::new(("window", "resize-test")))
-                    .unwrap()
-            })
-        };
+        let bounds =
+            || ctx.memory(|memory| memory.area_rect(super::window_id("resize-test")).unwrap());
         frame(vec![]);
         frame(vec![]);
         let before = bounds();
@@ -1047,15 +1035,19 @@ fn window_edges_stop_at_minimum_size_and_screen_without_moving_opposite_edge() {
                         ..Default::default()
                     },
                     |ctx| {
-                        super::Window::new(title).show(ctx, &super::Theme::GAME, &mut true, |ui| {
-                            ui.label("Content");
-                            ui.allocate_space(ui.available_size());
-                        });
+                        super::Window::new(title, title).show(
+                            ctx,
+                            &super::Theme::GAME,
+                            &mut true,
+                            |ui| {
+                                ui.label("Content");
+                                ui.allocate_space(ui.available_size());
+                            },
+                        );
                     },
                 );
             };
-            let bounds =
-                || ctx.memory(|memory| memory.area_rect(egui::Id::new(("window", title))).unwrap());
+            let bounds = || ctx.memory(|memory| memory.area_rect(super::window_id(title)).unwrap());
             frame(vec![]);
             frame(vec![]);
             let before = bounds();
@@ -1198,10 +1190,15 @@ fn resize_highlight_grows_from_pointer_in_blue_without_changing_thickness() {
                     ..Default::default()
                 },
                 |ctx| {
-                    super::Window::new("edge-animation-test").show(ctx, &theme, &mut true, |ui| {
-                        ui.label("Content");
-                        ui.allocate_space(ui.available_size());
-                    });
+                    super::Window::new("edge-animation-test", "edge-animation-test").show(
+                        ctx,
+                        &theme,
+                        &mut true,
+                        |ui| {
+                            ui.label("Content");
+                            ui.allocate_space(ui.available_size());
+                        },
+                    );
                 },
             )
         };
@@ -1209,7 +1206,7 @@ fn resize_highlight_grows_from_pointer_in_blue_without_changing_thickness() {
         frame(0.01, vec![]);
         let bounds = ctx.memory(|memory| {
             memory
-                .area_rect(egui::Id::new(("window", "edge-animation-test")))
+                .area_rect(super::window_id("edge-animation-test"))
                 .unwrap()
         });
         let border = bounds.shrink(theme.border_width * 0.5);

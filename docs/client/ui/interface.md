@@ -1,8 +1,10 @@
 # Scene interface, HUD and inspection
 
 The egui interface (`crates/client/src/ui.rs`) draws in the same frame as
-the scene. The 3D view fills the whole window: no sidebar or HTML
-UI. HTML/CEF prototypes were abandoned (`prototype-cef-overlay`). See
+the scene. The 3D view fills the window, except for the sidebar while any
+window is docked: then the camera viewport and every HUD element sit beside
+it, with nothing of the scene behind it. There is no HTML UI; HTML/CEF
+prototypes were abandoned (`prototype-cef-overlay`). See
 [controls](../controls.md) for shortcuts, [navigation](../navigation.md) for
 physical location, [the UI kit](kit.md) for shared widgets, and
 [the browser](browser.md) for query editing. Client paths below are relative
@@ -12,8 +14,12 @@ to `crates/client/src/`.
 
 - Four free-floating halo icons at top right (`ui::icons`, ⚙ then ✔ then 🔍 then ⓘ,
   `kit::halo::halo_glyph`, hover blue, white while open) toggle the debug
-   console, Tasks, object browser and Object Inspector. They first open below the icons,
-  right-aligned (`terminal::below_icons` for debug). Tasks and browser start closed.
+  console, Tasks, object browser and Object Inspector. They first open below the icons,
+  right-aligned. Tasks and browser start closed. An icon or shortcut for a
+  window docked behind another tab brings that tab forward instead of closing it.
+- Each window's header has a dock button beside ×: it moves the window into
+  the full-height right sidebar, shared as tabs, or back to floating. See
+  [docking](kit.md#docking).
 - Widgets come from `ui/kit/`: `Theme::TERMINAL` for debug through
   `ui/terminal.rs`, `Theme::GAME` for player windows. Halo text lives in `kit::halo`.
 - Every panel action is an ID-based `UiCommand` (`actions.rs`). Panels own

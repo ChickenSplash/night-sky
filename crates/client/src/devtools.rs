@@ -44,6 +44,8 @@ use tabs::{
 
 /// Frame times kept for the graph.
 const FRAMES: usize = 240;
+/// The debug console's window key and title.
+pub const WINDOW: &str = "debug";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
@@ -172,7 +174,7 @@ pub fn draw(
     if !ctx.wants_keyboard_input()
         && ctx.input(|i| i.key_pressed(egui::Key::Backtick) || i.key_pressed(egui::Key::F3))
     {
-        tools.open = !tools.open;
+        crate::ui::kit::toggle_window(ctx, WINDOW, &mut tools.open);
     }
     // Kept up to date while closed, so the log tab can count what was missed.
     tools.sync();
@@ -184,7 +186,7 @@ pub fn draw(
     let mut report = false;
     let mut open = true;
     let window_start = bevy::platform::time::Instant::now();
-    terminal::window(ctx, "debug", &mut open, |ui| {
+    terminal::window(ctx, WINDOW, &mut open, |ui| {
         ui.horizontal_wrapped(|ui| {
             for (tab, label) in Tab::ALL {
                 if terminal::tab(ui, label, tools.tab == tab) {

@@ -9,6 +9,7 @@ use bevy_egui::egui::{self, Color32};
 use space_shared::{Galaxy, Layer, LayeredPlanet};
 
 const THEME: kit::Theme = kit::Theme::GAME;
+pub const WINDOW: &str = "object-inspector";
 
 #[derive(Default)]
 pub struct Inspector {
@@ -70,11 +71,10 @@ pub fn show(ctx: &egui::Context, state: &mut Inspector, view: View<'_>) {
         .unwrap_or_default();
     state.reconcile(target, interior);
     let mut open = state.open;
-    kit::Window {
-        title: "Object Inspector", eyebrow: "",
-        width: (0.58, 620.0, 1000.0), height: (0.75, 480.0, 900.0),
-        min_size: egui::vec2(380.0, 320.0),
-    }.show(ctx, &THEME, &mut open, |ui| {
+    kit::Window::new(WINDOW, "Object Inspector")
+        .size(kit::Extent::new(0.58, 620.0, 1000.0), kit::Extent::new(0.75, 480.0, 900.0))
+        .min_size(egui::vec2(380.0, 320.0))
+        .show(ctx, &THEME, &mut open, |ui| {
         kit::ScrollArea::vertical().id_salt("object-inspector-content").show(ui, |ui| {
             if state.target.is_none() {
                 kit::note(ui, &THEME, "Select an object to inspect it.");

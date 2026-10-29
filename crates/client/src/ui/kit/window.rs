@@ -1,7 +1,8 @@
-//! A floating window: movable by its whole padded header, resizable, opening
-//! at the top right below the HUD icons.
-use super::Theme;
-use bevy_egui::egui::{self, Color32, Rect, Sense, Ui, epaint, pos2, vec2};
+//! A kit window: floating (movable by its whole padded header, resizable,
+//! opening at the top right below the HUD icons) or docked into the sidebar.
+//! Header buttons switch between the two; each window remembers its choice.
+use super::{SPACING, Theme, dock, layout, widgets};
+use bevy_egui::egui::{self, Color32, Id, Rect, Sense, Ui, UiBuilder, epaint, pos2, vec2};
 
 /// Space between a window and the screen's edges when it first opens.
 const GAP: f32 = 12.0;
@@ -17,25 +18,100 @@ const RESIZE_HANDLES: [&str; 8] = [
     "right_bottom",
 ];
 
+/// A default length along one axis: a share of the screen, then clamped.
+#[derive(Clone, Copy)]
+pub struct Extent {
+    pub share: f32,
+    pub min: f32,
+    pub max: f32,
+}
+
+impl Extent {
+    pub const fn new(share: f32, min: f32, max: f32) -> Self {
+        Self { share, min, max }
+    }
+
+    fn of(self, length: f32) -> f32 {
+        (length * self.share).clamp(self.min, self.max)
+    }
+}
+
 pub struct Window<'a> {
-    pub title: &'a str,
+    /// Stable identity: state survives title changes and docking.
+    key: &'a str,
+    title: &'a str,
     /// Small text above a framed title; text-mode windows have a prompt.
-    pub eyebrow: &'a str,
-    /// Default width and height: a share of the screen, then clamped.
-    pub width: (f32, f32, f32),
-    pub height: (f32, f32, f32),
-    pub min_size: egui::Vec2,
+    eyebrow: &'a str,
+    width: Extent,
+    height: Extent,
+    min_size: egui::Vec2,
+}
+
+/// The egui ID of the floating window registered under `key`.
+pub fn window_id(key: &str) -> Id {
+    Id::new(("window", key))
+}
+
+fn docked_id(window: Id) -> Id {
+    window.with("docked")
+}
+
+pub(super) fn is_docked(ctx: &egui::Context, window: Id) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(docked_id(window)))
+        .unwrap_or(false)
+}
+
+/// Opens or closes a window from its shortcut or icon. A window docked
+/// behind another tab comes to the front instead of closing.
+pub fn toggle_window(ctx: &egui::Context, key: &str, open: &mut bool) {
+    let window = window_id(key);
+    if *open && dock::is_background(ctx, window) {
+        dock::activate(ctx, window);
+    } else {
+        *open = !*open;
+    }
+}
+
+/// Opens a window, bringing it to the front if it is docked behind a tab.
+pub fn reveal_window(ctx: &egui::Context, key: &str, open: &mut bool) {
+    *open = true;
+    dock::activate(ctx, window_id(key));
+}
+
+#[derive(Default)]
+struct HeaderActions {
+    close: bool,
+    dock: bool,
 }
 
 impl<'a> Window<'a> {
-    pub fn new(title: &'a str) -> Self {
+    pub fn new(key: &'a str, title: &'a str) -> Self {
         Self {
+            key,
             title,
             eyebrow: "",
-            width: (0.4, 420.0, 760.0),
-            height: (0.6, 320.0, 680.0),
+            width: Extent::new(0.4, 420.0, 760.0),
+            height: Extent::new(0.6, 320.0, 680.0),
             min_size: vec2(320.0, 200.0),
         }
+    }
+
+    #[cfg_attr(not(test), expect(dead_code, reason = "no player window has one yet"))]
+    pub fn eyebrow(mut self, eyebrow: &'a str) -> Self {
+        self.eyebrow = eyebrow;
+        self
+    }
+
+    /// Default content size when first opened, from the screen's size.
+    pub fn size(mut self, width: Extent, height: Extent) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    pub fn min_size(mut self, min_size: egui::Vec2) -> Self {
+        self.min_size = min_size;
+        self
     }
 
     /// Draws the window while `open`; its close button clears `open`.
@@ -49,27 +125,62 @@ impl<'a> Window<'a> {
         if !*open {
             return;
         }
-        let screen = ctx.content_rect();
-        let size = vec2(
-            (screen.width() * self.width.0).clamp(self.width.1, self.width.2),
-            (screen.height() * self.height.0).clamp(self.height.1, self.height.2),
-        );
+        let id = window_id(self.key);
+        let frame = 2.0 * (f32::from(theme.padding) + theme.border_width);
+        let min_width = self.min_size.x + frame;
+        let docked = is_docked(ctx, id);
+        let actions = if docked {
+            let width = self.width.of(ctx.content_rect().width()) + frame;
+            let actions = match dock::check_in(ctx, id, self.title, min_width, width) {
+                Some(rect) => self.show_docked(ctx, theme, id, rect, add),
+                None => HeaderActions::default(),
+            };
+            if actions.dock {
+                dock::leave(ctx, id);
+            }
+            actions
+        } else {
+            let (actions, rect) = self.show_floating(ctx, theme, id, add);
+            if actions.dock
+                && let Some(rect) = rect
+            {
+                dock::enter(ctx, id, self.title, min_width, rect.width());
+            }
+            actions
+        };
+        if actions.dock {
+            ctx.data_mut(|data| data.insert_temp(docked_id(id), !docked));
+        }
+        if actions.close {
+            dock::leave(ctx, id);
+            *open = false;
+        }
+    }
+
+    fn show_floating(
+        &self,
+        ctx: &egui::Context,
+        theme: &Theme,
+        window_id: Id,
+        add: impl FnOnce(&mut Ui),
+    ) -> (HeaderActions, Option<Rect>) {
+        let scene = layout::scene(ctx);
+        let size = vec2(self.width.of(scene.width()), self.height.of(scene.height()));
         let padding = f32::from(theme.padding);
-        let window_id = egui::Id::new(("window", self.title));
         clamp_resize(
             ctx,
             window_id,
             self.min_size + egui::Vec2::splat(2.0 * (padding + theme.border_width)),
-            screen,
+            scene,
         );
-        let mut close = false;
-        let position_id = egui::Id::new(("window-center", self.title));
+        let mut actions = HeaderActions::default();
+        let position_id = Id::new(("window-center", self.key));
         let position = ctx
             .data(|data| data.get_temp::<egui::Pos2>(position_id))
             .unwrap_or_else(|| {
                 pos2(
-                    screen.right() - GAP - size.x * 0.5 - padding - theme.border_width,
-                    below_icons(ctx, screen.top() + GAP)
+                    scene.right() - GAP - size.x * 0.5 - padding - theme.border_width,
+                    below_icons(ctx, scene.top() + GAP)
                         + size.y * 0.5
                         + padding
                         + theme.border_width,
@@ -92,7 +203,8 @@ impl<'a> Window<'a> {
             // which edges an immovable window may resize from. Track the
             // centre anchor ourselves to allow every edge and header moves.
             .pivot(egui::Align2::CENTER_CENTER)
-            .anchor(egui::Align2::CENTER_CENTER, position - screen.center())
+            .constrain_to(scene)
+            .anchor(egui::Align2::CENTER_CENTER, position - scene.center())
             .title_bar(false)
             .frame(
                 egui::Frame::new()
@@ -116,37 +228,23 @@ impl<'a> Window<'a> {
             .order(egui::Order::Foreground);
         let shown = window.show(ctx, |ui| {
             ui.set_style(style.clone());
-            theme.style_scrollbars(ui.style_mut());
-            ui.style_mut().spacing.item_spacing = egui::Vec2::splat(super::SPACING);
-            let mut close_rect = Rect::NOTHING;
-            let header = ui.horizontal(|ui| {
-                ui.set_min_height(28.0);
-                let title = header(ui, theme, &self);
-                let response = super::widgets::aligned_close_button(ui, theme, title);
-                close = response.clicked();
-                close_rect = response.rect;
-            });
-            // horizontal() already advances by item_spacing.y. Complete
-            // the same padding below the header as the frame gives above it.
-            ui.add_space((padding - ui.spacing().item_spacing.y).max(0.0));
+            let (header, buttons, clicked) = self.header(ui, theme, false);
+            actions = clicked;
             // The whole header, including its surrounding frame padding, is
-            // a handle. Cut out only the close button, not its whole column.
+            // a handle. Cut out only the buttons, not their whole column.
             let handle = Rect::from_min_max(
-                header.response.rect.min - vec2(padding, padding),
+                header.min - vec2(padding, padding),
                 pos2(ui.max_rect().right() + padding, ui.cursor().top()),
             );
             let content_clip = ui.clip_rect();
             ui.set_clip_rect(content_clip.union(handle));
             for (index, rect) in [
-                Rect::from_min_max(handle.min, pos2(close_rect.left(), handle.bottom())),
-                Rect::from_min_max(pos2(close_rect.right(), handle.top()), handle.max),
+                Rect::from_min_max(handle.min, pos2(buttons.left(), handle.bottom())),
+                Rect::from_min_max(pos2(buttons.right(), handle.top()), handle.max),
+                Rect::from_min_max(pos2(buttons.left(), handle.top()), buttons.right_top()),
                 Rect::from_min_max(
-                    pos2(close_rect.left(), handle.top()),
-                    close_rect.right_top(),
-                ),
-                Rect::from_min_max(
-                    close_rect.left_bottom(),
-                    pos2(close_rect.right(), handle.bottom()),
+                    buttons.left_bottom(),
+                    pos2(buttons.right(), handle.bottom()),
                 ),
             ]
             .into_iter()
@@ -161,11 +259,10 @@ impl<'a> Window<'a> {
                 }
             }
             ui.set_clip_rect(content_clip);
-            ui.add_space(super::SPACING);
-            add(ui);
+            content(ui, window_id, add);
         });
         ctx.set_style(style.clone());
-        if let Some(shown) = shown {
+        let rect = shown.map(|shown| {
             crate::render::window_blur::register(ctx, window_id, shown.response.rect);
             resize_edges(
                 ctx,
@@ -177,11 +274,78 @@ impl<'a> Window<'a> {
             ctx.data_mut(|data| {
                 data.insert_temp(position_id, shown.response.rect.center() + movement)
             });
-        }
-        if close {
-            *open = false;
-        }
+            shown.response.rect
+        });
+        (actions, rect)
     }
+
+    /// Fills the sidebar's content `rect`, opaque and without move or resize
+    /// handles: the sidebar's own edge resizes it.
+    fn show_docked(
+        &self,
+        ctx: &egui::Context,
+        theme: &Theme,
+        window_id: Id,
+        rect: Rect,
+        add: impl FnOnce(&mut Ui),
+    ) -> HeaderActions {
+        let mut actions = HeaderActions::default();
+        let inset = f32::from(theme.padding) + theme.border_width;
+        egui::Area::new(window_id.with("docked-area"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.min)
+            .constrain(false)
+            .show(ctx, |ui| {
+                ui.set_clip_rect(rect);
+                theme.style_scrollbars(ui.style_mut());
+                ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+                    egui::Frame::new()
+                        .fill(theme.fill.to_opaque())
+                        .stroke((theme.border_width, theme.border))
+                        .corner_radius(theme.radius)
+                        .inner_margin(theme.padding)
+                        .show(ui, |ui| {
+                            let size = rect.shrink(inset).size();
+                            ui.set_min_size(size);
+                            ui.set_max_size(size);
+                            actions = self.header(ui, theme, true).2;
+                            content(ui, window_id, add);
+                        });
+                });
+            });
+        actions
+    }
+
+    /// The title, dock button and close button. Returns the header block,
+    /// the buttons' bounds and which were clicked.
+    fn header(&self, ui: &mut Ui, theme: &Theme, docked: bool) -> (Rect, Rect, HeaderActions) {
+        theme.style_scrollbars(ui.style_mut());
+        ui.style_mut().spacing.item_spacing = egui::Vec2::splat(SPACING);
+        let mut actions = HeaderActions::default();
+        let mut buttons = Rect::NOTHING;
+        let header = ui.horizontal(|ui| {
+            ui.set_min_height(28.0);
+            let title = title(ui, theme, self);
+            let close = widgets::aligned_close_button(ui, theme, title);
+            let dock = ui.place(widgets::header_slot(ui, title, 1), |ui: &mut Ui| {
+                widgets::dock_button(ui, theme, docked)
+            });
+            actions.close = close.clicked();
+            actions.dock = dock.clicked();
+            buttons = close.rect.union(dock.rect);
+        });
+        // horizontal() already advances by item_spacing.y. Complete
+        // the same padding below the header as the frame gives above it.
+        ui.add_space((f32::from(theme.padding) - ui.spacing().item_spacing.y).max(0.0));
+        (header.response.rect, buttons, actions)
+    }
+}
+
+/// The caller's content, under one ID whether floating or docked, so its
+/// scroll positions, folds and text survive moving between the two.
+fn content(ui: &mut Ui, window_id: Id, add: impl FnOnce(&mut Ui)) {
+    ui.add_space(SPACING);
+    ui.scope_builder(UiBuilder::new().id(window_id.with("content")), add);
 }
 
 #[derive(Clone, Copy)]
@@ -193,9 +357,9 @@ struct ResizeDrag {
 /// Clamp the dragged edge before egui applies resize sizing or viewport
 /// translation. Its native path otherwise moves the whole rectangle first
 /// and only afterwards enforces the minimum content size.
-fn clamp_resize(ctx: &egui::Context, window_id: egui::Id, minimum: egui::Vec2, screen: Rect) {
+fn clamp_resize(ctx: &egui::Context, window_id: Id, minimum: egui::Vec2, screen: Rect) {
     let layer = egui::LayerId::new(egui::Order::Foreground, window_id);
-    let handles_id = egui::Id::new(layer).with("edge_drag");
+    let handles_id = Id::new(layer).with("edge_drag");
     let dragging = RESIZE_HANDLES.map(|name| {
         ctx.read_response(handles_id.with(name))
             .is_some_and(|response| response.dragged())
@@ -292,14 +456,17 @@ fn resize_edges(
     layer: egui::LayerId,
     style: &egui::Style,
 ) {
-    use super::interact::{ANIMATION_SECONDS, ease_out};
     // These response IDs belong to the pinned egui 0.33 Window implementation.
-    let id = egui::Id::new(layer).with("edge_drag");
+    let id = Id::new(layer).with("edge_drag");
     let responses = RESIZE_HANDLES.map(|side| ctx.read_response(id.with(side)));
     let dragging = responses.iter().flatten().any(egui::Response::dragged);
-    let frame = ctx.cumulative_frame_nr();
     let painter = ctx.layer_painter(layer);
     let border = rect.shrink(theme.border_width * 0.5);
+    let width = if dragging {
+        style.visuals.widgets.active.bg_stroke.width
+    } else {
+        style.visuals.widgets.hovered.bg_stroke.width
+    };
     for (side, corners) in [(0, [4, 6]), (1, [5, 7]), (2, [4, 5]), (3, [6, 7])] {
         let active = [side, corners[0], corners[1]].into_iter().any(|index| {
             responses[index].as_ref().is_some_and(|response| {
@@ -310,72 +477,25 @@ fn resize_edges(
                 }
             })
         });
-        let animation_id = id.with(("kit-resize-edge", side));
-        let origin_id = animation_id.with("origin");
-        let vertical = side < 2;
-        let pointer = ctx.input(|input| input.pointer.hover_pos());
-        let origin = ctx.data_mut(|data| {
-            let (was_active, mut origin, previous) = data
-                .get_temp::<(bool, f32, u64)>(origin_id)
-                .unwrap_or((false, 0.5, frame));
-            if active
-                && (!was_active || frame > previous + 1)
-                && let Some(pointer) = pointer
-            {
-                origin = if vertical {
-                    (pointer.y - border.top()) / border.height().max(1.0)
-                } else {
-                    (pointer.x - border.left()) / border.width().max(1.0)
-                }
-                .clamp(0.0, 1.0);
-            }
-            data.insert_temp(origin_id, (active, origin, frame));
-            origin
-        });
-        // Initialise idle edges before their first hover, matching inputs.
-        let amount = ctx.animate_bool_with_time_and_easing(
-            animation_id,
+        let segment = match side {
+            0 => [border.left_top(), border.left_bottom()],
+            1 => [border.right_top(), border.right_bottom()],
+            2 => [border.left_top(), border.right_top()],
+            _ => [border.left_bottom(), border.right_bottom()],
+        };
+        super::interact::pointer_edge(
+            ctx,
+            &painter,
+            id.with(("kit-resize-edge", side)),
+            segment,
             active,
-            ANIMATION_SECONDS,
-            ease_out,
+            (width, theme.accent).into(),
         );
-        if amount <= 0.0 {
-            continue;
-        }
-        let start = origin * (1.0 - amount);
-        let end = origin + (1.0 - origin) * amount;
-        let width = if dragging {
-            style.visuals.widgets.active.bg_stroke.width
-        } else {
-            style.visuals.widgets.hovered.bg_stroke.width
-        };
-        let points = if vertical {
-            let x = if side == 0 {
-                border.left()
-            } else {
-                border.right()
-            };
-            [
-                pos2(x, border.top() + border.height() * start),
-                pos2(x, border.top() + border.height() * end),
-            ]
-        } else {
-            let y = if side == 2 {
-                border.top()
-            } else {
-                border.bottom()
-            };
-            [
-                pos2(border.left() + border.width() * start, y),
-                pos2(border.left() + border.width() * end, y),
-            ]
-        };
-        painter.line_segment(points, (width, theme.accent));
     }
 }
 
 /// A prompt and the title in text mode; else the eyebrow over a large title.
-fn header(ui: &mut Ui, theme: &Theme, window: &Window) -> Rect {
+fn title(ui: &mut Ui, theme: &Theme, window: &Window) -> Rect {
     let font = if theme.text_mode {
         theme.font.id()
     } else {
@@ -402,7 +522,7 @@ fn header(ui: &mut Ui, theme: &Theme, window: &Window) -> Rect {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             if !window.eyebrow.is_empty() {
-                super::widgets::eyebrow(ui, theme, window.eyebrow);
+                widgets::eyebrow(ui, theme, window.eyebrow);
             }
             let response = ui.label(title);
             bounds.translate(response.rect.min.to_vec2())
@@ -413,6 +533,10 @@ fn header(ui: &mut Ui, theme: &Theme, window: &Window) -> Rect {
 
 /// Clears the HUD icons at the top right, so a window never covers them.
 fn below_icons(ctx: &egui::Context, top: f32) -> f32 {
-    ctx.data(|data| data.get_temp::<(Rect, bool)>(egui::Id::new("icons-pointer-capture")))
-        .map_or(top, |(icons, _)| top.max(icons.bottom() + GAP))
+    let icons = layout::icons(ctx);
+    if icons.is_positive() {
+        top.max(icons.bottom() + GAP)
+    } else {
+        top
+    }
 }

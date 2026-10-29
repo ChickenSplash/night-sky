@@ -195,8 +195,8 @@ states, including H/He block normalisation and liquid pressure-work units. These
 checks do not implement a runtime mixture or phase-equilibrium solver.
 Tests cover orbital and clock invariants, deterministic generation, multiple
 systems, streaming, persistent task slots, presentation layout and camera flights.
-UI regressions cover long presses, window movement/resizing, title alignment,
-selection-driven rows, responsive result panes and reset placement, numeric
+UI regressions cover long presses, window movement/resizing, docking and dock
+tabs, title alignment, selection-driven rows, responsive result panes and reset placement, numeric
 precision/validation, dropdown geometry, themed tooltips and scrollbar easing.
 
 Additional graphical check:

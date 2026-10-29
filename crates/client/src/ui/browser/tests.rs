@@ -685,11 +685,8 @@ fn opening_browser_keeps_its_height_stable_and_inside_the_viewport() {
                 );
             },
         );
-        let bounds = ctx.memory(|memory| {
-            memory
-                .area_rect(egui::Id::new(("window", "Object browser")))
-                .unwrap()
-        });
+        let bounds =
+            ctx.memory(|memory| memory.area_rect(crate::ui::kit::window_id(WINDOW)).unwrap());
         if frame > 1 {
             assert!(
                 screen.contains_rect(bounds),

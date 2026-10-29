@@ -129,7 +129,7 @@ mod tests {
             );
             ctx.memory(|memory| {
                 memory
-                    .area_rect(egui::Id::new(("window", "terminal-test")))
+                    .area_rect(crate::ui::kit::window_id("terminal-test"))
                     .unwrap()
             })
         };

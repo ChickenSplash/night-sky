@@ -163,12 +163,9 @@ fn task_window_uses_bounded_resizing_and_foreground_stacking() {
         let nav = Navigation::default();
         let mut state = Tasks::default();
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 900.0));
-        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new(("window", "Tasks")));
+        let layer = egui::LayerId::new(egui::Order::Foreground, kit::window_id(WINDOW));
         ctx.data_mut(|data| {
-            data.insert_temp(
-                egui::Id::new(("window-center", "Tasks")),
-                pos2(450.0, 450.0),
-            );
+            data.insert_temp(egui::Id::new(("window-center", WINDOW)), pos2(450.0, 450.0));
             data.insert_temp(
                 egui::Id::new(("window-center", "Other")),
                 pos2(700.0, 450.0),
@@ -186,7 +183,7 @@ fn task_window_uses_bounded_resizing_and_foreground_stacking() {
                 },
                 |ctx| {
                     window(ctx, &mut true, &galaxy, &nav, &mut state, &mut Vec::new());
-                    kit::Window::new("Other").show(ctx, &Theme::GAME, &mut true, |ui| {
+                    kit::Window::new("Other", "Other").show(ctx, &Theme::GAME, &mut true, |ui| {
                         ui.allocate_space(ui.available_size());
                     });
                 },
