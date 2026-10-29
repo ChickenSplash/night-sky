@@ -330,3 +330,38 @@ fn sidebar_edge_lights_from_the_pointer_like_window_edges() {
     // 30% down the edge, so it grows three parts up for every seven down.
     assert!(((270.0 - top.y) / (bottom.y - 270.0) - 3.0 / 7.0).abs() < 0.02);
 }
+
+#[test]
+fn later_drags_and_redocking_continue_from_the_chosen_whole_point_width() {
+    let harness = Harness::new([true, false]);
+    harness.settle();
+    harness.click(harness.dock_button("first"));
+    harness.settle();
+    let drag = |from: f32, by: f32| {
+        let edge = Pos2::new(from, 450.0);
+        harness.frame(vec![Event::PointerMoved(edge)]);
+        harness.frame(vec![press(edge, true)]);
+        harness.frame(vec![Event::PointerMoved(edge + egui::vec2(by, 0.0))]);
+        harness.frame(vec![press(edge + egui::vec2(by, 0.0), false)]);
+        harness.settle();
+        harness.scene().right()
+    };
+    let wide = drag(harness.scene().right(), -60.3);
+    assert_eq!(wide, wide.round(), "the sidebar edge stays on whole points");
+    // Grabbed just inside the docked window, the edge still resizes.
+    let wider = drag(wide + 2.0, -50.0);
+    assert!(
+        (wider - (wide - 50.0)).abs() < 1.0,
+        "a second drag continues from the chosen width: {wide} -> {wider}"
+    );
+    harness.click(harness.dock_button("first"));
+    harness.settle();
+    assert_eq!(harness.scene(), SCREEN);
+    harness.click(harness.dock_button("first"));
+    harness.settle();
+    assert_eq!(
+        harness.scene().right(),
+        wider,
+        "re-docking keeps the chosen width"
+    );
+}

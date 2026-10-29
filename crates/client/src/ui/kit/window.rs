@@ -228,6 +228,10 @@ impl<'a> Window<'a> {
             .order(egui::Order::Foreground);
         let shown = window.show(ctx, |ui| {
             ui.set_style(style.clone());
+            // egui sizes the frame to the content, while the header aligns to
+            // the size egui keeps. Short content, such as a single note, would
+            // otherwise shrink the frame and leave the header buttons outside.
+            ui.set_min_size(ui.max_rect().size());
             let (header, buttons, clicked) = self.header(ui, theme, false);
             actions = clicked;
             // The whole header, including its surrounding frame padding, is

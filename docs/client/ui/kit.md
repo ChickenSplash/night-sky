@@ -116,9 +116,13 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
   rect, which becomes the camera viewport and the HUD's bounds. Nothing of the
   3D view lies behind it, so keep the sidebar on the right: canvas markers
   assume the viewport starts at the window's left edge.
-- An empty sidebar takes the docking window's floating width. Its left edge
-  resizes it instantly, between the widest docked window's minimum and half
-  the screen, with the window edges' pointer-origin highlight.
+- The first time it opens, the sidebar takes the docking window's floating
+  width; afterwards it keeps the width last chosen. Its left edge resizes it
+  instantly, in whole points, between the widest docked window's minimum and
+  half the screen, with the window edges' pointer-origin highlight.
+- Floating window content always fills the size egui keeps for the window, so
+  short content (such as the inspector's empty prompt) cannot shrink the frame
+  away from its header buttons.
 - Several docked windows share the sidebar as tabs; only the front one draws.
   A newly docked or reopened window comes to the front. Closing or floating it
   shows the next tab; the sidebar closes with its last tab.

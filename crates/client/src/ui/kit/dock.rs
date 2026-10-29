@@ -116,10 +116,17 @@ pub fn begin(ctx: &egui::Context) -> Rect {
             dock.width = start - drag.x;
         }
         let (min, max) = dock.width_bounds(screen);
-        dock.width = dock.width.clamp(min, max);
+        // Whole points: pointer deltas are fractional, and egui's debug
+        // builds outline every widget whose edges are off its rounding grid.
+        dock.width = dock.width.clamp(min, max).round();
         dock.content = None;
         dock.clone()
     });
+    // Until a drag is under way, keep its starting width current. A drag
+    // then measures from the width it was grabbed at, every time.
+    if !resizing {
+        ctx.data_mut(|data| data.insert_temp(start_id, dock.width));
+    }
     if dock.tabs.is_empty() {
         layout::set_scene(ctx, screen);
         return screen;
@@ -168,13 +175,14 @@ fn show(ctx: &egui::Context, rect: Rect, dock: &Dock) -> (Rect, Option<Id>) {
                     .rect;
                 content.min.y = strip.bottom() + padding;
             }
-            resize_edge(ui, rect, dock.width);
+            resize_edge(ui, rect);
         });
     (content, chosen)
 }
 
 /// The sidebar's left edge: dragged to resize, lit like a window edge.
-fn resize_edge(ui: &mut egui::Ui, rect: Rect, width: f32) {
+/// `begin` applies the drag before laying out the frame.
+fn resize_edge(ui: &mut egui::Ui, rect: Rect) {
     let handle = Rect::from_min_max(
         pos2(rect.left() - GRIP, rect.top()),
         pos2(rect.left() + GRIP, rect.bottom()),
@@ -182,9 +190,6 @@ fn resize_edge(ui: &mut egui::Ui, rect: Rect, width: f32) {
     let response = ui
         .interact(handle, resize_id(), Sense::drag())
         .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-    if response.drag_started() {
-        ui.data_mut(|data| data.insert_temp(resize_id().with("start"), width));
-    }
     if response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
@@ -205,12 +210,12 @@ fn resize_edge(ui: &mut egui::Ui, rect: Rect, width: f32) {
     );
 }
 
-/// Docks a floating window as the active tab. An empty sidebar takes the
-/// window's floating `width`, so the window keeps its shape.
+/// Docks a floating window as the active tab. A sidebar that has never been
+/// sized takes the window's floating `width`; after that it keeps its own.
 pub(super) fn enter(ctx: &egui::Context, window: Id, title: &str, min_width: f32, width: f32) {
     let frame = ctx.cumulative_frame_nr();
     with(ctx, |dock| {
-        if dock.tabs.is_empty() {
+        if dock.width <= 0.0 {
             dock.width = width;
         }
         dock.enter(frame, window, title, min_width);

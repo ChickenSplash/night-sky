@@ -1479,3 +1479,45 @@ fn filter_chips_reveal_and_remove_with_eased_horizontal_sweeps() {
     assert_eq!(clip.left(), full.left());
     assert!(frame(0.52, vec![]).1.is_none());
 }
+
+#[test]
+fn short_content_keeps_the_window_size_and_its_header_buttons_inside() {
+    let ctx = egui::Context::default();
+    super::plain_style(&ctx);
+    let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(2560.0, 1400.0));
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(ctx.run(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ctx| {
+                super::Window::new("short", "Short")
+                    .min_size(vec2(380.0, 320.0))
+                    .show(ctx, &super::Theme::GAME, &mut true, |ui| {
+                        super::ScrollArea::vertical().show(ui, |ui| {
+                            super::note(ui, &super::Theme::GAME, "Select an object.");
+                        });
+                    });
+            },
+        ));
+    }
+    let bounds = ctx.memory(|memory| memory.area_rect(super::window_id("short")).unwrap());
+    assert!(
+        bounds.width() >= 380.0 && bounds.height() >= 320.0,
+        "a single note must not shrink the window: {bounds:?}"
+    );
+    let close = output
+        .unwrap()
+        .shapes
+        .into_iter()
+        .find_map(|shape| match shape.shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == "×" => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(bounds.contains(close), "× at {close:?} outside {bounds:?}");
+}
