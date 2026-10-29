@@ -1,5 +1,30 @@
 use super::*;
-use crate::actions::{Display, GalaxyReference};
+use crate::actions::Display;
+
+#[test]
+fn removed_atmosphere_jitter_switch_is_rejected() {
+    assert!(parse("set_debug atmosphere_jitter false").is_err());
+    assert!(
+        serde_json::from_str::<UiCommand>(
+            r#"{"type":"set_debug","switch":"atmosphere_jitter","on":true}"#
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn removed_galaxy_reference_presets_are_rejected() {
+    for view in ["inside", "face_on", "edge_on"] {
+        assert!(parse(&format!("galaxy_reference {view}")).is_err());
+        assert!(
+            serde_json::from_value::<UiCommand>(serde_json::json!({
+                "type": "galaxy_reference",
+                "view": view,
+            }))
+            .is_err()
+        );
+    }
+}
 use crate::navigation::presentation::PresentationMode;
 
 #[test]
@@ -130,12 +155,7 @@ fn arguments_fill_fields_in_order_or_by_name() {
             presentation_mode: PresentationMode::Simulation
         }
     );
-    assert_eq!(
-        parse("galaxy_reference face_on").unwrap(),
-        UiCommand::GalaxyReference {
-            view: GalaxyReference::FaceOn
-        }
-    );
+    assert_eq!(parse("view_galaxy").unwrap(), UiCommand::ViewGalaxy);
     assert_eq!(
         parse("set_zoom 6371000").unwrap(),
         UiCommand::SetZoom {
@@ -251,11 +271,14 @@ fn search_takes_the_rest_of_the_line_and_explains_refusals() {
     assert_eq!(
         parse("set_search work_cap_millions=5").unwrap(),
         UiCommand::SetSearch {
-            threads: None,
             work_cap_millions: Some(5.0)
         }
     );
-    assert!(parse("set_search").unwrap_err().contains("Give threads"));
+    assert!(
+        parse("set_search")
+            .unwrap_err()
+            .contains("Give work_cap_millions")
+    );
     assert_eq!(
         parse("set_layered_planets true").unwrap(),
         UiCommand::SetLayeredPlanets { on: true }
@@ -263,6 +286,6 @@ fn search_takes_the_rest_of_the_line_and_explains_refusals() {
     assert!(
         parse("set_search threads=0")
             .unwrap_err()
-            .contains("threads must be 1 to 64")
+            .contains("threads")
     );
 }

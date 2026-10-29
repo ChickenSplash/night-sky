@@ -146,8 +146,8 @@ fn status(ui: &mut egui::Ui, browser: &mut Browser, entry: Option<&Entry>) {
                 let share = (radius > 0.0).then(|| (p.complete_to_ly / radius) as f32);
                 (
                     format!(
-                        "Searching {scope} · out to {:.1} ly · {} so far",
-                        p.complete_to_ly,
+                        "Searching {scope} · out to {} ly · {} so far",
+                        crate::format::number(p.complete_to_ly, 1),
                         count(n)
                     ),
                     Some(share),
@@ -157,9 +157,9 @@ fn status(ui: &mut egui::Ui, browser: &mut Browser, entry: Option<&Entry>) {
             (None, State::Done) => (String::new(), None),
             (None, State::Capped) => (
                 format!(
-                    "{} · stopped at its work limit, complete out to {:.1} ly",
+                    "{} · stopped at its work limit, complete out to {} ly",
                     count(n),
-                    p.complete_to_ly
+                    crate::format::number(p.complete_to_ly, 1)
                 ),
                 None,
             ),

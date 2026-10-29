@@ -89,6 +89,9 @@ pub struct LayeredPlanet {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    /// Full region inventory. Empty only for older records without a breakdown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<LayerMaterial>,
     /// Optional phase SUB-allocations of the existing layer mass, never added
     /// to it. Empty when the selected model does not resolve a local partition.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -114,6 +117,12 @@ pub struct Layer {
     pub temperature_k: Option<f64>,
     /// Density or column model ID.
     pub model: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LayerMaterial {
+    pub material: String,
+    pub mass_kg: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -481,12 +481,7 @@ fn inspector_actions_reach_remote_stars_and_planets_like_a_second_click() {
             selected.then_some(star.as_str())
         );
     }
-    send(
-        &mut app,
-        vec![UiCommand::GalaxyReference {
-            view: GalaxyReference::FaceOn,
-        }],
-    );
+    send(&mut app, vec![UiCommand::ViewGalaxy]);
     send(
         &mut app,
         vec![UiCommand::FlyToPlanet {
@@ -675,12 +670,7 @@ fn page_navigation_selects_constellation_stars_and_keeps_other_presentation_mode
 #[test]
 fn script_json_parses_into_commands() {
     let parse = |json| serde_json::from_str::<UiCommand>(json).unwrap();
-    assert_eq!(
-        parse(r#"{"type":"galaxy_reference","view":"face_on"}"#),
-        UiCommand::GalaxyReference {
-            view: GalaxyReference::FaceOn
-        }
-    );
+    assert_eq!(parse(r#"{"type":"view_galaxy"}"#), UiCommand::ViewGalaxy);
     assert_eq!(
         parse(r#"{"type":"set_presentation_mode","presentation_mode":"constellation"}"#),
         UiCommand::SetPresentationMode {
@@ -707,20 +697,16 @@ fn script_json_parses_into_commands() {
 }
 
 #[test]
-fn reference_views_face_the_centre_and_clear_system_selection() {
+fn galaxy_view_faces_the_centre_and_clears_system_selection() {
     use space_simulation::galaxy::{GalaxyModel, PC_METRES};
     let home = bevy::math::DVec3::from_array(GalaxyModel::milky_way().home_pc);
-    for view in [
-        GalaxyReference::Inside,
-        GalaxyReference::FaceOn,
-        GalaxyReference::EdgeOn,
-    ] {
+    {
         let mut nav = Navigation {
             visit: Some(crate::Visit::List(0)),
             selection: Some(Selection::Planet("fixture/0".into())),
             ..default()
         };
-        galaxy_reference(&mut nav, view);
+        view_galaxy(&mut nav);
         let eye = nav.eye.unwrap() / PC_METRES + home;
         let direction = (nav.rotation * Vec3::NEG_Z).as_dvec3();
         assert!(direction.dot(-eye.normalize()) > 0.999999);

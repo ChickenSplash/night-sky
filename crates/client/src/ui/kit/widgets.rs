@@ -51,8 +51,13 @@ pub fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
 
 /// A persistent section toggle. Call its body only while expanded.
 pub fn section(ui: &mut Ui, theme: &Theme, text: &str) -> bool {
+    section_with_default(ui, theme, text, true)
+}
+
+/// Like `section`, with an initial state before the user's first toggle.
+pub fn section_with_default(ui: &mut Ui, theme: &Theme, text: &str, default_open: bool) -> bool {
     let id = ui.make_persistent_id(("section", text));
-    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(true));
+    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(default_open));
     let (rect, response, _) = row(ui, theme, theme.row, true);
     ui.painter().text(
         pos2(rect.left() + theme.inset, rect.center().y),

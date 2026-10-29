@@ -71,6 +71,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             .flatten()
             .map_or(s.surface_radius_m(), |c| s.surface_radius_m() + c.extent_m);
         layers.push(Layer {
+            materials: materials(s.gas_inventory()),
             phase_allocations: Vec::new(),
             model_fidelity: ModelFidelity::Approximate,
             model_limitations: strings(s.approximation_notes()),
@@ -87,6 +88,7 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     }
     if s.deposit_thickness_m() > 0.0 {
         layers.push(Layer {
+            materials: materials(s.deposit_inventory()),
             phase_allocations: Vec::new(),
             model_fidelity: ModelFidelity::Approximate,
             model_limitations: vec![
@@ -305,6 +307,7 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
             let envelope = r.kind == fallback::Kind::Envelope;
             let atmosphere = r.kind == fallback::Kind::Atmosphere;
             Layer {
+                materials: materials(&r.inventory),
                 phase_allocations: Vec::new(),
                 model_fidelity: fidelity,
                 model_limitations: vec![
@@ -386,6 +389,7 @@ fn region(
     model: &str,
 ) -> Layer {
     Layer {
+        materials: materials(inventory),
         phase_allocations: Vec::new(),
         model_fidelity: ModelFidelity::Approximate,
         model_limitations: vec![match kind {
@@ -403,6 +407,19 @@ fn region(
         temperature_k,
         model: model.into(),
     }
+}
+
+fn materials(inventory: &Inventory) -> Vec<space_shared::LayerMaterial> {
+    Material::ALL
+        .into_iter()
+        .filter_map(|m| {
+            let mass_kg = inventory.mass_kg(m);
+            (mass_kg > 0.0).then(|| space_shared::LayerMaterial {
+                material: m.id().into(),
+                mass_kg,
+            })
+        })
+        .collect()
 }
 
 fn strings(notes: &[&str]) -> Vec<String> {
@@ -439,3 +456,6 @@ fn water_kind(region: &water::Region) -> &'static str {
         PhaseKnowledge::UnresolvedCompression => "water_compression",
     }
 }
+
+#[cfg(test)]
+mod tests;

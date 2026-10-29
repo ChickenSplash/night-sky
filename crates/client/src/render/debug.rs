@@ -1,5 +1,5 @@
 //! Debug-only switches for A/B performance tests, set from the debug window's
-//! `perf` tab or `set_debug`. They are not product settings and start in the
+//! `settings` tab or `set_debug`. They are not persisted settings and start in the
 //! normal rendering state. Bevy's render diagnostics also record GPU
 //! time and shader invocations per pass for the `perf` tab.
 use crate::scene::SpaceCamera;
@@ -28,9 +28,6 @@ pub enum DebugSwitch {
     SplitMultiples,
     /// Draw planetary atmospheres (`atmosphere.rs`).
     Atmospheres,
-    /// Move each pixel's atmosphere samples along its steps, so steps show
-    /// as fine grain rather than bands.
-    AtmosphereJitter,
     /// Read the starlight reaching the air from a table built per air,
     /// rather than marching towards each star (`atmosphere/tables.rs`).
     AtmosphereTables,
@@ -84,9 +81,6 @@ impl DebugSwitch {
             Self::Atmospheres => {
                 "Draw the scattering shell of planetary atmospheres. Turn off to compare the look and its GPU cost."
             }
-            Self::AtmosphereJitter => {
-                "Sample the atmosphere at a different point of each step in neighbouring pixels, so too few steps show as fine grain instead of coloured bands. Turn off to compare."
-            }
             Self::AtmosphereTables => {
                 "Read the starlight reaching each point of the air from a lookup table built once per air, instead of marching towards each star. Should look the same and cost less; turn off to compare."
             }
@@ -126,7 +120,6 @@ pub struct RenderDebug {
     pub point_stars: bool,
     pub split_multiples: bool,
     pub atmospheres: bool,
-    pub atmosphere_jitter: bool,
     pub atmosphere_tables: bool,
     pub atmosphere_stop_opaque: bool,
     pub atmosphere_multiple: bool,
@@ -149,7 +142,6 @@ impl Default for RenderDebug {
             point_stars: true,
             split_multiples: true,
             atmospheres: true,
-            atmosphere_jitter: true,
             atmosphere_tables: true,
             atmosphere_stop_opaque: true,
             atmosphere_multiple: true,
@@ -163,33 +155,6 @@ impl Default for RenderDebug {
 }
 
 impl RenderDebug {
-    pub const SWITCHES: [(DebugSwitch, &str); 18] = [
-        (DebugSwitch::FreezeStream, "Freeze star streaming"),
-        (DebugSwitch::GalacticPoints, "Galactic star points"),
-        (DebugSwitch::PointPixels, "Shade point pixels"),
-        (DebugSwitch::Msaa, "4x MSAA"),
-        (DebugSwitch::Bloom, "Bloom"),
-        (DebugSwitch::CullBlocks, "Cull blocks outside the view"),
-        (DebugSwitch::PointStars, "Stars as points"),
-        (DebugSwitch::SplitMultiples, "Split multiple stars"),
-        (DebugSwitch::Atmospheres, "Atmospheres"),
-        (DebugSwitch::AtmosphereJitter, "Jitter atmosphere steps"),
-        (DebugSwitch::AtmosphereTables, "Atmosphere lookup tables"),
-        (
-            DebugSwitch::AtmosphereStopOpaque,
-            "Stop atmosphere at opaque",
-        ),
-        (
-            DebugSwitch::AtmosphereMultiple,
-            "Atmosphere multiple scattering",
-        ),
-        (DebugSwitch::AtmosphereGround, "Atmosphere ground lighting"),
-        (DebugSwitch::GiantDescent, "Giant atmosphere descent"),
-        (DebugSwitch::Oblateness, "Flattened bodies"),
-        (DebugSwitch::Ground, "Ground chunks"),
-        (DebugSwitch::GroundLevels, "Ground chunk levels"),
-    ];
-
     pub fn get(&self, switch: DebugSwitch) -> bool {
         match switch {
             DebugSwitch::FreezeStream => self.freeze_stream,
@@ -201,7 +166,6 @@ impl RenderDebug {
             DebugSwitch::PointStars => self.point_stars,
             DebugSwitch::SplitMultiples => self.split_multiples,
             DebugSwitch::Atmospheres => self.atmospheres,
-            DebugSwitch::AtmosphereJitter => self.atmosphere_jitter,
             DebugSwitch::AtmosphereTables => self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => self.atmosphere_multiple,
@@ -224,7 +188,6 @@ impl RenderDebug {
             DebugSwitch::PointStars => &mut self.point_stars,
             DebugSwitch::SplitMultiples => &mut self.split_multiples,
             DebugSwitch::Atmospheres => &mut self.atmospheres,
-            DebugSwitch::AtmosphereJitter => &mut self.atmosphere_jitter,
             DebugSwitch::AtmosphereTables => &mut self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => &mut self.atmosphere_stop_opaque,
             DebugSwitch::AtmosphereMultiple => &mut self.atmosphere_multiple,

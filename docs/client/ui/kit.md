@@ -31,7 +31,8 @@ readouts; extending an object should extend that source, not duplicate it.
 ## Themes and geometry
 
 - `Theme::GAME`: player-facing windows and modal controls.
-- `Theme::TERMINAL`: debug console, with monospace text-mode controls.
+- `Theme::TERMINAL`: debug console, with monospace text-mode controls and
+  the same hairline border colour and thickness as `Theme::GAME`.
 - `Theme::DESTRUCTIVE`: shared red feedback for close, chip removal and reset.
 - `Theme::SUBTLE_ACCENT_OPACITY`: 0.12, shared by row backgrounds, idle
   scrollbars and progress-bar remainders. It is a gamma-multiplied accent tint,
@@ -44,6 +45,11 @@ readouts; extending an object should extend that source, not duplicate it.
   for individual controls.
 - Section separation uses space instead of decorative lines. Checkbox split
   dividers and intentional diagnostic rules remain functional separators.
+- Physical readouts use the shared `format::number` formatter: comma thousands
+  separators and a decimal point (`21,580.174 km`). Existing precision, unit
+  selection and scientific notation for trace quantities remain unchanged.
+  Formatting is presentation-only; numeric API fields, identifiers and editable
+  command/query syntax are not rewritten.
 - `Slider` rows split like checkboxes: label, a text-mode `[=====|-----]`
   track and the value, then the square `+` that opens their description.
   Labels share a column so neighbouring tracks line up. Use them instead of

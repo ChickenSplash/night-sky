@@ -134,12 +134,7 @@ fn a_constellation_is_not_a_physical_location() {
         ..at_list(&galaxy, 0)
     };
     assert_eq!(labels(&nav, &galaxy), ["Milky Way"]);
-    assert_eq!(
-        up(&nav, &galaxy),
-        Some(UiCommand::GalaxyReference {
-            view: GalaxyReference::FaceOn
-        })
-    );
+    assert_eq!(up(&nav, &galaxy), Some(UiCommand::ViewGalaxy));
 }
 
 #[test]

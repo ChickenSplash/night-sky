@@ -65,7 +65,7 @@ impl Theme {
     /// Faint rows, idle scrollbars and progress remainders share this strength.
     pub const SUBTLE_ACCENT_OPACITY: f32 = 0.12;
     /// The debug console: a translucent black window after the desktop's
-    /// Hyprland windows, with a light grey border and text-mode controls.
+    /// Hyprland windows, with the player-window border and text-mode controls.
     pub const TERMINAL: Self = Self {
         text_mode: true,
         text: Color32::from_rgb(214, 228, 244),
@@ -73,9 +73,8 @@ impl Theme {
         accent: Color32::from_rgb(0x33, 0xcc, 0xff),
         on: Color32::from_rgb(0x00, 0xff, 0x99),
         fill: Color32::from_black_alpha(205),
-        // Light grey (0xc8, 0xcc, 0xd0) at 0.93.
-        border: Color32::from_rgba_premultiplied(186, 190, 193, 237),
-        border_width: 2.0,
+        border: Self::GAME.border,
+        border_width: Self::GAME.border_width,
         radius: 0,
         control_radius: 4,
         padding: 12,

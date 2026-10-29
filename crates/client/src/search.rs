@@ -21,7 +21,6 @@ mod tests;
 
 /// The log target of search lines.
 pub const TARGET: &str = "search";
-pub const THREADS: RangeInclusive<usize> = 1..=64;
 /// Work cap, in millions of units.
 pub const WORK_CAP_MILLIONS: RangeInclusive<f64> = 1.0..=10_000.0;
 /// Requests kept, finished or not; the oldest finished goes first.
@@ -90,22 +89,16 @@ pub struct Searches {
     /// last update.
     pub shown: Option<u64>,
     pub shown_entry: Option<Entry>,
-    /// Debug settings, reset on restart (`set_search`). The browser always
-    /// searches on one thread.
-    pub threads: usize,
+    /// Debug work cap, reset on restart (`set_search`).
     pub work_cap: u64,
 }
 
 impl Default for Searches {
     fn default() -> Self {
-        // The star loader takes three quarters of the machine's threads.
-        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
-        let threads = (available / 4).max(1);
         Self {
-            hub: Arc::new(Hub::new(threads)),
+            hub: Arc::new(Hub::new()),
             shown: None,
             shown_entry: None,
-            threads,
             work_cap: DEFAULT_WORK_CAP,
         }
     }
@@ -211,14 +204,7 @@ fn apply(
                 }
                 searches.shown = None;
             }
-            UiCommand::SetSearch {
-                threads,
-                work_cap_millions,
-            } => {
-                if let Some(threads) = threads {
-                    searches.threads = (*threads).clamp(*THREADS.start(), *THREADS.end());
-                    searches.hub.set_threads(searches.threads);
-                }
+            UiCommand::SetSearch { work_cap_millions } => {
                 if let Some(millions) = work_cap_millions {
                     let millions =
                         millions.clamp(*WORK_CAP_MILLIONS.start(), *WORK_CAP_MILLIONS.end());
@@ -227,8 +213,7 @@ fn apply(
                 }
                 info!(
                     target: TARGET,
-                    "search threads {}, work cap {} M",
-                    searches.threads,
+                    "search shared CPU budget, work cap {} M",
                     searches.work_cap / 1_000_000
                 );
             }
@@ -241,21 +226,24 @@ fn apply(
 fn summary(entry: &Entry) -> String {
     let p = &entry.progress;
     let reach = if p.state == State::Capped {
-        format!(", searched out to {:.1} ly", p.complete_to_ly)
+        format!(
+            ", searched out to {} ly",
+            crate::format::number(p.complete_to_ly, 1)
+        )
     } else {
         String::new()
     };
     format!(
-        "#{} {} · {} results{reach} · {:.2} s · {:.1} M stars tried, {:.1} M rejected early, {} systems tested, {} cells · cache {:.0} MB",
+        "#{} {} · {} results{reach} · {} s · {} M stars tried, {} M rejected early, {} systems tested, {} cells · cache {} MB",
         entry.id,
         entry.state(),
-        entry.result_count,
-        p.elapsed_ms / 1e3,
-        p.stars as f64 / 1e6,
-        p.rejected_early as f64 / 1e6,
-        p.evaluated,
-        p.cells,
-        p.cache_bytes as f64 / 1e6,
+        crate::format::grouped(entry.result_count),
+        crate::format::number(p.elapsed_ms / 1e3, 2),
+        crate::format::number(p.stars as f64 / 1e6, 1),
+        crate::format::number(p.rejected_early as f64 / 1e6, 1),
+        crate::format::grouped(p.evaluated as usize),
+        crate::format::grouped(p.cells as usize),
+        crate::format::number(p.cache_bytes as f64 / 1e6, 0),
     )
 }
 
@@ -270,10 +258,16 @@ pub struct Hub {
     work_cap: AtomicU64,
 }
 
+impl Default for Hub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Hub {
-    pub fn new(threads: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            service: Mutex::new(Service::spawn(threads)),
+            service: Mutex::new(Service::spawn()),
             store: Mutex::new(VecDeque::new()),
             next: AtomicU64::new(1),
             work_cap: AtomicU64::new(DEFAULT_WORK_CAP),
@@ -364,12 +358,6 @@ impl Hub {
     pub fn cancel(&self, id: u64) {
         if let Ok(service) = self.service.lock() {
             service.cancel(id);
-        }
-    }
-
-    pub fn set_threads(&self, threads: usize) {
-        if let Ok(service) = self.service.lock() {
-            service.set_threads(threads);
         }
     }
 

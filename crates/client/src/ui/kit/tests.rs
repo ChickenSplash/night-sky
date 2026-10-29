@@ -1176,9 +1176,9 @@ fn corner_resize_stops_both_axes_without_moving_the_opposite_corner() {
 }
 
 #[test]
-fn terminal_theme_keeps_the_console_colours() {
-    let grey = egui::Color32::from_rgb(0xc8, 0xcc, 0xd0);
-    assert_eq!(THEME.border, grey.gamma_multiply(0.93));
+fn terminal_theme_matches_the_browser_border_and_keeps_its_background() {
+    assert_eq!(THEME.border, super::Theme::GAME.border);
+    assert_eq!(THEME.border_width, super::Theme::GAME.border_width);
     assert_eq!(THEME.fill, egui::Color32::from_black_alpha(205));
 }
 

@@ -1,5 +1,5 @@
 //! The native search service: one thread running every open request in
-//! turn (`Runner`), using `threads` threads for large cells.
+//! turn (`Runner`), sharing the background CPU budget for large cells.
 use super::engine::SearchRequest;
 use super::runner::{Order, Runner, SearchUpdate};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -7,11 +7,10 @@ use std::time::{Duration, Instant};
 
 /// Work per slice: a fraction of a second, so cancellations and new
 /// requests are seen promptly.
-const SLICE: u64 = 1_000_000;
+const SLICE: u64 = 100_000;
 
 enum Message {
     Order(Order),
-    Threads(usize),
 }
 
 pub struct SearchService {
@@ -21,12 +20,12 @@ pub struct SearchService {
 
 impl SearchService {
     /// Stops when dropped.
-    pub fn spawn(threads: usize) -> Self {
+    pub fn spawn() -> Self {
         let (send, inbox) = channel();
         let (outbox, updates) = channel();
         std::thread::Builder::new()
             .name("search".into())
-            .spawn(move || serve(&inbox, &outbox, threads.max(1)))
+            .spawn(move || serve(&inbox, &outbox))
             .expect("could not start the search thread");
         Self { send, updates }
     }
@@ -42,11 +41,6 @@ impl SearchService {
         let _ = self.send.send(Message::Order(Order::Cancel(id)));
     }
 
-    /// Threads for the next slices of every request.
-    pub fn set_threads(&self, threads: usize) {
-        let _ = self.send.send(Message::Threads(threads.max(1)));
-    }
-
     /// Updates since the last call, without waiting.
     pub fn updates(&self) -> Vec<SearchUpdate> {
         self.updates.try_iter().collect()
@@ -58,12 +52,22 @@ impl SearchService {
     }
 }
 
-fn serve(inbox: &Receiver<Message>, outbox: &Sender<SearchUpdate>, mut threads: usize) {
+fn serve(inbox: &Receiver<Message>, outbox: &Sender<SearchUpdate>) {
     let mut runner = Runner::default();
+    let budget = crate::background::shared();
+    let mut demand = None;
+    let mut pending = None;
     let epoch = Instant::now();
     let clock = || epoch.elapsed().as_secs_f64() * 1e3;
     loop {
-        let message = if runner.busy() {
+        if runner.busy() || pending.is_some() {
+            demand.get_or_insert_with(|| budget.search_demand());
+        } else {
+            demand = None;
+        }
+        let message = if pending.is_some() {
+            pending.take()
+        } else if runner.busy() {
             match inbox.try_recv() {
                 Ok(message) => Some(message),
                 Err(TryRecvError::Empty) => None,
@@ -77,12 +81,31 @@ fn serve(inbox: &Receiver<Message>, outbox: &Sender<SearchUpdate>, mut threads: 
         };
         let update = match message {
             // Take in every waiting message before working.
-            Some(Message::Order(order)) => runner.order(order, clock()),
-            Some(Message::Threads(n)) => {
-                threads = n;
-                None
+            Some(Message::Order(order @ Order::Submit(_))) => {
+                demand.get_or_insert_with(|| budget.search_demand());
+                let Some(_permit) = budget.try_search() else {
+                    // Exact-ID and single-system requests can generate bodies
+                    // during submission, so initialization needs a slot too.
+                    pending = Some(Message::Order(order));
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                };
+                runner.order(order, clock())
             }
-            None => runner.step(SLICE, threads, clock),
+            Some(Message::Order(order)) => runner.order(order, clock()),
+            None => {
+                let Some(coordinator) = budget.try_search() else {
+                    // Poll commands again shortly, without spinning or blocking
+                    // cancellation behind another subsystem's numerical solve.
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                };
+                let mut permits = vec![coordinator];
+                while let Some(permit) = budget.try_search_extra() {
+                    permits.push(permit);
+                }
+                runner.step(SLICE, permits.len(), clock)
+            }
         };
         if let Some(update) = update
             && outbox.send(update).is_err()

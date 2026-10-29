@@ -349,7 +349,7 @@ fn prediction_readout(live: &Live, seconds: f64) -> PredictionReadout {
 
 /// The inspector's title, facts and note for a craft, live at `seconds`.
 pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String, String)>) {
-    use crate::format::{duration_text, km_text, speed_label};
+    use crate::format::{duration_text, km_text, number, signed_number, speed_label};
     let (state, reference) = live.surroundings(seconds);
     let mut rows = vec![("Type".to_owned(), live.craft.kind.label().to_owned())];
     rows.push((
@@ -374,7 +374,11 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
     rows.push((
         "Warp turn rate".into(),
         if live.craft.warp.engaged {
-            format!("{turning:.1} / {} °/s", live.craft.warp.turn_rate_dps)
+            format!(
+                "{} / {} °/s",
+                number(turning, 1),
+                live.craft.warp.turn_rate_dps
+            )
         } else {
             format!("{} °/s at full steering", live.craft.warp.turn_rate_dps)
         },
@@ -441,20 +445,23 @@ pub fn facts(live: &Live, galaxy: &Galaxy, seconds: f64) -> (String, Vec<(String
     rows.push((
         "Thrust".into(),
         if thrust > 0.0 {
-            format!("{thrust:.2} m/s²")
+            format!("{} m/s²", number(thrust, 2))
         } else {
             "Off".into()
         },
     ));
     rows.push((
         "Throttle".into(),
-        format!("{:+.1}%", live.craft.input.controls.throttle * 100.0),
+        format!(
+            "{}%",
+            signed_number(live.craft.input.controls.throttle * 100.0, 1)
+        ),
     ));
     rows.push((
         "Spin (pitch/yaw/roll)".into(),
         live.craft
             .spin
-            .map(|v| format!("{:+.2}", v.to_degrees()))
+            .map(|v| signed_number(v.to_degrees(), 2))
             .join(" / ")
             + " °/s",
     ));

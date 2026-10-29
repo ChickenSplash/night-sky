@@ -15,9 +15,9 @@ New debug readouts/switches belong here, not in separate windows or the canvas.
 | --- | --- |
 | `log` | Last 2,000 tracing events from `devtools::log_layers`, level filter and grep; marks errors/warnings logged while hidden |
 | `terminal` | Command line and output |
-| `perf` | Frame graph, star generation/stream/draw metrics, cells/blocks/grid boxes, GPU passes and performance switches |
-| `render` | Fullscreen, scene overlays with its nested switches (orbits, labels, markers, velocity marker, craft predicted paths, body wireframes), FOV, realistic lighting, exposure/compression facts, glow and galaxy reference views |
-| `atmosphere` | All-planet air switch, optional selected-planet override, presets and sliders for debug air, global shader steps, override top/optical depths, GPU frame and transparent-pass times |
+| `perf` | Frame graph, CPU work, star generation/stream/draw metrics, cells/blocks/grid boxes, GPU passes, search and planet refinement |
+| `settings` | Display, quality, rendering and a collapsed-by-default debug section, with all global visual switches |
+| `atmosphere` | Optional selected-planet override, presets and sliders for debug air, global shader steps, override top/optical depths, GPU frame and transparent-pass times |
 | `controls` | Shortcut help |
 | `state` | Camera, location, open list, anchor/page, presentation, selection, anchor star, clock and shown search |
 | `tools` | GPU/core-load tests and bug report |
@@ -42,12 +42,30 @@ history sample's `craft`, and `performance.craft_peak_last_second`; they remain
 recorded while the console is closed. A slow update usually lengthens the next
 frame interval, not the interval attached to its own work sample.
 
-The collapsible `perf` switches use `render::debug::RenderDebug`, not `Navigation`.
-They are A/B tests, reset on restart and can be set with `set_debug <switch> <on>`:
-freeze star streaming (loader keeps its last aim), galactic points, shade point
-pixels (off still runs vertices, never rasterises), 4x MSAA (both window cameras),
-bloom, cull blocks outside the view (default on), split multiple systems, and
-stars as points (default on).
+### Settings organisation
+
+Global visual switches appear once, in `settings`, not in `perf` or `atmosphere`:
+
+- **Display:** fullscreen, field of view and scene overlays, with orbital paths,
+  labels, markers, velocity marker and craft predicted paths nested below overlays.
+- **Quality:** 4x MSAA, resolving multiple-star systems, flattened bodies and detailed ground.
+- **Rendering:** realistic lighting, with bloom, galaxy glow, body wireframes and
+  atmospheres nested below it. Multiple scattering, ground lighting and giant
+  atmosphere descent sit below atmospheres. Manual exposure/compression facts follow.
+- **Debug:** initially collapsed, with streaming, stars, atmospheres and ground
+  groups for implementation switches and A/B cost comparisons. These include
+  freezing streaming, point drawing/shading, renderer choice, block culling,
+  atmosphere tables/opacity stopping, and ground detail-level colours.
+
+Disabled children stay visible and retain their values. Controls follow their
+actual dependencies: scene overlays for body wireframes, realistic lighting for
+lit rendering, atmospheres for air features, lookup tables for multiple scattering,
+ground lighting and opacity stopping, and detailed ground for detail-level colours.
+Flattened bodies and MSAA remain available without realistic lighting.
+
+Visual switches use `Navigation` display options or `render::debug::RenderDebug`.
+The latter reset on restart and remain accessible through `set_debug <switch> <on>`;
+moving their controls does not change rendering defaults or command names.
 
 ## Background planet refinement
 
@@ -55,9 +73,11 @@ The `perf` tab's **planet refinement** section controls
 background layered calculations, on by default and not persisted
 (`set_layered_planets <on>` or `ns planets on|off` also switch it). It shows
 per-planet queue/running/solved/refusal states by designation, in orbit order.
-The separate **CPU threads** section shows the shared star/planet budget and
-star-worker activity once, rather than repeating thread counts in each loader
-section. Ready candidates publish complete physical revisions when safe;
+The separate **CPU threads** section shows the shared star/search/planet budget,
+with **star activity**, **search** and **planet refinement** rows. These are
+instantaneous admitted worker-slot counts, not CPU-utilisation measurements;
+idle threads and queued work do not count. Search has no separate thread row
+or thread-count controls. Ready candidates publish complete physical revisions when safe;
 close cameras, craft snapshots and active routes defer publication. Refusals
 and failures retain the usable synchronous fallback. Turning refinement off
 pauses work/publication, not already adopted facts. The inspector and

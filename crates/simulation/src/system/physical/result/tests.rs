@@ -45,6 +45,56 @@ fn round_trip(result: &PlanetResult) {
 }
 
 #[test]
+fn layer_breakdowns_preserve_each_material_and_survive_serialisation() {
+    for (water, gas) in [(0.0, 0.0), (0.3, 0.0), (0.0, 0.1)] {
+        let result = initial_result(&budget(water, gas), &environment(250.0), revision(0)).unwrap();
+        for layer in &result.record.layers {
+            assert!(!layer.materials.is_empty());
+            assert!(close(
+                layer.materials.iter().map(|m| m.mass_kg).sum(),
+                layer.mass_kg
+            ));
+        }
+        for material in &result.record.physical.materials {
+            let total: f64 = result
+                .record
+                .layers
+                .iter()
+                .flat_map(|l| &l.materials)
+                .filter(|m| m.material == material.material)
+                .map(|m| m.mass_kg)
+                .sum();
+            assert!(close(total, material.retained_kg), "{}", material.material);
+        }
+        round_trip(&result);
+    }
+}
+
+#[test]
+fn layer_breakdowns_reject_invalid_entries_but_accept_legacy_absence() {
+    let result = initial_result(&budget(0.3, 0.0), &environment(250.0), revision(0)).unwrap();
+    for case in 0..5 {
+        let mut bad = result.clone();
+        let layer = &mut bad.record.layers[0];
+        match case {
+            0 => layer.materials[0].mass_kg *= 2.0,
+            1 => layer.materials[0].mass_kg = f64::NAN,
+            2 => layer.materials[0].mass_kg = -1.0,
+            3 => layer.materials[0].material = "unknown".into(),
+            _ => layer.materials.push(layer.materials[0].clone()),
+        }
+        assert!(validate_result(&bad).is_err(), "{case}");
+    }
+    let mut legacy = serde_json::to_value(&result).unwrap();
+    for layer in legacy["record"]["layers"].as_array_mut().unwrap() {
+        layer.as_object_mut().unwrap().remove("materials");
+    }
+    let legacy: PlanetResult = serde_json::from_value(legacy).unwrap();
+    validate_result(&legacy).unwrap();
+    assert!(legacy.record.layers.iter().all(|l| l.materials.is_empty()));
+}
+
+#[test]
 fn startup_fallback_has_honest_provenance_and_keeps_usable_facts_during_failure() {
     for (water, gas) in [(0.0, 0.0), (0.3, 0.0), (0.0, 0.1)] {
         let b = budget(water, gas);

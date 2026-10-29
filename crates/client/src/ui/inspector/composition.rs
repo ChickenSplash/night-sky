@@ -34,13 +34,19 @@ pub(super) fn facts(info: &mut Info, planet: &Planet) {
         "composition.density",
         "Mean density",
         Some("kg/m³"),
-        format!("{:.1} kg/m³", data.mean_density_kg_m3),
+        format!(
+            "{} kg/m³",
+            crate::format::number(data.mean_density_kg_m3, 1)
+        ),
     );
     info.field(
         "composition.gravity",
         "Reference gravity",
         Some("m/s²"),
-        format!("{:.3} m/s²", data.reference_gravity_m_s2),
+        format!(
+            "{} m/s²",
+            crate::format::number(data.reference_gravity_m_s2, 3)
+        ),
     );
     info.field(
         "composition.envelope",

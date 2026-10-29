@@ -43,6 +43,37 @@ pub fn halo_glyph(
     paint_halo(ui, galley, sense, colour)
 }
 
+/// Font-independent information icon for the Object Inspector.
+pub fn inspector_icon(
+    ui: &mut egui::Ui,
+    size: f32,
+    colour: impl FnOnce(&egui::Response) -> egui::Color32,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::click());
+    let ink = colour(&response);
+    let centre = rect.center();
+    // Match the other icons' compact ink size and weight, without relying on a
+    // circled-information glyph being present in the bundled fonts.
+    for (width, colour) in [
+        (5.5, egui::Color32::from_black_alpha(HALO_FADE)),
+        (3.5, egui::Color32::from_black_alpha(HALO_EDGE)),
+        (1.5, ink),
+    ] {
+        let stroke = egui::Stroke::new(width, colour);
+        ui.painter().circle_stroke(centre, size * 0.36, stroke);
+        ui.painter().line_segment(
+            [
+                centre + egui::vec2(0.0, -size * 0.02),
+                centre + egui::vec2(0.0, size * 0.20),
+            ],
+            stroke,
+        );
+        ui.painter()
+            .circle_filled(centre + egui::vec2(0.0, -size * 0.19), width * 0.5, colour);
+    }
+    response
+}
+
 pub fn halo_wrapped_text(
     ui: &mut egui::Ui,
     text: &str,

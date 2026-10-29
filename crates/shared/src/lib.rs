@@ -7,8 +7,8 @@ pub use atmosphere::{
     AerosolData, AerosolKind, AtmosphereData, AtmosphereReference, GasFraction, PlanetEnvironment,
 };
 pub use composition::{
-    Layer, LayeredPlanet, MaterialBudget, ModelFidelity, PhaseAllocation, PlanetPhysical,
-    RadiusReference,
+    Layer, LayerMaterial, LayeredPlanet, MaterialBudget, ModelFidelity, PhaseAllocation,
+    PlanetPhysical, RadiusReference,
 };
 pub use planet_result::{
     PhysicalRevision, PlanetResult, RefinementStatus, ResultProvenance, SurfaceKnowledge,

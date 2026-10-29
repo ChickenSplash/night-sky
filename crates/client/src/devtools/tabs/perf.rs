@@ -2,8 +2,7 @@
 //! passes.
 use crate::actions::UiCommand;
 use crate::devtools::FRAMES;
-use crate::format::{grouped, si};
-use crate::render::debug::RenderDebug;
+use crate::format::{grouped, number, si, signed_number};
 use crate::stars::stream::{Starfield, StreamMetrics};
 use crate::ui::terminal::{self, DIM, TEXT};
 use bevy::diagnostic::DiagnosticsStore;
@@ -17,7 +16,7 @@ pub fn perf(
     metrics: &StreamMetrics,
     field: &Starfield,
     diagnostics: Option<&DiagnosticsStore>,
-    (debug, searches): (&RenderDebug, &crate::search::Searches),
+    searches: &crate::search::Searches,
     out: &mut Vec<UiCommand>,
 ) {
     let recent: Vec<f32> = frames.iter().rev().take(60).copied().collect();
@@ -27,20 +26,27 @@ pub fn perf(
         let mut rows = vec![
             (
                 "fps",
-                format!("{:.0}", 1000.0 / mean.max(0.001)),
+                number(f64::from(1000.0 / mean.max(0.001)), 0),
                 Some("Frames per second, from the mean of the last 60 frames."),
             ),
             (
                 "frame",
-                format!("{mean:.1} ms mean, {worst:.1} ms worst"),
+                format!(
+                    "{} ms mean, {} ms worst",
+                    number(mean.into(), 1),
+                    number(worst.into(), 1)
+                ),
                 Some("Mean and slowest frame time over the last 60 frames."),
             ),
             (
                 "latest / peak",
                 format!(
-                    "{:.1} / {:.1} ms",
-                    metrics.history.back().map_or(0.0, |f| f.frame_interval_ms),
-                    metrics.frame_peak_ms()
+                    "{} / {} ms",
+                    number(
+                        metrics.history.back().map_or(0.0, |f| f.frame_interval_ms),
+                        1
+                    ),
+                    number(metrics.frame_peak_ms(), 1)
                 ),
                 Some(
                     "Latest app-frame interval and maximum over the trailing second. The interval precedes that frame's CPU work, so a stall can appear in the following interval.",
@@ -50,7 +56,7 @@ pub fn perf(
         if let Some(s) = &metrics.sample {
             rows.push((
             "last second",
-            format!("P95 {:.1} ms, P99 {:.1} ms", s.frame_p95_ms, s.frame_p99_ms),
+            format!("P95 {} ms, P99 {} ms", number(s.frame_p95_ms,1),number(s.frame_p99_ms,1)),
             Some("95% and 99% of last second's frames were faster than these, so stutters show here."),
         ));
         }
@@ -66,28 +72,40 @@ pub fn perf(
             &[
                 (
                     "update",
-                    format!("{:.2} / {:.2} ms", latest.total_ms, peak.total_ms),
+                    format!(
+                        "{} / {} ms",
+                        number(latest.total_ms, 2),
+                        number(peak.total_ms, 2)
+                    ),
                     Some(
                         "Latest / trailing-second peak CPU time in the craft update. Includes discovery, fixed steps and frame handoffs, not rendering or orbit forecasting.",
                     ),
                 ),
                 (
                     "system discovery",
-                    format!("{:.2} / {:.2} ms", latest.discovery_ms, peak.discovery_ms),
+                    format!(
+                        "{} / {} ms",
+                        number(latest.discovery_ms, 2),
+                        number(peak.discovery_ms, 2)
+                    ),
                     Some(
                         "Latest / trailing-second peak CPU time checking loaded system/star positions and polling background arrival loads. Body generation runs off-thread. Warp never waits for it.",
                     ),
                 ),
                 (
                     "movement + handoffs",
-                    format!("{:.2} / {:.2} ms", latest.stepping_ms, peak.stepping_ms),
+                    format!(
+                        "{} / {} ms",
+                        number(latest.stepping_ms, 2),
+                        number(peak.stepping_ms, 2)
+                    ),
                     Some(
                         "Latest / trailing-second peak CPU time stepping craft, applying gravity and changing coordinate frames.",
                     ),
                 ),
                 (
                     "fixed steps",
-                    format!("{} / {}", latest.steps, peak.steps),
+                    format!("{} / {}", grouped(latest.steps), grouped(peak.steps)),
                     Some(
                         "Fixed physics steps this update / maximum over the trailing second, across all craft.",
                     ),
@@ -96,23 +114,38 @@ pub fn perf(
         );
     }
     if terminal::section(ui, "CPU threads") {
-        let s = metrics.live(field);
+        let budget = space_simulation::background::shared();
+        let activity = budget.activity();
         terminal::facts_with_details(
             ui,
             "debug-cpu-threads",
             &[
                 (
                     "shared budget",
-                    space_simulation::background::shared().limit().to_string(),
+                    budget.limit().to_string(),
                     Some(
-                        "Three quarters of available CPU threads for stars and planet calculations together, not per loader. Stars have admission priority, with one slot reserved for new star work on multi-thread budgets. This is not CPU affinity or a frame-time guarantee; other game work is outside this budget.",
+                        "Three quarters of available CPU threads shared by visible stars, object search and planet refinement. Active search keeps one slot; stars get priority for extra capacity. Search borrows spare slots while leaving star headroom, and refinement starts only while stars and search are idle. Single-slot budgets alternate stars and search. This is not CPU affinity or a frame-time guarantee.",
                     ),
                 ),
                 (
                     "star activity",
-                    format!("{:.1} busy", s.busy_threads),
+                    format!("{} active", activity.stars),
                     Some(
-                        "Average star-worker activity over the last second, grids included. This is the existing elapsed-time estimate, not total CPU usage or planet-worker activity.",
+                        "Currently admitted star-worker slots, grids included. An instantaneous concurrency count, not measured CPU utilisation.",
+                    ),
+                ),
+                (
+                    "search",
+                    format!("{} active", activity.search),
+                    Some(
+                        "Currently admitted search-worker slots, including its coordinator. Allocations are reconsidered between bounded work slices; idle service threads do not count. Not measured CPU utilisation.",
+                    ),
+                ),
+                (
+                    "planet refinement",
+                    format!("{} active", activity.planets),
+                    Some(
+                        "Currently admitted planet preparation/refinement slots. Already-running solves finish before releasing their slots; queued jobs do not count. Not measured CPU utilisation.",
                     ),
                 ),
             ],
@@ -121,7 +154,7 @@ pub fn perf(
     if terminal::section(ui, "star stream") {
         let s = metrics.live(field);
         let aimed = field.aimed_pc.map_or("nowhere yet".into(), |[x, y, z]| {
-            format!("{x:+.0}  {y:+.0}  {z:+.0} pc")
+            format!("{} pc", [x, y, z].map(|v| signed_number(v, 0)).join("  "))
         });
         terminal::facts_with_details(
             ui,
@@ -152,8 +185,10 @@ pub fn perf(
                 (
                     "generation",
                     format!(
-                        "{:.0} ms for {} cells, {} cancelled",
-                        s.generation_ms, s.generated_cells, s.cancelled
+                        "{} ms for {} cells, {} cancelled",
+                        number(s.generation_ms, 0),
+                        grouped(s.generated_cells),
+                        grouped(s.cancelled)
                     ),
                     Some(
                         "Generating time in the trailing second, and jobs dropped because the camera moved on. Refreshed every frame.",
@@ -162,8 +197,9 @@ pub fn perf(
                 (
                     "mesh queue",
                     format!(
-                        "{} cells, oldest {:.0} ms",
-                        s.mesh_chunks, s.mesh_wait_oldest_ms
+                        "{} cells, oldest {} ms",
+                        grouped(s.mesh_chunks),
+                        number(s.mesh_wait_oldest_ms, 0)
                     ),
                     Some(
                         "Loaded cells waiting to become GPU batches, and how long the oldest has waited.",
@@ -171,14 +207,15 @@ pub fn perf(
                 ),
                 (
                     "mesh wait",
-                    format!("{:.0} ms average", s.mesh_wait_avg_ms),
+                    format!("{} ms average", number(s.mesh_wait_avg_ms, 0)),
                     Some("Average time from a cell loading to its stars showing on screen."),
                 ),
                 (
                     "render sync",
                     format!(
-                        "{:.0} ms for {} chunks built",
-                        s.render_sync_ms, s.built_chunks
+                        "{} ms for {} chunks built",
+                        number(s.render_sync_ms, 0),
+                        grouped(s.built_chunks)
                     ),
                     Some(
                         "Frame time spent over the last second turning loaded stars into GPU batches.",
@@ -208,15 +245,15 @@ pub fn perf(
                         grouped(metrics.blocks)
                     ),
                     Some(
-                        "Cubes of a cell's grid holding up to 262,144 stars, uploaded as one to four batches; those outside the view are skipped when culling is on (render tab).",
+                        "Cubes of a cell's grid holding up to 262,144 stars, uploaded as one to four batches; those outside the view are skipped when culling is on (settings tab, debug section).",
                     ),
                 ),
                 (
                     "grid boxes",
                     format!(
-                        "{}, {:.1} stars each on average",
+                        "{}, {} stars each on average",
                         grouped(boxes),
-                        field.stars as f64 / boxes.max(1) as f64
+                        number(field.stars as f64 / boxes.max(1) as f64, 1)
                     ),
                     Some(
                         "The smallest cubes, aiming for about 8 stars each, used to find nearby stars without scanning whole cells; empty ones included.",
@@ -266,7 +303,7 @@ pub fn perf(
                 ),
                 (
                     "vertex memory",
-                    format!("{:.0} MB", (uploaded * STAR_BYTES) as f64 / 1e6),
+                    format!("{} MB", number((uploaded * STAR_BYTES) as f64 / 1e6, 0)),
                     Some("GPU memory holding the uploaded stars, 20 bytes each."),
                 ),
                 (
@@ -282,7 +319,7 @@ pub fn perf(
     if terminal::section(ui, "star sync") {
         let latest = &metrics.sync_latest;
         let peak = metrics.sync_peak();
-        let ms = |latest: f64, peak: f64| format!("{latest:.2} / {peak:.2} ms");
+        let ms = |latest: f64, peak: f64| format!("{} / {} ms", number(latest, 2), number(peak, 2));
         terminal::facts_with_details(
             ui,
             "debug-star-sync",
@@ -349,7 +386,7 @@ pub fn perf(
     if terminal::section(ui, "instrumentation") {
         let latest = &metrics.instrumentation_latest;
         let peak = metrics.instrumentation_peak();
-        let ms = |latest: f64, peak: f64| format!("{latest:.3} / {peak:.3} ms");
+        let ms = |latest: f64, peak: f64| format!("{} / {} ms", number(latest, 3), number(peak, 3));
         terminal::facts_with_details(
             ui,
             "debug-instrumentation",
@@ -386,7 +423,11 @@ pub fn perf(
             &[
                 (
                     "search latest / peak",
-                    format!("{:.2} / {:.2} ms", latest.search_ms, peak.search_ms),
+                    format!(
+                        "{} / {} ms",
+                        number(latest.search_ms, 2),
+                        number(peak.search_ms, 2)
+                    ),
                     Some(
                         "Search CPU elapsed time this frame and maximum in the trailing second. Zero latest means no search this frame.",
                     ),
@@ -394,8 +435,9 @@ pub fn perf(
                 (
                     "prep latest / peak",
                     format!(
-                        "{:.2} / {:.2} ms",
-                        latest.preparation_ms, peak.preparation_ms
+                        "{} / {} ms",
+                        number(latest.preparation_ms, 2),
+                        number(peak.preparation_ms, 2)
                     ),
                     Some(
                         "Split preparation CPU elapsed time this frame and maximum in the trailing second; excludes search, GPU upload and GPU rendering.",
@@ -403,7 +445,11 @@ pub fn perf(
                 ),
                 (
                     "generation latest / peak",
-                    format!("{:.2} / {:.2} ms", latest.generation_ms, peak.generation_ms),
+                    format!(
+                        "{} / {} ms",
+                        number(latest.generation_ms, 2),
+                        number(peak.generation_ms, 2)
+                    ),
                     Some(
                         "Uncached system generation within preparation. Peaks for different rows may belong to different frames.",
                     ),
@@ -411,8 +457,9 @@ pub fn perf(
                 (
                     "orbits latest / peak",
                     format!(
-                        "{:.2} / {:.2} ms",
-                        latest.orbit_sprite_ms, peak.orbit_sprite_ms
+                        "{} / {} ms",
+                        number(latest.orbit_sprite_ms, 2),
+                        number(peak.orbit_sprite_ms, 2)
                     ),
                     Some(
                         "Orbital positions and sprite construction within preparation. Remaining preparation time includes candidate checks, culling and cache maintenance.",
@@ -443,9 +490,9 @@ pub fn perf(
                 (
                     "examined",
                     format!(
-                        "{} last search / {:.0} per second",
+                        "{} last search / {} per second",
                         grouped(metrics.split_examined),
-                        s.split_checked_per_second
+                        number(s.split_checked_per_second, 0)
                     ),
                     Some(
                         "Work across all retries in the last search, not necessarily per frame. Up to four attempts of 100,000 stars, plus exhaustion probes. The per-second rate uses the trailing second.",
@@ -453,35 +500,38 @@ pub fn perf(
                 ),
                 (
                     "search time",
-                    format!("{:.2} ms per search", s.split_search_avg_ms),
+                    format!("{} ms per search", number(s.split_search_avg_ms, 2)),
                     Some(
                         "CPU elapsed time gathering candidates, including retries and their allocations. Trailing-second average; excludes per-frame sprite preparation and GPU work.",
                     ),
                 ),
                 (
                     "search rate",
-                    format!("{:.1} per second", s.split_searches_per_second),
+                    format!("{} per second", number(s.split_searches_per_second, 1)),
                     Some(
                         "Searches per second, including movement, cell changes, view changes and recovery attempts. A search may contain several retries.",
                     ),
                 ),
                 (
                     "search per frame",
-                    format!("{:.2} ms", s.split_search_ms_per_frame),
+                    format!("{} ms", number(s.split_search_ms_per_frame, 2)),
                     Some(
                         "Search CPU elapsed time divided by all frames in the trailing second, including frames without searches.",
                     ),
                 ),
                 (
                     "preparation",
-                    format!("{:.2} ms per frame", s.split_preparation_ms_per_frame),
+                    format!(
+                        "{} ms per frame",
+                        number(s.split_preparation_ms_per_frame, 2)
+                    ),
                     Some(
                         "CPU elapsed time checking cached candidates, generating uncached systems, calculating orbital positions and constructing split sprite records. Includes cache maintenance and off-screen culling; excludes GPU upload, GPU rendering and searching.",
                     ),
                 ),
                 (
                     "rebuilt",
-                    format!("{:.1} systems per frame", s.split_rebuilt_per_frame),
+                    format!("{} systems per frame", number(s.split_rebuilt_per_frame, 1)),
                     Some(
                         "Systems generated on cache misses, averaged across all frames in the trailing second. Sustained rebuilding while stationary indicates cache churn.",
                     ),
@@ -489,9 +539,9 @@ pub fn perf(
                 (
                     "cache",
                     format!(
-                        "{} systems / {:.1} prunes per second",
+                        "{} systems / {} prunes per second",
                         grouped(metrics.split_cached),
-                        s.split_cache_clears_per_second
+                        number(s.split_cache_clears_per_second, 1)
                     ),
                     Some(
                         "Cached generated systems now, and capacity-triggered prunes per second. A prune drops the systems not split this frame, never those in use. Toggle and streaming resets are not counted.",
@@ -519,19 +569,19 @@ pub fn perf(
             &[
                 (
                     "lookup time",
-                    format!("{:.2} ms per frame", s.nearby_ms_per_frame),
+                    format!("{} ms per frame", number(s.nearby_ms_per_frame, 2)),
                     Some(
                         "Time finding the nearest star, for automatic arrival and the close-up render scale. Trailing-second average, refreshed every frame.",
                     ),
                 ),
                 (
                     "checked",
-                    format!("{:.0} stars per frame", s.nearby_checked_per_frame),
+                    format!("{} stars per frame", number(s.nearby_checked_per_frame, 0)),
                     Some("Stars measured by the lookups; each cell's grid keeps this low."),
                 ),
                 (
                     "cells",
-                    format!("{:.0} searched per frame", s.nearby_cells_per_frame),
+                    format!("{} searched per frame", number(s.nearby_cells_per_frame, 0)),
                     Some("Loaded cells close enough to hold the nearest star."),
                 ),
             ],
@@ -542,18 +592,6 @@ pub fn perf(
     }
     if terminal::section(ui, "gpu passes") {
         gpu_passes(ui, diagnostics, mean);
-    }
-    if terminal::section(ui, "performance switches") {
-        for (switch, label) in RenderDebug::SWITCHES {
-            let on = debug.get(switch);
-            if terminal::check(ui, on, label, true, switch.detail()) {
-                out.push(UiCommand::SetDebug { switch, on: !on });
-            }
-        }
-        terminal::note(
-            ui,
-            "For A/B tests; reset on restart. Freeze first to hold the star count still. Without pixel shading, points still run the vertex shader, separating vertex cost from fill.",
-        );
     }
 }
 
@@ -569,15 +607,15 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
         .map(|e| {
             let p = &e.progress;
             let mut text = format!(
-                "{} · searched out to {:.1} ly · {} stars tried, {} rejected early, {} placed · {} systems tested · {} cells · cache {:.0} MB",
+                "{} · searched out to {} ly · {} stars tried, {} rejected early, {} placed · {} systems tested · {} cells · cache {} MB",
                 e.query,
-                p.complete_to_ly,
+                number(p.complete_to_ly,1),
                 si(p.stars as f64),
                 si(p.rejected_early as f64),
                 si(p.placed as f64),
                 grouped(p.evaluated as usize),
                 grouped(p.cells as usize),
-                p.cache_bytes as f64 / 1e6,
+                number(p.cache_bytes as f64 / 1e6,0),
             );
             if let Some(error) = &e.error {
                 text = format!("{} · {error}", e.query);
@@ -589,13 +627,8 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
         (
             "runs on",
             searches.mode().to_owned(),
-            Some("The search thread, apart from the star loader."),
-        ),
-        (
-            "threads",
-            searches.threads.to_string(),
             Some(
-                "Threads sharing a large cell's stars. The star loader keeps its own three quarters of the machine.",
+                "A background service sharing the CPU budget with visible-star streaming and planet refinement. See CPU threads for current allocations.",
             ),
         ),
         (
@@ -615,10 +648,10 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
                 (
                     label.as_str(),
                     format!(
-                        "{} · {} results · {:.2} s",
+                        "{} · {} results · {} s",
                         e.state(),
-                        e.result_count,
-                        e.progress.elapsed_ms / 1e3
+                        grouped(e.result_count),
+                        number(e.progress.elapsed_ms / 1e3, 2)
                     ),
                     Some(detail.as_str()),
                 )
@@ -626,25 +659,14 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
     );
     terminal::facts_with_details(ui, "debug-search", &rows);
     ui.horizontal_wrapped(|ui| {
-        let threads = searches.threads;
         let cap = (searches.work_cap / 1_000_000) as f64;
-        let mut set = |threads: Option<usize>, work_cap_millions: Option<f64>| {
-            out.push(UiCommand::SetSearch {
-                threads,
-                work_cap_millions,
-            })
-        };
-        if terminal::button(ui, "threads -") && threads > *crate::search::THREADS.start() {
-            set(Some(threads - 1), None);
-        }
-        if terminal::button(ui, "threads +") && threads < *crate::search::THREADS.end() {
-            set(Some(threads + 1), None);
-        }
+        let mut set =
+            |work_cap_millions: Option<f64>| out.push(UiCommand::SetSearch { work_cap_millions });
         if terminal::button(ui, "cap ÷10") {
-            set(None, Some((cap / 10.0).max(1.0)));
+            set(Some((cap / 10.0).max(1.0)));
         }
         if terminal::button(ui, "cap ×10") {
-            set(None, Some((cap * 10.0).min(10_000.0)));
+            set(Some((cap * 10.0).min(10_000.0)));
         }
     });
     if recent.is_empty() {
@@ -726,7 +748,11 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
         &[
             (
                 "gpu total",
-                format!("{total:.1} ms of a {frame_ms:.1} ms frame"),
+                format!(
+                    "{} ms of a {} ms frame",
+                    number(total, 1),
+                    number(frame_ms.into(), 1)
+                ),
                 Some("Near the frame time the GPU is the limit; well below it, the CPU is."),
             ),
             (
@@ -747,7 +773,7 @@ fn gpu_passes(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>, frame_m
                 .color(colour),
         );
     };
-    let ms = |v: Option<f64>| v.map_or("·".into(), |v| format!("{v:.2} ms"));
+    let ms = |v: Option<f64>| v.map_or("·".into(), |v| format!("{} ms", number(v, 2)));
     let count = |v: Option<f64>| v.map_or("·".into(), si);
     egui::Grid::new("debug-gpu-passes")
         .num_columns(5)

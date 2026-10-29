@@ -6,10 +6,10 @@ use space_simulation::SimulationClock;
 
 #[test]
 fn each_icon_toggles_only_its_own_window() {
-    const GLYPHS: [&str; 3] = ["⚙", "✔", "🔍"];
+    const GLYPHS: [&str; 4] = ["⚙", "✔", "🔍", "ⓘ"];
     let ctx = egui::Context::default();
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
-    let frame = |open: &mut [bool; 3], events| {
+    let frame = |open: &mut [bool; 4], events| {
         ctx.run(
             egui::RawInput {
                 screen_rect: Some(rect),
@@ -17,7 +17,7 @@ fn each_icon_toggles_only_its_own_window() {
                 ..default()
             },
             |ctx| {
-                let [debug, tasks, browser] = open;
+                let [debug, tasks, browser, inspector] = open;
                 icons(
                     ctx,
                     rect,
@@ -25,13 +25,14 @@ fn each_icon_toggles_only_its_own_window() {
                         (GLYPHS[0], "Debug console", debug),
                         (GLYPHS[1], "Tasks", tasks),
                         (GLYPHS[2], "Object browser", browser),
+                        (GLYPHS[3], "Object Inspector", inspector),
                     ],
                 );
             },
         )
     };
     for (index, glyph) in GLYPHS.into_iter().enumerate() {
-        let mut open = [false; 3];
+        let mut open = [false; 4];
         frame(&mut open, vec![]);
         let output = frame(&mut open, vec![]);
         let pos = output
@@ -41,6 +42,7 @@ fn each_icon_toggles_only_its_own_window() {
                 egui::epaint::Shape::Text(text) if text.galley.job.text == glyph => {
                     Some(text.pos + text.galley.size() * 0.5)
                 }
+                egui::epaint::Shape::Circle(circle) if glyph == "ⓘ" => Some(circle.center),
                 _ => None,
             })
             .unwrap_or_else(|| panic!("{glyph} is painted"));
@@ -57,7 +59,7 @@ fn each_icon_toggles_only_its_own_window() {
             );
             frame(&mut open, vec![button(false)]);
         }
-        let expected: [bool; 3] = std::array::from_fn(|i| i == index);
+        let expected: [bool; 4] = std::array::from_fn(|i| i == index);
         assert_eq!(open, expected, "{glyph}");
         assert!(pointer_captured(&ctx));
     }
@@ -513,7 +515,7 @@ fn text_huds_share_edge_padding_and_bottom_baseline() {
 }
 
 #[test]
-fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport() {
+fn floating_inspector_stays_compact_after_selection_changes_and_wraps_in_a_narrow_viewport() {
     let ctx = egui::Context::default();
     let galaxy = space_simulation::demo_galaxy();
     let mut nav = Navigation::default();
@@ -556,7 +558,7 @@ fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport()
             );
         }
         if stage == 1 {
-            for prefix in ["Overview", "Composition", "Mean density"] {
+            for prefix in ["Overview", "Mass", "Gravity at radius"] {
                 let shape = output
                     .shapes
                     .iter()
@@ -579,13 +581,25 @@ fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport()
                     "{prefix} is clipped: {shape:?}"
                 );
             }
-            assert!(
-                !output.shapes.iter().any(|shape| {
-                    matches!(&shape.shape, egui::epaint::Shape::Text(text)
-                    if text.galley.job.text.starts_with("Structure caveats"))
-                }),
-                "model details must start collapsed"
-            );
+            for removed in [
+                "Composition",
+                "Atmosphere",
+                "Atmospheric pressure",
+                "Mean density",
+                "Model details",
+                "Background refinement",
+                "Condensed top",
+                "Surface / radius",
+                "Active result",
+            ] {
+                assert!(
+                    !output.shapes.iter().any(|shape| {
+                        matches!(&shape.shape, egui::epaint::Shape::Text(text)
+                    if text.galley.job.text.contains(removed))
+                    }),
+                    "scene readout must not paint {removed}"
+                );
+            }
         }
         if stage == 2 {
             let area = ctx
@@ -600,7 +614,7 @@ fn floating_inspector_scrolls_after_tab_changes_and_wraps_in_a_narrow_viewport()
 }
 
 #[test]
-fn floating_inspector_bounds_long_composition_with_scrolling() {
+fn floating_inspector_bounds_basic_facts_with_scrolling() {
     let ctx = egui::Context::default();
     let galaxy = space_simulation::demo_galaxy();
     let mut nav = Navigation::default();

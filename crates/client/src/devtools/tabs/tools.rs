@@ -3,7 +3,7 @@ use crate::devtools::DevTools;
 use crate::devtools::atmosphere_test::{AtmosphereTest, preset_label};
 use crate::devtools::core_load::CoreLoad;
 use crate::devtools::gpu_test::GpuTest;
-use crate::format::grouped;
+use crate::format::{grouped, number};
 use crate::scene::{CameraPose, CameraRig};
 use crate::stars::stream::{Starfield, StreamMetrics};
 use crate::ui::terminal;
@@ -77,7 +77,7 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     ),
                     (
                         "fps",
-                        format!("{:.1}", r.fps),
+                        number(r.fps, 1),
                         Some("Frames over the 20 s measured."),
                     ),
                     (
@@ -90,14 +90,14 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     ),
                     (
                         "star pass",
-                        format!("{:.2} ms", r.star_pass_ms),
+                        format!("{} ms", number(r.star_pass_ms, 2)),
                         Some(
                             "Mean GPU time of the main view's transparent pass and, for points, the star points pass.",
                         ),
                     ),
                     (
                         "gpu total",
-                        format!("{:.2} ms", r.gpu_total_ms),
+                        format!("{} ms", number(r.gpu_total_ms, 2)),
                         Some("Mean GPU time of every pass, as in the perf tab."),
                     ),
                     (
@@ -111,7 +111,7 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     ),
                     (
                         "star memory",
-                        format!("{:.0} MB", r.star_memory_mb),
+                        format!("{} MB", number(r.star_memory_mb, 0)),
                         Some("GPU memory holding the uploaded stars."),
                     ),
                     (
@@ -130,7 +130,7 @@ fn gpu_test(ui: &mut egui::Ui, test: &mut GpuTest, field: &Starfield, metrics: &
                     ),
                     (
                         "load",
-                        format!("{:.1} s", r.load_s),
+                        format!("{} s", number(r.load_s, 1)),
                         Some("From the click until every star was uploaded."),
                     ),
                 ],
@@ -208,7 +208,7 @@ fn atmosphere_test(ui: &mut egui::Ui, test: &mut AtmosphereTest) {
                 off.case.view.label(),
                 preset_label(off.case.preset)
             ),
-            format!("off {:.2} ms · {on}", off.gpu_total_ms),
+            format!("off {} ms · {on}", number(off.gpu_total_ms, 2)),
         ));
     }
     let detail = "GPU time of every pass with the air off, then what the air adds at 16 and 24 view steps, in ms.";
@@ -252,7 +252,7 @@ fn core_load_test(ui: &mut egui::Ui, load: &mut CoreLoad, field: &Starfield) {
     let (time, cells, stars) = match *load {
         CoreLoad::Idle | CoreLoad::Requested => return,
         CoreLoad::Running(started) => (
-            format!("{:.1} s so far", started.elapsed().as_secs_f64()),
+            format!("{} s so far", number(started.elapsed().as_secs_f64(), 1)),
             format!(
                 "{} loaded, {} pending",
                 grouped(field.cells.len()),
@@ -264,7 +264,11 @@ fn core_load_test(ui: &mut egui::Ui, load: &mut CoreLoad, field: &Starfield) {
             cells,
             stars,
             seconds,
-        } => (format!("{seconds:.2} s"), grouped(cells), grouped(stars)),
+        } => (
+            format!("{} s", number(seconds, 2)),
+            grouped(cells),
+            grouped(stars),
+        ),
     };
     terminal::facts_with_details(
         ui,

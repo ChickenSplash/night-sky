@@ -167,7 +167,7 @@ pub(super) fn publish(
         // Requests without results: `GET /search/<id>` has those.
         "search": {
             "browser_open": browser.open, "shown": searches.shown, "mode": searches.mode(),
-            "threads": searches.threads,
+            "shared_cpu_threads": space_simulation::background::shared().limit(),
             "work_cap": searches.work_cap, "requests": searches.recent(),
         },
         "debug": {
@@ -175,7 +175,6 @@ pub(super) fn publish(
             "point_pixels": debug.point_pixels, "msaa": debug.msaa, "bloom": debug.bloom,
             "cull_blocks": debug.cull_blocks, "point_stars": debug.point_stars,
             "split_multiples": debug.split_multiples, "atmospheres": debug.atmospheres,
-            "atmosphere_jitter": debug.atmosphere_jitter,
             "atmosphere_tables": debug.atmosphere_tables,
             "atmosphere_stop_opaque": debug.atmosphere_stop_opaque,
             "atmosphere_multiple": debug.atmosphere_multiple,
@@ -331,7 +330,7 @@ mod tests {
         assert_eq!(state["search"]["shown"], Value::Null);
         assert_eq!(state["search"]["browser_open"], false);
         assert!(state["search"]["requests"].is_array());
-        assert!(state["search"]["threads"].as_u64().unwrap() >= 1);
+        assert!(state["search"]["shared_cpu_threads"].as_u64().unwrap() >= 1);
         let galaxy = &app.world().resource::<Universe>().0;
         assert_eq!(state["lists"][0]["id"], galaxy.systems[0].id);
         assert_eq!(

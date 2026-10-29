@@ -60,7 +60,7 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     demo.rs          Reproducible fictional overlay content
   src/orbit/         Analytic orbits, states and nested barycentric motion
   src/clock.rs       Accumulated simulation time
-  src/background.rs  Shared active-work budget for stars and planet refinement
+  src/background.rs  Shared active-work budget for stars, search and planet refinement
   src/units.rs       Shared physical constants
   src/seed.rs        Stable hashing, random draws and seeded placement
   src/light.rs       Star and planet photometry

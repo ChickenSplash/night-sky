@@ -21,6 +21,33 @@ fn read(keys: &[KeyCode], buttons: &[MouseButton], typing: bool, pointer_free: b
 }
 
 #[test]
+fn inspector_key_is_a_single_press_and_does_not_trigger_while_typing() {
+    assert!(read(&[KeyCode::KeyI], &[], false, false).just_pressed(Action::Inspect));
+    assert!(!read(&[KeyCode::KeyI], &[], true, true).just_pressed(Action::Inspect));
+    assert_eq!(Bindings::default().label(&[Action::Inspect]), "I");
+    let mut keys = ButtonInput::default();
+    keys.press(KeyCode::KeyI);
+    let mut actions = Actions::default();
+    actions.update(
+        &Bindings::default(),
+        &keys,
+        &ButtonInput::default(),
+        false,
+        true,
+    );
+    assert!(actions.just_pressed(Action::Inspect));
+    keys.clear();
+    actions.update(
+        &Bindings::default(),
+        &keys,
+        &ButtonInput::default(),
+        false,
+        true,
+    );
+    assert!(!actions.just_pressed(Action::Inspect));
+}
+
+#[test]
 fn one_key_can_serve_several_actions() {
     let actions = read(&[KeyCode::ShiftRight], &[], false, true);
     assert!(actions.pressed(Action::ThrottleUp) && actions.pressed(Action::Alternate));

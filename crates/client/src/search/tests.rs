@@ -15,7 +15,7 @@ fn wait_for(hub: &Hub, id: u64) -> Entry {
 
 #[test]
 fn requests_are_kept_by_id_refused_and_cancelled() {
-    let hub = Hub::new(2);
+    let hub = Hub::new();
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
     let query = |text: &str| Query::parse(text).unwrap();
     let near = hub
@@ -93,7 +93,7 @@ fn live_craft_are_found_by_kind_name_and_among_generated_objects() {
         .unwrap();
     let home = space_simulation::galaxy::GalaxyModel::milky_way().home_pc;
     fleet.get_mut(&ship).unwrap().origin_pc = home;
-    let hub = Hub::new(2);
+    let hub = Hub::new();
     let live = live_objects(&fleet, &galaxy, 0.0);
     let search = |text: &str| {
         let query = Query::parse(text).unwrap();

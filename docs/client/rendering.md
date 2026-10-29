@@ -238,7 +238,7 @@ sub-f32-radius mean free paths representable in dense air.
 Once opaque, transmission behind the shell is set to zero, deliberately dropping
 the less-than-1/20,000 remainder so bright ground and rim sprites cannot leak
 through. Otherwise background attenuation uses the directly integrated depth,
-independent of scattering jitter. `set_debug atmosphere_stop_opaque false`
+independent of scattering samples. `set_debug atmosphere_stop_opaque false`
 distributes scattering samples over the old full interval for comparison, but
 retains the same foreground attenuation. Neither path needs lookup-table
 readiness. The prepass is bounded to 1,024 steps; on budget exhaustion it falls
@@ -250,13 +250,9 @@ premature/late stops and dark rings on extreme columns such as
 integration across its ground limb, preset atmospheres, inside cameras and a
 rebased deep column. Incoming starlight still uses the transmittance table.
 
-**Jitter.** Each step takes its sample at a point within the step that
-differs from pixel to pixel (interleaved gradient noise, Jimenez 2014), not
-at its midpoint. With every pixel sampling the same depths, sharp changes
-along the ray, chiefly the edge of the planet's shadow at twilight, showed as
-coloured bands that only many steps hid; jittered, they blur into a fine,
-static grain. `set_debug atmosphere_jitter false` samples at the midpoints
-again, to compare.
+**View sampling.** Each view step samples its midpoint, with no pixel noise.
+Sharp changes along the ray, chiefly the planet's shadow at twilight, can
+show as bands at low step counts; increase the view steps to reduce them.
 
 **Transmittance table.** The light lost on the way in from each star is
 read from a table rather than marched (`render/atmosphere/tables.rs`): the
@@ -459,7 +455,7 @@ extinction, relativistic light propagation or a physically evolving atmosphere.
 - On by default (`Navigation::realistic`); the wireframe bodies must stay
   unchanged when it is off (galactic stars appear in both modes). The smoke
   test turns it off for its wireframe captures.
-  `exposure::facts` (debug window, `render` tab) shows only manual exposure
+  `exposure::facts` (debug window, `settings` tab) shows only manual exposure
   in stops and compression as a percentage, with expandable explanations.
   No physical/assisted checkbox, metering, target key or adaptation remains.
   Photometry lives in `crates/simulation/src/light.rs`;

@@ -37,7 +37,7 @@ pub use tooltip::TooltipExt;
 pub use widgets::{
     aligned_close_button, button, button_size, check, choice, destructive_button, eyebrow,
     eyebrow_text, field, heading, input, item, link, list_row, note, primary_button, progress,
-    rule, section, tab, toggle,
+    rule, section, section_with_default, tab, toggle,
 };
 pub use window::Window;
 

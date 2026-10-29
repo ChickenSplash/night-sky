@@ -31,6 +31,7 @@ type CameraState<'w> = (
     Res<'w, crate::craft::Fleet>,
     Res<'w, crate::input::pilot::Pilot>,
     Res<'w, crate::input::Bindings>,
+    Res<'w, crate::input::Actions>,
 );
 
 /// Interface state that is not part of the scene.
@@ -45,6 +46,7 @@ pub struct Hud {
     magnitude_drag: Option<(f64, f64)>,
     exposure_drags: [Option<f64>; 2],
     inspector: crate::ui::inspector::Cache,
+    object_inspector: inspector::window::Inspector,
 }
 
 pub fn draw_ui(
@@ -64,7 +66,7 @@ pub fn draw_ui(
 ) {
     let (mut contexts, mut writer, mut tools, mut browser, searches) = interaction;
     let (markers, velocity) = overlay;
-    let (rig, pose, starfield, fleet, pilot, bindings) = camera_state;
+    let (rig, pose, starfield, fleet, pilot, bindings, actions) = camera_state;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -80,6 +82,9 @@ pub fn draw_ui(
         rect = egui::Rect::from_min_size(rect.min, egui::vec2(1.0, 1.0));
     }
     let hud = &mut *hud;
+    if actions.just_pressed(crate::input::Action::Inspect) {
+        hud.object_inspector.open = !hud.object_inspector.open;
+    }
     icons(
         ctx,
         rect,
@@ -87,6 +92,7 @@ pub fn draw_ui(
             ("⚙", "Debug console", &mut tools.open),
             ("✔", "Tasks", &mut hud.tasks_open),
             ("🔍", "Object browser (Ctrl+K)", &mut browser.open),
+            ("ⓘ", "Object Inspector (I)", &mut hud.object_inspector.open),
         ],
     );
     browser::window(
@@ -108,6 +114,20 @@ pub fn draw_ui(
         &nav,
         &mut hud.tasks,
         &mut out,
+    );
+    if universe.is_changed() {
+        hud.object_inspector.invalidate();
+    }
+    inspector::window::show(
+        ctx,
+        &mut hud.object_inspector,
+        inspector::window::View {
+            nav: &nav,
+            galaxy: &universe.0,
+            field: &starfield,
+            now,
+            loading: &loading,
+        },
     );
 
     let pixels = ctx.pixels_per_point();
@@ -183,9 +203,13 @@ pub fn draw_ui(
     writer.write_batch(out);
 }
 
-/// ⚙ Debug console, ✔ Tasks and 🔍 Object browser, top to bottom,
+/// ⚙ Debug console, ✔ Tasks, 🔍 Object browser and ⓘ Object Inspector, top to bottom,
 /// free-floating at the top right of the view. Each toggles its window.
-fn icons(ctx: &egui::Context, rect: egui::Rect, icons: [(&str, &str, &mut bool); 3]) {
+fn icons<const N: usize>(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    icons: [(&str, &str, &mut bool); N],
+) {
     use kit::TooltipExt;
     use kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_glyph};
     let id = egui::Id::new("hud-icons");
@@ -198,18 +222,22 @@ fn icons(ctx: &egui::Context, rect: egui::Rect, icons: [(&str, &str, &mut bool);
             ui.spacing_mut().item_spacing.y = HUD_LINE_GAP;
             ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
                 for (glyph, hint, open) in icons {
-                    let response =
-                        halo_glyph(ui, glyph, ICON_SIZE, egui::Sense::click(), |response| {
-                            if response.hovered() {
-                                HOVER
-                            } else if *open {
-                                CURRENT
-                            } else {
-                                LINK
-                            }
-                        })
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text_themed(&kit::Theme::GAME, hint);
+                    let colour = |response: &egui::Response| {
+                        if response.hovered() {
+                            HOVER
+                        } else if *open {
+                            CURRENT
+                        } else {
+                            LINK
+                        }
+                    };
+                    let response = if glyph == "ⓘ" {
+                        kit::halo::inspector_icon(ui, ICON_SIZE, colour)
+                    } else {
+                        halo_glyph(ui, glyph, ICON_SIZE, egui::Sense::click(), colour)
+                    }
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text_themed(&kit::Theme::GAME, hint);
                     if response.clicked() {
                         *open = !*open;
                     }

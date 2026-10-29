@@ -5,7 +5,7 @@ pub mod controls;
 pub mod log;
 pub mod perf;
 pub mod planets;
-pub mod render;
+pub mod settings;
 pub mod state;
 pub mod terminal;
 pub mod tools;

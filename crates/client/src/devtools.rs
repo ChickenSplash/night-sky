@@ -36,7 +36,7 @@ use tabs::{
     controls::controls,
     log::{log, unseen_badges},
     perf::perf,
-    render::render,
+    settings::settings,
     state::state,
     terminal::terminal_tab,
     tools::tools_tab,
@@ -50,7 +50,7 @@ enum Tab {
     Log,
     Terminal,
     Perf,
-    Render,
+    Settings,
     Atmosphere,
     Controls,
     State,
@@ -62,7 +62,7 @@ impl Tab {
         (Self::Log, "log"),
         (Self::Terminal, "terminal"),
         (Self::Perf, "perf"),
-        (Self::Render, "render"),
+        (Self::Settings, "settings"),
         (Self::Atmosphere, "atmosphere"),
         (Self::Controls, "controls"),
         (Self::State, "state"),
@@ -216,24 +216,21 @@ pub fn draw(
                                 &metrics,
                                 &starfield,
                                 diagnostics.as_deref(),
-                                (&debug, &searches),
+                                &searches,
                                 &mut out,
                             );
                             tabs::planets::planets(ui, &mut planets);
                         }
-                        Tab::Render => render(
+                        Tab::Settings => settings(
                             ui,
                             &nav,
+                            &debug,
                             window.single().is_ok_and(crate::window::is_fullscreen),
                             &mut out,
                         ),
-                        Tab::Atmosphere => atmosphere(
-                            ui,
-                            &nav,
-                            (&debug, &tuning),
-                            diagnostics.as_deref(),
-                            &mut out,
-                        ),
+                        Tab::Atmosphere => {
+                            atmosphere(ui, &tuning, diagnostics.as_deref(), &mut out)
+                        }
                         Tab::Controls => controls(ui, &mut bindings),
                         Tab::State => state(
                             ui,

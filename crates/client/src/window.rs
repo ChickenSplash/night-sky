@@ -1,4 +1,4 @@
-//! The primary window's mode. F11, the debug window's `render` tab and
+//! The primary window's mode. F11, the debug window's `settings` tab and
 //! `set_fullscreen` switch borderless fullscreen on the window's monitor.
 use crate::actions::UiCommand;
 use crate::input::{Action, Actions};

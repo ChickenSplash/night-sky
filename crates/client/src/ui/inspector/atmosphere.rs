@@ -1,5 +1,6 @@
 //! Generated physical facts, never the renderer's selected-planet override.
 use super::{Info, Section};
+use crate::format::number;
 use space_shared::{AtmosphereReference, PlanetEnvironment};
 
 pub(super) fn pressure_display(pressure_pa: f64) -> (&'static str, String) {
@@ -8,11 +9,11 @@ pub(super) fn pressure_display(pressure_pa: f64) -> (&'static str, String) {
         let value = if mbar > 0.0 && mbar < 0.0001 {
             format!("{mbar:.3e} mbar")
         } else {
-            format!("{mbar:.4} mbar")
+            format!("{} mbar", number(mbar, 4))
         };
         ("mbar", value)
     } else {
-        ("bar", format!("{:.4} bar", pressure_pa / 1e5))
+        ("bar", format!("{} bar", number(pressure_pa / 1e5, 4)))
     }
 }
 
@@ -26,15 +27,19 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
         "atmosphere.heating",
         "Stellar heating",
         Some("W/m²"),
-        format!("{:.1} W/m² (mean estimate)", environment.irradiation_w_m2),
+        format!(
+            "{} W/m² (mean estimate)",
+            number(environment.irradiation_w_m2, 1)
+        ),
     );
     info.field(
         "atmosphere.equilibrium_temperature",
         "Equilibrium temperature",
         Some("K"),
         format!(
-            "{:.0} K (assumed albedo {:.2})",
-            environment.equilibrium_temperature_k, environment.assumed_bond_albedo
+            "{} K (assumed albedo {:.2})",
+            number(environment.equilibrium_temperature_k, 0),
+            environment.assumed_bond_albedo
         ),
     );
     let Some(air) = &environment.atmosphere else {
@@ -92,15 +97,18 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
             Some("km"),
             if air.pressure_pa >= 1e5 {
                 format!(
-                    "{:.1} km above boundary (isothermal estimate)",
-                    space_simulation::system::atmosphere::profile::Profile {
-                        radius_m: air.reference_radius_m,
-                        scale_height_m: air.scale_height_m,
-                        spherical: !air.hydrostatic_unresolved && air.reference_radius_m > 0.0,
-                    }
-                    .height_for_drop(air.pressure_pa.ln() - 1e5_f64.ln())
-                    .unwrap_or(f64::NAN)
-                        / 1e3
+                    "{} km above boundary (isothermal estimate)",
+                    number(
+                        space_simulation::system::atmosphere::profile::Profile {
+                            radius_m: air.reference_radius_m,
+                            scale_height_m: air.scale_height_m,
+                            spherical: !air.hydrostatic_unresolved && air.reference_radius_m > 0.0,
+                        }
+                        .height_for_drop(air.pressure_pa.ln() - 1e5_f64.ln())
+                        .unwrap_or(f64::NAN)
+                            / 1e3,
+                        1
+                    )
                 )
             } else {
                 "Not above boundary (sub-bar column)".into()
@@ -118,8 +126,8 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
         "Column temperature",
         Some("K"),
         format!(
-            "{:.0} K (isothermal estimate, no greenhouse)",
-            air.temperature_k
+            "{} K (isothermal estimate, no greenhouse)",
+            number(air.temperature_k, 0)
         ),
     );
     info.field(
@@ -135,13 +143,13 @@ pub(super) fn facts(info: &mut Info, environment: Option<&PlanetEnvironment>) {
         "atmosphere.scale_height",
         "Scale height",
         Some("km"),
-        format!("{:.1} km", air.scale_height_m / 1e3),
+        format!("{} km", number(air.scale_height_m / 1e3, 1)),
     );
     info.field(
         "atmosphere.extent",
         "Atmosphere extent",
         Some("km"),
-        format!("{:.1} km (operational cutoff)", air.extent_m / 1e3),
+        format!("{} km (operational cutoff)", number(air.extent_m / 1e3, 1)),
     );
     if air.hydrostatic_unresolved {
         info.field(

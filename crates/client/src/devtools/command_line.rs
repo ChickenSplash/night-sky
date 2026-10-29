@@ -287,14 +287,14 @@ pub const USAGE: [Usage; 37] = [
         about: "How far bodies are exposed for themselves, 0 (one physical exposure) to 1 (each correctly exposed)",
     },
     Usage {
-        name: "galaxy_reference",
-        fields: &["view"],
-        about: "inside, face_on or edge_on",
+        name: "view_galaxy",
+        fields: &[],
+        about: "Frame the galaxy from above",
     },
     Usage {
         name: "set_debug",
         fields: &["switch", "on"],
-        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres, atmosphere_jitter, atmosphere_tables, atmosphere_stop_opaque, atmosphere_multiple, atmosphere_ground, oblateness, ground or ground_levels; true or false",
+        about: "freeze_stream, galactic_points, point_pixels, msaa, bloom, cull_blocks, point_stars, split_multiples, atmospheres, atmosphere_tables, atmosphere_stop_opaque, atmosphere_multiple, atmosphere_ground, oblateness, ground or ground_levels; true or false",
     },
     Usage {
         name: "set_atmosphere",
@@ -325,8 +325,8 @@ pub const USAGE: [Usage; 37] = [
     },
     Usage {
         name: "set_search",
-        fields: &["threads", "work_cap_millions"],
-        about: "Debug: search threads (1 to 64) and work cap in millions of units (1 to 10000); either may be left out",
+        fields: &["work_cap_millions"],
+        about: "Debug: search work cap in millions of units (1 to 10000); CPU capacity comes from the shared budget",
     },
     Usage {
         name: "set_layered_planets",

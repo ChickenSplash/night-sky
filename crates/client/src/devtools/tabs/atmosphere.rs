@@ -1,13 +1,11 @@
 //! The `atmosphere` tab: optional override air on the selected planet, its
 //! presets and shader steps, and what it costs the GPU.
 use super::perf::{gpu_total, pass_times};
-use crate::Navigation;
 use crate::actions::UiCommand;
 use crate::render::atmosphere::{
     self, AirSettings, AtmosphereChange, AtmosphereTuning, GAS, HAZE, HAZE_ABSORBED, HEIGHT_KM,
     PRESSURE_BAR, Preset,
 };
-use crate::render::debug::{DebugSwitch, RenderDebug};
 use crate::ui::kit::Slider;
 use crate::ui::terminal;
 use bevy::diagnostic::DiagnosticsStore;
@@ -19,87 +17,15 @@ const PASS: &str = "main_transparent_pass_3d";
 
 pub fn atmosphere(
     ui: &mut egui::Ui,
-    nav: &Navigation,
-    (debug, tuning): (&RenderDebug, &AtmosphereTuning),
+    tuning: &AtmosphereTuning,
     diagnostics: Option<&DiagnosticsStore>,
     out: &mut Vec<UiCommand>,
 ) {
     terminal::heading(ui, "atmosphere");
-    let detail = format!(
-        "{} {}",
-        DebugSwitch::Atmospheres.detail(),
-        if matches!(nav.selection, Some(crate::Selection::Planet(_))) {
-            "Generated air applies to every planet, drawn with realistic lighting."
-        } else {
-            "Generated air applies to every planet. Select one to use a debug override."
-        },
+    terminal::note(
+        ui,
+        "Global atmosphere rendering and quality switches are in the settings tab. Select a planet to tune its debug air here.",
     );
-    if terminal::check(ui, debug.atmospheres, "Atmospheres", true, &detail) {
-        out.push(UiCommand::SetDebug {
-            switch: DebugSwitch::Atmospheres,
-            on: !debug.atmospheres,
-        });
-    }
-    if terminal::check(
-        ui,
-        debug.atmosphere_jitter,
-        "Jitter steps",
-        true,
-        DebugSwitch::AtmosphereJitter.detail(),
-    ) {
-        out.push(UiCommand::SetDebug {
-            switch: DebugSwitch::AtmosphereJitter,
-            on: !debug.atmosphere_jitter,
-        });
-    }
-    if terminal::check(
-        ui,
-        debug.atmosphere_tables,
-        "Lookup tables",
-        true,
-        DebugSwitch::AtmosphereTables.detail(),
-    ) {
-        out.push(UiCommand::SetDebug {
-            switch: DebugSwitch::AtmosphereTables,
-            on: !debug.atmosphere_tables,
-        });
-    }
-    if terminal::check(
-        ui,
-        debug.atmosphere_stop_opaque,
-        "Stop where opaque",
-        true,
-        DebugSwitch::AtmosphereStopOpaque.detail(),
-    ) {
-        out.push(UiCommand::SetDebug {
-            switch: DebugSwitch::AtmosphereStopOpaque,
-            on: !debug.atmosphere_stop_opaque,
-        });
-    }
-    if terminal::check(
-        ui,
-        debug.atmosphere_multiple,
-        "Multiple scattering",
-        true,
-        DebugSwitch::AtmosphereMultiple.detail(),
-    ) {
-        out.push(UiCommand::SetDebug {
-            switch: DebugSwitch::AtmosphereMultiple,
-            on: !debug.atmosphere_multiple,
-        });
-    }
-    if terminal::check(
-        ui,
-        debug.atmosphere_ground,
-        "Ground lighting",
-        true,
-        DebugSwitch::AtmosphereGround.detail(),
-    ) {
-        out.push(UiCommand::SetDebug {
-            switch: DebugSwitch::AtmosphereGround,
-            on: !debug.atmosphere_ground,
-        });
-    }
     gpu(ui, diagnostics);
     if terminal::check(
         ui,
@@ -274,7 +200,7 @@ pub fn atmosphere(
         &[
             (
                 "top of the air",
-                format!("{:.0} km", physical.top / 1e3),
+                format!("{} km", crate::format::number(physical.top / 1e3, 0)),
                 Some(
                     "Above this the air is taken as empty: 12.5 scale heights of the gas or haze, whichever is taller.",
                 ),
@@ -343,16 +269,18 @@ fn gpu(ui: &mut egui::Ui, diagnostics: Option<&DiagnosticsStore>) {
     let pass = passes
         .get(PASS)
         .and_then(|p| p.gpu)
-        .map_or("·".into(), |ms| format!("{ms:.2} ms"));
+        .map_or("·".into(), |ms| {
+            format!("{} ms", crate::format::number(ms, 2))
+        });
     terminal::facts_with_details(
         ui,
         "debug-atmosphere-gpu",
         &[
             (
                 "gpu frame",
-                format!("{:.2} ms", gpu_total(&passes)),
+                format!("{} ms", crate::format::number(gpu_total(&passes), 2)),
                 Some(
-                    "GPU time of the whole frame. Turn the switch off and on to see the atmosphere's share.",
+                    "GPU time of the whole frame. Toggle Atmospheres in the settings tab to compare its share.",
                 ),
             ),
             (
@@ -373,11 +301,7 @@ mod tests {
     /// The commands a click on the text `label` sends.
     fn click(label: &str) -> Vec<UiCommand> {
         let ctx = egui::Context::default();
-        let (nav, debug, tuning) = (
-            Navigation::default(),
-            RenderDebug::default(),
-            AtmosphereTuning::default(),
-        );
+        let tuning = AtmosphereTuning::default();
         let frame = |events| {
             let mut commands = Vec::new();
             let output = ctx.run(
@@ -390,9 +314,8 @@ mod tests {
                     ..default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        atmosphere(ui, &nav, (&debug, &tuning), None, &mut commands)
-                    });
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| atmosphere(ui, &tuning, None, &mut commands));
                 },
             );
             (output, commands)
@@ -428,11 +351,11 @@ mod tests {
             })]
         );
         assert_eq!(
-            click("Atmospheres"),
-            vec![UiCommand::SetDebug {
-                switch: DebugSwitch::Atmospheres,
-                on: false
-            }]
+            click("Selected planet override"),
+            vec![UiCommand::SetAtmosphere(AtmosphereChange {
+                enabled: Some(true),
+                ..default()
+            })]
         );
     }
 }

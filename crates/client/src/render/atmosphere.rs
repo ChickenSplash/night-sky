@@ -463,9 +463,9 @@ pub struct AtmosphereMaterial {
     absorption: Vec4,
     #[uniform(0)]
     gas_absorption: Vec4,
-    /// 1 to jitter the view steps, and 1 to end each ray where the air turns
-    /// opaque (with the tables only), and 1 when the surface already includes
-    /// its atmospheric lighting, so the shell must not dim its sunlight again.
+    /// End each ray where the air turns opaque (with tables only), mark surfaces
+    /// already including atmospheric lighting, and the presentation fade.
+    /// The fourth component is padding.
     #[uniform(0)]
     switches: Vec4,
     /// The pole, and how far to stretch along it to make the planet round:
@@ -560,24 +560,24 @@ impl Shell {
         self.radius * self.air.top * MESH_MARGIN
     }
 
-    /// `near` is the camera's near plane, in render units; `switches` jitter
-    /// the view steps, end each ray where the air turns opaque and add the
-    /// light scattered more than once; the fourth switch marks ground that
+    /// `near` is the camera's near plane, in render units; `switches` end each
+    /// ray where the air turns opaque and add the light scattered more than
+    /// once; the third switch marks ground that
     /// already includes atmospheric lighting.
     fn material(
         &self,
         eye: Vec3,
         near: f32,
         steps: (u32, u32),
-        switches: [bool; 4],
+        switches: [bool; 3],
         tables: Option<Tables>,
     ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
-        let [jitter, opaque] = [switches[0], switches[1]].map(|on| f32::from(u8::from(on)));
+        let opaque = f32::from(u8::from(switches[0]));
         let multiple = tables
             .as_ref()
             .and_then(|t| t.multiple.clone())
-            .filter(|_| switches[2]);
+            .filter(|_| switches[1]);
         AtmosphereMaterial {
             centre: from_eye.extend(self.radius),
             steps: Vec4::new(
@@ -598,7 +598,7 @@ impl Shell {
                 .air
                 .gas_absorption
                 .extend(u8::from(self.air.spherical) as f32),
-            switches: Vec4::new(jitter, opaque, f32::from(u8::from(switches[3])), self.fade),
+            switches: Vec4::new(opaque, f32::from(u8::from(switches[2])), self.fade, 0.0),
             pole: self.pole.extend(1.0 / (1.0 - self.flattening)),
             lights: self.lights,
             suns: self.suns,
@@ -663,7 +663,6 @@ pub(super) fn sync_atmospheres(
             near,
             (tuning.view_steps, tuning.light_steps),
             [
-                debug.atmosphere_jitter,
                 debug.atmosphere_stop_opaque,
                 debug.atmosphere_multiple,
                 surface_lighting

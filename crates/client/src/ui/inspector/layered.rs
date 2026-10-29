@@ -1,5 +1,6 @@
 //! Active result detail and a separately labelled, unapplied refinement candidate.
 use super::{Info, Section, atmosphere::pressure_display, composition::material_label};
+use crate::format::number;
 use crate::planet_loading::{Layered, PlanetState};
 use space_shared::{AtmosphereReference, Layer, LayeredPlanet, ModelFidelity, Planet};
 
@@ -78,8 +79,9 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
         "Radius (candidate vs active)",
         Some("km"),
         format!(
-            "{radius_km:.0} km vs {:.0} km ({:+.2}%) · active radius drawn",
-            planet.radius_km,
+            "{} km vs {} km ({:+.2}%) · active radius drawn",
+            number(radius_km, 0),
+            number(planet.radius_km, 0),
             (radius_km / planet.radius_km - 1.0) * 100.0
         ),
     );
@@ -88,7 +90,7 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
         .as_ref()
         .and_then(|e| e.atmosphere.as_ref());
     let active_temperature = active_air.map_or("no active gas estimate".into(), |air| {
-        format!("{:.0} K", air.temperature_k)
+        format!("{} K", number(air.temperature_k, 0))
     });
     info.field(
         "layered.temperature",
@@ -98,7 +100,10 @@ fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
             "Surface temperature (candidate vs active)"
         },
         Some("K"),
-        format!("{:.0} K vs {active_temperature}", l.surface_temperature_k),
+        format!(
+            "{} K vs {active_temperature}",
+            number(l.surface_temperature_k, 0)
+        ),
     );
     let active_pressure = match active_air {
         None => "no active gas column".into(),
@@ -209,8 +214,8 @@ pub(super) fn active(info: &mut Info, planet: &Planet) {
             "Condensed top",
             Some("km"),
             format!(
-                "{:.1} km · {:?} phase · separate from gas reference",
-                geometry.condensed_radius_m / 1000.0,
+                "{} km · {:?} phase · separate from gas reference",
+                number(geometry.condensed_radius_m / 1000.0, 1),
                 geometry.condensed_phase
             ),
         );
@@ -265,7 +270,7 @@ fn regions(info: &mut Info, prefix: &str, l: &LayeredPlanet) {
     }
 }
 
-fn fidelity_label(fidelity: ModelFidelity) -> &'static str {
+pub(super) fn fidelity_label(fidelity: ModelFidelity) -> &'static str {
     match fidelity {
         ModelFidelity::ReferenceChecked => {
             "Reference-checked local model (not a whole-planet accuracy guarantee)"
@@ -301,18 +306,21 @@ fn layer_text(layer: &Layer) -> String {
             .temperature_k
             .map_or("temperature not modelled".into(), |t| {
                 if layer.kind == "envelope" {
-                    format!("{t:.0} K at top (varies with depth)")
+                    format!("{} K at top (varies with depth)", number(t, 0))
                 } else if layer.kind == "water_compression" {
-                    format!("{t:.0} K at outer boundary (thermal state unresolved)")
+                    format!(
+                        "{} K at outer boundary (thermal state unresolved)",
+                        number(t, 0)
+                    )
                 } else {
-                    format!("{t:.0} K")
+                    format!("{} K", number(t, 0))
                 }
             }),
     );
     parts.join(" · ")
 }
 
-fn surface_label(surface: &str) -> String {
+pub(super) fn surface_label(surface: &str) -> String {
     match surface {
         "envelope" => "1 bar in H/He envelope (not ground)".into(),
         "rock" => "Rock".into(),

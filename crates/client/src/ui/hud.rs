@@ -71,7 +71,7 @@ pub(super) fn rate_text(rate: f64) -> String {
     .into_iter()
     .find(|(_, scale)| rate >= *scale)
     .unwrap_or(("seconds/s", 1.0));
-    format!("{:.2} {unit}", rate / scale)
+    format!("{} {unit}", crate::format::number(rate / scale, 2))
 }
 
 pub(super) fn time_controls(
@@ -200,9 +200,9 @@ pub(super) fn stick_reticle(ctx: &egui::Context, stick: &crate::input::pilot::St
 
 fn elapsed_text(days: f64) -> String {
     if days >= 365.25 {
-        format!("T + {:.2} yr", days / 365.25)
+        format!("T + {} yr", crate::format::number(days / 365.25, 2))
     } else {
-        format!("T + {days:.2} days")
+        format!("T + {} days", crate::format::number(days, 2))
     }
 }
 
@@ -370,7 +370,7 @@ pub(super) fn exposure_controls(
                 let response = halo_text(ui, &text, egui::Sense::click_and_drag(), |r| {
                     if nav.realistic && (r.hovered() || r.dragged() || r.has_focus()) { HOVER } else { LINK }
                 }).on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text_themed(&Theme::GAME,
-                    if nav.realistic { help } else { "Turn on realistic lighting in the debug console's render tab to adjust this." });
+                    if nav.realistic { help } else { "Turn on realistic lighting in the debug console's settings tab to adjust this." });
                 ctx.data_mut(|data| data.insert_temp(egui::Id::new(format!("{id}-pointer-capture")),
                     (response.rect, response.dragged() || response.is_pointer_button_down_on())));
                 if response.drag_started() && nav.realistic { drags[index] = Some(value); }

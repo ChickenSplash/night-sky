@@ -92,7 +92,8 @@ below the visible magnitude limit. Both share the manual exposure described in
 - The UI also shows latest-frame and trailing-second peaks for search and
   preparation, uncached generation, orbital/sprite construction and rebuild
   counts. Generation and orbit timings are parts of preparation, not extra
-  costs to add to it. `split_multiples` is in the performance-switches section.
+  costs to add to it. `split_multiples` is the settings tab's quality control
+  **Resolve multiple-star systems**.
 
 ## Point light and central black hole
 
@@ -144,7 +145,6 @@ below the visible magnitude limit. Both share the manual exposure described in
   Camera-relative origins are formed in f64 before converting to f32. Patches
   are built lazily and hidden when disabled.
 - Glow is shown only with realistic lighting and **Smooth galaxy glow (prototype)**
-  enabled (render tab), alongside Inside, Face-on and Edge-on reference camera
-  commands.
+  enabled (settings tab, rendering section).
 - Dust, detailed spiral structure, other galaxy types and moving stars are
   not implemented. Glow is a smooth prototype, not a dust-attenuated renderer.

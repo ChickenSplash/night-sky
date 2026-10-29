@@ -496,7 +496,7 @@ fn every_property_can_be_filtered() {
 #[test]
 fn the_service_answers_cancels_and_refuses() {
     use std::time::Duration;
-    let service = SearchService::spawn(2);
+    let service = SearchService::spawn();
     service.submit(SearchRequest {
         id: 7,
         ..request("kind=planet within_ly=15")

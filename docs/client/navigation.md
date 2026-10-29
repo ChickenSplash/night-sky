@@ -225,7 +225,7 @@ proxies and even known solid phases never grant landing permission.
   (camera-axis travel as a fraction of `move_speed`, roll in `w`) over about
   0.15 s; speed changes and mouse turns stay instant.
 - Vertical field of view is `Navigation::fov_deg` (30° to 130°, default 50°),
-  set in the render tab (`UiCommand::SetFov`) or Shift + left-drag (up narrows).
+  set in the settings tab (`UiCommand::SetFov`) or Shift + left-drag (up narrows).
   Hand projections (picking, overlays, table framing) use
   `Navigation::tan_half_fov`, never a fixed 50°.
 - Shift + scroll (either Shift key) zooms from 1 m to 40,000 ly, whatever is

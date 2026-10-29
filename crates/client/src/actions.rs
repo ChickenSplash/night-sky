@@ -139,10 +139,8 @@ pub enum UiCommand {
     SetCompression {
         amount: f64,
     },
-    /// Repeatable views for evaluating the smooth galaxy prototype.
-    GalaxyReference {
-        view: GalaxyReference,
-    },
+    /// Frame the galaxy from above, outside any visited system.
+    ViewGalaxy,
     /// Debug-only performance switches (`render/debug.rs`).
     SetDebug {
         switch: crate::render::debug::DebugSwitch,
@@ -157,10 +155,8 @@ pub enum UiCommand {
     },
     /// Cancel and clear the object browser's request.
     ClearSearch,
-    /// Debug-only search settings; either may be left out.
+    /// Debug-only search work cap.
     SetSearch {
-        #[serde(default)]
-        threads: Option<usize>,
         #[serde(default)]
         work_cap_millions: Option<f64>,
     },
@@ -187,14 +183,6 @@ pub enum Display {
     Realistic,
     GalaxyGlow,
     Wireframe,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GalaxyReference {
-    Inside,
-    FaceOn,
-    EdgeOn,
 }
 
 impl UiCommand {
@@ -264,15 +252,9 @@ impl UiCommand {
             UiCommand::Search { query } => {
                 space_simulation::search::Query::parse(query).and_then(|query| query.check())
             }
-            UiCommand::SetSearch {
-                threads,
-                work_cap_millions,
-            } => {
-                if threads.is_none() && work_cap_millions.is_none() {
-                    return Err("Give threads, work_cap_millions or both".into());
-                }
-                if let Some(threads) = threads {
-                    within("threads", *threads, crate::search::THREADS)?;
+            UiCommand::SetSearch { work_cap_millions } => {
+                if work_cap_millions.is_none() {
+                    return Err("Give work_cap_millions".into());
                 }
                 if let Some(millions) = work_cap_millions {
                     within(
@@ -496,37 +478,28 @@ fn thrust_target(
         .ok_or_else(|| format!("No craft `{id}`"))
 }
 
-fn galaxy_reference(nav: &mut Navigation, view: GalaxyReference) {
+fn view_galaxy(nav: &mut Navigation) {
     use bevy::math::DVec3;
     use space_simulation::galaxy::{GalaxyModel, PC_METRES};
     let home = DVec3::from_array(GalaxyModel::milky_way().home_pc);
-    let eye = match view {
-        GalaxyReference::Inside => home,
-        GalaxyReference::FaceOn => DVec3::new(0.0, 38000.0, 0.0),
-        GalaxyReference::EdgeOn => DVec3::new(0.0, 0.0, 38000.0),
-    };
-    let up = if view == GalaxyReference::FaceOn {
-        Vec3::Z
-    } else {
-        Vec3::Y
-    };
+    let eye = DVec3::new(0.0, 38000.0, 0.0);
     nav.leave_for_home_frame();
     nav.page = 0;
     nav.selection = None;
     nav.following = false;
     nav.presentation_mode = PresentationMode::Simulation;
-    // Keep the normal zoom range even for an external reference eye. Otherwise
+    // Keep the normal zoom range even for an external galaxy view. Otherwise
     // the first wheel event clamps 124,000 ly to 40,000 ly and jumps inward.
     nav.distance = (eye.length() * PC_METRES).min(40_000.0 * space_simulation::LY_METRES);
     nav.target = (eye - home) * PC_METRES - eye.normalize() * nav.distance;
     nav.rotation = Transform::default()
-        .looking_to((-eye).as_vec3(), up)
+        .looking_to((-eye).as_vec3(), Vec3::Z)
         .rotation;
     nav.eye = Some((eye - home) * PC_METRES);
     nav.set_fov(50.0);
     nav.realistic = true;
     nav.fly = true;
-    nav.notice = "Smooth galaxy prototype: no dust or spiral detail yet".into();
+    nav.notice.clear();
 }
 
 pub fn apply(
@@ -778,7 +751,7 @@ pub fn apply(
             UiCommand::SetMagnitude { magnitude } => nav.set_magnitude(*magnitude),
             UiCommand::SetExposure { stops } => nav.set_exposure(*stops),
             UiCommand::SetCompression { amount } => nav.set_compression(*amount),
-            UiCommand::GalaxyReference { view } => galaxy_reference(&mut nav, *view),
+            UiCommand::ViewGalaxy => view_galaxy(&mut nav),
             UiCommand::SetDebug { switch, on } => debug.set(*switch, *on),
             UiCommand::SetAtmosphere(change) => tuning.apply(change),
             // `search::apply` runs these.

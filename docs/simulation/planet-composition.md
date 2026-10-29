@@ -45,6 +45,13 @@ safe adoption. The caller must include body identity, retained supply, forcing
 and resource/prescription changes in those keys. A new input/model identity
 starts a new lineage; candidate work from another lineage must be discarded.
 
+Each transported layer includes its full nonzero material inventory as material
+IDs and masses, alongside the dominant-material label. Both layered and fallback
+adapters copy the actual region inventories, without reconstructing composition
+from whole-planet fractions. Supplied breakdowns must contain unique known IDs,
+positive finite masses, and sum to the region mass. Older records may omit the
+breakdown; clients show it as unavailable rather than assuming a pure region.
+
 `physical::initial_result` computes the cheap fallback without attempting a
 layered solve or manufacturing a refusal. `resolved_result` converts an actual
 layered/refused outcome into a candidate. Their common validation establishes
@@ -2047,8 +2054,10 @@ flight). Without a visit, a selected star or remote planet's parent system is
 prefetched. A lingering selection of a system just left does not restart its
 cancelled queue. Each planet is one independent background job; the selected
 planet goes first among queued jobs. Jobs already running are not reordered.
-The [shared star/planet budget](../client/streaming.md#shared-star-and-planet-cpu-budget)
-prevents independent ¾-CPU worker allocations from competing unchecked.
+The [shared star/search/planet budget](../client/streaming.md#shared-background-cpu-budget)
+prevents independent worker allocations from competing unchecked. Refinement
+starts only while visible-star streaming and object search are idle; running
+solves retain their permits until they finish.
 
 Results live in a four-system, least-recently-targeted in-memory cache, keyed by
 stable natural-system ID, with captured per-planet input/model revisions and

@@ -168,7 +168,7 @@ impl Default for Navigation {
             galaxy_glow: true,
             exposure: 0.0,
             compression: 0.5,
-            wireframe: true,
+            wireframe: false,
             charted: std::collections::HashMap::new(),
             notice: "Connecting to local API…".into(),
             fly: false,

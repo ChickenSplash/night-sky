@@ -10,9 +10,9 @@ to `crates/client/src/`.
 
 ## Windows and commands
 
-- Three free-floating halo icons at top right (`ui::icons`, ⚙ then ✔ then 🔍,
+- Four free-floating halo icons at top right (`ui::icons`, ⚙ then ✔ then 🔍 then ⓘ,
   `kit::halo::halo_glyph`, hover blue, white while open) toggle the debug
-  console, Tasks and object browser. They first open below the icons,
+   console, Tasks, object browser and Object Inspector. They first open below the icons,
   right-aligned (`terminal::below_icons` for debug). Tasks and browser start closed.
 - Widgets come from `ui/kit/`: `Theme::TERMINAL` for debug through
   `ui/terminal.rs`, `Theme::GAME` for player windows. Halo text lives in `kit::halo`.
@@ -24,6 +24,35 @@ to `crates/client/src/`.
   command opens it on that query. Results reuse inspector facts/actions and
   chart shown systems for unstreamed visits. Tasks remain the separate
   [information-overlay interface](../../shared/information-overlay.md).
+
+## Object Inspector window
+
+The ⓘ icon or **I** key toggles a single, initially closed **Object Inspector** using the
+object browser's shared player-window theme, blur, movement and resizing. It
+is drawn as a compact circle, dot and stem rather than a font glyph, avoiding
+missing-font fallback squares. The shortcut is inactive while typing. The window
+follows ordinary selection only, without travelling or falling back to location.
+The existing borderless breadcrumb readout is unchanged. Non-planet selections
+reuse shared object facts; no selection shows a prompt.
+
+Planets show the validated active result's ordered regions, not pending refinement
+candidates. An interactive annular cross-section preserves inner and outer radii
+relative to the outermost modelled region, including atmosphere extent. Colours
+identify regions, not physical appearance. Thin layers are never exaggerated:
+the exterior-to-centre overview keeps every region selectable even when its ring
+is sub-pixel. Both views share local layer selection, reset when the object or
+active record changes. Wide windows place them side by side; narrow windows stack
+them. This is a radial model diagram, not a rendered surface or phase inference.
+
+Layer details show material, radii, thickness, mass, boundary pressures in bar/mbar,
+available temperature, model and fidelity. A composition breakdown lists every
+nonzero material, largest first, with its mass and percentage of the selected
+layer's mass (not the whole planet). Unresolved quantities stay unknown;
+envelope/compression temperatures describe an outer boundary, not a resolved
+profile. The window ends at the selected-layer stats and composition, without explanatory footers
+or global model summaries. Full model limitations and reference-boundary facts
+remain in the full shared data used by browser/developer readouts. Missing/invalid active records
+show no invented layers.
 
 ## Breadcrumbs and inspector
 
@@ -45,8 +74,11 @@ to `crates/client/src/`.
   selection, or current location with no selection. There is no separate
   inspection override. Repeated crumb clicks only select, never travel; tracking
   follows the normal selection rules.
-- The inspector keeps its borderless halo text, with Overview, Composition,
-  Atmosphere, Orbit and rotation, and collapsed Model details sections for planets. A shared-kit vertical
+- The inspector keeps its borderless halo text. Planet readouts show only type,
+  mass, radius, gravity, and orbit/rotation facts, plus navigation actions. Layer,
+  composition, atmosphere, boundary and refinement/model details are omitted from
+  this scene overlay; the Object Inspector owns detailed interior inspection.
+  A shared-kit vertical
   scroll area bounds long content to the viewport, reserving the bottom HUD
   inset; wheel/scrollbar input reaches all facts and actions. Its top stays
   anchored at the shared HUD inset. Facts are cached
@@ -78,25 +110,19 @@ radius meaning and model caveats. Missing legacy composition and invalid new
 records are visibly unknown, never zero-filled. Water-rich boundaries make no
 ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 
-The player-facing order is Overview, Composition, Atmosphere, Orbit and rotation,
-then Model details (closed by default). While background refinement
-are on, a **Background refinement** section follows Overview, beside
-the active result; see [the layered record](../../simulation/planet-composition.md#layered-transport-record).
-It distinguishes unapplied candidates, safety deferrals and applied active
-results. Active provenance/refinement status, phase knowledge and condensed-top geometry
-are always available, with ordered regions in Composition and revision/fidelity
-and region model limitations in Model details. Overview identifies the surface/radius
-meaning and gives atmospheric pressure without a separate present/absent row.
-An absent/sub-cutoff model has unknown pressure, not an invented exact zero.
-Composition groups bulk gas species separately from rock, metal and water;
-both their total and species breakdown use whole-planet retained mass. This is a
-material inventory, not a claim that all those species are in the atmosphere.
-Short section explanations distinguish it from atmospheric percentages by molecule.
-The normal atmosphere section contains mixture, estimated temperature and scale
-height. Reservoir bookkeeping, structure/reflectance assumptions, heating,
-operational extent and model limitations live in Model details. Important pressure
-uncertainty remains beside the main measurement. Developer exports retain all
-fields, including the collapsed details, with the same section assignments.
+The full shared record retains Overview, Background refinement, Composition,
+Atmosphere, Orbit and rotation, and Model details sections for browser/developer
+consumers. The top-left readout filters this data for presentation only, without
+deleting facts or changing API exports. Refinement facts distinguish unapplied
+candidates, safety deferrals and applied active results; see
+[the layered record](../../simulation/planet-composition.md#layered-transport-record).
+Composition includes ordered regions and bulk gas inventories; these are
+whole-planet mass fractions, not atmospheric molecular percentages. Atmosphere
+facts retain mixture, estimated temperature and scale height. Reference-boundary
+meaning, uncertain pressure, phase knowledge, fidelity and limitations remain in
+the full data. An absent/sub-cutoff model has unknown pressure, never an invented
+exact zero. The Object Inspector currently displays region details, not every
+field of that full record.
 
 Planet facts include generated all-star mean heating, equilibrium temperature
 with assumed albedo, atmospheric composition, reference pressure, column

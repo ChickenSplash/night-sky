@@ -430,6 +430,22 @@ fn validate_layers(record: &LayeredPlanet) -> Check {
         {
             return Err("invalid layer");
         }
+        if !layer.materials.is_empty() {
+            let mut seen = BTreeSet::new();
+            let mut total = 0.0;
+            for material in &layer.materials {
+                if Material::from_id(&material.material).is_none()
+                    || !seen.insert(&material.material)
+                    || !positive(material.mass_kg)
+                {
+                    return Err("invalid layer material");
+                }
+                total += material.mass_kg;
+            }
+            if !close(total, layer.mass_kg) {
+                return Err("inconsistent layer material mass");
+            }
+        }
         let mut seen = BTreeSet::new();
         let mut phase_mass = 0.0;
         for phase in &layer.phase_allocations {

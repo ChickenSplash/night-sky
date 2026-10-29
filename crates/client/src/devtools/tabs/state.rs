@@ -16,7 +16,11 @@ pub fn state(
     searches: &crate::search::Searches,
 ) {
     let galaxy = &universe.0;
-    let ly = |v: bevy::math::DVec3| format!("{:+.3}  {:+.3}  {:+.3}", v.x, v.y, v.z);
+    let ly = |v: bevy::math::DVec3| {
+        v.to_array()
+            .map(|n| crate::format::signed_number(n, 3))
+            .join("  ")
+    };
     let range = crate::format::distance_label(pose.distance);
     terminal::heading(ui, "camera");
     terminal::facts(
@@ -154,7 +158,10 @@ pub fn state(
         ui,
         "debug-clock",
         &[
-            ("simulated", format!("{:.3} s", clock.0.seconds)),
+            (
+                "simulated",
+                format!("{} s", crate::format::number(clock.0.seconds, 3)),
+            ),
             ("rate", format!("{} s/s", clock.0.rate)),
             ("paused", clock.0.paused.to_string()),
         ],

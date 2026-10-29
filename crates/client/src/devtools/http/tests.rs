@@ -8,7 +8,7 @@ use crate::stars::stream::Starfield;
 use crate::{Clock, Navigation, Universe};
 
 fn hub() -> Arc<Hub> {
-    Arc::new(Hub::new(2))
+    Arc::new(Hub::new())
 }
 
 #[test]

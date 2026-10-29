@@ -28,8 +28,7 @@ struct Air {
     shape: vec4<f32>,
     absorption: vec4<f32>,
     gas_absorption: vec4<f32>,
-    // 1 to jitter the view steps; 1 to end each ray where the air turns
-    // opaque; 1 when the ground already includes its air lighting.
+    // Stop at opacity, ground includes air lighting, presentation fade, padding.
     switches: vec4<f32>,
     // The pole, and the stretch along it that makes the planet round.
     pole: vec4<f32>,
@@ -165,7 +164,7 @@ struct Foreground {
 
 // Integrate only positive local extinction, never differences of large table
 // depths. Limit radial profile changes and tangent curvature to resolve both
-// sides of the limb identically. Independent of jitter and table readiness.
+// sides of the limb identically. Independent of table readiness.
 fn foreground(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32) -> Foreground {
     var scale = air.rayleigh.w;
     if any(air.mie.rgb > vec3(0.0)) || air.mie.w > 0.0 {
@@ -227,18 +226,6 @@ fn rounded(v: vec3<f32>) -> vec3<f32> {
     return v + air.pole.xyz * (dot(v, air.pole.xyz) * (air.pole.w - 1.0));
 }
 
-// Where each view step takes its sample, from 0 (its start) to 1 (its end).
-// Neighbouring pixels sample at different points (Jimenez 2014's interleaved
-// gradient noise), so sharp changes along the ray, such as the edge of the
-// planet's shadow at twilight, blur into fine grain instead of bands.
-// Midway without jitter.
-fn jitter(pixel: vec2<f32>) -> f32 {
-    if air.switches.x == 0.0 {
-        return 0.5;
-    }
-    return fract(52.9829189 * fract(dot(floor(pixel), vec2(0.06711056, 0.00583715))));
-}
-
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let view_dir = normalize(in.world_position.xyz - view.world_position);
@@ -247,7 +234,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let top = air.steps.x;
     // Underground nothing is seen, not even the air beyond the far side.
     if dot(eye, eye) < 1.0 {
-        return vec4(0.0, 0.0, 0.0, select(0.0, air.switches.w, air.steps.w > 0.0));
+        return vec4(0.0, 0.0, 0.0, select(0.0, air.switches.z, air.steps.w > 0.0));
     }
     // Distance along the ray to its closest approach, and that point.
     let closest = -dot(eye, dir);
@@ -278,7 +265,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // can be seen. What lies behind is still dimmed by the whole ray's air.
     let front = foreground(nearest, dir, start, end);
     var span = end - start;
-    if air.switches.y != 0.0 && front.opaque {
+    if air.switches.x != 0.0 && front.opaque {
         span = front.end;
     }
     // Steps bunch up near a camera low in the air; from the top of the air
@@ -286,7 +273,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let count = air.steps.y;
     let height = clamp((length(eye) - 1.0) / (top - 1.0), 0.0, 1.0);
     let power = mix(2.0, 1.0, height);
-    let offset = jitter(in.position.xy);
+    // Fixed midpoint sampling, without pixel noise.
+    let offset = 0.5;
     var last = 0.0;
     var depth = vec3(0.0);
     var light = vec3(0.0);
@@ -346,7 +334,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         depth = front.depth;
     }
     var sunlit = 1.0;
-    if reaches && air.switches.z == 0.0 {
+    if reaches && air.switches.y == 0.0 {
         let surface = normalize(nearest + dir * ground);
         var lit = 0.0;
         var total = 0.0;
@@ -378,5 +366,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             through = 0.0;
         }
     }
-    return vec4(encode(light * air.switches.w), (1.0 - through) * air.switches.w);
+    return vec4(encode(light * air.switches.z), (1.0 - through) * air.switches.z);
 }

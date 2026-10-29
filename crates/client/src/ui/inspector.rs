@@ -4,9 +4,11 @@ mod composition;
 mod layered;
 mod planet_layout;
 mod presentation;
+pub mod window;
+use crate::format::number;
 use crate::{
     Navigation,
-    actions::{GalaxyReference, UiCommand},
+    actions::UiCommand,
     craft::Now,
     navigation::objects::{self, ObjectRef},
     navigation::presentation::PresentationMode,
@@ -32,7 +34,6 @@ pub struct Cache {
         space_shared::RefinementStatus,
     )>,
     info: Info,
-    model_details_open: bool,
 }
 
 impl Cache {
@@ -90,6 +91,8 @@ impl Cache {
 #[derive(Default)]
 pub struct Info {
     pub title: String,
+    /// Validated active regions, shared with the interactive interior window.
+    interior: Option<space_shared::LayeredPlanet>,
     pub fields: Vec<Fact>,
     section: Section,
     pub note: String,
@@ -219,7 +222,10 @@ fn describe_with(
                 {
                     info.title = objects::member_label(&name, &star.component);
                     info.fact("Type", format!("{} · {}", star.kind, star.spectral));
-                    info.fact("Mass", format!("{:.2} solar masses", star.mass_solar));
+                    info.fact(
+                        "Mass",
+                        format!("{} solar masses", number(star.mass_solar, 2)),
+                    );
                     info.fact("Radius", star_radius_text(star.radius_solar));
                     info.fact(
                         "Flattening",
@@ -227,7 +233,10 @@ fn describe_with(
                             space_simulation::star_shape(star).flattening(),
                         ),
                     );
-                    info.fact("Temperature", format!("{:.0} K", star.temperature_k));
+                    info.fact(
+                        "Temperature",
+                        format!("{} K", number(star.temperature_k, 0)),
+                    );
                     info.fact(
                         "Luminosity",
                         format!("{} solar", luminosity_text(star.luminosity_solar)),
@@ -269,6 +278,9 @@ fn describe_with(
             {
                 let days = space_simulation::planet_period(&system, planet) / 86400.0;
                 info.title = planet.designation.clone();
+                if space_simulation::system::physical::validate(planet).is_ok() {
+                    info.interior = planet.initial_result.as_ref().map(|r| r.record.clone());
+                }
                 info.field("planet.class", "Type", None, planet.class.clone());
                 if system.barycentres_on(planet.page()).next().is_some() {
                     let host: Vec<_> = member_component(&system, &planet.host)
@@ -301,7 +313,7 @@ fn describe_with(
                     "planet.radius",
                     "Radius",
                     Some("km"),
-                    format!("{:.0} km", planet.radius_km),
+                    format!("{} km", number(planet.radius_km, 0)),
                 );
                 composition::facts(&mut info, planet);
                 info.section = Section::Orbit;
@@ -318,7 +330,7 @@ fn describe_with(
                     "orbit.distance",
                     "Orbital distance",
                     Some("AU"),
-                    format!("{:.3} AU", planet.orbit.semi_major_au),
+                    format!("{} AU", number(planet.orbit.semi_major_au, 3)),
                 );
                 info.field(
                     "orbit.period",
@@ -431,7 +443,7 @@ fn velocity_kms(key: &str, position_ly: DVec3) -> [f64; 3] {
 fn motion_facts(info: &mut Info, velocity: [f64; 3]) {
     info.fact(
         "Galactic velocity",
-        format!("{:.0} km/s", DVec3::from_array(velocity).length()),
+        format!("{} km/s", number(DVec3::from_array(velocity).length(), 0)),
     );
     info.velocity_kms = Some(velocity);
 }
@@ -479,7 +491,7 @@ fn pair_facts(
     let [first, second] = pair.members.each_ref().map(|m| member_component(system, m));
     info.fact("Pair", format!("{first} and {second}"));
     let mass = system.member_mass(page, &pair.id);
-    info.fact("Total mass", format!("{mass:.2} solar masses"));
+    info.fact("Total mass", format!("{} solar masses", number(mass, 2)));
     let light: f64 = stars.iter().map(|s| s.luminosity_solar).sum();
     info.fact("Luminosity", format!("{} solar", luminosity_text(light)));
     info.fact(
@@ -514,9 +526,7 @@ pub fn actions(
         ObjectRef::Galaxy => vec![Action {
             label: "View from above".into(),
             current: false,
-            command: UiCommand::GalaxyReference {
-                view: GalaxyReference::FaceOn,
-            },
+            command: UiCommand::ViewGalaxy,
         }],
         ObjectRef::List { id } => {
             let mut actions = vec![Action {
@@ -722,6 +732,17 @@ fn action_text(ui: &mut egui::Ui, action: &Action) -> bool {
     .clicked()
 }
 
+/// The scene readout stays compact; physical detail belongs in the object window
+/// and the full shared data remains available to browser/developer consumers.
+fn scene_field(field: &Fact, object: &ObjectRef) -> bool {
+    !matches!(object, ObjectRef::Planet { .. })
+        || matches!(
+            field.id.as_str(),
+            "planet.class" | "planet.mass" | "planet.radius" | "composition.gravity"
+        )
+        || field.section == Section::Orbit
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
@@ -751,38 +772,14 @@ pub fn show(
                 .info
                 .fields
                 .iter()
-                .filter(|f| f.section == section)
+                .filter(|f| f.section == section && scene_field(f, object))
                 .collect();
             if fields.is_empty() {
                 continue;
             }
             if matches!(object, ObjectRef::Planet { .. }) {
                 ui.add_space(HUD_LINE_GAP);
-                if section == Section::ModelDetails {
-                    let label = if cache.model_details_open {
-                        "▾ Model details"
-                    } else {
-                        "▸ Model details"
-                    };
-                    if halo_text(ui, label, egui::Sense::click(), |response| {
-                        if response.hovered() { HOVER } else { LINK }
-                    }).clicked() {
-                        cache.model_details_open = !cache.model_details_open;
-                    }
-                    if !cache.model_details_open {
-                        continue;
-                    }
-                } else {
                 halo_wrapped_text(ui, section.label(), width, LINK);
-                }
-                let explanation = match section {
-                    Section::Composition => Some("Whole planet · % by mass. Materials may be in the interior or atmosphere; phases are not resolved."),
-                    Section::Atmosphere => Some("Atmospheric mixture · % by molecule, not % of planet mass."),
-                    _ => None,
-                };
-                if let Some(text) = explanation {
-                    halo_wrapped_text(ui, text, width, LINK);
-                }
             }
             for field in fields {
                 ui.horizontal(|ui| {
@@ -847,6 +844,44 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scene_planet_readout_filters_details_without_removing_shared_facts() {
+        let galaxy = space_simulation::demo_galaxy();
+        for planet in galaxy.systems.iter().flat_map(|s| &s.planets) {
+            let object = ObjectRef::Planet {
+                id: planet.id.clone(),
+            };
+            let info = describe(&object, &galaxy, None, Now::none());
+            let shown: Vec<_> = info
+                .fields
+                .iter()
+                .filter(|f| scene_field(f, &object))
+                .collect();
+            for id in [
+                "planet.class",
+                "planet.mass",
+                "planet.radius",
+                "composition.gravity",
+            ] {
+                assert!(shown.iter().any(|f| f.id == id), "{id}");
+            }
+            assert!(
+                shown
+                    .iter()
+                    .all(|f| matches!(f.section, Section::Overview | Section::Orbit))
+            );
+            assert!(!shown.iter().any(|f| f.id.starts_with("atmosphere.")
+                || f.id.starts_with("result.")
+                || f.id.starts_with("layered.")));
+            assert!(info.fields.iter().any(|f| f.id == "atmosphere.pressure"));
+            assert!(
+                info.fields
+                    .iter()
+                    .any(|f| f.section == Section::Composition)
+            );
+        }
+    }
 
     fn paused_loading() -> PlanetLoading {
         let mut loading = PlanetLoading::default();

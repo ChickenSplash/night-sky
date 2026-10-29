@@ -55,6 +55,8 @@ pub enum Action {
     Alternate,
     /// Borderless fullscreen or a window.
     Fullscreen,
+    /// Toggle the selection-following Object Inspector.
+    Inspect,
 }
 
 /// A key or mouse button. Gamepad and flight-stick inputs can join it.
@@ -141,6 +143,7 @@ impl Default for Bindings {
             (K::ShiftLeft, Alternate),
             (K::ShiftRight, Alternate),
             (K::F11, Fullscreen),
+            (K::KeyI, Inspect),
         ];
         let buttons = [
             (MouseButton::Left, Look),

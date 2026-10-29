@@ -104,9 +104,14 @@ measurements and future ideas, not the current UI specification.
 - `Runner` (`search/runner.rs`) runs open requests in turn, a work slice each,
   taking `Order`s and giving `SearchUpdate`s. Clocks are the caller's.
   Cancellation stops at the next budget check.
-- `SearchService` runs on one service thread, a million work units per
-  slice, with several threads for large cells. By default search gets a quarter
-  of the machine's threads; star loading gets three quarters.
+- `SearchService` runs on one service thread, 100,000 work units per slice,
+  with several workers for large cells. Request initialization and each slice
+  use the [shared CPU budget](../client/streaming.md#shared-background-cpu-budget),
+  not a separate thread allowance. Active search reserves one slot; visible
+  stars take priority for extra capacity, and search borrows otherwise spare
+  slots while keeping star headroom. Planet refinement starts only while both
+  are idle. Idle search services reserve nothing. Results still use fixed work
+  limits and deterministic ordering, not scheduling or elapsed time.
 
 ## Live objects
 
@@ -140,7 +145,7 @@ them (`search::live`).
   by ID. Several requests can coexist without overwriting one another.
 - `UiCommand::Search { query }` searches from the camera and becomes
   `Searches::shown`, cancelling the previous shown request. `clear_search`
-  clears it; `set_search threads=<n> work_cap_millions=<m>` changes debug
+  clears it; `set_search work_cap_millions=<m>` changes debug
   settings.
 - Shown results' systems are charted in `Navigation::charted`, allowing visits
   without streamed cells. Locating a star from its ID alone was measured at

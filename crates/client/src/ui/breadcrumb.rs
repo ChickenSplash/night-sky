@@ -1,6 +1,6 @@
 //! Independent location and selection trails. Crumbs select, never navigate.
 use crate::Navigation;
-use crate::actions::{GalaxyReference, UiCommand};
+use crate::actions::UiCommand;
 use crate::navigation::objects::{self, ObjectRef};
 use crate::ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, HUD_PADDING, LINK, halo_text};
 use bevy_egui::egui;
@@ -125,9 +125,7 @@ pub fn up(nav: &Navigation, galaxy: &Galaxy) -> Option<UiCommand> {
         });
     }
     if nav.visit.is_some() {
-        return Some(UiCommand::GalaxyReference {
-            view: GalaxyReference::FaceOn,
-        });
+        return Some(UiCommand::ViewGalaxy);
     }
     None
 }

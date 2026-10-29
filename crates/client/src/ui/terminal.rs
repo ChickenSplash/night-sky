@@ -1,6 +1,6 @@
 //! The debug console's look: the kit's widgets in `Theme::TERMINAL`, a
 //! floating, translucent black window after the desktop's Hyprland windows,
-//! with a light grey border and text-mode controls.
+//! with the object browser's hairline border and text-mode controls.
 use super::kit::{self, Theme};
 use bevy_egui::egui::{self, Color32, FontId, Ui};
 
@@ -38,6 +38,10 @@ pub fn heading(ui: &mut Ui, text: &str) {
 /// A persistent section toggle. Call its body only while expanded.
 pub fn section(ui: &mut Ui, text: &str) -> bool {
     kit::section(ui, &THEME, text)
+}
+
+pub fn section_with_default(ui: &mut Ui, text: &str, default_open: bool) -> bool {
+    kit::section_with_default(ui, &THEME, text, default_open)
 }
 
 pub fn note(ui: &mut Ui, text: &str) {

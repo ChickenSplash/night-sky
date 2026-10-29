@@ -15,13 +15,13 @@ breadcrumb selects that object, including the galaxy and lists, without moving t
 | Move | W/A/S/D, R/F for up/down |
 | Zoom | Shift + mouse wheel |
 | Adjust movement speed | Mouse wheel or drag bottom-left set speed |
-| Adjust field of view | Debug console's `render` tab or Shift + left drag |
+| Adjust field of view | Debug console's `settings` tab or Shift + left drag |
 | Pause/resume simulation | Space or click bottom-centre time rate |
 | Adjust simulation speed | Drag time rate, real time to 100 years/s |
 | Adjust exposure | Drag Exposure at bottom right, +1 stop doubles light |
 | Adjust compression | Drag Dynamic Range Compression, 0 to 100% |
 | Adjust visible-star magnitude limit | Drag Magnitude limit, 3 to 10.5; applies on release |
-| Toggle borderless fullscreen | F11, the debug console's `render` tab or `set_fullscreen` |
+| Toggle borderless fullscreen | F11, the debug console's `settings` tab or `set_fullscreen` |
 
 Simulation time is integrated continuously; rate changes never jump orbit phase.
 Exposure and compression apply immediately, with defaults of 0 stops and 50%.
@@ -77,6 +77,7 @@ axis can later bind to them the same way.
 | Action | Control |
 | --- | --- |
 | Select a visible star | Click it |
+| Toggle Object Inspector | I or the top-right circled information icon |
 | Visit its system | Click the selected star again or press Enter |
 | Select a planet/task | Click its marker or the task index |
 | Select a star or pair of the loaded system | Click its marker (a pair's is a small cross) |
@@ -131,12 +132,12 @@ See the [shared UI kit](ui/kit.md) for styling and interaction details.
 | `log` | Recent client events, level filter and grep |
 | `terminal` | Commands, history and output |
 | `perf` | Frame times, generation, streaming and GPU metrics |
-| `render` | Fullscreen, display options, field of view, realistic lighting, exposure facts and reference views |
+| `settings` | Display, quality, rendering and debug switches, plus exposure facts |
 | `controls` | Camera, selection, time and console shortcuts |
 | `state` | Camera, navigation, selection and clock |
 | `tools` | Native bug reports and performance benchmarks |
 
 In the terminal tab, `help` lists commands. Examples: `set_presentation_mode table`,
-`set_display orbits false`, `galaxy_reference face_on`. Arguments can be positional
+`set_display orbits false`, `view_galaxy`. Arguments can be positional
 or `field=value`; quote values with spaces. Up/down recall history; `clear` empties
 the tab. The native launching terminal accepts the same commands via standard input.
