@@ -218,16 +218,6 @@ impl Fleet {
         }
     }
 
-    /// The craft where they last stepped to, for checks without a clock.
-    pub fn latest(&self) -> Now<'_> {
-        let seconds = self
-            .craft
-            .iter()
-            .map(|live| live.craft.seconds())
-            .fold(f64::INFINITY, f64::min);
-        self.at(if seconds.is_finite() { seconds } else { 0.0 })
-    }
-
     pub fn get(&self, id: &str) -> Option<&Live> {
         self.craft.iter().find(|live| live.craft.id == id)
     }

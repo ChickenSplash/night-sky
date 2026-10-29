@@ -39,11 +39,12 @@ to `crates/client/src/`.
   shows the selected object's hierarchy, including remote planets. List stars
   are `System n`; other stars use catalogue names.
 - Crumbs carry stable `objects::ObjectRef`s, never camera commands. Clicking
-  either trail sends `InspectObject` and activates a highlighted tab in the
-  shared borderless `ui/inspector.rs` readout below both trails. Selection
-  automatically activates its leaf. Inspection changes neither selection nor
-  camera/tracking. Missing tabs fall back to selected leaf, or current location
-  with no selection.
+  either trail uses the same selection commands as scene markers and browser
+  rows, including ordinary galaxy and list selections. Matching crumbs highlight
+  in both trails. The shared borderless `ui/inspector.rs` readout below follows
+  selection, or current location with no selection. There is no separate
+  inspection override. Repeated crumb clicks only select, never travel; tracking
+  follows the normal selection rules.
 - The inspector keeps its borderless halo text, with Overview, Composition,
   Atmosphere, Orbit and rotation, and collapsed Model details sections for planets. A shared-kit vertical
   scroll area bounds long content to the viewport, reserving the bottom HUD
@@ -120,8 +121,8 @@ hover blue, `CURRENT` when already showing the view:
   a `System n · k tasks` line per page. These act like clicking the star
   (`PickStar`: select, or visit once selected; list stars resolve unstreamed
   through `page_pick`), relative to the selected star in that list, else the
-  open list's page. They resend `InspectObject`; `breadcrumb::holds` keeps
-  the list tab while open so inspection stays on it during stepping/flights.
+  open list's page. Selecting a system replaces the list selection and the
+  inspector follows that star, with no pinned list readout.
 - Star: **Fly to system** / **Frame system**, **Table view** and, for list
   stars, **Constellation view** (`UiCommand::VisitStar`).
 - Planet: **Fly to planet** (`FlyToPlanet`, visiting its star then following,

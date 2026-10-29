@@ -96,10 +96,9 @@ pub(super) fn publish(
     let (debug, diagnostics, searches, browser, tuning, ground) = render;
     let trail = crate::ui::breadcrumb::trail(&nav, &universe.0);
     let selection_trail = crate::ui::breadcrumb::selection_trail(&nav, &universe.0, now);
-    let inspection =
-        crate::ui::breadcrumb::active_inspection(&nav, &universe.0, &trail, &selection_trail);
+    let inspector_object = crate::ui::breadcrumb::inspector_object(&nav, &trail);
     let readout = crate::ui::inspector::readout(
-        &inspection,
+        &inspector_object,
         &nav,
         &universe.0,
         &field,
@@ -142,7 +141,7 @@ pub(super) fn publish(
             crate::Anchor::Body(id) => json!({"kind": "body", "id": id}),
             crate::Anchor::Craft(id) => json!({"kind": "craft", "id": id}),
         }),
-        "inspection": inspection,
+        "inspector_object": inspector_object,
         "inspector": readout,
         "page": nav.page, "presentation_mode": nav.presentation_mode,
         "paused": clock.0.paused,
@@ -353,7 +352,7 @@ mod tests {
         );
         assert!(state["performance"]["gpu_diagnostics"].is_array());
         assert_eq!(state["inspector"]["title"], "Milky Way");
-        assert_eq!(state["inspector"]["inspection"], state["inspection"]);
+        assert_eq!(state["inspector"]["object"], state["inspector_object"]);
         assert!(state["inspector"]["facts"].is_array());
         assert_eq!(state["planet_loading"]["enabled"], true);
         assert!(state["planet_loading"]["system"].is_null());
@@ -369,10 +368,6 @@ mod tests {
         {
             let mut nav = app.world_mut().resource_mut::<Navigation>();
             nav.selection = Some(crate::Selection::Planet(planet));
-            nav.inspection = Some(crate::ui::breadcrumb::Inspection {
-                source: crate::ui::breadcrumb::TrailSource::Location,
-                object: crate::navigation::objects::ObjectRef::Galaxy,
-            });
         }
         {
             let mut snapshot = app.world_mut().resource_mut::<Snapshot>();
@@ -389,7 +384,6 @@ mod tests {
         assert!(history[1].instrumentation.snapshot_ms > 0.0);
         assert_eq!(history[2].instrumentation.snapshot_ms, 0.0);
         assert!(cached["sampled_unix_ms"].is_number());
-        assert_eq!(cached["inspector"]["title"], "Milky Way");
-        assert_ne!(cached["selection"], cached["inspector"]["object"]);
+        assert_eq!(cached["selection"], cached["inspector"]["object"]);
     }
 }

@@ -313,18 +313,9 @@ fn list_content(
                     theme.text,
                 );
                 if response.clicked() {
-                    match &result.object {
-                        space_simulation::objects::ObjectRef::Star { id } => {
-                            out.push(UiCommand::SelectStar { id: id.clone() });
-                        }
-                        space_simulation::objects::ObjectRef::Planet { id } => {
-                            out.push(UiCommand::Inspect { planet: id.clone() });
-                        }
-                        space_simulation::objects::ObjectRef::Craft { id } => {
-                            out.push(UiCommand::SelectCraft { id: id.clone() });
-                        }
-                        _ => {}
-                    }
+                    out.push(crate::navigation::objects::selection_command(
+                        &result.object,
+                    ));
                 }
                 if response.double_clicked()
                     && let Some(action) = crate::ui::inspector::actions(

@@ -1,4 +1,4 @@
-//! Independent location and selection trails. Crumbs inspect, never navigate.
+//! Independent location and selection trails. Crumbs select, never navigate.
 use crate::Navigation;
 use crate::actions::{GalaxyReference, UiCommand};
 use crate::navigation::objects::{self, ObjectRef};
@@ -38,19 +38,6 @@ fn root_letters(system: &StarSystem, page: u32) -> String {
         .barycentres_on(page)
         .last()
         .map_or_else(String::new, |pair| pair.component.clone())
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TrailSource {
-    Location,
-    Selection,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Inspection {
-    pub source: TrailSource,
-    pub object: ObjectRef,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,7 +112,7 @@ pub fn trail(nav: &Navigation, galaxy: &Galaxy) -> Vec<Crumb> {
     trail
 }
 
-/// Keyboard navigation stays separate from breadcrumb inspection.
+/// Keyboard navigation stays separate from breadcrumb selection.
 pub fn up(nav: &Navigation, galaxy: &Galaxy) -> Option<UiCommand> {
     if nav.location_body.is_some() {
         return Some(UiCommand::ShowPage { page: nav.page });
@@ -180,6 +167,25 @@ pub fn selection_trail(nav: &Navigation, galaxy: &Galaxy, now: crate::craft::Now
 }
 
 fn object_trail(nav: &Navigation, galaxy: &Galaxy, object: ObjectRef) -> Vec<Crumb> {
+    if object == ObjectRef::Galaxy {
+        return vec![Crumb {
+            level: Level::Galaxy,
+            label: "Milky Way".into(),
+            object,
+        }];
+    }
+    if let ObjectRef::List { id } = &object {
+        let Some(list) = galaxy.systems.iter().find(|list| list.id == *id) else {
+            return Vec::new();
+        };
+        let mut trail = object_trail(nav, galaxy, ObjectRef::Galaxy);
+        trail.push(Crumb {
+            level: Level::List,
+            label: list.name.clone(),
+            object,
+        });
+        return trail;
+    }
     let star = match &object {
         ObjectRef::Star { id } | ObjectRef::Barycentre { id } => {
             space_simulation::star::multiple::system_key(id)
@@ -313,11 +319,8 @@ pub fn show(
             ui.set_max_height((rect.height() - HUD_PADDING * 2.0).max(1.0));
             let location = trail(nav, galaxy);
             let selected = selection_trail(nav, galaxy, now);
-            let active = active_inspection(nav, galaxy, &location, &selected);
-            for (source, title, trail) in [
-                (TrailSource::Location, "Location", &location),
-                (TrailSource::Selection, "Selected", &selected),
-            ] {
+            let active = inspector_object(nav, &location);
+            for (title, trail) in [("Location", &location), ("Selected", &selected)] {
                 if trail.is_empty() {
                     continue;
                 }
@@ -327,7 +330,7 @@ pub fn show(
                         if index > 0 {
                             halo_text(ui, "›", egui::Sense::hover(), |_| LINK);
                         }
-                        let current = active.source == source && active.object == crumb.object;
+                        let current = active == crumb.object;
                         let clicked =
                             halo_text(ui, &crumb.label, egui::Sense::click(), |response| {
                                 if response.hovered() {
@@ -341,12 +344,7 @@ pub fn show(
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .clicked();
                         if clicked {
-                            out.push(UiCommand::InspectObject {
-                                inspection: Inspection {
-                                    source,
-                                    object: crumb.object.clone(),
-                                },
-                            });
+                            out.push(objects::selection_command(&crumb.object));
                         }
                     }
                 });
@@ -356,7 +354,7 @@ pub fn show(
             let height = (rect.bottom() - ui.cursor().top() - HUD_PADDING * 3.0).max(1.0);
             ui.set_max_width(ui.available_width().min(480.0));
             crate::ui::kit::ScrollArea::vertical()
-                .id_salt(("inspector", format!("{:?}", active.object)))
+                .id_salt(("inspector", format!("{active:?}")))
                 .max_height(height)
                 .min_scrolled_height(1.0)
                 .show(ui, |ui| {
@@ -380,48 +378,16 @@ pub fn show(
     }
 }
 
-/// An inspection stays valid while its crumb is in its trail. A list's tab
-/// also stays while that list is open, so stepping through its systems (mid
-/// flight, or selecting their stars) does not move the inspector away.
-pub fn holds(
-    nav: &Navigation,
-    galaxy: &Galaxy,
-    inspection: &Inspection,
-    location: &[Crumb],
-    selected: &[Crumb],
-) -> bool {
-    let trail = if inspection.source == TrailSource::Location {
-        location
-    } else {
-        selected
-    };
-    trail.iter().any(|crumb| crumb.object == inspection.object)
-        || matches!(&inspection.object, ObjectRef::List { id }
-            if nav.list().is_some_and(|index| galaxy.systems[index].id == *id))
-}
-
-pub fn active_inspection(
-    nav: &Navigation,
-    galaxy: &Galaxy,
-    location: &[Crumb],
-    selected: &[Crumb],
-) -> Inspection {
-    if let Some(active) = &nav.inspection
-        && holds(nav, galaxy, active, location, selected)
-    {
-        return active.clone();
-    }
-    let (source, trail) = if selected.is_empty() {
-        (TrailSource::Location, location)
-    } else {
-        (TrailSource::Selection, selected)
-    };
-    Inspection {
-        source,
-        object: trail
-            .last()
-            .map_or(ObjectRef::Galaxy, |crumb| crumb.object.clone()),
-    }
+/// Selection drives the inspector, with physical location as the no-selection fallback.
+pub fn inspector_object(nav: &Navigation, location: &[Crumb]) -> ObjectRef {
+    nav.selection.as_ref().map_or_else(
+        || {
+            location
+                .last()
+                .map_or(ObjectRef::Galaxy, |crumb| crumb.object.clone())
+        },
+        crate::Selection::object,
+    )
 }
 
 #[cfg(test)]

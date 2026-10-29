@@ -12,7 +12,6 @@ use crate::{
     navigation::presentation::PresentationMode,
     planet_loading::{Layered, PlanetLoading},
     stars::stream::Starfield,
-    ui::breadcrumb::Inspection,
     ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, LINK, halo_text, halo_wrapped_text},
 };
 use bevy::math::DVec3;
@@ -653,23 +652,10 @@ fn list_pages(id: &str, nav: &Navigation, galaxy: &Galaxy) -> Option<(Vec<Action
     Some((actions, current))
 }
 
-/// Preserve the list tab exactly as a click in the inspector does.
-fn action_commands(inspection: &Inspection, command: UiCommand) -> Vec<UiCommand> {
-    let keep = matches!(inspection.object, ObjectRef::List { .. })
-        && matches!(command, UiCommand::PickStar { .. });
-    let mut commands = vec![command];
-    if keep {
-        commands.push(UiCommand::InspectObject {
-            inspection: inspection.clone(),
-        });
-    }
-    commands
-}
-
 /// Read-only developer view of the very same facts and available UI actions.
 /// Unreachable actions remain omitted; task links are URLs, not app commands.
 pub fn readout(
-    inspection: &Inspection,
+    object: &ObjectRef,
     nav: &Navigation,
     galaxy: &Galaxy,
     field: &Starfield,
@@ -678,9 +664,9 @@ pub fn readout(
     loading: &PlanetLoading,
 ) -> serde_json::Value {
     use serde_json::json;
-    let position = position_ly(&inspection.object, nav, galaxy, field);
+    let position = position_ly(object, nav, galaxy, field);
     let info = cache.get(
-        &inspection.object,
+        object,
         galaxy,
         position,
         now,
@@ -691,7 +677,7 @@ pub fn readout(
         json!({
             "label": action.label, "current": action.current, "available": true,
             "group": group, "kind": "command",
-            "commands": action_commands(inspection, action.command),
+            "commands": [action.command],
         })
     };
     let mut buttons = Vec::new();
@@ -702,17 +688,17 @@ pub fn readout(
         );
     }
     buttons.extend(
-        actions(&inspection.object, nav, galaxy, field, now)
+        actions(object, nav, galaxy, field, now)
             .into_iter()
             .map(|action| export(action, "navigation")),
     );
-    if let ObjectRef::List { id } = &inspection.object
+    if let ObjectRef::List { id } = object
         && let Some((systems, _)) = list_pages(id, nav, galaxy)
     {
         buttons.extend(systems.into_iter().map(|action| export(action, "systems")));
     }
     json!({
-        "inspection": inspection, "object": inspection.object,
+        "object": object,
         "title": info.title,
         "facts": info.rows().map(|(label, value)| json!({"label": label, "value": value})).collect::<Vec<_>>(),
         "fields": info.fields,
@@ -739,7 +725,7 @@ fn action_text(ui: &mut egui::Ui, action: &Action) -> bool {
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
-    inspection: &Inspection,
+    object: &ObjectRef,
     nav: &Navigation,
     galaxy: &Galaxy,
     field: &Starfield,
@@ -747,7 +733,6 @@ pub fn show(
     (now, loading): (Now, &PlanetLoading),
     out: &mut Vec<UiCommand>,
 ) {
-    let object = &inspection.object;
     let position = position_ly(object, nav, galaxy, field);
     cache.get(
         object,
@@ -830,11 +815,6 @@ pub fn show(
         halo_wrapped_text(ui, &cache.info.note, width, LINK);
     }
     let actions = actions(object, nav, galaxy, field, now);
-    // Stepping through a list keeps its tab, though selecting or visiting a
-    // star would otherwise move the inspector to it.
-    let step = |out: &mut Vec<UiCommand>, command: UiCommand| {
-        out.extend(action_commands(inspection, command));
-    };
     if !actions.is_empty() {
         ui.add_space(HUD_LINE_GAP);
         ui.horizontal_wrapped(|ui| {
@@ -844,7 +824,7 @@ pub fn show(
                     halo_text(ui, "·", egui::Sense::hover(), |_| LINK);
                 }
                 if action_text(ui, &action) {
-                    step(out, action.command);
+                    out.push(action.command);
                 }
             }
         });
@@ -857,7 +837,7 @@ pub fn show(
             ui.spacing_mut().item_spacing.y = 4.0;
             for action in systems {
                 if action_text(ui, &action) {
-                    step(out, action.command);
+                    out.push(action.command);
                 }
             }
         });
@@ -867,7 +847,6 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::breadcrumb::TrailSource;
 
     fn paused_loading() -> PlanetLoading {
         let mut loading = PlanetLoading::default();
@@ -901,7 +880,7 @@ mod tests {
         assert_eq!(density.unit, Some("kg/m³"));
         assert!(matches!(density.value, Value::Known(_)));
         let exported = readout(
-            &inspection(object.clone()),
+            &object,
             &Navigation::default(),
             &galaxy,
             &Starfield::default(),
@@ -925,13 +904,6 @@ mod tests {
                 .any(|f| f.id == "composition.density" && matches!(f.value, Value::Unknown(_)))
         );
         assert!(!unknown.rows().any(|(_, value)| value == "0.0 kg/m³"));
-    }
-
-    fn inspection(object: ObjectRef) -> Inspection {
-        Inspection {
-            source: TrailSource::Selection,
-            object,
-        }
     }
 
     #[test]
@@ -963,9 +935,8 @@ mod tests {
         }
         let mut cache = Cache::default();
         for object in objects {
-            let inspection = inspection(object.clone());
             let exported = readout(
-                &inspection,
+                &object,
                 &nav,
                 &galaxy,
                 &field,
@@ -1024,7 +995,7 @@ mod tests {
     }
 
     #[test]
-    fn list_buttons_preserve_inspection_and_cached_facts_invalidate() {
+    fn list_buttons_emit_only_the_star_action_and_cached_facts_invalidate() {
         let mut galaxy = space_simulation::demo_galaxy();
         let nav = Navigation::default();
         let field = Starfield::default();
@@ -1033,9 +1004,9 @@ mod tests {
             fleet: &fleet,
             seconds: 0.0,
         };
-        let inspection = inspection(ObjectRef::List {
+        let inspection = ObjectRef::List {
             id: galaxy.systems[0].id.clone(),
-        });
+        };
         let mut cache = Cache::default();
         let exported = readout(
             &inspection,
@@ -1057,12 +1028,7 @@ mod tests {
             let commands: Vec<UiCommand> =
                 serde_json::from_value(button["commands"].clone()).unwrap();
             assert!(matches!(commands[0], UiCommand::PickStar { .. }));
-            assert_eq!(
-                commands[1],
-                UiCommand::InspectObject {
-                    inspection: inspection.clone()
-                }
-            );
+            assert_eq!(commands.len(), 1);
         }
         galaxy.systems[0].name = "Updated list".into();
         assert_eq!(
@@ -1108,9 +1074,9 @@ mod tests {
             .find(|planet| planet.task.is_some())
             .unwrap();
         planet.task.as_mut().unwrap().url = Some("https://example.com/task".into());
-        let inspection = inspection(ObjectRef::Planet {
+        let inspection = ObjectRef::Planet {
             id: planet.id.clone(),
-        });
+        };
         let mut cache = Cache::default();
         let exported = readout(
             &inspection,
@@ -1258,9 +1224,9 @@ mod tests {
         );
     }
 
-    fn inspection_for_unreachable() -> Inspection {
-        inspection(ObjectRef::Star {
+    fn inspection_for_unreachable() -> ObjectRef {
+        ObjectRef::Star {
             id: "g100.0.0".into(),
-        })
+        }
     }
 }

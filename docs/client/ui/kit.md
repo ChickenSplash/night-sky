@@ -15,7 +15,7 @@ Paths are relative to `crates/client/src/`.
 | `ui.rs` | UI composition, top-right window toggles and command dispatch |
 | `ui/hud.rs` | Draggable scene HUD controls and pointer capture |
 | `ui/canvas.rs` | Scene captions, markers and picking overlays |
-| `ui/breadcrumb.rs` | Independent location/selection trails and inspection tabs |
+| `ui/breadcrumb.rs` | Independent location/selection trails and selection-driven inspector |
 | `ui/inspector.rs` | Shared object descriptions, available actions and cached facts |
 | `ui/tasks.rs` | List/task filtering, sorting, status groups and navigation commands |
 | `ui/browser/` | Query editing, registry-driven picker and selected-result view |

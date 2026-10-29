@@ -33,9 +33,11 @@ pub enum UiCommand {
     Inspect {
         planet: String,
     },
-    /// Activate an inspector tab without changing selection or camera state.
-    InspectObject {
-        inspection: crate::ui::breadcrumb::Inspection,
+    /// Select the galaxy without moving the camera.
+    SelectGalaxy,
+    /// Select a list without opening it or moving the camera.
+    SelectList {
+        id: String,
     },
     ShowPage {
         page: u32,
@@ -357,15 +359,8 @@ impl UiCommand {
                     .ok_or_else(|| format!("List `{id}` has no task `{task}`"))
             }
             UiCommand::Inspect { planet: id } => planet(id),
-            UiCommand::InspectObject { inspection } => {
-                let location = crate::ui::breadcrumb::trail(nav, galaxy);
-                let selected = crate::ui::breadcrumb::selection_trail(nav, galaxy, fleet.latest());
-                if crate::ui::breadcrumb::holds(nav, galaxy, inspection, &location, &selected) {
-                    Ok(())
-                } else {
-                    Err("That object is in neither the location nor the selection trail".into())
-                }
-            }
+            UiCommand::SelectGalaxy => Ok(()),
+            UiCommand::SelectList { id } => list(id).map(|_| ()),
             UiCommand::ShowPage { page } => {
                 let system = visiting()?;
                 if system.pages().contains(page) {
@@ -611,12 +606,10 @@ pub fn apply(
                     }
                 }
             }
-            UiCommand::InspectObject { inspection } => {
-                let location = crate::ui::breadcrumb::trail(&nav, galaxy);
-                let selected =
-                    crate::ui::breadcrumb::selection_trail(&nav, galaxy, fleet.at(clock.0.seconds));
-                if crate::ui::breadcrumb::holds(&nav, galaxy, inspection, &location, &selected) {
-                    nav.inspection = Some(inspection.clone());
+            UiCommand::SelectGalaxy => nav.select(Some(Selection::Galaxy)),
+            UiCommand::SelectList { id } => {
+                if list(id).is_some() {
+                    nav.select(Some(Selection::List(id.clone())));
                 }
             }
             UiCommand::ShowPage { page } => nav.show_page(*page, galaxy),

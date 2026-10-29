@@ -6,13 +6,11 @@ use space_simulation::{
 };
 
 #[test]
-fn remote_planet_selection_and_inspection_never_move_the_camera() {
-    use crate::{
-        navigation::objects::ObjectRef,
-        ui::breadcrumb::{Inspection, TrailSource},
-    };
+fn breadcrumb_selections_replace_selection_without_moving_the_camera() {
+    use crate::navigation::objects::{ObjectRef, selection_command};
     let galaxy = space_simulation::demo_galaxy();
     let id = galaxy.systems[1].planets[0].id.clone();
+    let list = galaxy.systems[1].id.clone();
     let mut app = run(galaxy, vec![]);
     let before = (
         nav(&app).target,
@@ -27,35 +25,26 @@ fn remote_planet_selection_and_inspection_never_move_the_camera() {
         nav(&app).selected_planet(&app.world().resource::<Universe>().0),
         None
     );
-    assert_eq!(
-        nav(&app).inspection.as_ref().unwrap().object,
-        ObjectRef::Planet { id: id.clone() }
-    );
     let star = crate::navigation::objects::parent_star(&id)
         .unwrap()
         .to_owned();
-    for inspection in [
-        Inspection {
-            source: TrailSource::Location,
-            object: ObjectRef::Galaxy,
-        },
-        Inspection {
-            source: TrailSource::Selection,
-            object: ObjectRef::Star { id: star },
-        },
-        Inspection {
-            source: TrailSource::Selection,
-            object: ObjectRef::Planet { id: id.clone() },
-        },
+    for object in [
+        ObjectRef::Galaxy,
+        ObjectRef::List { id: list },
+        ObjectRef::Star { id: star },
+        ObjectRef::Planet { id: id.clone() },
     ] {
-        send(
-            &mut app,
-            vec![UiCommand::InspectObject {
-                inspection: inspection.clone(),
-            }],
+        // Repeated breadcrumb clicks only select, never visit or follow.
+        for _ in 0..2 {
+            send(&mut app, vec![selection_command(&object)]);
+            assert_eq!(nav(&app).selection.as_ref().unwrap().object(), object);
+        }
+        let location =
+            crate::ui::breadcrumb::trail(nav(&app), &app.world().resource::<Universe>().0);
+        assert_eq!(
+            crate::ui::breadcrumb::inspector_object(nav(&app), &location),
+            object
         );
-        assert_eq!(nav(&app).inspection, Some(inspection));
-        assert_eq!(nav(&app).selection, Some(Selection::Planet(id.clone())));
         assert_eq!(
             (
                 nav(&app).target,
@@ -65,7 +54,7 @@ fn remote_planet_selection_and_inspection_never_move_the_camera() {
             ),
             before
         );
-        assert!(!nav(&app).fly);
+        assert!(!nav(&app).fly && !nav(&app).following && nav(&app).visit.is_none());
     }
 }
 
@@ -126,12 +115,6 @@ fn selecting_a_search_star_never_travels_even_when_selected_again() {
             }
         );
         assert_eq!(
-            nav(&app).inspection.as_ref().unwrap().object,
-            crate::navigation::objects::ObjectRef::Star {
-                id: point.id.clone()
-            }
-        );
-        assert_eq!(
             (
                 nav(&app).target,
                 nav(&app).eye,
@@ -147,13 +130,10 @@ fn selecting_a_search_star_never_travels_even_when_selected_again() {
 }
 
 #[test]
-fn inspector_tabs_preserve_tracking_and_reject_absent_crumbs() {
-    use crate::{
-        navigation::objects::ObjectRef,
-        ui::breadcrumb::{Inspection, TrailSource},
-    };
+fn galaxy_and_list_selection_stop_tracking_and_reject_unknown_lists() {
     let galaxy = space_simulation::demo_galaxy();
     let id = galaxy.systems[0].planets[0].id.clone();
+    let list = galaxy.systems[0].id.clone();
     let mut app = run(galaxy, vec![]);
     {
         let mut nav = app.world_mut().resource_mut::<Navigation>();
@@ -162,30 +142,28 @@ fn inspector_tabs_preserve_tracking_and_reject_absent_crumbs() {
         nav.select(Some(Selection::Planet(id)));
         nav.following = true;
     }
-    let inspection = Inspection {
-        source: TrailSource::Location,
-        object: ObjectRef::Galaxy,
+    send(&mut app, vec![UiCommand::SelectGalaxy]);
+    assert_eq!(nav(&app).selection, Some(Selection::Galaxy));
+    assert!(!nav(&app).following);
+    send(&mut app, vec![UiCommand::SelectList { id: list.clone() }]);
+    assert_eq!(nav(&app).selection, Some(Selection::List(list.clone())));
+    let invalid = UiCommand::SelectList {
+        id: "absent".into(),
     };
-    send(
-        &mut app,
-        vec![UiCommand::InspectObject {
-            inspection: inspection.clone(),
-        }],
+    assert!(
+        invalid
+            .check(
+                &app.world().resource::<Universe>().0,
+                nav(&app),
+                app.world().resource::<crate::stars::stream::Starfield>(),
+                app.world().resource::<crate::craft::Fleet>(),
+            )
+            .is_err()
     );
-    assert!(nav(&app).following);
-    send(
-        &mut app,
-        vec![UiCommand::InspectObject {
-            inspection: Inspection {
-                source: TrailSource::Location,
-                object: ObjectRef::Star {
-                    id: "absent".into(),
-                },
-            },
-        }],
-    );
-    assert_eq!(nav(&app).inspection, Some(inspection));
-    assert!(nav(&app).following);
+    send(&mut app, vec![invalid]);
+    assert_eq!(nav(&app).selection, Some(Selection::List(list)));
+    assert_eq!(nav(&app).visit, Some(crate::Visit::List(0)));
+    assert!(!nav(&app).following);
 }
 
 #[test]
@@ -521,42 +499,22 @@ fn inspector_actions_reach_remote_stars_and_planets_like_a_second_click() {
 }
 
 #[test]
-fn list_systems_select_like_a_star_click_and_keep_the_list_tab() {
-    use crate::{
-        navigation::objects::ObjectRef,
-        ui::breadcrumb::{Inspection, TrailSource},
-    };
+fn list_systems_select_like_a_star_click_and_replace_the_list_selection() {
     let galaxy = space_simulation::demo_galaxy();
     let list = galaxy.systems[1].id.clone();
     let second = galaxy.systems[1].page_star(1).unwrap().id.clone();
-    let tab = Inspection {
-        source: TrailSource::Selection,
-        object: ObjectRef::List { id: list.clone() },
-    };
     let mut app = run(galaxy, vec![UiCommand::Jump { list: list.clone() }]);
-    send(
-        &mut app,
-        vec![UiCommand::InspectObject {
-            inspection: tab.clone(),
-        }],
-    );
+    send(&mut app, vec![UiCommand::SelectList { id: list }]);
     // Unstreamed, as the stars of a distant list usually are.
-    let pick = || {
-        vec![
-            UiCommand::PickStar { id: second.clone() },
-            UiCommand::InspectObject {
-                inspection: tab.clone(),
-            },
-        ]
-    };
+    let pick = || vec![UiCommand::PickStar { id: second.clone() }];
     send(&mut app, pick());
     assert_eq!(nav(&app).selected_star().unwrap().id, second);
     assert_eq!(nav(&app).presentation_mode, PresentationMode::Constellation);
-    assert_eq!(nav(&app).inspection, Some(tab.clone()));
+    assert!(matches!(nav(&app).selection, Some(Selection::Star(_))));
     send(&mut app, pick());
     assert_eq!((nav(&app).list(), nav(&app).page), (Some(1), 1));
     assert_eq!(nav(&app).presentation_mode, PresentationMode::Simulation);
-    assert_eq!(nav(&app).inspection, Some(tab));
+    assert!(!matches!(nav(&app).selection, Some(Selection::List(_))));
 }
 
 #[test]

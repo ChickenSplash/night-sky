@@ -3,7 +3,7 @@
 The egui interface sits over a full-window 3D view. Debug console
 (⚙), Tasks (✔) and Object browser (🔍) open from the top right. The top-left **Location** and
 **Selected** trails distinguish physical location from selection. Clicking a
-breadcrumb inspects it without changing selection or moving the camera.
+breadcrumb selects that object, including the galaxy and lists, without moving the camera.
 
 ## Camera and time
 
@@ -82,7 +82,7 @@ axis can later bind to them the same way.
 | Select a star or pair of the loaded system | Click its marker (a pair's is a small cross) |
 | Reach a marker hidden by a crowd | Zoom in until it separates, or use the breadcrumb or search |
 | Follow a planet | Click the selected planet again or use `follow` |
-| Inspect without travel | Click an item in either breadcrumb trail |
+| Select without travel | Click an item in either breadcrumb trail |
 | Fly to/frame a system | Inspector's Fly to system / Frame system |
 | Fly to and follow a planet | Inspector's Fly to planet |
 | Compare planets in a row | Inspector's Table view |

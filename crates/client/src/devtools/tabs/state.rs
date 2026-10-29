@@ -86,6 +86,8 @@ pub fn state(
                 match &nav.selection {
                     None => "none".into(),
                     Some(Selection::Star(star)) => format!("star {}", star.id),
+                    Some(Selection::Galaxy) => "galaxy".into(),
+                    Some(Selection::List(id)) => format!("list {id}"),
                     Some(Selection::Planet(id)) => format!("planet {id}"),
                     Some(Selection::Craft(id)) => format!("craft {id}"),
                     Some(Selection::Barycentre(id)) => format!("barycentre {id}"),

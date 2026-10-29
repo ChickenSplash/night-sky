@@ -2,7 +2,7 @@ use super::*;
 use crate::{Selection, Visit, navigation::presentation::PresentationMode};
 
 #[test]
-fn selection_trail_is_remote_and_inspector_falls_back_when_a_location_disappears() {
+fn remote_selection_drives_inspector_even_when_location_disappears() {
     let galaxy = space_simulation::demo_galaxy();
     let mut nav = at_list(&galaxy, 0);
     let planet = &galaxy.systems[1].planets[0];
@@ -11,17 +11,10 @@ fn selection_trail_is_remote_and_inspector_falls_back_when_a_location_disappears
     let selected = selection_trail(&nav, &galaxy, crate::craft::Now::none());
     assert_eq!(location.last().unwrap().level, Level::Star);
     assert_eq!(selected.last().unwrap().object, planet_ref(planet));
-    assert_eq!(
-        active_inspection(&nav, &galaxy, &location, &selected).object,
-        planet_ref(planet)
-    );
-    nav.inspection = Some(Inspection {
-        source: TrailSource::Location,
-        object: location.last().unwrap().object.clone(),
-    });
+    assert_eq!(inspector_object(&nav, &location), planet_ref(planet));
     nav.arrived = false;
     assert_eq!(
-        active_inspection(&nav, &galaxy, &trail(&nav, &galaxy), &selected).object,
+        inspector_object(&nav, &trail(&nav, &galaxy)),
         planet_ref(planet)
     );
 }
@@ -29,6 +22,73 @@ fn selection_trail_is_remote_and_inspector_falls_back_when_a_location_disappears
 fn planet_ref(planet: &space_shared::Planet) -> ObjectRef {
     ObjectRef::Planet {
         id: planet.id.clone(),
+    }
+}
+
+#[test]
+fn galaxy_and_list_selections_have_trails_independent_of_location() {
+    let galaxy = space_simulation::demo_galaxy();
+    let mut nav = at_list(&galaxy, 0);
+    let location = trail(&nav, &galaxy);
+    for (selection, expected) in [
+        (Selection::Galaxy, vec!["Milky Way".to_owned()]),
+        (
+            Selection::List(galaxy.systems[1].id.clone()),
+            vec!["Milky Way".to_owned(), galaxy.systems[1].name.clone()],
+        ),
+    ] {
+        let object = selection.object();
+        nav.select(Some(selection));
+        let selected = selection_trail(&nav, &galaxy, crate::craft::Now::none());
+        assert_eq!(
+            selected
+                .iter()
+                .map(|crumb| crumb.label.clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(selected.last().unwrap().object, object);
+        assert_eq!(inspector_object(&nav, &location), object);
+        assert_eq!(trail(&nav, &galaxy), location);
+    }
+    nav.select(None);
+    assert!(selection_trail(&nav, &galaxy, crate::craft::Now::none()).is_empty());
+    assert_eq!(
+        inspector_object(&nav, &location),
+        location.last().unwrap().object
+    );
+}
+
+#[test]
+fn every_crumb_kind_uses_its_normal_selection_command() {
+    for (object, command) in [
+        (ObjectRef::Galaxy, UiCommand::SelectGalaxy),
+        (
+            ObjectRef::List { id: "list".into() },
+            UiCommand::SelectList { id: "list".into() },
+        ),
+        (
+            ObjectRef::Star { id: "star".into() },
+            UiCommand::SelectStar { id: "star".into() },
+        ),
+        (
+            ObjectRef::Barycentre { id: "pair".into() },
+            UiCommand::SelectBarycentre { id: "pair".into() },
+        ),
+        (
+            ObjectRef::Planet {
+                id: "planet".into(),
+            },
+            UiCommand::Inspect {
+                planet: "planet".into(),
+            },
+        ),
+        (
+            ObjectRef::Craft { id: "craft".into() },
+            UiCommand::SelectCraft { id: "craft".into() },
+        ),
+    ] {
+        assert_eq!(objects::selection_command(&object), command);
     }
 }
 

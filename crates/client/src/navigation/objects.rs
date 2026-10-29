@@ -6,6 +6,19 @@ use space_shared::{Galaxy, Planet, StarSystem};
 
 pub use space_simulation::objects::ObjectRef;
 
+/// Select only, using the same commands as scene markers and browser rows.
+pub fn selection_command(object: &ObjectRef) -> crate::actions::UiCommand {
+    use crate::actions::UiCommand;
+    match object {
+        ObjectRef::Galaxy => UiCommand::SelectGalaxy,
+        ObjectRef::List { id } => UiCommand::SelectList { id: id.clone() },
+        ObjectRef::Star { id } => UiCommand::SelectStar { id: id.clone() },
+        ObjectRef::Barycentre { id } => UiCommand::SelectBarycentre { id: id.clone() },
+        ObjectRef::Planet { id } => UiCommand::Inspect { planet: id.clone() },
+        ObjectRef::Craft { id } => UiCommand::SelectCraft { id: id.clone() },
+    }
+}
+
 /// Planet IDs encode their host, and so their system's key, including for
 /// planets on list pages.
 pub fn parent_star(id: &str) -> Option<&str> {

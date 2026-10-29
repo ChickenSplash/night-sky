@@ -1,7 +1,8 @@
 # Navigation, selection and camera frames
 
-Physical location, the open list, selection, inspection and presentation are
-separate concepts. See [controls](controls.md) for user actions,
+Physical location, the open list, selection and presentation are
+separate concepts. The inspector follows selection, or location when nothing is selected.
+See [controls](controls.md) for user actions,
 [the scene interface](ui/interface.md) for breadcrumbs and inspection, and
 [the information overlay](../shared/information-overlay.md) for list pages.
 Client paths below are relative to `crates/client/src/` unless prefixed with `crates/`.
@@ -131,8 +132,9 @@ proxies and even known solid phases never grant landing permission.
 
 - `Navigation::selection` is the one clicked object: `Selection::Star` (stable
   star ID), `Selection::Planet` (stable planet ID, including remote systems),
-  `Selection::Craft` (a live craft's ID, see [craft](../simulation/craft.md#in-the-client))
-  or `Selection::Barycentre` (a pair of the loaded system, by member ID).
+  `Selection::Craft` (a live craft's ID, see [craft](../simulation/craft.md#in-the-client)),
+  `Selection::Barycentre` (a pair of the loaded system, by member ID),
+  `Selection::Galaxy` or `Selection::List` (stable list ID).
   Selecting one replaces the other; `Navigation::select` keeps following only
   from planet to planet. A second click activates it: a star is visited, a
   planet or craft followed.

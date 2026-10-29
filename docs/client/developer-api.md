@@ -182,8 +182,10 @@ folder to reinstall. Agents should keep using `ns`, which has no dependencies.
 ## Inspector readout
 
 `ns inspect` reads `/state/inspector`, the active top-left inspector, which
-can differ from selection. `ns inspect facts`, `ns inspect actions`, or
-`ns inspect actions/0/commands` selects subsets. The readout includes source/
+follows selection, or physical location with no selection. `/state/inspector_object`
+exports that resolved target; there is no separate inspection state.
+`ns inspect facts`, `ns inspect actions`, or
+`ns inspect actions/0/commands` selects subsets. The readout includes
 object, title, ordered label/value facts, task description, source note,
 action buttons and, for a located star or system, `velocity_kms`
 (galactocentric, galaxy axes). It reuses `ui::inspector::describe`, actions and list-page
@@ -198,7 +200,8 @@ exports unknown reasons instead of fabricated zero mass fractions.
 Buttons include label, current/available state, group and kind. Unreachable
 buttons are omitted, like the UI. Command buttons export ordered `commands`
 arrays of UiCommand JSON accepted by `ns cmd` or `POST /command`. List-system
-buttons also export follow-up `InspectObject` to preserve the list tab. Task
+buttons select/visit the star without preserving a separate list tab. `select_galaxy`
+and `select_list <id>` select without travelling. Task
 links export a URL and no app commands; CLI reads never open them. These reads
 do not select or move the camera and use the normal snapshot refresh rate.
 

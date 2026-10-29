@@ -5,7 +5,7 @@ pub mod galaxy_nav;
 pub mod objects;
 pub mod presentation;
 
-use crate::{render, scene, ui};
+use crate::{render, scene};
 use bevy::{math::DVec3, prelude::*};
 use space_shared::{Galaxy, StarSystem};
 use space_simulation::LY_METRES;
@@ -24,6 +24,8 @@ pub enum Visit {
 /// without a second action.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Selection {
+    Galaxy,
+    List(String),
     /// Any star in the galaxy, by stable ID.
     Star(galaxy_nav::PickedStar),
     /// Stable planet ID, even when its parent system is not visited.
@@ -41,6 +43,8 @@ impl Selection {
 
     pub fn object(&self) -> objects::ObjectRef {
         match self {
+            Self::Galaxy => objects::ObjectRef::Galaxy,
+            Self::List(id) => objects::ObjectRef::List { id: id.clone() },
             Self::Star(star) => objects::ObjectRef::Star {
                 id: star.id.clone(),
             },
@@ -75,8 +79,6 @@ pub struct Navigation {
     /// Set by clicks, C or page controls. Selecting never moves the camera;
     /// visiting a star or following a planet does.
     pub selection: Option<Selection>,
-    /// Which trail and object currently drive the floating inspector.
-    pub inspection: Option<ui::breadcrumb::Inspection>,
     /// The body the camera is physically at, unrelated to selection or
     /// following: a planet, or a star or inner pair of a multiple system,
     /// by the rule that picks a craft's orbit reference. Never the whole
@@ -145,7 +147,6 @@ impl Default for Navigation {
             visit: None,
             arrived: false,
             selection: None,
-            inspection: None,
             location_body: None,
             anchor: None,
             galactic_origin_ly: DVec3::ZERO,
@@ -276,13 +277,6 @@ impl Navigation {
             self.following = false;
         }
         self.selection = selection;
-        self.inspection = self
-            .selection
-            .as_ref()
-            .map(|selection| ui::breadcrumb::Inspection {
-                source: ui::breadcrumb::TrailSource::Selection,
-                object: selection.object(),
-            });
     }
 
     /// The system the camera is physically at, on `page`. `None` in open space,

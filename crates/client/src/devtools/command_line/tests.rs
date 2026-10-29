@@ -48,10 +48,6 @@ fn every_usage_parses() {
                 .expect("nested ship orders use the JSON command route");
             continue;
         }
-        if usage.name == "inspect_object" {
-            parse(r#"{"type":"inspect_object","inspection":{"source":"location","object":{"kind":"galaxy"}}}"#).expect("nested inspection uses the documented JSON command route");
-            continue;
-        }
         if usage.name == "set_atmosphere" {
             for line in [
                 "set_atmosphere venus",
