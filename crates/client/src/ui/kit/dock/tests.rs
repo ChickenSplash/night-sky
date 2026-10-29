@@ -60,8 +60,11 @@ impl Harness {
         output
     }
 
+    /// Runs long enough for any animation to finish.
     fn settle(&self) -> FullOutput {
-        self.frame(vec![]);
+        for _ in 0..7 {
+            self.frame(vec![]);
+        }
         self.frame(vec![])
     }
 
@@ -393,13 +396,15 @@ fn later_drags_and_redocking_continue_from_the_chosen_whole_point_width() {
     );
 }
 
-/// Drop previews: accent outlines two points thick.
+/// Drop previews: closed accent outlines one point thick, by their bounds.
 fn previews(output: &FullOutput) -> Vec<Rect> {
     output
         .shapes
         .iter()
         .filter_map(|shape| match &shape.shape {
-            Shape::Rect(rect) if rect.stroke.width == 2.0 => Some(rect.rect),
+            Shape::Path(path) if path.closed && path.stroke.width == 1.0 => {
+                Some(Rect::from_points(&path.points))
+            }
             _ => None,
         })
         .collect()
@@ -424,9 +429,9 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
         .unwrap();
     assert_eq!(preview.len(), 1, "one preview while over the edge");
     assert!(
-        (preview[0].width() - floating.width()).abs() < 4.0
-            && (preview[0].right() - SCREEN.right()).abs() < 2.0,
-        "the preview shows where the sidebar would open: {:?}",
+        (preview[0].width() + 2.0 * PREVIEW_MARGIN - floating.width()).abs() < 4.0
+            && (preview[0].right() + PREVIEW_MARGIN - SCREEN.right()).abs() < 2.0,
+        "the preview floats inside where the sidebar would open: {:?}",
         preview[0]
     );
     assert!(
@@ -436,7 +441,7 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
     harness.frame(vec![press(edge, false)]);
     harness.settle();
     assert!(is_docked(&harness.ctx, window_id("first")));
-    assert!((harness.scene().right() - preview[0].left()).abs() < 4.0);
+    assert!((harness.scene().right() + PREVIEW_MARGIN - preview[0].left()).abs() < 4.0);
     assert!(!carrying(&harness.ctx));
 }
 
@@ -494,6 +499,13 @@ fn pulling_a_tab_out_floats_its_window_under_the_pointer() {
     harness.frame(vec![]);
     harness.frame(vec![]);
     assert!(!is_docked(&harness.ctx, window_id("first")));
+    assert!(
+        harness.scene().right() > sidebar,
+        "the last tab out starts closing the sidebar"
+    );
+    for _ in 0..4 {
+        harness.frame(vec![]);
+    }
     assert_eq!(
         harness.scene(),
         SCREEN,
@@ -570,4 +582,96 @@ fn double_clicking_a_header_or_tab_switches_between_floating_and_docked() {
     harness.double_click(harness.tab("first"));
     assert!(!is_docked(&harness.ctx, window_id("first")));
     assert_eq!(harness.scene(), SCREEN);
+}
+
+/// Releases a carried window at the screen's edge, then returns each
+/// frame's scene right edge and docked-window rect until it settles.
+fn drop_and_watch(harness: &Harness, key: &str) -> Vec<(f32, Rect)> {
+    let from = harness.header(key);
+    let edge = Pos2::new(SCREEN.right() - 10.0, 450.0);
+    harness.frame(vec![Event::PointerMoved(from)]);
+    harness.frame(vec![press(from, true)]);
+    harness.frame(vec![Event::PointerMoved(edge - egui::vec2(200.0, 0.0))]);
+    harness.frame(vec![Event::PointerMoved(edge)]);
+    harness.frame(vec![press(edge, false)]);
+    (0..6)
+        .map(|_| {
+            harness.frame(vec![]);
+            (harness.scene().right(), docked_rect(harness, key))
+        })
+        .collect()
+}
+
+#[test]
+fn a_dropped_window_glides_into_a_sidebar_that_eases_open() {
+    let harness = Harness::new([true, false]);
+    harness.settle();
+    let frames = drop_and_watch(&harness, "first");
+    let dropped = harness.floating("first");
+    let (scene, docked) = (harness.scene(), docked_rect(&harness, "first"));
+    assert!(
+        frames[0].0 > scene.right() + 1.0,
+        "the sidebar eases open rather than jumping: {frames:?}"
+    );
+    assert!(
+        frames.windows(2).all(|pair| pair[1].0 <= pair[0].0),
+        "the scene only ever narrows while it opens: {frames:?}"
+    );
+    let first = frames[0].1;
+    assert!(
+        first.height() < docked.height() - 20.0 && first.top() > docked.top() + 1.0,
+        "the window starts from where it was dropped: {dropped:?} {first:?} {docked:?}"
+    );
+    assert_eq!(frames.last().unwrap().1, docked, "and lands in the sidebar");
+}
+
+#[test]
+fn a_floated_window_glides_back_to_its_floating_place() {
+    let harness = Harness::new([true, false]);
+    harness.settle();
+    let floating = harness.floating("first");
+    harness.dock("first");
+    let docked = docked_rect(&harness, "first");
+    let tab = harness.tab("first");
+    harness.time.set(harness.time.get() + 1.0);
+    harness.frame(vec![Event::PointerMoved(tab)]);
+    for _ in 0..2 {
+        harness.frame(vec![press(tab, true)]);
+        harness.frame(vec![press(tab, false)]);
+    }
+    let gliding = (0..2)
+        .map(|_| {
+            harness.frame(vec![]);
+            docked_rect(&harness, "first")
+        })
+        .last()
+        .unwrap();
+    assert!(!is_docked(&harness.ctx, window_id("first")));
+    assert!(
+        gliding != docked && gliding != floating,
+        "it is still on its way: {docked:?} -> {gliding:?} -> {floating:?}"
+    );
+    harness.settle();
+    assert_eq!(harness.floating("first"), floating);
+    assert_eq!(harness.scene(), SCREEN);
+}
+
+#[test]
+fn a_tab_coming_forward_slides_in() {
+    let harness = Harness::new([true, true]);
+    harness.dock("first");
+    harness.dock("second");
+    let settled = docked_rect(&harness, "second");
+    harness.click(harness.tab("first"));
+    let second = harness.tab("second");
+    harness.frame(vec![Event::PointerMoved(second), press(second, true)]);
+    harness.frame(vec![press(second, false)]);
+    let arriving = docked_rect(&harness, "second");
+    assert!(
+        arriving.left() > settled.left()
+            && arriving.left() < settled.left() + super::super::window::REVEAL,
+        "the front tab slides in from the right: {arriving:?} -> {settled:?}"
+    );
+    harness.settle();
+    assert_eq!(docked_rect(&harness, "second"), settled);
 }

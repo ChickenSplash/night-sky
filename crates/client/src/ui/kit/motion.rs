@@ -1,6 +1,6 @@
 //! Retargetable layout motion using the same timing as control highlights.
 use super::interact::{ANIMATION_SECONDS, ease_out};
-use bevy_egui::egui::{Id, Rect, Ui};
+use bevy_egui::egui::{self, Id, Rect, Ui};
 
 #[derive(Clone, Copy)]
 struct Motion {
@@ -51,4 +51,66 @@ pub fn animated_rect(ui: &Ui, id: Id, initial: Rect, target: Rect) -> Rect {
         ui.ctx().request_repaint();
     }
     rect
+}
+
+fn progress(started: f64, now: f64) -> f32 {
+    ((now - started) / f64::from(ANIMATION_SECONDS)).clamp(0.0, 1.0) as f32
+}
+
+/// One length easing towards a target that may change, such as the
+/// sidebar's width. Retargeting continues from the shown value.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Eased {
+    from: f32,
+    to: f32,
+    started: f64,
+}
+
+impl Eased {
+    pub fn value(self, now: f64) -> f32 {
+        egui::lerp(self.from..=self.to, ease_out(progress(self.started, now)))
+    }
+
+    pub fn moving(self, now: f64) -> bool {
+        self.value(now) != self.to
+    }
+
+    pub fn retarget(&mut self, to: f32, now: f64) {
+        if to != self.to {
+            *self = Self {
+                from: self.value(now),
+                to,
+                started: now,
+            };
+        }
+    }
+
+    /// Jumps straight to `to`, such as while the user drags it.
+    pub fn snap(&mut self, to: f32) {
+        *self = Self {
+            from: to,
+            to,
+            started: 0.0,
+        };
+    }
+}
+
+/// A rectangle easing from where it was towards a target that may itself
+/// move while it travels, such as a window gliding into a sliding sidebar.
+#[derive(Clone, Copy)]
+pub(super) struct Glide {
+    pub from: Rect,
+    pub started: f64,
+}
+
+impl Glide {
+    /// The rectangle shown now and how far along the glide is, 0 to 1.
+    pub fn sample(self, to: Rect, now: f64) -> (Rect, f32) {
+        let amount = ease_out(progress(self.started, now));
+        let rect = Rect::from_min_max(
+            self.from.min.lerp(to.min, amount),
+            self.from.max.lerp(to.max, amount),
+        );
+        (rect, amount)
+    }
 }

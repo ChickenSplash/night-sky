@@ -11,6 +11,7 @@
 //! drag, because the widget that started it stops drawing when the window
 //! changes mode mid-drag.
 use super::interact::{ANIMATION_SECONDS, ease_out, pointer_edge};
+use super::motion::Eased;
 use super::{SPACING, Theme, layout, widgets};
 use bevy_egui::egui::{self, Id, Pos2, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
 
@@ -24,6 +25,11 @@ const GRIP: f32 = 4.0;
 const EDGE_ZONE: f32 = 48.0;
 /// How far past the sidebar's edge a tab must be pulled to float.
 const TEAR: f32 = 8.0;
+/// How far the drop preview floats inside the space it previews.
+const PREVIEW_MARGIN: f32 = 16.0;
+/// How much shorter the preview's inner edge is than its outer one, at
+/// each end, as a share of its height.
+const PREVIEW_TAPER: f32 = 0.06;
 
 #[derive(Clone)]
 struct Tab {
@@ -54,7 +60,11 @@ struct Carry {
 struct Dock {
     tabs: Vec<Tab>,
     active: Option<Id>,
+    /// The chosen width, kept while the sidebar is closed.
     width: f32,
+    /// The width on screen: easing open, closed or to the chosen width,
+    /// except while the user drags the edge.
+    shown: Eased,
     /// Where the active window goes, once `begin` has laid out this frame.
     content: Option<(u64, Rect)>,
     /// Last frame's tab buttons and the strip holding them.
@@ -178,6 +188,7 @@ enum Carried {
 pub fn begin(ctx: &egui::Context) -> Rect {
     let screen = ctx.content_rect();
     let frame = ctx.cumulative_frame_nr();
+    let now = ctx.input(|input| input.time);
     let resizing = ctx
         .read_response(resize_id())
         .is_some_and(|response| response.dragged());
@@ -212,6 +223,16 @@ pub fn begin(ctx: &egui::Context) -> Rect {
         // Whole points: pointer deltas are fractional, and egui's debug
         // builds outline every widget whose edges are off its rounding grid.
         dock.width = dock.width.clamp(min, max).round();
+        let target = if dock.tabs.is_empty() {
+            0.0
+        } else {
+            dock.width
+        };
+        if resizing {
+            dock.shown.snap(target);
+        } else {
+            dock.shown.retarget(target, now);
+        }
         dock.content = None;
         if let Some(zone) = zone {
             dock.preview = Some(zone);
@@ -237,14 +258,24 @@ pub fn begin(ctx: &egui::Context) -> Rect {
         ctx.data_mut(|data| data.insert_temp(start_id, dock.width));
     }
     preview(ctx, dock.preview, zone.is_some());
-    if dock.tabs.is_empty() {
+    if dock.shown.moving(now) {
+        ctx.request_repaint();
+    }
+    // Opening or closing, the sidebar slides at its full width rather than
+    // squeezing its contents; the scene keeps the rest of the screen.
+    let open = dock.shown.value(now).round();
+    if open <= 0.0 && dock.tabs.is_empty() {
         layout::set_scene(ctx, screen);
         return screen;
     }
-    let rect = dock.rect(screen);
-    let scene = Rect::from_min_max(screen.min, pos2(rect.left(), screen.bottom()));
+    let left = screen.right() - open;
+    let rect = Rect::from_min_max(
+        pos2(left, screen.top()),
+        pos2(left + dock.width, screen.bottom()),
+    );
+    let scene = Rect::from_min_max(screen.min, pos2(left, screen.bottom()));
     layout::set_scene(ctx, scene);
-    let shown = show(ctx, rect, &dock);
+    let shown = show(ctx, rect, screen, &dock);
     with(ctx, |dock| {
         dock.content = Some((frame, shown.content));
         dock.tab_rects = shown.tabs;
@@ -346,8 +377,9 @@ fn drop_zone(dock: &Dock, screen: Rect, carry: &Carry, pointer: Pos2) -> Option<
     ))
 }
 
-/// An accent-tinted outline of where a carried window would dock, sliding
-/// in from the screen's edge while a drop zone is under the pointer.
+/// A floating, accent-outlined trapezium inside where a carried window would
+/// dock, its inner edge the shorter. It slides in from the screen's edge
+/// while a drop zone is under the pointer and back out after.
 fn preview(ctx: &egui::Context, rect: Option<Rect>, active: bool) {
     let amount = ctx.animate_bool_with_time_and_easing(
         id().with("preview"),
@@ -358,21 +390,23 @@ fn preview(ctx: &egui::Context, rect: Option<Rect>, active: bool) {
     let Some(rect) = rect.filter(|_| amount > 0.0) else {
         return;
     };
-    let shown = Rect::from_min_max(
-        pos2(rect.right() - rect.width() * amount, rect.top()),
-        rect.max,
-    );
+    let shape = rect.shrink(PREVIEW_MARGIN);
+    let shape = shape.translate(vec2((1.0 - amount) * (shape.width() + PREVIEW_MARGIN), 0.0));
+    let taper = shape.height() * PREVIEW_TAPER;
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Tooltip,
         id().with("preview"),
     ));
-    painter.rect(
-        shown.shrink(THEME.border_width),
-        THEME.radius,
-        THEME.accent.gamma_multiply(0.14 * amount),
-        (2.0, THEME.accent.gamma_multiply(amount)),
-        egui::StrokeKind::Inside,
-    );
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            pos2(shape.left(), shape.top() + taper),
+            shape.right_top(),
+            shape.right_bottom(),
+            pos2(shape.left(), shape.bottom() - taper),
+        ],
+        THEME.accent.gamma_multiply(0.1 * amount),
+        (1.0, THEME.accent.gamma_multiply(amount)),
+    ));
 }
 
 /// What the sidebar's own controls did this frame.
@@ -388,8 +422,9 @@ struct Shown {
     float: Option<Id>,
 }
 
-/// The background, tab strip and resizable edge.
-fn show(ctx: &egui::Context, rect: Rect, dock: &Dock) -> Shown {
+/// The background, tab strip and resizable edge, clipped to the `screen`
+/// while sliding in or out.
+fn show(ctx: &egui::Context, rect: Rect, screen: Rect, dock: &Dock) -> Shown {
     let mut shown = Shown {
         content: rect,
         tabs: Vec::with_capacity(dock.tabs.len()),
@@ -403,7 +438,7 @@ fn show(ctx: &egui::Context, rect: Rect, dock: &Dock) -> Shown {
         .fixed_pos(rect.min)
         .constrain(false)
         .show(ctx, |ui| {
-            ui.set_clip_rect(rect.expand2(vec2(GRIP, 0.0)));
+            ui.set_clip_rect(rect.expand2(vec2(GRIP, 0.0)).intersect(screen));
             ui.expand_to_include_rect(rect);
             ui.painter().rect_filled(rect, 0, THEME.fill.to_opaque());
             let padding = f32::from(THEME.padding);

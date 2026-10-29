@@ -113,14 +113,25 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 - Windows move into the right-hand sidebar (`kit::dock`) by being carried
   there, as in an IDE:
   - dragging a floating window's header within 48 points of the screen's
-    right edge, or over an open sidebar, shows an accent preview of where it
-    would dock; releasing there docks it. Over the tab strip it joins where it
+    right edge, or over an open sidebar, slides in a floating accent
+    trapezium (1-point outline, shorter inner edge) inset 16 points inside
+    where it would dock; releasing there docks it. Over the tab strip it joins where it
     lands, otherwise at the end.
   - pulling a tab or docked header more than 8 points out of the sidebar
     floats the window under the pointer, held by its title, and it keeps
     following until released. Within the strip, a dragged tab reorders.
   - double-clicking a header or tab docks or floats it directly. A window
     carried into the sidebar floats again where it was picked up from.
+- Motion uses the kit's 0.18-second ease-out (`kit::motion`), never the
+  user's own drags:
+  - the sidebar eases open and closed at its full width, so the scene rect,
+    camera viewport and HUD ease with it. Dragging its edge stays instant.
+  - a window switching mode glides from where it last drew to its new place,
+    drawn at a fixed rect (the docked style) on the way, its fill blending
+    between translucent and opaque and the scene blurred behind it while
+    translucent. A window carried out follows the pointer instead.
+  - a docked window coming to the front (tab switch, reopening) slides in
+    24 points from the right and fades up.
 - The carry is kit state, not an egui drag: the widget that starts it (a tab
   or header) stops drawing once the window changes mode mid-drag. It belongs
   to one press, ends in `dock::begin` on release, and `dock::carrying` keeps
