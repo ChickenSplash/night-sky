@@ -25,11 +25,12 @@ const GRIP: f32 = 4.0;
 const EDGE_ZONE: f32 = 48.0;
 /// How far past the sidebar's edge a tab must be pulled to float.
 const TEAR: f32 = 8.0;
-/// How far the drop preview floats inside the space it previews.
-const PREVIEW_MARGIN: f32 = 16.0;
-/// How much shorter the preview's inner edge is than its outer one, at
-/// each end, as a share of its height.
-const PREVIEW_TAPER: f32 = 0.06;
+/// The drop preview's size, the same on every screen: about the middle
+/// tenth of a typical one.
+const PREVIEW_SIZE: Vec2 = vec2(64.0, 128.0);
+/// How much shorter the preview's outer edge is than its inner one, at each
+/// end, as a share of its height.
+const PREVIEW_TAPER: f32 = 0.18;
 
 #[derive(Clone)]
 struct Tab {
@@ -377,9 +378,10 @@ fn drop_zone(dock: &Dock, screen: Rect, carry: &Carry, pointer: Pos2) -> Option<
     ))
 }
 
-/// A floating, accent-outlined trapezium inside where a carried window would
-/// dock, its inner edge the shorter. It slides in from the screen's edge
-/// while a drop zone is under the pointer and back out after.
+/// A small floating trapezium in the middle of where a carried window would
+/// dock, opening towards the screen's centre. It is framed like a window
+/// whose edges light on hover, the accent growing from each edge's middle as
+/// it slides in from the screen's edge, and retracting as it slides back out.
 fn preview(ctx: &egui::Context, rect: Option<Rect>, active: bool) {
     let amount = ctx.animate_bool_with_time_and_easing(
         id().with("preview"),
@@ -390,23 +392,34 @@ fn preview(ctx: &egui::Context, rect: Option<Rect>, active: bool) {
     let Some(rect) = rect.filter(|_| amount > 0.0) else {
         return;
     };
-    let shape = rect.shrink(PREVIEW_MARGIN);
-    let shape = shape.translate(vec2((1.0 - amount) * (shape.width() + PREVIEW_MARGIN), 0.0));
+    let screen = ctx.content_rect();
+    let shape = Rect::from_center_size(rect.center(), PREVIEW_SIZE);
+    let shape = shape.translate(vec2((1.0 - amount) * (screen.right() - shape.left()), 0.0));
     let taper = shape.height() * PREVIEW_TAPER;
+    let corners = [
+        shape.left_top(),
+        pos2(shape.right(), shape.top() + taper),
+        pos2(shape.right(), shape.bottom() - taper),
+        shape.left_bottom(),
+    ];
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Tooltip,
         id().with("preview"),
     ));
     painter.add(egui::Shape::convex_polygon(
-        vec![
-            pos2(shape.left(), shape.top() + taper),
-            shape.right_top(),
-            shape.right_bottom(),
-            pos2(shape.left(), shape.bottom() - taper),
-        ],
-        THEME.accent.gamma_multiply(0.1 * amount),
-        (1.0, THEME.accent.gamma_multiply(amount)),
+        corners.to_vec(),
+        THEME.fill.gamma_multiply(amount),
+        (THEME.border_width, THEME.border.gamma_multiply(amount)),
     ));
+    let width = ctx.style().visuals.widgets.hovered.bg_stroke.width;
+    for (index, from) in corners.into_iter().enumerate() {
+        let to = corners[(index + 1) % corners.len()];
+        let middle = from.lerp(to, 0.5);
+        painter.line_segment(
+            [middle.lerp(from, amount), middle.lerp(to, amount)],
+            (width, THEME.accent.gamma_multiply(amount)),
+        );
+    }
 }
 
 /// What the sidebar's own controls did this frame.

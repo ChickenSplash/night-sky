@@ -113,10 +113,11 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 - Windows move into the right-hand sidebar (`kit::dock`) by being carried
   there, as in an IDE:
   - dragging a floating window's header within 48 points of the screen's
-    right edge, or over an open sidebar, slides in a floating accent
-    trapezium (1-point outline, shorter inner edge) inset 16 points inside
-    where it would dock; releasing there docks it. Over the tab strip it joins where it
-    lands, otherwise at the end.
+    right edge, or over an open sidebar, slides in a small fixed-size
+    trapezium (64 by 128 points, opening towards the screen's centre) in the
+    middle of where it would dock. It is framed like a window with lit edges,
+    the accent growing from each edge's middle as it arrives. Releasing there
+    docks it. Over the tab strip it joins where it lands, otherwise at the end.
   - pulling a tab or docked header more than 8 points out of the sidebar
     floats the window under the pointer, held by its title, and it keeps
     following until released. Within the strip, a dragged tab reorders.

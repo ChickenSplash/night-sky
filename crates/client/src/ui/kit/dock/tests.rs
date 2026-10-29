@@ -396,13 +396,13 @@ fn later_drags_and_redocking_continue_from_the_chosen_whole_point_width() {
     );
 }
 
-/// Drop previews: closed accent outlines one point thick, by their bounds.
+/// Drop previews: closed four-cornered outlines, by their bounds.
 fn previews(output: &FullOutput) -> Vec<Rect> {
     output
         .shapes
         .iter()
         .filter_map(|shape| match &shape.shape {
-            Shape::Path(path) if path.closed && path.stroke.width == 1.0 => {
+            Shape::Path(path) if path.closed && path.points.len() == 4 => {
                 Some(Rect::from_points(&path.points))
             }
             _ => None,
@@ -428,10 +428,12 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
         .map(|output| previews(&output))
         .unwrap();
     assert_eq!(preview.len(), 1, "one preview while over the edge");
+    let zone_centre = SCREEN.right() - floating.width() * 0.5;
     assert!(
-        (preview[0].width() + 2.0 * PREVIEW_MARGIN - floating.width()).abs() < 4.0
-            && (preview[0].right() + PREVIEW_MARGIN - SCREEN.right()).abs() < 2.0,
-        "the preview floats inside where the sidebar would open: {:?}",
+        (preview[0].size() - PREVIEW_SIZE).length() < 1.0
+            && (preview[0].center().x - zone_centre).abs() < 3.0
+            && (preview[0].center().y - SCREEN.center().y).abs() < 1.0,
+        "a small preview floats in the middle of where the sidebar would open: {:?}",
         preview[0]
     );
     assert!(
@@ -441,7 +443,11 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
     harness.frame(vec![press(edge, false)]);
     harness.settle();
     assert!(is_docked(&harness.ctx, window_id("first")));
-    assert!((harness.scene().right() + PREVIEW_MARGIN - preview[0].left()).abs() < 4.0);
+    let sidebar_centre = (harness.scene().right() + SCREEN.right()) * 0.5;
+    assert!(
+        (sidebar_centre - preview[0].center().x).abs() < 3.0,
+        "the sidebar opens around where the preview showed"
+    );
     assert!(!carrying(&harness.ctx));
 }
 
