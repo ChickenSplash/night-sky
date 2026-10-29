@@ -674,3 +674,34 @@ fn a_tab_coming_forward_slides_in() {
     harness.settle();
     assert_eq!(docked_rect(&harness, "second"), settled);
 }
+
+#[test]
+fn a_carried_window_passes_the_screen_edge_then_glides_back_inside() {
+    let harness = Harness::new([true, false]);
+    let from = harness.header("first");
+    let to = Pos2::new(5.0, 300.0);
+    harness.frame(vec![Event::PointerMoved(from)]);
+    harness.frame(vec![press(from, true)]);
+    harness.frame(vec![Event::PointerMoved(Pos2::new(600.0, 300.0))]);
+    harness.frame(vec![Event::PointerMoved(to)]);
+    harness.frame(vec![]);
+    let carried = harness.floating("first");
+    assert!(
+        carried.left() < -100.0,
+        "carrying is not stopped at the screen's edge: {carried:?}"
+    );
+    harness.frame(vec![press(to, false)]);
+    harness.frame(vec![]);
+    let gliding = docked_rect(&harness, "first");
+    assert!(
+        gliding.left() < 0.0 && gliding.left() > carried.left(),
+        "let go, it glides back rather than jumping: {carried:?} -> {gliding:?}"
+    );
+    harness.settle();
+    let settled = harness.floating("first");
+    assert!(
+        SCREEN.contains_rect(settled) && settled.left().abs() < 1.0,
+        "it ends just inside the screen: {settled:?}"
+    );
+    assert_eq!(settled.size(), carried.size());
+}

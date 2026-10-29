@@ -82,6 +82,8 @@ pub fn reveal_window(ctx: &egui::Context, key: &str, open: &mut bool) {
 #[derive(Clone, Copy)]
 struct Drawn {
     docked: bool,
+    /// Carried by the pointer, which may take it past the scene's edges.
+    carried: bool,
     rect: Rect,
     frame: u64,
 }
@@ -91,6 +93,8 @@ struct Drawn {
 enum Arrival {
     /// From floating into the sidebar, or back out (`docked: false`).
     Glide { glide: Glide, docked: bool },
+    /// A floating window let go partly outside the scene, returning inside.
+    Settle { glide: Glide },
     /// A docked window coming to the front, sliding in and fading up.
     Front { started: f64 },
 }
@@ -182,13 +186,17 @@ impl<'a> Window<'a> {
                 dock::leave(ctx, id);
             }
             actions
-        } else if let Some(Arrival::Glide { glide, .. }) = arrival {
+        } else if let Some(Arrival::Glide { glide, .. } | Arrival::Settle { glide }) = arrival {
             // Drawn like a docked window until it lands, so it can change
             // size and opacity on the way.
             let now = ctx.input(|input| input.time);
             let (rect, amount) = glide.sample(self.floating_target(ctx, theme, id), now);
+            let from = match arrival {
+                Some(Arrival::Settle { .. }) => theme.fill,
+                _ => theme.fill.to_opaque(),
+            };
             let look = Look {
-                fill: theme.fill.to_opaque().lerp_to_gamma(theme.fill, amount),
+                fill: from.lerp_to_gamma(theme.fill, amount),
                 opacity: 1.0,
                 docked: false,
                 gliding: true,
@@ -197,7 +205,8 @@ impl<'a> Window<'a> {
         } else {
             let (actions, rect) = self.show_floating(ctx, theme, id, min_width, add);
             if let Some(rect) = rect {
-                drawn(ctx, id, false, rect);
+                let carried = dock::carried(ctx, id).is_some();
+                drawn(ctx, id, false, carried, rect);
             }
             if actions.dock
                 && let Some(rect) = rect
@@ -261,8 +270,8 @@ impl<'a> Window<'a> {
         let padding = f32::from(theme.padding);
         let pointer = ctx.input(|input| input.pointer.latest_pos());
         let carried = dock::carried(ctx, window_id).zip(pointer);
-        // A carried window follows the pointer anywhere on screen, over the
-        // sidebar too; otherwise it stays beside the sidebar.
+        // A carried window follows the pointer anywhere, over the sidebar
+        // and past the screen's edges; let go, it glides back beside them.
         let bounds = if carried.is_some() {
             ctx.content_rect()
         } else {
@@ -301,6 +310,7 @@ impl<'a> Window<'a> {
             // centre anchor ourselves to allow every edge and header moves.
             .pivot(egui::Align2::CENTER_CENTER)
             .constrain_to(bounds)
+            .constrain(carried.is_none())
             .anchor(egui::Align2::CENTER_CENTER, position - bounds.center())
             .title_bar(false)
             .frame(
@@ -417,7 +427,7 @@ impl<'a> Window<'a> {
         if look.fill.a() < 255 && visible.is_positive() {
             crate::render::window_blur::register(ctx, window_id, visible);
         }
-        drawn(ctx, window_id, look.docked, rect);
+        drawn(ctx, window_id, look.docked, false, rect);
         if look.gliding {
             actions = HeaderActions {
                 close: actions.close,
@@ -487,13 +497,14 @@ fn drawn_id(window: Id) -> Id {
     window.with("drawn")
 }
 
-fn drawn(ctx: &egui::Context, window: Id, docked: bool, rect: Rect) {
+fn drawn(ctx: &egui::Context, window: Id, docked: bool, carried: bool, rect: Rect) {
     let frame = ctx.cumulative_frame_nr();
     ctx.data_mut(|data| {
         data.insert_temp(
             drawn_id(window),
             Drawn {
                 docked,
+                carried,
                 rect,
                 frame,
             },
@@ -518,6 +529,7 @@ fn arrival(ctx: &egui::Context, window: Id, docked: bool) -> Option<Arrival> {
         .filter(|arrival| {
             let (started, to) = match *arrival {
                 Arrival::Glide { glide, docked } => (glide.started, docked),
+                Arrival::Settle { glide } => (glide.started, false),
                 Arrival::Front { started } => (started, true),
             };
             to == docked && now - started < f64::from(ANIMATION_SECONDS)
@@ -530,6 +542,14 @@ fn arrival(ctx: &egui::Context, window: Id, docked: bool) -> Option<Arrival> {
             },
             docked,
         }),
+        Some(last) if !docked && last.carried && !layout::scene(ctx).contains_rect(last.rect) => {
+            Some(Arrival::Settle {
+                glide: Glide {
+                    from: last.rect,
+                    started: now,
+                },
+            })
+        }
         None if docked && under_way.is_none() => Some(Arrival::Front { started: now }),
         _ => under_way,
     };
@@ -573,7 +593,7 @@ fn docked_look(
             look.opacity = amount;
             rect
         }
-        None => target,
+        Some(Arrival::Settle { .. }) | None => target,
     };
     (rect, look)
 }

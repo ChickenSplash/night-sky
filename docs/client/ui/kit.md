@@ -102,7 +102,8 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 - A floating window moves only from its padded header, excluding the close
   button; all edges and corners resize it. Bounds are clamped to the scene
   (the screen beside any sidebar) and the window minimum, except while the
-  window is carried towards the sidebar.
+  window is carried: it then passes freely over the sidebar and past the
+  screen's edges, and when let go outside the scene it glides back inside.
 - Clicking a window brings it forward. The existing scene-blur registration
   stays in the shared frame; do not replace it when adding a panel.
 - `aligned_close_button` centres the visible glyph on title ink, rather than
