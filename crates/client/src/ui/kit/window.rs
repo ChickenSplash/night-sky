@@ -303,8 +303,15 @@ impl<'a> Window<'a> {
         frame_style.visuals.widgets.hovered.fg_stroke.color = theme.accent;
         frame_style.visuals.widgets.active.fg_stroke.color = theme.accent;
         ctx.set_style(frame_style);
+        // egui fades in a window that was not drawn last frame. Only fade
+        // one opening: one landing from a glide was on screen all along.
+        let frame_nr = ctx.cumulative_frame_nr();
+        let opening = ctx
+            .data(|data| data.get_temp::<Drawn>(drawn_id(window_id)))
+            .is_none_or(|drawn| drawn.frame + 1 < frame_nr);
         let window = egui::Window::new(self.title)
             .id(window_id)
+            .fade_in(opening)
             // egui 0.33 checks the anchor (not just the pivot) to decide
             // which edges an immovable window may resize from. Track the
             // centre anchor ourselves to allow every edge and header moves.

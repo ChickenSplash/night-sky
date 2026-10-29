@@ -705,3 +705,34 @@ fn a_carried_window_passes_the_screen_edge_then_glides_back_inside() {
     );
     assert_eq!(settled.size(), carried.size());
 }
+
+/// The alpha of the window `key`'s content text, if drawn: egui fades a
+/// window in through its text colour.
+fn content_alpha(output: &FullOutput, key: &str) -> Option<u8> {
+    let label = format!("{key} content");
+    output.shapes.iter().find_map(|shape| match &shape.shape {
+        Shape::Text(text) if text.galley.text() == label => Some(text.fallback_color.a()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_window_landing_from_a_glide_does_not_fade_in_again() {
+    let harness = Harness::new([true, false]);
+    let from = harness.header("first");
+    let to = Pos2::new(5.0, 300.0);
+    harness.frame(vec![Event::PointerMoved(from)]);
+    harness.frame(vec![press(from, true)]);
+    harness.frame(vec![Event::PointerMoved(Pos2::new(600.0, 300.0))]);
+    harness.frame(vec![Event::PointerMoved(to)]);
+    harness.frame(vec![]);
+    assert!(
+        harness.floating("first").left() < 0.0,
+        "carried past the edge"
+    );
+    harness.frame(vec![press(to, false)]);
+    for index in 0..10 {
+        let alpha = content_alpha(&harness.frame(vec![]), "first");
+        assert_eq!(alpha, Some(255), "frame {index} after letting go");
+    }
+}
