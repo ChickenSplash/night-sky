@@ -378,8 +378,9 @@ fn drop_zone(dock: &Dock, screen: Rect, carry: &Carry, pointer: Pos2) -> Option<
     ))
 }
 
-/// A small floating trapezium in the middle of where a carried window would
-/// dock, opening towards the screen's centre. It is framed like a window
+/// A small floating trapezium against the screen's right edge, inset by the
+/// usual padding and centred vertically, whatever the sidebar's width, while
+/// a carried window would dock. It opens towards the screen's centre. It is framed like a window
 /// whose edges light on hover, the accent growing from each edge's middle as
 /// it slides in from the screen's edge, and retracting as it slides back out.
 fn preview(ctx: &egui::Context, rect: Option<Rect>, active: bool) {
@@ -393,7 +394,14 @@ fn preview(ctx: &egui::Context, rect: Option<Rect>, active: bool) {
         return;
     };
     let screen = ctx.content_rect();
-    let shape = Rect::from_center_size(rect.center(), PREVIEW_SIZE);
+    let inset = f32::from(THEME.padding);
+    let shape = Rect::from_center_size(
+        pos2(
+            screen.right() - inset - PREVIEW_SIZE.x * 0.5,
+            rect.center().y,
+        ),
+        PREVIEW_SIZE,
+    );
     let shape = shape.translate(vec2((1.0 - amount) * (screen.right() - shape.left()), 0.0));
     let taper = shape.height() * PREVIEW_TAPER;
     let corners = [

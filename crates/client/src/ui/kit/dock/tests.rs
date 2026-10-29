@@ -414,7 +414,6 @@ fn previews(output: &FullOutput) -> Vec<Rect> {
 fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
     let harness = Harness::new([true, false]);
     let from = harness.header("first");
-    let floating = harness.floating("first");
     let edge = Pos2::new(SCREEN.right() - 10.0, 450.0);
     harness.frame(vec![Event::PointerMoved(from)]);
     harness.frame(vec![press(from, true)]);
@@ -428,12 +427,11 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
         .map(|output| previews(&output))
         .unwrap();
     assert_eq!(preview.len(), 1, "one preview while over the edge");
-    let zone_centre = SCREEN.right() - floating.width() * 0.5;
     assert!(
         (preview[0].size() - PREVIEW_SIZE).length() < 1.0
-            && (preview[0].center().x - zone_centre).abs() < 3.0
+            && (preview[0].right() - (SCREEN.right() - f32::from(THEME.padding))).abs() < 1.0
             && (preview[0].center().y - SCREEN.center().y).abs() < 1.0,
-        "a small preview floats in the middle of where the sidebar would open: {:?}",
+        "a small preview floats against the screen's edge: {:?}",
         preview[0]
     );
     assert!(
@@ -443,11 +441,6 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
     harness.frame(vec![press(edge, false)]);
     harness.settle();
     assert!(is_docked(&harness.ctx, window_id("first")));
-    let sidebar_centre = (harness.scene().right() + SCREEN.right()) * 0.5;
-    assert!(
-        (sidebar_centre - preview[0].center().x).abs() < 3.0,
-        "the sidebar opens around where the preview showed"
-    );
     assert!(!carrying(&harness.ctx));
 }
 

@@ -114,8 +114,9 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
   there, as in an IDE:
   - dragging a floating window's header within 48 points of the screen's
     right edge, or over an open sidebar, slides in a small fixed-size
-    trapezium (64 by 128 points, opening towards the screen's centre) in the
-    middle of where it would dock. It is framed like a window with lit edges,
+    trapezium (64 by 128 points, opening towards the screen's centre) against
+    the screen's right edge, inset by the usual 12-point padding and centred
+    vertically, whatever the sidebar's width. It is framed like a window with lit edges,
     the accent growing from each edge's middle as it arrives. Releasing there
     docks it. Over the tab strip it joins where it lands, otherwise at the end.
   - pulling a tab or docked header more than 8 points out of the sidebar
