@@ -99,19 +99,33 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
   console. `Window::new(key, title)` takes a stable key: egui state, the
   remembered position and the dock choice belong to the key, not the title.
   Sizes are set with the `size`/`min_size` builder methods.
-- A floating window moves only from its padded header, excluding the header
-  buttons; all edges and corners resize it. Bounds are clamped to the scene
-  (the screen beside any sidebar) and the window minimum.
+- A floating window moves only from its padded header, excluding the close
+  button; all edges and corners resize it. Bounds are clamped to the scene
+  (the screen beside any sidebar) and the window minimum, except while the
+  window is carried towards the sidebar.
 - Clicking a window brings it forward. The existing scene-blur registration
   stays in the shared frame; do not replace it when adding a panel.
 - `aligned_close_button` centres the visible glyph on title ink, rather than
-  the whole header block or font line box. Modals use the same helper. The
-  dock button sits in the next header slot along, aligned the same way.
+  the whole header block or font line box. Modals use the same helper.
 
 ### Docking
 
-- The dock button moves a window into the right-hand sidebar (`kit::dock`)
-  and back. The sidebar is full height, opaque and unblurred: `dock::begin`
+- Windows move into the right-hand sidebar (`kit::dock`) by being carried
+  there, as in an IDE:
+  - dragging a floating window's header within 48 points of the screen's
+    right edge, or over an open sidebar, shows an accent preview of where it
+    would dock; releasing there docks it. Over the tab strip it joins where it
+    lands, otherwise at the end.
+  - pulling a tab or docked header more than 8 points out of the sidebar
+    floats the window under the pointer, held by its title, and it keeps
+    following until released. Within the strip, a dragged tab reorders.
+  - double-clicking a header or tab docks or floats it directly. A window
+    carried into the sidebar floats again where it was picked up from.
+- The carry is kit state, not an egui drag: the widget that starts it (a tab
+  or header) stops drawing once the window changes mode mid-drag. It belongs
+  to one press, ends in `dock::begin` on release, and `dock::carrying` keeps
+  the pointer from the camera meanwhile.
+- The sidebar is full height, opaque and unblurred: `dock::begin`
   reserves its width at the start of the frame and returns the remaining scene
   rect, which becomes the camera viewport and the HUD's bounds. Nothing of the
   3D view lies behind it, so keep the sidebar on the right: canvas markers
@@ -123,7 +137,8 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
 - Floating window content always fills the size egui keeps for the window, so
   short content (such as the inspector's empty prompt) cannot shrink the frame
   away from its header buttons.
-- Several docked windows share the sidebar as tabs; only the front one draws.
+- Docked windows share the sidebar as tabs, shown even for one so there is
+  always a tab to drag; only the front one draws.
   A newly docked or reopened window comes to the front. Closing or floating it
   shows the next tab; the sidebar closes with its last tab.
 - Each window remembers being docked while closed, and reopens there. Open

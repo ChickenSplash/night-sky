@@ -5,7 +5,7 @@ use super::interact::{
     Highlight, control_sense, focus_input_padding, held_click, highlight, hover_amount,
     input_edges, row,
 };
-use super::{SPACING, Theme, TooltipExt};
+use super::{SPACING, Theme};
 use bevy_egui::egui::{self, Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 
 /// A faint full-width line.
@@ -288,42 +288,11 @@ pub fn close_button(ui: &mut Ui, theme: &Theme) -> egui::Response {
 
 /// Align the visible close glyph with the title, not the whole header block.
 pub fn aligned_close_button(ui: &mut Ui, theme: &Theme, title: Rect) -> egui::Response {
-    ui.place(header_slot(ui, title, 0), |ui: &mut Ui| {
-        close_button(ui, theme)
-    })
-}
-
-/// The `slot`th 28-point square from the right of a header, centred on the
-/// title's ink.
-pub(super) fn header_slot(ui: &Ui, title: Rect, slot: usize) -> Rect {
-    Rect::from_center_size(
-        pos2(
-            ui.max_rect().right() - 14.0 - 28.0 * slot as f32,
-            title.center().y,
-        ),
+    let rect = Rect::from_center_size(
+        pos2(ui.max_rect().right() - 14.0, title.center().y),
         vec2(28.0, 28.0),
-    )
-}
-
-/// Moves a window into the sidebar, or back out while `docked`. Painted as
-/// a frame with a filled side column, or a frame with a smaller window inside.
-pub(super) fn dock_button(ui: &mut Ui, theme: &Theme, docked: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(28.0, 28.0), control_sense(true));
-    let response = held_click(response);
-    let hover = hover_amount(ui, &response, true);
-    let colour = theme.text.lerp_to_gamma(theme.accent, hover);
-    let icon = Rect::from_center_size(rect.center(), vec2(16.0, 12.0));
-    let painter = ui.painter();
-    painter.rect_stroke(icon, 0, (1.5, colour), egui::StrokeKind::Inside);
-    let inner = if docked {
-        Rect::from_min_size(icon.min + vec2(3.5, 3.5), vec2(7.0, 5.0))
-    } else {
-        Rect::from_min_max(pos2(icon.right() - 6.0, icon.top()), icon.max)
-    };
-    painter.rect_filled(inner, 0, colour);
-    response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text_themed(theme, if docked { "Float" } else { "Dock to side" })
+    );
+    ui.place(rect, |ui: &mut Ui| close_button(ui, theme))
 }
 
 /// A square, borderless button matching labelled number inputs.
@@ -422,20 +391,33 @@ pub fn toggle(ui: &mut Ui, theme: &Theme, on: bool, label: &str) -> bool {
 
 /// A tab name, bracketed while it is the open tab.
 pub fn tab(ui: &mut Ui, theme: &Theme, label: &str, open: bool) -> bool {
+    tab_response(ui, theme, label, open).clicked()
+}
+
+fn tab_response(ui: &mut Ui, theme: &Theme, label: &str, open: bool) -> egui::Response {
     if open {
         chip_response(ui, theme, format!("[{label}]"), theme.accent)
     } else {
         chip_response(ui, theme, format!(" {label} "), theme.dim)
     }
-    .clicked()
 }
 
 /// One of a row of choices, such as a scope; lit while chosen.
 pub fn choice(ui: &mut Ui, theme: &Theme, label: &str, chosen: bool) -> bool {
+    choice_response(ui, theme, label, chosen).clicked()
+}
+
+/// `choice`, with its whole response, such as for a tab that can be dragged.
+pub(super) fn choice_response(
+    ui: &mut Ui,
+    theme: &Theme,
+    label: &str,
+    chosen: bool,
+) -> egui::Response {
     if theme.text_mode {
-        return tab(ui, theme, label, chosen);
+        return tab_response(ui, theme, label, chosen);
     }
-    flat_button(ui, theme, label, chosen, true, chosen).clicked()
+    flat_button(ui, theme, label, chosen, true, chosen)
 }
 
 /// `grep text`: a one-line text field after a prompt, with animated end edges.

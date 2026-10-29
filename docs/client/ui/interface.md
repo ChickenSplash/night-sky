@@ -17,8 +17,9 @@ to `crates/client/src/`.
   console, Tasks, object browser and Object Inspector. They first open below the icons,
   right-aligned. Tasks and browser start closed. An icon or shortcut for a
   window docked behind another tab brings that tab forward instead of closing it.
-- Each window's header has a dock button beside ×: it moves the window into
-  the full-height right sidebar, shared as tabs, or back to floating. See
+- Dragging a window's header to the screen's right edge docks it into the
+  full-height right sidebar, shared as tabs; dragging its tab out floats it
+  again, and double-clicking a header or tab switches directly. See
   [docking](kit.md#docking).
 - Widgets come from `ui/kit/`: `Theme::TERMINAL` for debug through
   `ui/terminal.rs`, `Theme::GAME` for player windows. Halo text lives in `kit::halo`.

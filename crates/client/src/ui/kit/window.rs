@@ -1,8 +1,10 @@
 //! A kit window: floating (movable by its whole padded header, resizable,
 //! opening at the top right below the HUD icons) or docked into the sidebar.
-//! Header buttons switch between the two; each window remembers its choice.
+//! Carrying the header to the screen's right edge docks it and pulling its
+//! tab out floats it (see `dock`); double-clicking the header switches too.
+//! Each window remembers its choice.
 use super::{SPACING, Theme, dock, layout, widgets};
-use bevy_egui::egui::{self, Color32, Id, Rect, Sense, Ui, UiBuilder, epaint, pos2, vec2};
+use bevy_egui::egui::{self, Color32, Id, Rect, Sense, Ui, UiBuilder, Vec2, epaint, pos2, vec2};
 
 /// Space between a window and the screen's edges when it first opens.
 const GAP: f32 = 12.0;
@@ -52,15 +54,6 @@ pub fn window_id(key: &str) -> Id {
     Id::new(("window", key))
 }
 
-fn docked_id(window: Id) -> Id {
-    window.with("docked")
-}
-
-pub(super) fn is_docked(ctx: &egui::Context, window: Id) -> bool {
-    ctx.data(|data| data.get_temp::<bool>(docked_id(window)))
-        .unwrap_or(false)
-}
-
 /// Opens or closes a window from its shortcut or icon. A window docked
 /// behind another tab comes to the front instead of closing.
 pub fn toggle_window(ctx: &egui::Context, key: &str, open: &mut bool) {
@@ -81,7 +74,10 @@ pub fn reveal_window(ctx: &egui::Context, key: &str, open: &mut bool) {
 #[derive(Default)]
 struct HeaderActions {
     close: bool,
+    /// Double-clicked: dock a floating window, or float a docked one.
     dock: bool,
+    /// Dragged far enough to start carrying the window.
+    grabbed: bool,
 }
 
 impl<'a> Window<'a> {
@@ -128,19 +124,27 @@ impl<'a> Window<'a> {
         let id = window_id(self.key);
         let frame = 2.0 * (f32::from(theme.padding) + theme.border_width);
         let min_width = self.min_size.x + frame;
-        let docked = is_docked(ctx, id);
-        let actions = if docked {
+        let actions = if dock::is_docked(ctx, id) {
+            // Carried into the sidebar: floating again returns it to where
+            // it was picked up from, not the screen's edge.
+            let home = self.position_id().with("home");
+            if let Some(home) = ctx.data_mut(|data| data.remove_temp::<egui::Pos2>(home)) {
+                ctx.data_mut(|data| data.insert_temp(self.position_id(), home));
+            }
             let width = self.width.of(ctx.content_rect().width()) + frame;
             let actions = match dock::check_in(ctx, id, self.title, min_width, width) {
                 Some(rect) => self.show_docked(ctx, theme, id, rect, add),
                 None => HeaderActions::default(),
             };
+            if actions.grabbed {
+                dock::pick_up(ctx, id, self.title, min_width, width, Vec2::ZERO, true);
+            }
             if actions.dock {
                 dock::leave(ctx, id);
             }
             actions
         } else {
-            let (actions, rect) = self.show_floating(ctx, theme, id, add);
+            let (actions, rect) = self.show_floating(ctx, theme, id, min_width, add);
             if actions.dock
                 && let Some(rect) = rect
             {
@@ -148,13 +152,15 @@ impl<'a> Window<'a> {
             }
             actions
         };
-        if actions.dock {
-            ctx.data_mut(|data| data.insert_temp(docked_id(id), !docked));
-        }
         if actions.close {
-            dock::leave(ctx, id);
+            dock::close(ctx, id);
             *open = false;
         }
+    }
+
+    /// Where the floating window's centre was last left.
+    fn position_id(&self) -> Id {
+        Id::new(("window-center", self.key))
     }
 
     fn show_floating(
@@ -162,11 +168,21 @@ impl<'a> Window<'a> {
         ctx: &egui::Context,
         theme: &Theme,
         window_id: Id,
+        min_width: f32,
         add: impl FnOnce(&mut Ui),
     ) -> (HeaderActions, Option<Rect>) {
         let scene = layout::scene(ctx);
         let size = vec2(self.width.of(scene.width()), self.height.of(scene.height()));
         let padding = f32::from(theme.padding);
+        let pointer = ctx.input(|input| input.pointer.latest_pos());
+        let carried = dock::carried(ctx, window_id).zip(pointer);
+        // A carried window follows the pointer anywhere on screen, over the
+        // sidebar too; otherwise it stays beside the sidebar.
+        let bounds = if carried.is_some() {
+            ctx.content_rect()
+        } else {
+            scene
+        };
         clamp_resize(
             ctx,
             window_id,
@@ -174,9 +190,14 @@ impl<'a> Window<'a> {
             scene,
         );
         let mut actions = HeaderActions::default();
-        let position_id = Id::new(("window-center", self.key));
-        let position = ctx
-            .data(|data| data.get_temp::<egui::Pos2>(position_id))
+        let position_id = self.position_id();
+        let outer = size + egui::Vec2::splat(2.0 * (padding + theme.border_width));
+        let height = ctx
+            .memory(|memory| memory.area_rect(window_id))
+            .map_or(outer.y, |rect| rect.height());
+        let position = carried
+            .map(|(grab, pointer)| pointer - grab + vec2(0.0, height * 0.5))
+            .or_else(|| ctx.data(|data| data.get_temp::<egui::Pos2>(position_id)))
             .unwrap_or_else(|| {
                 pos2(
                     scene.right() - GAP - size.x * 0.5 - padding - theme.border_width,
@@ -186,7 +207,6 @@ impl<'a> Window<'a> {
                         + theme.border_width,
                 )
             });
-        let mut movement = egui::Vec2::ZERO;
         // egui paints resize feedback from the area's context style, outside
         // the content closure. Suppress only that native stroke, then restore
         // the original style for controls and after this window is drawn.
@@ -203,8 +223,8 @@ impl<'a> Window<'a> {
             // which edges an immovable window may resize from. Track the
             // centre anchor ourselves to allow every edge and header moves.
             .pivot(egui::Align2::CENTER_CENTER)
-            .constrain_to(scene)
-            .anchor(egui::Align2::CENTER_CENTER, position - scene.center())
+            .constrain_to(bounds)
+            .anchor(egui::Align2::CENTER_CENTER, position - bounds.center())
             .title_bar(false)
             .frame(
                 egui::Frame::new()
@@ -232,37 +252,7 @@ impl<'a> Window<'a> {
             // the size egui keeps. Short content, such as a single note, would
             // otherwise shrink the frame and leave the header buttons outside.
             ui.set_min_size(ui.max_rect().size());
-            let (header, buttons, clicked) = self.header(ui, theme, false);
-            actions = clicked;
-            // The whole header, including its surrounding frame padding, is
-            // a handle. Cut out only the buttons, not their whole column.
-            let handle = Rect::from_min_max(
-                header.min - vec2(padding, padding),
-                pos2(ui.max_rect().right() + padding, ui.cursor().top()),
-            );
-            let content_clip = ui.clip_rect();
-            ui.set_clip_rect(content_clip.union(handle));
-            for (index, rect) in [
-                Rect::from_min_max(handle.min, pos2(buttons.left(), handle.bottom())),
-                Rect::from_min_max(pos2(buttons.right(), handle.top()), handle.max),
-                Rect::from_min_max(pos2(buttons.left(), handle.top()), buttons.right_top()),
-                Rect::from_min_max(
-                    buttons.left_bottom(),
-                    pos2(buttons.right(), handle.bottom()),
-                ),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let response = ui
-                    .interact(rect, ui.id().with(("move-header", index)), Sense::drag())
-                    .on_hover_cursor(egui::CursorIcon::AllScroll);
-                if response.dragged() {
-                    ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
-                    movement = response.drag_delta();
-                }
-            }
-            ui.set_clip_rect(content_clip);
+            actions = self.header(ui, theme, egui::CursorIcon::AllScroll);
             content(ui, window_id, add);
         });
         ctx.set_style(style.clone());
@@ -275,16 +265,36 @@ impl<'a> Window<'a> {
                 shown.response.layer_id,
                 &style,
             );
-            ctx.data_mut(|data| {
-                data.insert_temp(position_id, shown.response.rect.center() + movement)
-            });
-            shown.response.rect
+            let rect = shown.response.rect;
+            if actions.grabbed
+                && let Some(origin) = ctx.input(|input| input.pointer.press_origin())
+            {
+                let grab = origin - pos2(rect.center().x, rect.top());
+                if dock::pick_up(
+                    ctx,
+                    window_id,
+                    self.title,
+                    min_width,
+                    rect.width(),
+                    grab,
+                    false,
+                ) {
+                    ctx.data_mut(|data| data.insert_temp(position_id.with("home"), rect.center()));
+                }
+            }
+            let position = dock::carried(ctx, window_id)
+                .zip(pointer)
+                .map_or(rect.center(), |(grab, pointer)| {
+                    pointer - grab + vec2(0.0, rect.height() * 0.5)
+                });
+            ctx.data_mut(|data| data.insert_temp(position_id, position));
+            rect
         });
         (actions, rect)
     }
 
-    /// Fills the sidebar's content `rect`, opaque and without move or resize
-    /// handles: the sidebar's own edge resizes it.
+    /// Fills the sidebar's content `rect`, opaque and without resize handles:
+    /// the sidebar's own edge resizes it.
     fn show_docked(
         &self,
         ctx: &egui::Context,
@@ -312,7 +322,7 @@ impl<'a> Window<'a> {
                             let size = rect.shrink(inset).size();
                             ui.set_min_size(size);
                             ui.set_max_size(size);
-                            actions = self.header(ui, theme, true).2;
+                            actions = self.header(ui, theme, egui::CursorIcon::Grab);
                             content(ui, window_id, add);
                         });
                 });
@@ -320,28 +330,59 @@ impl<'a> Window<'a> {
         actions
     }
 
-    /// The title, dock button and close button. Returns the header block,
-    /// the buttons' bounds and which were clicked.
-    fn header(&self, ui: &mut Ui, theme: &Theme, docked: bool) -> (Rect, Rect, HeaderActions) {
+    /// The title and close button. The rest of the header, including the
+    /// frame padding around it, is a handle showing `cursor`: dragged to
+    /// carry the window, or double-clicked to dock or float it.
+    fn header(&self, ui: &mut Ui, theme: &Theme, cursor: egui::CursorIcon) -> HeaderActions {
         theme.style_scrollbars(ui.style_mut());
         ui.style_mut().spacing.item_spacing = egui::Vec2::splat(SPACING);
         let mut actions = HeaderActions::default();
-        let mut buttons = Rect::NOTHING;
+        let mut close = Rect::NOTHING;
         let header = ui.horizontal(|ui| {
             ui.set_min_height(28.0);
             let title = title(ui, theme, self);
-            let close = widgets::aligned_close_button(ui, theme, title);
-            let dock = ui.place(widgets::header_slot(ui, title, 1), |ui: &mut Ui| {
-                widgets::dock_button(ui, theme, docked)
-            });
-            actions.close = close.clicked();
-            actions.dock = dock.clicked();
-            buttons = close.rect.union(dock.rect);
+            let response = widgets::aligned_close_button(ui, theme, title);
+            actions.close = response.clicked();
+            close = response.rect;
         });
         // horizontal() already advances by item_spacing.y. Complete
         // the same padding below the header as the frame gives above it.
-        ui.add_space((f32::from(theme.padding) - ui.spacing().item_spacing.y).max(0.0));
-        (header.response.rect, buttons, actions)
+        let padding = f32::from(theme.padding);
+        ui.add_space((padding - ui.spacing().item_spacing.y).max(0.0));
+        let handle = Rect::from_min_max(
+            header.response.rect.min - vec2(padding, padding),
+            pos2(ui.max_rect().right() + padding, ui.cursor().top()),
+        );
+        let content_clip = ui.clip_rect();
+        ui.set_clip_rect(content_clip.union(handle));
+        // Cut out only the button, not its whole column.
+        for (index, rect) in [
+            Rect::from_min_max(handle.min, pos2(close.left(), handle.bottom())),
+            Rect::from_min_max(pos2(close.right(), handle.top()), handle.max),
+            Rect::from_min_max(pos2(close.left(), handle.top()), close.right_top()),
+            Rect::from_min_max(close.left_bottom(), pos2(close.right(), handle.bottom())),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // Drag only, so egui's resize edges keep priority where they
+            // overlap; double-clicks are read from the pointer directly.
+            let response = ui
+                .interact(rect, ui.id().with(("move-header", index)), Sense::drag())
+                .on_hover_cursor(cursor);
+            if response.dragged() {
+                ui.ctx().set_cursor_icon(cursor);
+                actions.grabbed = true;
+            }
+            actions.dock |= response.hovered()
+                && ui.input(|input| {
+                    input
+                        .pointer
+                        .button_double_clicked(egui::PointerButton::Primary)
+                });
+        }
+        ui.set_clip_rect(content_clip);
+        actions
     }
 }
 

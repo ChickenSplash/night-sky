@@ -20,6 +20,7 @@ const HUD_DRAG_SPAN: f64 = 400.0;
 pub(crate) fn pointer_captured(ctx: &egui::Context) -> bool {
     ctx.is_pointer_over_area()
         || ctx.wants_pointer_input()
+        || super::kit::dock::carrying(ctx)
         || [
             "time-pointer-capture",
             "speed-pointer-capture",

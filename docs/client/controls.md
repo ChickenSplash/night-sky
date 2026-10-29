@@ -119,7 +119,9 @@ bodies while overlays are hidden.
 Click the left side of a checkbox row to toggle it. The square `+` / `-` button
 on the right expands or collapses its explanation without changing the switch.
 Only the console header (including its padding) moves the window, indicated by
-a four-way arrow cursor.
+a four-way arrow cursor. Dragging a header to the screen's right edge docks
+the window into the sidebar; dragging its tab out floats it again, and
+double-clicking a header or tab does either.
 
 The browser, Tasks and debug console use the same movable/resizable window
 frame. Close glyphs align with their title and hover red. Scrollbars have

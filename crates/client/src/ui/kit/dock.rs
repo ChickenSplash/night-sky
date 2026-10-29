@@ -1,11 +1,18 @@
 //! The right-hand sidebar that kit windows dock into. `begin` reserves its
 //! width before anything else is laid out, so the 3D view and HUD shrink
-//! beside it rather than sitting underneath. Several docked windows share it
-//! as tabs. Each docked window checks in every frame it is open; one that
-//! stops checking in, such as after a shortcut closed it, leaves the strip.
-use super::interact::pointer_edge;
+//! beside it rather than sitting underneath. Docked windows share it as tabs.
+//! Each docked window checks in every frame it is open; one that stops
+//! checking in, such as after a shortcut closed it, leaves the strip.
+//!
+//! Windows move between floating and docked by being carried: a floating
+//! window's header dropped on the screen's right edge (or on the open sidebar)
+//! docks it, and a tab or docked header pulled out of the sidebar floats it
+//! under the pointer. The carry is the kit's own state rather than an egui
+//! drag, because the widget that started it stops drawing when the window
+//! changes mode mid-drag.
+use super::interact::{ANIMATION_SECONDS, ease_out, pointer_edge};
 use super::{SPACING, Theme, layout, widgets};
-use bevy_egui::egui::{self, Id, Rect, Sense, UiBuilder, pos2, vec2};
+use bevy_egui::egui::{self, Id, Pos2, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
 
 /// The sidebar's own background and tab strip.
 const THEME: Theme = Theme::GAME;
@@ -13,6 +20,10 @@ const THEME: Theme = Theme::GAME;
 const MAX_SHARE: f32 = 0.5;
 /// How far either side of the sidebar's edge it can be grabbed.
 const GRIP: f32 = 4.0;
+/// How close to the screen's right edge a carried window docks.
+const EDGE_ZONE: f32 = 48.0;
+/// How far past the sidebar's edge a tab must be pulled to float.
+const TEAR: f32 = 8.0;
 
 #[derive(Clone)]
 struct Tab {
@@ -23,6 +34,22 @@ struct Tab {
     seen: u64,
 }
 
+/// A window being dragged between floating and docked.
+#[derive(Clone)]
+struct Carry {
+    window: Id,
+    title: String,
+    min_width: f32,
+    /// Outer floating width, which a never-sized sidebar opens at.
+    width: f32,
+    /// The pointer's offset from the floating window's top centre.
+    grab: Vec2,
+    /// Still a tab: it reorders along the strip until pulled out.
+    docked: bool,
+    /// The press this carry belongs to.
+    origin: Option<Pos2>,
+}
+
 #[derive(Clone, Default)]
 struct Dock {
     tabs: Vec<Tab>,
@@ -30,6 +57,15 @@ struct Dock {
     width: f32,
     /// Where the active window goes, once `begin` has laid out this frame.
     content: Option<(u64, Rect)>,
+    /// Last frame's tab buttons and the strip holding them.
+    tab_rects: Vec<(Id, Rect)>,
+    strip: Option<Rect>,
+    carry: Option<Carry>,
+    /// A tab double-clicked last frame, floated before this frame's layout
+    /// so its window floats beside the full-width scene.
+    float: Option<Id>,
+    /// The drop preview last shown, kept while it fades out.
+    preview: Option<Rect>,
 }
 
 impl Dock {
@@ -40,6 +76,10 @@ impl Dock {
             .map(|tab| tab.min_width)
             .fold(0.0, f32::max);
         (min, (screen.width() * MAX_SHARE).max(min))
+    }
+
+    fn rect(&self, screen: Rect) -> Rect {
+        Rect::from_min_max(pos2(screen.right() - self.width, screen.top()), screen.max)
     }
 
     fn remove(&mut self, window: Id) {
@@ -77,6 +117,27 @@ impl Dock {
             }
         }
     }
+
+    /// Where along the strip `pointer` falls, among the tabs other than
+    /// `except`: the number of them before it, reading row by row.
+    fn slot(&self, pointer: Pos2, except: Option<Id>) -> usize {
+        self.tab_rects
+            .iter()
+            .filter(|(window, _)| Some(*window) != except)
+            .filter(|(_, rect)| {
+                rect.bottom() < pointer.y
+                    || (rect.y_range().contains(pointer.y) && rect.center().x < pointer.x)
+            })
+            .count()
+    }
+
+    fn move_tab(&mut self, window: Id, to: usize) {
+        let Some(from) = self.tabs.iter().position(|tab| tab.window == window) else {
+            return;
+        };
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to.min(self.tabs.len()), tab);
+    }
 }
 
 fn id() -> Id {
@@ -87,8 +148,29 @@ fn resize_id() -> Id {
     id().with("resize")
 }
 
+fn docked_id(window: Id) -> Id {
+    window.with("docked")
+}
+
 fn with<R>(ctx: &egui::Context, change: impl FnOnce(&mut Dock) -> R) -> R {
     ctx.data_mut(|data| change(data.get_temp_mut_or_default::<Dock>(id())))
+}
+
+/// Whether the window lives in the sidebar, remembered while it is closed.
+pub(super) fn is_docked(ctx: &egui::Context, window: Id) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(docked_id(window)))
+        .unwrap_or(false)
+}
+
+fn set_docked(ctx: &egui::Context, window: Id, docked: bool) {
+    ctx.data_mut(|data| data.insert_temp(docked_id(window), docked));
+}
+
+/// What happened to the carried window this frame.
+enum Carried {
+    None,
+    Torn(Id),
+    Dropped(Id),
 }
 
 /// Lays out the sidebar and returns the rest of the screen, for the scene.
@@ -99,10 +181,16 @@ pub fn begin(ctx: &egui::Context) -> Rect {
     let resizing = ctx
         .read_response(resize_id())
         .is_some_and(|response| response.dragged());
-    let drag = ctx.input(|input| input.pointer.total_drag_delta());
+    let (drag, pointer, held) = ctx.input(|input| {
+        (
+            input.pointer.total_drag_delta(),
+            input.pointer.latest_pos(),
+            input.pointer.primary_down(),
+        )
+    });
     let start_id = resize_id().with("start");
     let start = ctx.data(|data| data.get_temp::<f32>(start_id));
-    let dock = with(ctx, |dock| {
+    let (dock, carried, zone, floated) = with(ctx, |dock| {
         let gone: Vec<_> = dock
             .tabs
             .iter()
@@ -112,6 +200,11 @@ pub fn begin(ctx: &egui::Context) -> Rect {
         for window in gone {
             dock.remove(window);
         }
+        let floated = dock.float.take();
+        if let Some(window) = floated {
+            dock.remove(window);
+        }
+        let (carried, zone) = carry(dock, screen, frame, pointer, held);
         if resizing && let (Some(start), Some(drag)) = (start, drag) {
             dock.width = start - drag.x;
         }
@@ -120,35 +213,191 @@ pub fn begin(ctx: &egui::Context) -> Rect {
         // builds outline every widget whose edges are off its rounding grid.
         dock.width = dock.width.clamp(min, max).round();
         dock.content = None;
-        dock.clone()
+        if let Some(zone) = zone {
+            dock.preview = Some(zone);
+        }
+        (dock.clone(), carried, zone, floated)
     });
+    if let Some(window) = floated {
+        set_docked(ctx, window, false);
+    }
+    match carried {
+        Carried::Torn(window) => set_docked(ctx, window, false),
+        Carried::Dropped(window) => set_docked(ctx, window, true),
+        Carried::None => {}
+    }
+    match &dock.carry {
+        Some(carry) if carry.docked => ctx.set_cursor_icon(egui::CursorIcon::Grabbing),
+        Some(_) => ctx.set_cursor_icon(egui::CursorIcon::AllScroll),
+        None => {}
+    }
     // Until a drag is under way, keep its starting width current. A drag
     // then measures from the width it was grabbed at, every time.
     if !resizing {
         ctx.data_mut(|data| data.insert_temp(start_id, dock.width));
     }
+    preview(ctx, dock.preview, zone.is_some());
     if dock.tabs.is_empty() {
         layout::set_scene(ctx, screen);
         return screen;
     }
-    let rect = Rect::from_min_max(pos2(screen.right() - dock.width, screen.top()), screen.max);
+    let rect = dock.rect(screen);
     let scene = Rect::from_min_max(screen.min, pos2(rect.left(), screen.bottom()));
     layout::set_scene(ctx, scene);
-    let (content, chosen) = show(ctx, rect, &dock);
+    let shown = show(ctx, rect, &dock);
     with(ctx, |dock| {
-        dock.content = Some((frame, content));
-        if chosen.is_some() {
-            dock.active = chosen;
+        dock.content = Some((frame, shown.content));
+        dock.tab_rects = shown.tabs;
+        dock.strip = Some(shown.strip);
+        if shown.chosen.is_some() {
+            dock.active = shown.chosen;
         }
+        dock.float = shown.float;
     });
+    if let Some((window, title)) = shown.grabbed {
+        pick_up(ctx, window, &title, 0.0, 0.0, Vec2::ZERO, true);
+    }
     scene
 }
 
-/// The background, tab strip and resizable edge. Returns where the active
-/// window goes and any tab clicked.
-fn show(ctx: &egui::Context, rect: Rect, dock: &Dock) -> (Rect, Option<Id>) {
-    let mut content = rect;
-    let mut chosen = None;
+/// Moves the carried window on with the pointer: reordering or tearing out a
+/// tab, and docking or letting go on release. Returns any change of mode and
+/// the drop zone under a floating carried window.
+fn carry(
+    dock: &mut Dock,
+    screen: Rect,
+    frame: u64,
+    pointer: Option<Pos2>,
+    held: bool,
+) -> (Carried, Option<Rect>) {
+    let Some(mut carry) = dock.carry.take() else {
+        return (Carried::None, None);
+    };
+    let mut carried = Carried::None;
+    if carry.docked
+        && let Some(pointer) = pointer
+    {
+        if pointer.x < dock.rect(screen).left() - TEAR {
+            dock.remove(carry.window);
+            carry.docked = false;
+            // Hold the floating window by the middle of its title.
+            carry.grab = vec2(0.0, f32::from(THEME.padding) + 14.0);
+            carried = Carried::Torn(carry.window);
+        } else if over_strip(dock, pointer) {
+            let slot = dock.slot(pointer, Some(carry.window));
+            dock.move_tab(carry.window, slot);
+        }
+    }
+    let zone = (!carry.docked)
+        .then_some(pointer)
+        .flatten()
+        .and_then(|pointer| drop_zone(dock, screen, &carry, pointer));
+    if held {
+        dock.carry = Some(carry);
+        return (carried, zone);
+    }
+    if zone.is_some()
+        && let Some(pointer) = pointer
+    {
+        if dock.width <= 0.0 {
+            dock.width = carry.width;
+        }
+        let slot = if over_strip(dock, pointer) {
+            dock.slot(pointer, None)
+        } else {
+            dock.tabs.len()
+        };
+        dock.enter(frame, carry.window, &carry.title, carry.min_width);
+        dock.move_tab(carry.window, slot);
+        dock.active = Some(carry.window);
+        carried = Carried::Dropped(carry.window);
+    }
+    (carried, None)
+}
+
+/// Whether `pointer` is over the tab strip, give or take the tabs' spacing.
+fn over_strip(dock: &Dock, pointer: Pos2) -> bool {
+    !dock.tabs.is_empty()
+        && dock
+            .strip
+            .is_some_and(|strip| strip.expand(SPACING * 0.5).contains(pointer))
+}
+
+/// Where a floating window carried to `pointer` would go: the open sidebar,
+/// or a new one at the screen's right edge.
+fn drop_zone(dock: &Dock, screen: Rect, carry: &Carry, pointer: Pos2) -> Option<Rect> {
+    if !dock.tabs.is_empty() {
+        let rect = dock.rect(screen);
+        return (pointer.x >= rect.left()).then_some(rect);
+    }
+    if pointer.x < screen.right() - EDGE_ZONE {
+        return None;
+    }
+    let width = if dock.width > 0.0 {
+        dock.width
+    } else {
+        carry.width
+    };
+    let max = (screen.width() * MAX_SHARE).max(carry.min_width);
+    let width = width.clamp(carry.min_width, max).round();
+    Some(Rect::from_min_max(
+        pos2(screen.right() - width, screen.top()),
+        screen.max,
+    ))
+}
+
+/// An accent-tinted outline of where a carried window would dock, sliding
+/// in from the screen's edge while a drop zone is under the pointer.
+fn preview(ctx: &egui::Context, rect: Option<Rect>, active: bool) {
+    let amount = ctx.animate_bool_with_time_and_easing(
+        id().with("preview"),
+        active,
+        ANIMATION_SECONDS,
+        ease_out,
+    );
+    let Some(rect) = rect.filter(|_| amount > 0.0) else {
+        return;
+    };
+    let shown = Rect::from_min_max(
+        pos2(rect.right() - rect.width() * amount, rect.top()),
+        rect.max,
+    );
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        id().with("preview"),
+    ));
+    painter.rect(
+        shown.shrink(THEME.border_width),
+        THEME.radius,
+        THEME.accent.gamma_multiply(0.14 * amount),
+        (2.0, THEME.accent.gamma_multiply(amount)),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// What the sidebar's own controls did this frame.
+struct Shown {
+    /// Where the active window goes.
+    content: Rect,
+    tabs: Vec<(Id, Rect)>,
+    strip: Rect,
+    chosen: Option<Id>,
+    /// A tab dragged far enough to start carrying it.
+    grabbed: Option<(Id, String)>,
+    /// A tab double-clicked to float its window, next frame.
+    float: Option<Id>,
+}
+
+/// The background, tab strip and resizable edge.
+fn show(ctx: &egui::Context, rect: Rect, dock: &Dock) -> Shown {
+    let mut shown = Shown {
+        content: rect,
+        tabs: Vec::with_capacity(dock.tabs.len()),
+        strip: Rect::NOTHING,
+        chosen: None,
+        grabbed: None,
+        float: None,
+    };
     egui::Area::new(id())
         .order(egui::Order::Middle)
         .fixed_pos(rect.min)
@@ -157,27 +406,34 @@ fn show(ctx: &egui::Context, rect: Rect, dock: &Dock) -> (Rect, Option<Id>) {
             ui.set_clip_rect(rect.expand2(vec2(GRIP, 0.0)));
             ui.expand_to_include_rect(rect);
             ui.painter().rect_filled(rect, 0, THEME.fill.to_opaque());
-            if dock.tabs.len() > 1 {
-                let padding = f32::from(THEME.padding);
-                let strip = ui
-                    .scope_builder(UiBuilder::new().max_rect(rect.shrink(padding)), |ui| {
-                        ui.spacing_mut().item_spacing = vec2(SPACING * 0.5, SPACING * 0.5);
-                        ui.horizontal_wrapped(|ui| {
-                            for tab in &dock.tabs {
-                                let active = dock.active == Some(tab.window);
-                                if widgets::choice(ui, &THEME, &tab.title, active) {
-                                    chosen = Some(tab.window);
-                                }
+            let padding = f32::from(THEME.padding);
+            shown.strip = ui
+                .scope_builder(UiBuilder::new().max_rect(rect.shrink(padding)), |ui| {
+                    ui.spacing_mut().item_spacing = vec2(SPACING * 0.5, SPACING * 0.5);
+                    ui.horizontal_wrapped(|ui| {
+                        for tab in &dock.tabs {
+                            let active = dock.active == Some(tab.window);
+                            let response = widgets::choice_response(ui, &THEME, &tab.title, active)
+                                .on_hover_cursor(egui::CursorIcon::Grab);
+                            if response.clicked() {
+                                shown.chosen = Some(tab.window);
                             }
-                        })
+                            if response.double_clicked() {
+                                shown.float = Some(tab.window);
+                            }
+                            if response.dragged() {
+                                shown.grabbed = Some((tab.window, tab.title.clone()));
+                            }
+                            shown.tabs.push((tab.window, response.rect));
+                        }
                     })
-                    .response
-                    .rect;
-                content.min.y = strip.bottom() + padding;
-            }
+                })
+                .response
+                .rect;
+            shown.content.min.y = shown.strip.bottom() + padding;
             resize_edge(ui, rect);
         });
-    (content, chosen)
+    shown
 }
 
 /// The sidebar's left edge: dragged to resize, lit like a window edge.
@@ -210,6 +466,68 @@ fn resize_edge(ui: &mut egui::Ui, rect: Rect) {
     );
 }
 
+/// Starts carrying a window whose header or tab is being dragged, unless
+/// this press already carries one. `grab` is the pointer's offset from the
+/// floating window's top centre; `width` its outer width. Returns whether
+/// this started the carry.
+pub(super) fn pick_up(
+    ctx: &egui::Context,
+    window: Id,
+    title: &str,
+    min_width: f32,
+    width: f32,
+    grab: Vec2,
+    docked: bool,
+) -> bool {
+    let origin = ctx.input(|input| input.pointer.press_origin());
+    with(ctx, |dock| {
+        if dock
+            .carry
+            .as_ref()
+            .is_some_and(|carry| carry.origin == origin)
+        {
+            return false;
+        }
+        dock.carry = Some(Carry {
+            window,
+            title: title.to_owned(),
+            min_width,
+            width,
+            grab,
+            docked,
+            origin,
+        });
+        true
+    })
+}
+
+/// The pointer's offset from the top centre of `window`, while it is being
+/// carried as a floating window.
+/// A carry left over from an earlier press, such as where `begin` did not
+/// run to end it, is ignored.
+pub(super) fn carried(ctx: &egui::Context, window: Id) -> Option<Vec2> {
+    let origin = ctx.input(|input| input.pointer.press_origin())?;
+    with(ctx, |dock| {
+        dock.carry
+            .as_ref()
+            .filter(|carry| carry.window == window && !carry.docked && carry.origin == Some(origin))
+            .map(|carry| carry.grab)
+    })
+}
+
+/// Whether a window is being carried, so the pointer belongs to the UI even
+/// where no widget is under it.
+pub fn carrying(ctx: &egui::Context) -> bool {
+    let Some(origin) = ctx.input(|input| input.pointer.press_origin()) else {
+        return false;
+    };
+    with(ctx, |dock| {
+        dock.carry
+            .as_ref()
+            .is_some_and(|carry| carry.origin == Some(origin))
+    })
+}
+
 /// Docks a floating window as the active tab. A sidebar that has never been
 /// sized takes the window's floating `width`; after that it keeps its own.
 pub(super) fn enter(ctx: &egui::Context, window: Id, title: &str, min_width: f32, width: f32) {
@@ -221,6 +539,7 @@ pub(super) fn enter(ctx: &egui::Context, window: Id, title: &str, min_width: f32
         dock.enter(frame, window, title, min_width);
         dock.active = Some(window);
     });
+    set_docked(ctx, window, true);
 }
 
 /// Keeps an open docked window's tab. Returns where to draw it this frame,
@@ -248,7 +567,14 @@ pub(super) fn check_in(
     content.filter(|_| front)
 }
 
+/// Floats a docked window, which keeps its last floating place.
 pub(super) fn leave(ctx: &egui::Context, window: Id) {
+    with(ctx, |dock| dock.remove(window));
+    set_docked(ctx, window, false);
+}
+
+/// Takes a closed window's tab away, remembering that it was docked.
+pub(super) fn close(ctx: &egui::Context, window: Id) {
     with(ctx, |dock| dock.remove(window));
 }
 
