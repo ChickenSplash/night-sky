@@ -42,6 +42,7 @@ fn controls_help(ui: &mut egui::Ui, bindings: &Bindings) {
             ),
             (&keys(&[Pilot]), "Pilot the selected ship".into()),
             ("F3 / ` / cog", "Toggle debug console".into()),
+            (&keys(&[Fullscreen]), "Toggle fullscreen".into()),
             ("Drag set speed", "Adjust movement speed".into()),
             ("Click time rate", "Pause / resume".into()),
             ("Drag time rate", "Adjust simulation speed".into()),

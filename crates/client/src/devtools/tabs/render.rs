@@ -6,8 +6,17 @@ use crate::ui::terminal::{self};
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-pub fn render(ui: &mut egui::Ui, nav: &Navigation, out: &mut Vec<UiCommand>) {
+pub fn render(ui: &mut egui::Ui, nav: &Navigation, fullscreen: bool, out: &mut Vec<UiCommand>) {
     terminal::heading(ui, "display");
+    if terminal::check(
+        ui,
+        fullscreen,
+        "Fullscreen",
+        true,
+        "Fill the window's monitor without borders. F11 also toggles it.",
+    ) {
+        out.push(UiCommand::SetFullscreen { on: !fullscreen });
+    }
     if terminal::check(
         ui,
         nav.overlays,
@@ -143,6 +152,10 @@ mod tests {
 
     /// The commands a click on the switch labelled `label` sends.
     fn click(nav: &Navigation, label: &str) -> Vec<UiCommand> {
+        click_with(nav, false, label)
+    }
+
+    fn click_with(nav: &Navigation, fullscreen: bool, label: &str) -> Vec<UiCommand> {
         let ctx = egui::Context::default();
         let frame = |events| {
             let mut commands = Vec::new();
@@ -156,7 +169,8 @@ mod tests {
                     ..default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| render(ui, nav, &mut commands));
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| render(ui, nav, fullscreen, &mut commands));
                 },
             );
             (output, commands)
@@ -202,6 +216,17 @@ mod tests {
                 click(&nav, label),
                 vec![UiCommand::SetDisplay { option, on: false }],
                 "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn fullscreen_switch_toggles_the_window_mode() {
+        let nav = Navigation::default();
+        for on in [false, true] {
+            assert_eq!(
+                click_with(&nav, on, "Fullscreen"),
+                vec![UiCommand::SetFullscreen { on: !on }]
             );
         }
     }

@@ -140,7 +140,7 @@ pub struct Usage {
 
 /// Every `UiCommand`, by its serde name. A test fails, naming the command,
 /// when a variant has no entry here or an entry's fields do not match.
-pub const USAGE: [Usage; 35] = [
+pub const USAGE: [Usage; 36] = [
     Usage {
         name: "steer_craft",
         fields: &["order", "id", "tick", "in_s", "for_s"],
@@ -327,6 +327,11 @@ pub const USAGE: [Usage; 35] = [
         name: "set_layered_planets",
         fields: &["on"],
         about: "Experimental layered planet calculations, shown in the planet inspector beside the legacy facts; rendering stays legacy",
+    },
+    Usage {
+        name: "set_fullscreen",
+        fields: &["on"],
+        about: "Borderless fullscreen on the window's monitor (F11); true or false",
     },
 ];
 

@@ -11,6 +11,7 @@ mod scene;
 mod search;
 mod stars;
 mod ui;
+mod window;
 
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -54,13 +55,7 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Night Sky".into(),
                     resolution: (1440, 900).into(),
-                    mode: if smoke_test {
-                        bevy::window::WindowMode::BorderlessFullscreen(
-                            bevy::window::MonitorSelection::Current,
-                        )
-                    } else {
-                        bevy::window::WindowMode::Windowed
-                    },
+                    mode: window::mode(smoke_test),
                     ..default()
                 }),
                 ..default()
@@ -132,6 +127,7 @@ fn main() {
         )
             .chain(),
     )
+    .add_systems(Update, window::fullscreen.after(input::read))
     .add_systems(
         PostUpdate,
         // Before the egui pass, so markers use this frame's camera like the bodies.

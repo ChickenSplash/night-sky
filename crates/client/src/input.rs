@@ -53,6 +53,8 @@ pub enum Action {
     Steer,
     /// Held with Look for field of view, or with the wheel for zoom.
     Alternate,
+    /// Borderless fullscreen or a window.
+    Fullscreen,
 }
 
 /// A key or mouse button. Gamepad and flight-stick inputs can join it.
@@ -138,6 +140,7 @@ impl Default for Bindings {
             (K::Space, Pause),
             (K::ShiftLeft, Alternate),
             (K::ShiftRight, Alternate),
+            (K::F11, Fullscreen),
         ];
         let buttons = [
             (MouseButton::Left, Look),

@@ -167,6 +167,10 @@ pub enum UiCommand {
     SetLayeredPlanets {
         on: bool,
     },
+    /// Borderless fullscreen on the window's monitor, or a window.
+    SetFullscreen {
+        on: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -788,6 +792,8 @@ pub fn apply(
             UiCommand::Search { .. } | UiCommand::ClearSearch | UiCommand::SetSearch { .. } => {}
             // `planet_loading::update` runs this.
             UiCommand::SetLayeredPlanets { .. } => {}
+            // `window::fullscreen` runs this.
+            UiCommand::SetFullscreen { .. } => {}
         }
     }
 }

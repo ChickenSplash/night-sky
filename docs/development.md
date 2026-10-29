@@ -24,6 +24,7 @@ crates/client/       Bevy client and egui interface
   src/navigation/    Destination, visits, picking, camera flights, presentation and identities
   src/input/         Named bindings, input capture and ship piloting
   src/format.rs      Shared text formatting
+  src/window.rs      Primary window mode: fullscreen toggle
   src/search/        Object search requests, settings and the shared store
   src/planet_loading.rs Background refinement queue, guarded adoption and candidate cache
   src/scene/         Camera, controls, location, placement and wireframes

@@ -16,7 +16,7 @@ New debug readouts/switches belong here, not in separate windows or the canvas.
 | `log` | Last 2,000 tracing events from `devtools::log_layers`, level filter and grep; marks errors/warnings logged while hidden |
 | `terminal` | Command line and output |
 | `perf` | Frame graph, star generation/stream/draw metrics, cells/blocks/grid boxes, GPU passes and performance switches |
-| `render` | Scene overlays with its nested switches (orbits, labels, markers, velocity marker, craft predicted paths, body wireframes), FOV, realistic lighting, exposure/compression facts, glow and galaxy reference views |
+| `render` | Fullscreen, scene overlays with its nested switches (orbits, labels, markers, velocity marker, craft predicted paths, body wireframes), FOV, realistic lighting, exposure/compression facts, glow and galaxy reference views |
 | `atmosphere` | All-planet air switch, optional selected-planet override, presets and sliders for debug air, global shader steps, override top/optical depths, GPU frame and transparent-pass times |
 | `controls` | Shortcut help |
 | `state` | Camera, location, open list, anchor/page, presentation, selection, anchor star, clock and shown search |
