@@ -1,4 +1,4 @@
-//! Experimental layered planet loading: switch and per-planet progress. The
+//! Background planet refinement: pause switch and per-planet progress. The
 //! results themselves show in the planet inspector.
 use crate::{
     planet_loading::{PlanetLoading, PlanetState},
@@ -50,5 +50,5 @@ pub fn planets(ui: &mut egui::Ui, loading: &mut PlanetLoading) {
             rows.push((name, text, None));
         }
     }
-    terminal::facts_with_details(ui, "experimental-planets", &rows);
+    terminal::facts_with_details(ui, "planet-refinement", &rows);
 }

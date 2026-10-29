@@ -3,7 +3,7 @@ use crate::system::generated::{Mode, generated_system_with_mode};
 
 fn fixture() -> (Planet, Refinement) {
     let prepared =
-        generated_system_with_mode("g3c0200000.2.128", [0.0; 3], Mode::LayeredPrototype).unwrap();
+        generated_system_with_mode("g3c0200000.2.128", [0.0; 3], Mode::PrepareRefinement).unwrap();
     prepared
         .jobs
         .iter()
@@ -70,7 +70,8 @@ fn complete_projection_preserves_identity_orbits_spin_and_forcing() {
 #[test]
 fn refusal_keeps_the_partitioned_fallback_geometry_and_records_the_reason() {
     let prepared =
-        generated_system_with_mode("g13b6ffffcfeba.2.1", [0.0; 3], Mode::LayeredPrototype).unwrap();
+        generated_system_with_mode("g13b6ffffcfeba.2.1", [0.0; 3], Mode::PrepareRefinement)
+            .unwrap();
     let job = &prepared.jobs[0];
     let refused = Outcome::Fallback(Box::new(crate::system::structure::fallback::solve(
         &job.budget,
@@ -101,7 +102,7 @@ fn refusal_keeps_the_partitioned_fallback_geometry_and_records_the_reason() {
 #[test]
 fn inspected_cold_water_candidate_replaces_the_gas_coordinate_with_its_ice_boundary() {
     let prepared =
-        generated_system_with_mode("g3c0200000.2.128", [0.0; 3], Mode::LayeredPrototype).unwrap();
+        generated_system_with_mode("g3c0200000.2.128", [0.0; 3], Mode::PrepareRefinement).unwrap();
     let id = "g3c0200000.2.128#A/6";
     let job = prepared.jobs.iter().find(|j| j.id == id).unwrap();
     let old = prepared.system.planets.iter().find(|p| p.id == id).unwrap();

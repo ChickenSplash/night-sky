@@ -24,7 +24,7 @@ See [galaxy cells](../simulation/galaxy.md),
   rejection bound as a `Need`, which `supply`/`complete` work out.
   `Loader::with_threads(n)` shares each cell's stars among n threads:
   `star_threads` uses three quarters of the machine's threads, at least
-   1. This is now a shared work budget with experimental planet refinement,
+   1. This is now a shared work budget with background planet refinement,
    not an independent allowance for each loader. The perf tab's **CPU threads**
    section shows the shared ceiling and star-worker activity, from `Loader::take_worked`.
 - Stars needing something become holes, made again once it is worked out,
@@ -57,7 +57,7 @@ See [galaxy cells](../simulation/galaxy.md),
 
 ## Shared star and planet CPU budget
 
-`simulation::background` admits active star and experimental planet work into
+`simulation::background` admits active star and background planet work into
 one process-local budget: `max(1, available_parallelism × 3 / 4)`. On a machine
 reporting 20 threads that is **15 total**, not 15 per subsystem. The star loader's
 coordinator, scoped star workers and asynchronous cell-grid builders all hold
@@ -76,7 +76,7 @@ planet dispatch and result polling on the frame thread are nonblocking.
 This is a concurrency budget, not CPU affinity, real-time scheduling or a
 guarantee against dropped frames. Bevy rendering/ground jobs, search, craft
 loading and other processes are outside this budget. Interactive frame-time
-testing remains necessary. See [experimental planet loading](../simulation/planet-composition.md#experimental-background-loading)
+testing remains necessary. See [background planet refinement](../simulation/planet-composition.md#experimental-background-loading)
 for the opt-in mode and cancellation/cache behaviour.
 
 ## Magnitude changes

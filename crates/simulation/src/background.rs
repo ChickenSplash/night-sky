@@ -1,4 +1,4 @@
-//! Shared CPU budget for visible-star streaming and experimental planet solves.
+//! Shared CPU budget for visible-star streaming and background planet refinement.
 //! Permits limit active work, not idle OS threads. No main-thread waits.
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 

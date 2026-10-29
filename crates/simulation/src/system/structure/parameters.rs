@@ -3,23 +3,8 @@
 
 pub const EARTH_REFERENCE_RADIUS_M: f64 = 6_371_000.0;
 pub const EARTH_REFERENCE_FLUX_W_M2: f64 = 1361.0;
-pub const MIN_MASS_EARTH: f64 = 1e-4;
-pub const MAX_MASS_EARTH: f64 = 4000.0;
-pub const MIN_ENVELOPE_MASS_EARTH: f64 = 0.1;
-pub const MAX_CONDENSED_MASS_EARTH: f64 = 1000.0;
 pub const CONDENSED_FIT_LIMIT_EARTH: f64 = 20.0;
 pub const CONDENSED_CONTINUATION_EXPONENT: f64 = 0.2;
-pub const MAX_TRACE_VOLATILE_FRACTION: f64 = 0.01;
-pub const MIN_HELIUM_SHARE: f64 = 0.15;
-pub const MAX_HELIUM_SHARE: f64 = 0.35;
-pub const HEAVY_INERTIA_BASE: f64 = 0.36;
-pub const METAL_INERTIA_REDUCTION: f64 = 0.08;
-pub const ENVELOPE_INERTIA: f64 = 0.25;
-pub const MIN_INERTIA: f64 = 0.12;
-/// Environmental boundary model: percent-level gas self-gravity and cold-water
-/// radius contributions only. Neither limit is a classification/pressure cutoff.
-pub const MAX_BOUNDARY_GAS_FRACTION: f64 = 0.01;
-pub const MAX_BOUNDARY_WATER_FRACTION: f64 = 0.01;
 
 // Lopez & Fortney (2014), equation 4. Applied to envelope thickness only.
 pub const ENVELOPE_THICKNESS_EARTH: f64 = 2.06;

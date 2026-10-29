@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
-    Legacy,
+    Synchronous,
     /// Prepare work only. The caller must dispatch these jobs off the frame thread.
-    LayeredPrototype,
+    PrepareRefinement,
 }
 
 #[derive(Clone)]
@@ -23,10 +23,6 @@ pub struct PlanetJob {
 }
 
 impl PlanetJob {
-    pub fn solve(&self) -> Result<prototype::Solved, super::structure::coupled::Error> {
-        prototype::solve(&self.budget, &self.environment, Default::default())
-    }
-
     /// Layered result, or the labelled fallback when the layered solver refuses.
     pub fn resolve(&self) -> prototype::Outcome {
         prototype::resolve(&self.budget, &self.environment, Default::default())
@@ -41,7 +37,7 @@ pub struct Prepared {
 }
 
 pub fn generated_system(id: &str, position_ly: [f64; 3]) -> Option<StarSystem> {
-    generated_system_with_mode(id, position_ly, Mode::Legacy).map(|p| p.system)
+    generated_system_with_mode(id, position_ly, Mode::Synchronous).map(|p| p.system)
 }
 
 pub fn generated_system_with_mode(id: &str, position_ly: [f64; 3], mode: Mode) -> Option<Prepared> {
@@ -52,7 +48,7 @@ pub fn generated_system_with_mode(id: &str, position_ly: [f64; 3], mode: Mode) -
         .planets
         .into_iter()
         .map(|hosted| {
-            if mode == Mode::LayeredPrototype
+            if mode == Mode::PrepareRefinement
                 && let Some(environment) = &hosted.environment
             {
                 jobs.push(PlanetJob {
@@ -94,13 +90,13 @@ pub fn generated_system_with_mode(id: &str, position_ly: [f64; 3], mode: Mode) -
 mod tests {
     use super::*;
     #[test]
-    fn experimental_mode_prepares_work_without_changing_initial_planets() {
+    fn refinement_preparation_preserves_synchronous_planets() {
         for id in ["g1e0024924b.2.231", "g13b6ffffcfeba.2.1"] {
-            let legacy = generated_system_with_mode(id, [1.0; 3], Mode::Legacy).unwrap();
+            let initial = generated_system_with_mode(id, [1.0; 3], Mode::Synchronous).unwrap();
             let prototype =
-                generated_system_with_mode(id, [1.0; 3], Mode::LayeredPrototype).unwrap();
-            assert!(legacy.jobs.is_empty());
-            assert_eq!(legacy.system, prototype.system);
+                generated_system_with_mode(id, [1.0; 3], Mode::PrepareRefinement).unwrap();
+            assert!(initial.jobs.is_empty());
+            assert_eq!(initial.system, prototype.system);
             assert_eq!(prototype.jobs.len(), prototype.system.planets.len());
             for (job, planet) in prototype.jobs.iter().zip(&prototype.system.planets) {
                 assert_eq!(job.id, planet.id);
@@ -109,8 +105,8 @@ mod tests {
             }
             eprintln!(
                 "Initial generation {id}: {:.3} ms ({} planets)",
-                legacy.initial_generation.as_secs_f64() * 1000.0,
-                legacy.system.planets.len()
+                initial.initial_generation.as_secs_f64() * 1000.0,
+                initial.system.planets.len()
             );
         }
     }

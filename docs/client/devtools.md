@@ -49,17 +49,20 @@ pixels (off still runs vertices, never rasterises), 4x MSAA (both window cameras
 bloom, cull blocks outside the view (default on), split multiple systems, and
 stars as points (default on).
 
-## Experimental planet loading
+## Background planet refinement
 
-The `perf` tab's **experimental planet loading** section enables optional
-background layered calculations, off by default and not persisted
+The `perf` tab's **planet refinement** section controls
+background layered calculations, on by default and not persisted
 (`set_layered_planets <on>` or `ns planets on|off` also switch it). It shows
 per-planet queue/running/solved/refusal states by designation, in orbit order.
 The separate **CPU threads** section shows the shared star/planet budget and
 star-worker activity once, rather than repeating thread counts in each loader
-section. Solved results appear in the planet inspector's layered section and
-`/state/planet_loading`; the live scene still uses each planet's synchronous
-fallback result, not these layered results. See
+section. Ready candidates publish complete physical revisions when safe;
+close cameras, craft snapshots and active routes defer publication. Refusals
+and failures retain the usable synchronous fallback. Turning refinement off
+pauses work/publication, not already adopted facts. The inspector and
+`/state/planet_loading` distinguish candidates, deferrals and applied results;
+`/state/planet_results` exports active facts. See
 [composition](../simulation/planet-composition.md#experimental-background-loading)
 for target selection, caching, cancellation, the transport record and limits.
 

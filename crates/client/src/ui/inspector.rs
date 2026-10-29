@@ -43,7 +43,7 @@ impl Cache {
 
     /// A star's facts include its motion once its position is known. A
     /// craft's change every frame, so are never kept. A planet's change with
-    /// its experimental layered result.
+    /// its active revision and background refinement status.
     pub(crate) fn get(
         &mut self,
         object: &ObjectRef,
@@ -153,7 +153,7 @@ pub(crate) fn position_ly(
 }
 
 /// `position_ly` is the system's, from home, when known.
-/// Without the experimental layered section.
+/// Without background refinement diagnostics.
 #[cfg(test)]
 pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>, now: Now) -> Info {
     describe_with(object, galaxy, position_ly, now, None, None)
@@ -888,7 +888,7 @@ mod tests {
             assert!(ids.insert(&field.id), "duplicate field {}", field.id);
             assert!(!field.value.text().is_empty());
         }
-        // The experimental layered section appears only while its mode is on.
+        // Candidate diagnostics appear only while background refinement is on.
         for section in Section::ALL {
             let shown = info.fields.iter().any(|f| f.section == section);
             assert_eq!(shown, section != Section::Layered, "{section:?}");
@@ -1144,16 +1144,21 @@ mod tests {
         use space_simulation::system::{
             generated::{Mode, generated_system_with_mode},
             physical,
-            structure::{coupled, fallback},
+            structure::{coupled, fallback, prototype},
         };
         let galaxy = space_simulation::demo_galaxy();
         let system = "g13b6ffffcfeba.2.1";
         let prepared =
-            generated_system_with_mode(system, [0.0; 3], Mode::LayeredPrototype).unwrap();
+            generated_system_with_mode(system, [0.0; 3], Mode::PrepareRefinement).unwrap();
         let (job, solved) = prepared
             .jobs
             .iter()
-            .find_map(|j| Some((j, j.solve().ok()?)))
+            .find_map(|j| {
+                Some((
+                    j,
+                    prototype::solve(&j.budget, &j.environment, Default::default()).ok()?,
+                ))
+            })
             .unwrap();
         let object = ObjectRef::Planet { id: job.id.clone() };
         let layered = |loading: &PlanetLoading| {
@@ -1221,7 +1226,7 @@ mod tests {
                 .iter()
                 .any(|(f, text)| f == "layered.fidelity" && text.contains("Approximate"))
         );
-        // The plain readout and the browser never include the experimental section.
+        // The plain readout and the browser never include candidate diagnostics.
         let plain = describe(&object, &galaxy, None, Now::none());
         assert!(!plain.fields.iter().any(|f| f.section == Section::Layered));
     }

@@ -12,7 +12,7 @@ fn fixture() -> (
     String,
 ) {
     let key = "g3c0200000.2.128";
-    let prepared = generated_system_with_mode(key, [0.0; 3], Mode::LayeredPrototype).unwrap();
+    let prepared = generated_system_with_mode(key, [0.0; 3], Mode::PrepareRefinement).unwrap();
     let (id, refinement) = prepared
         .jobs
         .iter()
@@ -107,7 +107,7 @@ fn distant_camera_adopts_once_and_all_projections_validate() {
     // Rebuilding an evicted candidate cache reuses the committed result instead
     // of solving it again and reporting an already-adopted base as stale.
     let prepared =
-        generated_system_with_mode(&revisit.id, [0.0; 3], Mode::LayeredPrototype).unwrap();
+        generated_system_with_mode(&revisit.id, [0.0; 3], Mode::PrepareRefinement).unwrap();
     l.target(Some(revisit.id.clone()));
     let base = prepared
         .jobs

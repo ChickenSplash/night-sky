@@ -65,7 +65,7 @@ pub struct LayeredPlanet {
     pub model_fidelity: ModelFidelity,
     /// Global closure assumptions, in addition to each layer's limitations.
     pub model_limitations: Vec<String>,
-    /// Same transport shape as the legacy record. `approximations` lists the
+    /// Conserved material and reference structure. `approximations` lists the
     /// model IDs used. `reference_radius_m` is the top of the condensed surface
     /// (frost included) for thin models, or the explicit one-bar envelope level
     /// when present. Sub-bar envelopes reference their condensed/gas boundary.

@@ -140,7 +140,7 @@ The Bevy/egui client in `crates/client`:
   and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
   Layered results are calculated/cached through the
-  [background prototype](simulation/planet-composition.md#experimental-background-loading),
+   [background refinement](simulation/planet-composition.md#experimental-background-loading),
   and adopted as whole physical revisions when safe. Existing craft system
   snapshots, active routes and close cameras defer publication. Adopted facts
   survive revisits and voyage-cache eviction for the session. The dry solver's
@@ -157,8 +157,8 @@ The Bevy/egui client in `crates/client`:
   extend the prototype to 2,000 K, without claiming resolved hot phases.
   Exact deep-ice polymorphs, precise supercooled-liquid physics and complete
   giant-envelope coverage remain unresolved. An optional locally prepared
-  [H/He density resource and coupled envelope solve](simulation/planet-composition.md#self-gravitating-envelope-and-loaded-interior)
-   now supports a bounded subset of envelopes, without driving live rendering.
+   [H/He density resource and coupled envelope solve](simulation/planet-composition.md#self-gravitating-envelope-and-loaded-interior)
+    supports a bounded subset of envelopes; validated, safely adopted results drive live rendering.
    Cold mixed envelopes include approximate [locally suspended condensates](simulation/planet-composition.md#suspended-secondary-condensates),
    with conserved vapour/condensate splits but no settling or latent-heat closure.
   Thin atmosphere coupling matches supported dilute gas inventories to radial

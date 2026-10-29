@@ -3,7 +3,7 @@ use super::*;
 use crate::system::{
     composition::{Budget, Inventory, Material, Reservoir},
     forcing::Forcing,
-    structure::{self, StructureError, fallback::Fallback},
+    structure::{self, fallback::Fallback},
 };
 use crate::units::{ATOMIC_MASS_KG, BOLTZMANN_J_K, EARTH_MASS_KG, GRAVITATIONAL_CONSTANT};
 use space_shared::PlanetEnvironment;
@@ -20,6 +20,23 @@ pub enum RetentionSolve {
     Converged { steps: u8 },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RetentionError {
+    InvalidInventory(&'static str),
+    NonConvergence,
+}
+
+impl std::fmt::Display for RetentionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidInventory(name) => write!(f, "invalid retention {name}"),
+            Self::NonConvergence => write!(f, "retention did not converge"),
+        }
+    }
+}
+
+impl std::error::Error for RetentionError {}
+
 /// Solve survival = Jeans-inspired survival(final mass, final radius).
 /// Bisection needs a sign bracket and continuity, not a monotone radius law.
 /// Trial structure is explicitly prescribed fallback, never a layered solve.
@@ -27,7 +44,7 @@ pub enum RetentionSolve {
 pub(super) fn reconcile(
     formation: &Budget,
     forcing: &Forcing,
-) -> Result<(Budget, Fallback, RetentionSolve), StructureError> {
+) -> Result<(Budget, Fallback, RetentionSolve), RetentionError> {
     let environment = forcing.environment();
     let formation = secondary_budget(formation, forcing)?;
     // Always solve against the immutable source, not the previously retained
@@ -42,7 +59,7 @@ pub(super) fn reconcile(
             formation.source().mass_kg(Material::Helium),
         ),
     ])
-    .map_err(|_| StructureError::InvalidValue("source gas"))?;
+    .map_err(|_| RetentionError::InvalidInventory("source gas"))?;
     if gas.total_mass_kg() == 0.0 {
         return Ok((
             formation,
@@ -50,17 +67,17 @@ pub(super) fn reconcile(
             RetentionSolve::NoEnvelope,
         ));
     }
-    let at = |survival: f64| -> Result<(Budget, Fallback), StructureError> {
+    let at = |survival: f64| -> Result<(Budget, Fallback), RetentionError> {
         let gas = gas
             .scaled(survival)
-            .map_err(|_| StructureError::InvalidValue("retained gas"))?;
+            .map_err(|_| RetentionError::InvalidInventory("retained gas"))?;
         let budget = Budget::new(
             *formation.source(),
             *formation.reservoir(Reservoir::Interior),
             *formation.reservoir(Reservoir::CondensedVolatiles),
             gas,
         )
-        .map_err(|_| StructureError::InvalidValue("retained budget"))?;
+        .map_err(|_| RetentionError::InvalidInventory("retained budget"))?;
         let physical = structure::fallback::initial(&budget, &environment);
         Ok((budget, physical))
     };
@@ -78,7 +95,7 @@ pub(super) fn reconcile(
             low = survival;
         }
     }
-    Err(StructureError::OutsideDomain("retention did not converge"))
+    Err(RetentionError::NonConvergence)
 }
 
 /// Accessible volatile supply is a population prescription, not solved outgassing.
@@ -91,7 +108,7 @@ pub(crate) fn accessible_fraction(material: Material) -> f64 {
     }
 }
 
-fn secondary_budget(previous: &Budget, forcing: &Forcing) -> Result<Budget, StructureError> {
+fn secondary_budget(previous: &Budget, forcing: &Forcing) -> Result<Budget, RetentionError> {
     let source = previous.source();
     let interior = Inventory::new(&Material::ALL.map(|m| {
         (
@@ -103,7 +120,7 @@ fn secondary_budget(previous: &Budget, forcing: &Forcing) -> Result<Budget, Stru
             },
         )
     }))
-    .map_err(|_| StructureError::InvalidValue("source interior"))?;
+    .map_err(|_| RetentionError::InvalidInventory("source interior"))?;
     let condensed = Inventory::new(&Material::ALL.map(|m| {
         (
             m,
@@ -114,14 +131,14 @@ fn secondary_budget(previous: &Budget, forcing: &Forcing) -> Result<Budget, Stru
             },
         )
     }))
-    .map_err(|_| StructureError::InvalidValue("source volatiles"))?;
+    .map_err(|_| RetentionError::InvalidInventory("source volatiles"))?;
     let gas = Inventory::new(&[
         (Material::Hydrogen, source.mass_kg(Material::Hydrogen)),
         (Material::Helium, source.mass_kg(Material::Helium)),
     ])
-    .map_err(|_| StructureError::InvalidValue("source envelope"))?;
+    .map_err(|_| RetentionError::InvalidInventory("source envelope"))?;
     let initial = Budget::new(*source, interior, condensed, gas)
-        .map_err(|_| StructureError::InvalidValue("source budget"))?;
+        .map_err(|_| RetentionError::InvalidInventory("source budget"))?;
     // Fixed pre-loss structure at the final irradiation/age. This deliberately
     // avoids claiming a coupled multi-species evolution/escape solution.
     let physical = structure::fallback::initial(&initial, &forcing.environment());
@@ -133,9 +150,9 @@ fn secondary_budget(previous: &Budget, forcing: &Forcing) -> Result<Budget, Stru
             condensed.mass_kg(m) * (1.0 - accessible_fraction(m) * (1.0 - survival)),
         )
     }))
-    .map_err(|_| StructureError::InvalidValue("retained volatiles"))?;
+    .map_err(|_| RetentionError::InvalidInventory("retained volatiles"))?;
     Budget::new(*source, interior, condensed, gas)
-        .map_err(|_| StructureError::InvalidValue("secondary escape budget"))
+        .map_err(|_| RetentionError::InvalidInventory("secondary escape budget"))
 }
 
 fn hydrogen_survival(physical: &Fallback, forcing: &Forcing) -> f64 {
@@ -318,7 +335,6 @@ mod tests {
         )
         .unwrap();
         let forcing = Forcing::new(1361.0, 1e6, 0.4, 4.5).unwrap();
-        assert!(structure::derive(&formation, 1361.0, 4.5).is_err());
         let (retained, fallback, status) = reconcile(&formation, &forcing).unwrap();
         assert_eq!(status, RetentionSolve::NoEnvelope);
         assert_eq!(retained.source(), &inventory);

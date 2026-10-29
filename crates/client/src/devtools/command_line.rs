@@ -326,7 +326,7 @@ pub const USAGE: [Usage; 36] = [
     Usage {
         name: "set_layered_planets",
         fields: &["on"],
-        about: "Experimental layered planet calculations, shown in the planet inspector beside the legacy facts; rendering stays legacy",
+        about: "Pause or resume background planet refinement and safe adoption; already adopted results stay active",
     },
     Usage {
         name: "set_fullscreen",

@@ -78,7 +78,7 @@ records are visibly unknown, never zero-filled. Water-rich boundaries make no
 ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 
 The player-facing order is Overview, Composition, Atmosphere, Orbit and rotation,
-then Model details (closed by default). While experimental layered calculations
+then Model details (closed by default). While background refinement
 are on, a **Background refinement** section follows Overview, beside
 the active result; see [the layered record](../../simulation/planet-composition.md#layered-transport-record).
 It distinguishes unapplied candidates, safety deferrals and applied active

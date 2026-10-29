@@ -11,7 +11,7 @@
 //! - Generation keeps spins slower than `MAX_FLATTENING` allows
 //!   (`fastest_planet_hours`, `fastest_star_hours`).
 
-use crate::{Class, EARTH_SOLAR, SUN_GM, SUN_RADIUS_METRES};
+use crate::{EARTH_SOLAR, SUN_GM, SUN_RADIUS_METRES};
 use glam::DVec3;
 use space_shared::{Planet, Spin, Star};
 use std::f64::consts::TAU;
@@ -58,35 +58,6 @@ impl Spheroid {
     }
 }
 
-impl Class {
-    /// From `Class::name`, as a planet carries it.
-    pub fn from_name(name: &str) -> Option<Self> {
-        [
-            Class::Rocky,
-            Class::MetalRich,
-            Class::WaterRich,
-            Class::SubNeptune,
-            Class::EnvelopeWorld,
-            Class::GasGiant,
-        ]
-        .into_iter()
-        .find(|class| class.name() == name)
-    }
-
-    /// Moment of inertia over $Ma^2$: 0.4 for uniform density, less the more
-    /// the mass gathers at the centre. Representative values (Earth 0.331,
-    /// Jupiter 0.254, Uranus 0.23). Legacy records only: new generation supplies
-    /// its composition-derived factor explicitly.
-    fn inertia(self) -> f64 {
-        match self {
-            Class::Rocky | Class::MetalRich | Class::WaterRich => 0.33,
-            Class::SubNeptune => 0.26,
-            Class::EnvelopeWorld => 0.23,
-            Class::GasGiant => 0.25,
-        }
-    }
-}
-
 fn response(inertia: f64) -> f64 {
     2.5 / (1.0 + 6.25 * (1.0 - 1.5 * inertia).powi(2))
 }
@@ -123,28 +94,15 @@ pub(crate) fn star_flattening(mass_solar: f64, radius_solar: f64, period_hours: 
     w.min(MAX_FLATTENING)
 }
 
-/// Physical inertia for generated planets. Class fallback is restricted to
-/// legacy records without composition; malformed new records use a neutral factor.
+/// Physical inertia for generated planets. Missing or malformed factors use a
+/// neutral response, never a display-class heuristic.
 /// Accepts the whole Darwin-Radau domain: centrally condensed envelope worlds
 /// fall well below 0.1 and must keep the factor that limited their spin.
 pub fn planet_shape(planet: &Planet) -> Spheroid {
     let inertia = planet
         .inertia_factor
         .filter(|k| k.is_finite() && *k > 0.0 && *k <= 2.0 / 3.0)
-        .unwrap_or_else(|| {
-            if planet.physical.is_some() {
-                // Malformed new data must not turn a display label into physics.
-                return 0.33;
-            }
-            match planet.class.as_str() {
-                "Dwarf planet" => return 0.35,
-                "Ice giant" => return 0.23,
-                _ => {}
-            }
-            Class::from_name(&planet.class)
-                .unwrap_or(Class::Rocky)
-                .inertia()
-        });
+        .unwrap_or(0.33);
     let radius = planet.radius_km * 1_000.0;
     Spheroid::of(
         radius,
@@ -263,20 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn classes_round_trip_by_name() {
-        for class in [
-            Class::Rocky,
-            Class::MetalRich,
-            Class::WaterRich,
-            Class::SubNeptune,
-            Class::EnvelopeWorld,
-            Class::GasGiant,
-        ] {
-            assert_eq!(Class::from_name(class.name()), Some(class));
-        }
-    }
-
-    #[test]
     fn transported_physical_inertia_overrides_labels_and_legacy_is_unknown() {
         let mut planet = Planet {
             mass_earth: 5.0,
@@ -312,5 +256,15 @@ mod tests {
         wire.as_object_mut().unwrap().remove("inertia_factor");
         let legacy: Planet = serde_json::from_value(wire).unwrap();
         assert_eq!(legacy.inertia_factor, None);
+        for factor in [None, Some(f64::NAN), Some(0.0), Some(0.7)] {
+            planet.inertia_factor = factor;
+            for physical in [None, legacy.physical.clone()] {
+                planet.physical = physical;
+                for class in ["Rocky planet", "Gas giant", "Ice giant", "Dwarf planet"] {
+                    planet.class = class.into();
+                    assert!(close(&planet, 0.33));
+                }
+            }
+        }
     }
 }

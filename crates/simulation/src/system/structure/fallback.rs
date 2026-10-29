@@ -3,10 +3,8 @@
 //! iteration, external data or error path. Never counted as a layered solve.
 //! See docs/simulation/planet-composition.md#fallback-structure.
 use super::{
-    Approximation,
     coupled::Error,
     parameters::{CONDENSED_FIT_LIMIT_EARTH, EARTH_REFERENCE_FLUX_W_M2, EARTH_REFERENCE_RADIUS_M},
-    radius,
 };
 use crate::{
     system::composition::{Budget, Inventory, Material},
@@ -15,6 +13,7 @@ use crate::{
 use space_shared::{PlanetEnvironment, RadiusReference};
 use std::f64::consts::PI;
 
+mod fits;
 pub mod partition;
 
 pub const MODEL_ID: &str = "fallback_mass_radius_v1";
@@ -180,7 +179,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         };
         let inner = EARTH_REFERENCE_RADIUS_M * f64::cbrt(volume);
         volume += inventory.total_mass_kg() / condensed_kg
-            * radius::pure_radius_earth(proxy, condensed_earth)
+            * fits::pure_radius_earth(proxy, condensed_earth)
                 .expect("refractory and water fits exist")
                 .powi(3);
         regions.push(Region {
@@ -219,9 +218,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
     let mut radius_m = condensed_radius_m;
     let mut one_bar_radius_m = None;
     if let Some(gas) = gas {
-        let mut warnings = Vec::new();
-        let one_bar = radius::one_bar(mass_kg, h_he, condensed_radius_m, flux, age, &mut warnings);
-        clamped |= warnings.contains(&Approximation::EnvelopeFitInputsBounded);
+        let one_bar = fits::one_bar(mass_kg, h_he, condensed_radius_m, flux, age, &mut clamped);
         let mut top = condensed_radius_m;
         if let Some(r) = one_bar {
             (radius_m, reference, one_bar_radius_m) = (r, RadiusReference::OneBar, Some(r));

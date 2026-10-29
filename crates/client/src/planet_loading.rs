@@ -56,7 +56,7 @@ impl PlanetState {
 
 /// One planet's layered result as the inspector sees it.
 pub enum Layered<'a> {
-    /// The experimental mode is switched off.
+    /// Background work and publication are paused; adopted results remain active.
     Off,
     /// Its system is not the loader's target, or inputs are still being prepared.
     Waiting,
@@ -398,9 +398,13 @@ impl PlanetLoading {
                         return;
                     }
                     let result = std::panic::catch_unwind(|| {
-                        generated::generated_system_with_mode(&id, [0.0; 3], Mode::LayeredPrototype)
-                            .map(|p| (p.jobs, p.initial_generation.as_secs_f64() * 1000.0))
-                            .ok_or_else(|| "System generation unavailable".to_owned())
+                        generated::generated_system_with_mode(
+                            &id,
+                            [0.0; 3],
+                            Mode::PrepareRefinement,
+                        )
+                        .map(|p| (p.jobs, p.initial_generation.as_secs_f64() * 1000.0))
+                        .ok_or_else(|| "System generation unavailable".to_owned())
                     })
                     .unwrap_or_else(|_| Err("System generation worker panicked".into()));
                     if !cancel.load(Ordering::Relaxed) {

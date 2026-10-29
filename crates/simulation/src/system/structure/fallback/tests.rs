@@ -133,6 +133,42 @@ fn earth_twin_is_close_to_earth() {
 }
 
 #[test]
+fn prescribed_reference_worlds_keep_broad_radius_and_density_ranges() {
+    // Prescribed budgets, not reconstructed formation histories or accuracy bounds.
+    for (mass, metal, water, gas, flux, radii, densities) in [
+        (
+            0.0553,
+            0.7,
+            0.0,
+            0.0,
+            1361.0 / 0.387_f64.powi(2),
+            0.323..0.443,
+            4000.0..8000.0,
+        ),
+        (1.0, 0.325, 0.0, 0.0, 1361.0, 0.9..1.1, 4500.0..6500.0),
+        (1.0, 0.325, 0.5, 0.0, 1361.0, 1.1..1.6, 1500.0..4000.0),
+        (17.0, 0.325, 0.6, 0.15, 1.5, 3.0..6.0, 400.0..3500.0),
+        (95.0, 0.325, 0.0, 0.75, 15.0, 8.0..12.0, 300.0..1500.0),
+        (318.0, 0.325, 0.0, 0.9, 50.0, 10.0..12.0, 900.0..1800.0),
+    ] {
+        let refractory = 1.0 - water - gas;
+        let f = solve_checked(
+            &budget(&[
+                (Material::Metal, mass * refractory * metal),
+                (Material::Silicate, mass * refractory * (1.0 - metal)),
+                (Material::Water, mass * water),
+                (Material::Hydrogen, mass * gas * 0.75),
+                (Material::Helium, mass * gas * 0.25),
+            ]),
+            &environment(flux, 255.0, 4.5),
+        );
+        let p = physical::fallback(&f).physical;
+        assert!(radii.contains(&(f.radius_m / 6.371e6)), "{mass}: {f:?}");
+        assert!(densities.contains(&p.mean_density_kg_m3), "{mass}: {p:?}");
+    }
+}
+
+#[test]
 fn jupiter_twin_has_a_giant_radius_and_low_inertia() {
     let f = solve_checked(
         &budget(&[

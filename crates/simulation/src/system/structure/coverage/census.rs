@@ -80,7 +80,7 @@ pub(super) fn report<'a>(rows: &'a [Row]) -> String {
         .filter(|r| !r.envelope && r.category != Category::Solved)
         .collect();
     let mut out = format!(
-        "# P2 generated-input census\n\n- {} planets: {} envelope-route bodies, {} other refusals.\n- Same deterministic calibration population; thin solver unchanged.\n- All fractions are retained mass fractions, before prototype blow-off. H/He mass is not the total solved envelope mass when passive secondary traces are present.\n- Temperature is irradiation equilibrium, not a deep-envelope temperature. This input census does not infer envelope pressure, phase or radius.\n- Envelope is a routing label (now including solved envelopes), not a giant classification. Classes are legacy generator labels.\n- Diagnostic bins select requirements and examples only; they introduce no physics thresholds.\n",
+        "# Generated-input census\n\n- {} planets: {} envelope-route bodies, {} other refusals.\n- Deterministic calibration keys; current synchronous generation and retention. Archived P2 evidence describes its original inputs.\n- All fractions are retained mass fractions, before prototype blow-off. H/He mass is not the total solved envelope mass when passive secondary traces are present.\n- Temperature is irradiation equilibrium, not a deep-envelope temperature. This input census does not infer envelope pressure, phase or radius.\n- Envelope is a routing label (including solved envelopes), not a giant classification. Classes are descriptive generator labels.\n- Diagnostic bins select requirements and examples only; they introduce no physics thresholds.\n",
         rows.len(),
         envelopes.len(),
         failures.len()
@@ -98,7 +98,7 @@ pub(super) fn report<'a>(rows: &'a [Row]) -> String {
     );
     group_table(
         &mut out,
-        "Envelope-route bodies by legacy class",
+        "Envelope-route bodies by generated class",
         groups(&envelopes, |r| r.class.to_owned()),
     );
     group_table(
@@ -243,12 +243,12 @@ fn census_candidates_and_input_columns() {
             deposit_m: f64::NAN,
             escaped: String::new(),
             escaped_fraction: f64::NAN,
-            legacy_pressure_pa: 0.0,
+            initial_pressure_pa: 0.0,
             radius_change: None,
             eos_evaluations: 0,
             milliseconds: 0.0,
             new_radius_km: f64::NAN,
-            legacy_radius_km: 0.0,
+            initial_radius_km: 0.0,
             inertia_factor: f64::NAN,
             interface_pressure_pa: f64::NAN,
             gravity_residual: f64::NAN,

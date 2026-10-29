@@ -13,7 +13,7 @@ Default generation is now authoritative on one synchronous
 [labelled fallback result](#synchronous-reference-partition) per planet,
 `Planet::initial_result`. Live mass, radius, inertia, reservoirs, atmosphere and
 spin are all projections of it, installed together; the legacy
-`structure::derive` model no longer feeds generated planets. Opt-in background
+`structure::derive` model and boundary solver have been removed. Background
 loading refines those results by default and adopts complete revisions when
 [safe](#safe-background-adoption), otherwise retaining the active fallback.
 The separate [water-shell solver](#headless-restricted-water-shell-solver) uses
@@ -147,7 +147,7 @@ solid surface. Their use pins the system against further adoption.
 Search stays deterministic on synchronous fallback facts, discloses each planet's
 input/model/sequence basis and flags a differing loaded basis as not revalidated.
 It does not promise an exact layered match. Developer snapshots expose active
-results/geometry separately from the experimental candidate cache.
+results/geometry separately from the background candidate cache.
 
 ### Safe background adoption
 
@@ -2032,8 +2032,8 @@ The section is absent while the mode is off.
 The object browser's detail pane does not show it.
 
 `system::generated::generated_system_with_mode` defaults via the existing
-`generated_system` wrapper to the historically named `Mode::Legacy`, now using
-the synchronous new-model fallback. `Mode::LayeredPrototype` also
+`generated_system` wrapper to `Mode::Synchronous`, using
+the synchronous fallback. `Mode::PrepareRefinement` also
 prepares immutable per-planet budgets, environments and starting results, without solving them
 inline or changing the initial wire system. The client prepares these inputs
 off-thread by reconstructing the deterministic natural system once, avoiding
@@ -2091,7 +2091,7 @@ fixed quadrature, no iteration, work budget, external data or error path.
   [cold compressed radius](#cold-compressed-heavy-material-radius), with the
   same power-law continuation above 20 Earth masses (labelled).
 - **H/He envelope**, when present: the one-bar radius from the envelope fit and
-  thin-column support limit shared with the legacy model
+  thin-column support limit
   ([light envelopes](#light-envelopes-and-the-giant-transition)). Sub-bar gas
   is represented as one isothermal scale height (capped at the condensed
   radius) above a condensed reference.
@@ -2188,12 +2188,13 @@ Use `NS_COVERAGE_THREADS=20` for comparisons on the development machine.
 
 Every refusal also runs the fallback structure and checks its record. The
 summary's Fallback section counts checked fallbacks and their radius difference
-from the synchronous generated reference (historical columns still call it
-legacy); the TSV's last column, `fallback_radius_km`, is `NaN` for layered
+from the synchronous generated reference (`initial_radius_km` and `initial_pa`
+identify that basis in new TSVs; archived P2 TSVs retain their historical
+`legacy_radius_km` and `legacy_pa` names). The TSV's last column, `fallback_radius_km`, is `NaN` for layered
 solves.
 
 The same run writes `data/tmp/composition-census.md` for P2 requirements:
-envelope first blockers, legacy classes, intersections of mass/H/He fraction/
+envelope first blockers, generated classes, intersections of mass/H/He fraction/
 equilibrium-temperature bands, composition bounds and deterministic regression
 candidates. It lists every non-envelope refusal as well. The TSV appends
 separate hydrogen, helium and refractory mass fractions, H/He and non-H/He
@@ -2227,8 +2228,18 @@ cache/revisit and inspected ice-boundary regressions are recorded in
 `data/tmp/p3-adoption-{check,envelope}.log`. It adds no new EOS prescription or
 population-coverage claim. Targeted user visual/interactive acceptance is deferred
 to [P4](../plans/planet-composition.md#p4-targeted-interactive-adoption-acceptance)
-by user decision; P3 closes with legacy cleanup and its automated checks. The
+by user decision; P3 is now closed after legacy cleanup and its automated checks. The
 deferred checks are not claimed complete.
+
+The cleanup removes the obsolete whole-body solver, heuristic inertia and
+legacy generation/comparison naming. The unchanged radius-fit equations now
+belong to `structure/fallback/fits.rs`, with regressions for compression,
+stripping, thermal trends and broad prescribed reference worlds. Retention
+owns its own errors; shape never derives inertia from a display class.
+`./scripts/check.sh` passes (471 simulation and 392 client tests), as do all
+27 envelope-filtered fixtures and the saved 315-fallback audit (radii unchanged).
+Fresh standard coverage remains **1,437/1,544 layered and 107 checked fallbacks**.
+Logs: `data/tmp/p3-cleanup-{check,envelope,audit,coverage}.log`.
 
 1. H/He is an ordinary exchangeable gas, with no amount threshold. A body enters
    the **envelope route** only when the thin column refuses its gas: H/He alone above the
@@ -2647,9 +2658,8 @@ pressure. History: [plan](../plans/planet-composition.md#p3-default-cutover-and-
 Initial generated inertia factors come from the fallback's layered shell
 integration, including the reference partition's atmosphere column, normalised
 by the reference radius. They range from about 0.06 (centrally condensed
-envelope worlds) to 0.37. The legacy `structure::derive` model keeps its own
-clamped heuristic, `k=clamp((1-f) k_heavy (R_heavy/R)^2 + 0.25f,0.12,0.36)`,
-but no longer feeds generated planets. Neither is a giant-interior prediction.
+envelope worlds) to 0.37. The obsolete clamped structure heuristic has been
+removed. The fallback integration is not a giant-interior prediction.
 After adoption, inertia comes from the layered result's region integration.
 The assigned rotation phase/period is preserved, with shape recomputed using
 the same bounded flattening prescription, not a new angular-momentum or spin-
@@ -2669,8 +2679,8 @@ states keep their assigned periods, with the existing shape cap as a safeguard.
 `Planet::inertia_factor` is optional for legacy compatibility, transported early
 on both generated and task-overlay paths. Values in the Darwin-Radau domain
 `(0, 2/3]` override all class strings in `planet_shape`, so shape uses the same
-factor that limited spin. Only records without composition may use the isolated
-legacy class fallback; malformed new records use a neutral factor, never their label.
+factor that limited spin. Missing or malformed factors use a neutral response
+of 0.33, never a display-class heuristic, including older records without composition.
 
 ## Transport and downstream consumers
 

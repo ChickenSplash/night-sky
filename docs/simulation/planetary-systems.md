@@ -156,11 +156,10 @@ $$
 f = \frac{\tfrac{5}{2}m}{1 + \tfrac{25}{4}\left(1 - \tfrac{3}{2}k\right)^2}
 $$
 
-  Generated $k$ uses an approximate composition/envelope central-concentration
-  prescription, [documented here](planet-composition.md#inertia-and-spin).
-  It is carried on wire records so clients and spin limits agree. Only older
-  legacy records without composition or a valid physical factor use an isolated
-  class-based fallback; malformed new records never use their class as physics.
+  Generated $k$ comes from the active result's layer integration,
+  [documented here](planet-composition.md#inertia-and-spin).
+  It is carried on wire records so clients and spin limits agree. Missing or
+  malformed factors use a neutral response of 0.33, never a display-class heuristic.
 - **Stars, Roche model** (mass at the centre). The equator sits where
   $GM/R_e + \omega^2 R_e^2/2 = GM/R_p$, up to $1.5R_p$ at break-up. With the
   mean radius kept, $R_e/R_p = 1/(1 - W)$ for $W = \omega^2 R^3 / 2GM$, so

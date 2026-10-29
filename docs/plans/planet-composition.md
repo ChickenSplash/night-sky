@@ -2,16 +2,14 @@
 
 ## Status and goal
 
-**P1 and P2 complete and signed off. Next: P3, default cutover and legacy
-removal. P3 contract, model-independent validation and the synchronous live
-cutover, consumer adapters and guarded background adoption are implemented.
-Only legacy cleanup and its automated regression checks remain to close P3.
+**P1 and P2 complete and signed off. P3 complete: default cutover, consumer
+adapters, guarded background adoption, legacy removal and automated checks.
 Targeted interactive adoption review is deferred to P4 by user decision.** Every generated planet
 starts on one synchronous fallback and may adopt one validated layered revision.
 Live mass, radius, inertia, reservoirs and atmosphere belong to that result.
 
-`structure::derive` no longer feeds generated planets; its code remains until
-the final removal step. The layered solver joins dry, water, protected-trace
+`structure::derive`, its structure/error/approximation types and heuristic inertia
+have been removed. The layered solver joins dry, water, protected-trace
 and atmosphere-coupling solvers, with default-on background loading and whole-result
 publication when safe, otherwise an explicit deferral. Rendering and navigation read the new live
 projections; rendering optics now read the result directly.
@@ -35,7 +33,7 @@ quantities and no hidden legacy substitution remain non-negotiable. Fallback
 results are always distinguishable from layered solves and never counted as
 layered coverage. No universal physical radius-error tolerance is agreed.
 
-Legacy removal is the remaining P3 implementation task; it does not wait for
+Legacy removal is implemented and does not wait for
 the interactive checks now assigned to P4. The fast
 synchronous answer and live projections now use the new fallback result; optics
 read that result directly. Background layered results can now become authoritative.
@@ -663,7 +661,8 @@ audit limitations explicitly accepted. No further coverage or physics work is
 required to close P2. P3 investigation and cutover design are recorded below;
 the headless contract/validation slice and fallback-based retention trials are
 implemented. Synchronous live geometry/export cutover is also implemented;
-consumer adapters and guarded background adoption are implemented. Legacy cleanup remains for P3; targeted interactive adoption review belongs to P4.
+consumer adapters, guarded background adoption and legacy cleanup are implemented.
+Cleanup's automated verification passes; targeted interactive adoption review belongs to P4.
 
 **Scope control:** before each change, state the observed gap, smallest useful
 prescription, fixtures and stop condition. A slice ships only if it changes
@@ -693,7 +692,7 @@ Paths below are relative to `crates/`.
 | Atmosphere optics and descent: `client/src/render/atmosphere/generated.rs`, `simulation/src/system/atmosphere/{optics,profile}.rs` | **Done:** checked result optics and geometry-based descent, without an H/He threshold. A reached condensed top keeps its mesh/reflection; an unresolved proxy alone fades black. Missing optics retain a visible reference proxy. | Keep the bounded continuation labelled, not a full deep profile or cloud deck. Unsupported suspended-cloud optics remain explicit. |
 | Camera and craft: `simulation/src/system/clearance.rs`, `craft.rs`, `craft/route.rs`, `craft/voyage.rs`, `client/src/scene/location.rs`, `client/src/craft.rs` | **Adapters done:** clearance checks projections and uses enclosed reference gravity for gas, total mass for orbital speed. Camera fields refresh on changed system facts/revision. Spawn/readouts identify model-reference altitude; craft retain coherent immutable field/route snapshots. | **Step 4:** adopt one revision across view and craft, or defer it. Never refresh a live craft field independently of its route/state. Suspended-condensate drag remains unsupported, not ignored. |
 | Search and distant generation: `simulation/src/search/{engine,live}.rs`, `craft/voyage.rs` | **Done:** predicates use synchronous fallback generation. Planet hits carry provenance and revision; browser flags a differing loaded basis as not revalidated, without rewriting deterministic results. | An exact layered query is not promised. Any further revalidation/filter reconciliation belongs with step-4 adoption, not worker completion. |
-| Inspector and developer tools: `client/src/ui/inspector/`, `devtools/`, planet loader readout | **Done:** loaded active facts/revision, ordered regions, phase knowledge and limitations; separate unapplied candidates. `/state/planet_results` exports active results/geometry, not loader cache records. | Retire the experimental toggle/comparison path after background authority is delivered. |
+| Inspector and developer tools: `client/src/ui/inspector/`, `devtools/`, planet loader readout | **Done:** loaded active facts/revision, ordered regions, phase knowledge and limitations; separate unapplied candidates. `/state/planet_results` exports active results/geometry, not loader cache records. | Keep the background-refinement pause control and active/candidate/deferral diagnostics, not a legacy comparison mode. |
 
 ### Proposed authoritative contract
 
@@ -1010,7 +1009,7 @@ a unified exact layered search across the galaxy is not part of this cutover.
      revisits and late voyage replies. Logs:
      `data/tmp/p3-adoption-{check,envelope}.log`. No new population census,
      interactive client, visual run or performance benchmark was launched.
-5. **Legacy cleanup, the remaining P3 closure task.** Delete the obsolete legacy
+5. **Legacy cleanup complete.** Delete the obsolete legacy
    structure/boundary solver, heuristic inertia, experimental comparison plumbing
    and dead adapters. Keep useful active-result, candidate and deferral diagnostics.
    Run full automated project checks after removal; the targeted interactive
@@ -1019,7 +1018,33 @@ a unified exact layered search across the galaxy is not part of this cutover.
    craft generation no longer require them. Keep source-backed regression
    fixtures, formation/heating/orbit logic, and Seager/envelope fits used by
    fallback. Resolve H/He redistribution before shipping; missing local data
-   continues to mean labelled fallback, never a hidden replacement EOS.
+    continues to mean labelled fallback, never a hidden replacement EOS.
+    - Removed `structure::derive`, `Structure`, the old radius-reference and
+      approximation types, obsolete domain/boundary constants and both heuristic
+      inertia paths (bulk clamping and display-class response).
+    - Retained the unchanged Seager/envelope equations under `fallback/fits.rs`.
+      Fit compression, stripping, blending, heating/age and reference-world
+      regressions now exercise the surviving implementation; obsolete solver
+      rejection tests were removed. Retention owns its own error type.
+    - Renamed generation modes to `Synchronous` and `PrepareRefinement`; removed
+      the unused per-job solve adapter. Background pause, candidate comparisons,
+      deferral and active-result diagnostics remain useful and are retained.
+      Commands and owning guides no longer describe a legacy-rendered experiment.
+    - New census output calls its synchronous comparison basis `initial_pa` and
+      `initial_radius_km`. Archived P2 TSVs and their audit retain historical
+      names, not a runtime legacy dependency.
+    - **Verification:** `./scripts/check.sh` passes (471 simulation tests,
+      392 client tests, CLI/reference checks, formatting and strict Clippy).
+      All 27 envelope-filtered tests pass, including source-backed fixtures and
+      the retained fit regressions. The saved audit reconstructs 315 fallback
+      records with unchanged radii; the accepted diffuse extreme still refuses
+      tighter integration at its unchanged work budget.
+    - Fresh 140-system coverage remains **1,437/1,544 layered (93.1%) plus
+      107/107 checked fallbacks**. Compared with the archived P2 sample, outcomes,
+      refusal details, surfaces and model IDs are unchanged; radius/inertia
+      differences are below relative 4e-12, not a same-revision bitwise claim.
+      Logs: `data/tmp/p3-cleanup-{check,envelope,audit,coverage}.log`.
+      No interactive visual or performance benchmark was launched.
 
 **P3 closure scope, user decision:** finish legacy cleanup and its automated
 regression checks, then close P3. Move the three targeted interactive adoption
@@ -1042,12 +1067,12 @@ push as part of this investigation.
 - [x] Unified authoritative result and migrated consumers.
 - [x] Fast synchronous fallback with guarded background refinement.
 - [x] Inspector composition, regions, phase knowledge and model limitations.
-- [ ] Remove obsolete legacy solvers, heuristic inertia, consumers, adapters and
+- [x] Remove obsolete legacy solvers, heuristic inertia, consumers, adapters and
   comparison plumbing; update references and owning guides. Keep the Seager and
   envelope fits used by the fallback, scientific regression fixtures and useful
   active/candidate/deferral diagnostics.
-- [ ] Run `./scripts/check.sh` and verify no runtime callers require removed code.
-  With cleanup and automated checks complete, P3 can close independently of P4.
+- [x] Run `./scripts/check.sh` and verify no runtime callers require removed code.
+  Cleanup and automated checks complete: P3 is closed independently of P4.
 
 ## P4. Targeted interactive adoption acceptance
 

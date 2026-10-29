@@ -6,7 +6,7 @@ fn adopted_facts_override_late_seeded_replies_without_changing_arrival_origin() 
     let prepared = crate::system::generated::generated_system_with_mode(
         key,
         [0.0; 3],
-        crate::system::generated::Mode::LayeredPrototype,
+        crate::system::generated::Mode::PrepareRefinement,
     )
     .unwrap();
     let (id, refinement) = prepared

@@ -97,12 +97,12 @@ struct Row {
     deposit_m: f64,
     escaped: String,
     escaped_fraction: f64,
-    legacy_pressure_pa: f64,
+    initial_pressure_pa: f64,
     radius_change: Option<f64>,
     eos_evaluations: usize,
     milliseconds: f64,
     new_radius_km: f64,
-    legacy_radius_km: f64,
+    initial_radius_km: f64,
     inertia_factor: f64,
     interface_pressure_pa: f64,
     gravity_residual: f64,
@@ -283,7 +283,7 @@ fn row(p: &Hosted) -> Row {
     let outcome = route(p);
     let condensation = crate::system::materials::molecular::LAST_CONDENSATION.take();
     let milliseconds = start.elapsed().as_secs_f64() * 1e3;
-    let legacy = p.body.radius_km * 1e3;
+    let initial_radius_m = p.body.radius_km * 1e3;
     let env = p.environment.as_ref().unwrap();
     let (category, detail, solved, fallback_radius_m) = match outcome {
         Ok(s) => (Category::Solved, String::new(), Some(s), f64::NAN),
@@ -325,12 +325,12 @@ fn row(p: &Hosted) -> Row {
         deposit_m: solved.as_ref().map_or(f64::NAN, |s| s.deposit_m),
         escaped: solved.as_ref().map_or(String::new(), |s| s.escaped.clone()),
         escaped_fraction: solved.as_ref().map_or(f64::NAN, |s| s.escaped_fraction),
-        legacy_pressure_pa: env.atmosphere.as_ref().map_or(0.0, |a| a.pressure_pa),
-        radius_change: solved.as_ref().map(|s| s.radius_m / legacy - 1.0),
+        initial_pressure_pa: env.atmosphere.as_ref().map_or(0.0, |a| a.pressure_pa),
+        radius_change: solved.as_ref().map(|s| s.radius_m / initial_radius_m - 1.0),
         eos_evaluations: solved.as_ref().map_or(0, |s| s.eos_evaluations),
         milliseconds,
         new_radius_km: solved.as_ref().map_or(f64::NAN, |s| s.radius_m / 1000.0),
-        legacy_radius_km: p.body.radius_km,
+        initial_radius_km: p.body.radius_km,
         inertia_factor: solved.as_ref().map_or(f64::NAN, |s| s.inertia_factor),
         interface_pressure_pa: solved
             .as_ref()
@@ -421,7 +421,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
     let _ = writeln!(
         out,
         "## Fallback\n\n- Refusals with a checked fallback structure: {}\n\
-         - Fallback radius vs legacy, |relative| p50 / p95 / max: {}\n",
+          - Refusal fallback radius vs initial result, |relative| p50 / p95 / max: {}\n",
         ratio(
             fallbacks
                 .iter()
@@ -432,7 +432,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
         quantiles(
             fallbacks
                 .iter()
-                .map(|r| (r.fallback_radius_km / r.legacy_radius_km - 1.0).abs())
+                .map(|r| (r.fallback_radius_km / r.initial_radius_km - 1.0).abs())
                 .collect()
         ),
     );
@@ -522,7 +522,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
     let _ = writeln!(
         out,
         "\n## Solved non-envelope planets\n\n- Outer layer: {}\n\
-         - Radius change vs legacy, |relative| p50 / p95 / max: {}\n\
+          - Radius change vs initial result, |relative| p50 / p95 / max: {}\n\
          - Surface pressure, bar, p50 / p95 / max: {}\n\
          - Greenhouse warming, K, p50 / p95 / max: {}\n\
          - Frost deposit thickness, m, p50 / p95 / max (frost surfaces): {}\n\
@@ -614,7 +614,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
 fn table(rows: &[Row]) -> String {
     let mut out =
         "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\tsurface_k\toutcome\tdetail\t\
-                   surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tlegacy_pa\tradius_change\teos_evaluations\tms\thydrogen_fraction\thelium_fraction\trefractory_fraction\thhe_mass_earth\theavy_mass_earth\thelium_in_hhe\tnew_radius_km\tlegacy_radius_km\tinertia_factor\tinterface_pa\tgravity_residual\touter_residual_pa\tmodel\tfallback_radius_km\n"
+                    surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tinitial_pa\tradius_change\teos_evaluations\tms\thydrogen_fraction\thelium_fraction\trefractory_fraction\thhe_mass_earth\theavy_mass_earth\thelium_in_hhe\tnew_radius_km\tinitial_radius_km\tinertia_factor\tinterface_pa\tgravity_residual\touter_residual_pa\tmodel\tfallback_radius_km\n"
             .to_owned();
     for r in rows {
         let _ = writeln!(
@@ -634,7 +634,7 @@ fn table(rows: &[Row]) -> String {
             r.deposit_m,
             r.escaped,
             r.escaped_fraction,
-            r.legacy_pressure_pa,
+            r.initial_pressure_pa,
             r.radius_change
                 .map_or(String::new(), |c| format!("{c:.16e}")),
             r.eos_evaluations,
@@ -650,7 +650,7 @@ fn table(rows: &[Row]) -> String {
                 String::new()
             },
             r.new_radius_km,
-            r.legacy_radius_km,
+            r.initial_radius_km,
             r.inertia_factor,
             r.interface_pressure_pa,
             r.gravity_residual,
