@@ -93,8 +93,6 @@ struct Drawn {
 enum Arrival {
     /// From floating into the sidebar, or back out (`docked: false`).
     Glide { glide: Glide, docked: bool },
-    /// A floating window let go partly outside the scene, returning inside.
-    Settle { glide: Glide },
     /// A docked window coming to the front, sliding in and fading up.
     Front { started: f64 },
 }
@@ -102,6 +100,8 @@ enum Arrival {
 /// How a window drawn at a fixed place looks this frame.
 struct Look {
     fill: Color32,
+    /// How much of a floating window's shadow it casts, 0 to 1.
+    shadow: f32,
     opacity: f32,
     /// Docked, or floating again but still gliding out of the sidebar.
     docked: bool,
@@ -186,23 +186,21 @@ impl<'a> Window<'a> {
                 dock::leave(ctx, id);
             }
             actions
-        } else if let Some(Arrival::Glide { glide, .. } | Arrival::Settle { glide }) = arrival {
+        } else if let Some(Arrival::Glide { glide, .. }) = arrival {
             // Drawn like a docked window until it lands, so it can change
             // size and opacity on the way.
             let now = ctx.input(|input| input.time);
             let (rect, amount) = glide.sample(self.floating_target(ctx, theme, id), now);
-            let from = match arrival {
-                Some(Arrival::Settle { .. }) => theme.fill,
-                _ => theme.fill.to_opaque(),
-            };
             let look = Look {
-                fill: from.lerp_to_gamma(theme.fill, amount),
+                fill: theme.fill.to_opaque().lerp_to_gamma(theme.fill, amount),
+                shadow: amount,
                 opacity: 1.0,
                 docked: false,
                 gliding: true,
             };
             self.show_fixed(ctx, theme, id, rect, &look, add)
         } else {
+            prepare_fixed_area(ctx, id);
             let (actions, rect) = self.show_floating(ctx, theme, id, min_width, add);
             if let Some(rect) = rect {
                 let carried = dock::carried(ctx, id).is_some();
@@ -248,13 +246,7 @@ impl<'a> Window<'a> {
         let centre = ctx
             .data(|data| data.get_temp::<egui::Pos2>(self.position_id()))
             .unwrap_or_else(|| self.default_position(ctx, scene, size));
-        let rect = Rect::from_center_size(centre, size);
-        let shift =
-            |low: f32, high: f32, min: f32, max: f32| (min - low).max(0.0) + (max - high).min(0.0);
-        rect.translate(vec2(
-            shift(rect.left(), rect.right(), scene.left(), scene.right()),
-            shift(rect.top(), rect.bottom(), scene.top(), scene.bottom()),
-        ))
+        inside(Rect::from_center_size(centre, size), scene)
     }
 
     fn show_floating(
@@ -270,13 +262,11 @@ impl<'a> Window<'a> {
         let padding = f32::from(theme.padding);
         let pointer = ctx.input(|input| input.pointer.latest_pos());
         let carried = dock::carried(ctx, window_id).zip(pointer);
+        let settle = settling(ctx, window_id, scene);
         // A carried window follows the pointer anywhere, over the sidebar
         // and past the screen's edges; let go, it glides back beside them.
-        let bounds = if carried.is_some() {
-            ctx.content_rect()
-        } else {
-            scene
-        };
+        // Its clip, which egui also keeps scroll bars inside, goes with it.
+        let free = carried.is_some() || settle.is_some();
         clamp_resize(
             ctx,
             window_id,
@@ -291,8 +281,19 @@ impl<'a> Window<'a> {
             .map_or(outer.y, |rect| rect.height());
         let position = carried
             .map(|(grab, pointer)| pointer - grab + vec2(0.0, height * 0.5))
+            .or(settle)
             .or_else(|| ctx.data(|data| data.get_temp::<egui::Pos2>(position_id)))
             .unwrap_or_else(|| self.default_position(ctx, scene, outer));
+        let bounds = if free {
+            let window_size = ctx
+                .memory(|memory| memory.area_rect(window_id))
+                .map_or(outer, |rect| rect.size());
+            ctx.content_rect()
+                .union(Rect::from_center_size(position, window_size))
+                .expand(32.0)
+        } else {
+            scene
+        };
         // egui paints resize feedback from the area's context style, outside
         // the content closure. Suppress only that native stroke, then restore
         // the original style for controls and after this window is drawn.
@@ -317,7 +318,7 @@ impl<'a> Window<'a> {
             // centre anchor ourselves to allow every edge and header moves.
             .pivot(egui::Align2::CENTER_CENTER)
             .constrain_to(bounds)
-            .constrain(carried.is_none())
+            .constrain(!free)
             .anchor(egui::Align2::CENTER_CENTER, position - bounds.center())
             .title_bar(false)
             .frame(
@@ -326,12 +327,7 @@ impl<'a> Window<'a> {
                     .stroke((theme.border_width, theme.border))
                     .corner_radius(theme.radius)
                     .inner_margin(theme.padding)
-                    .shadow(epaint::Shadow {
-                        offset: [0, 6],
-                        blur: 24,
-                        spread: 0,
-                        color: Color32::from_black_alpha(140),
-                    }),
+                    .shadow(shadow(1.0)),
             )
             // `size` is the content's; the frame's padding and border go
             // outside it.
@@ -400,12 +396,18 @@ impl<'a> Window<'a> {
     ) -> HeaderActions {
         let mut actions = HeaderActions::default();
         let inset = f32::from(theme.padding) + theme.border_width;
-        egui::Area::new(window_id.with("docked-area"))
+        egui::Area::new(fixed_area_id(window_id))
             .order(egui::Order::Foreground)
             .fixed_pos(rect.min)
             .constrain(false)
             .fade_in(false)
             .show(ctx, |ui| {
+                if look.shadow > 0.0 {
+                    let shadow = shadow(look.shadow);
+                    ui.painter()
+                        .with_clip_rect(rect.expand(f32::from(shadow.blur) + 8.0))
+                        .add(shadow.as_shape(rect, theme.radius));
+                }
                 ui.set_clip_rect(rect);
                 ui.multiply_opacity(look.opacity);
                 theme.style_scrollbars(ui.style_mut());
@@ -536,7 +538,6 @@ fn arrival(ctx: &egui::Context, window: Id, docked: bool) -> Option<Arrival> {
         .filter(|arrival| {
             let (started, to) = match *arrival {
                 Arrival::Glide { glide, docked } => (glide.started, docked),
-                Arrival::Settle { glide } => (glide.started, false),
                 Arrival::Front { started } => (started, true),
             };
             to == docked && now - started < f64::from(ANIMATION_SECONDS)
@@ -549,14 +550,6 @@ fn arrival(ctx: &egui::Context, window: Id, docked: bool) -> Option<Arrival> {
             },
             docked,
         }),
-        Some(last) if !docked && last.carried && !layout::scene(ctx).contains_rect(last.rect) => {
-            Some(Arrival::Settle {
-                glide: Glide {
-                    from: last.rect,
-                    started: now,
-                },
-            })
-        }
         None if docked && under_way.is_none() => Some(Arrival::Front { started: now }),
         _ => under_way,
     };
@@ -580,6 +573,7 @@ fn docked_look(
     let now = ctx.input(|input| input.time);
     let mut look = Look {
         fill: theme.fill.to_opaque(),
+        shadow: 0.0,
         opacity: 1.0,
         docked: true,
         gliding: false,
@@ -588,6 +582,7 @@ fn docked_look(
         Some(Arrival::Glide { glide, .. }) => {
             let (rect, amount) = glide.sample(target, now);
             look.fill = theme.fill.lerp_to_gamma(look.fill, amount);
+            look.shadow = 1.0 - amount;
             look.gliding = true;
             rect
         }
@@ -600,9 +595,91 @@ fn docked_look(
             look.opacity = amount;
             rect
         }
-        Some(Arrival::Settle { .. }) | None => target,
+        None => target,
     };
     (rect, look)
+}
+
+/// A floating window's drop shadow, `amount` of the way in.
+fn shadow(amount: f32) -> epaint::Shadow {
+    epaint::Shadow {
+        offset: [0, 6],
+        blur: 24,
+        spread: 0,
+        color: Color32::from_black_alpha(140).gamma_multiply(amount),
+    }
+}
+
+/// `rect` moved the least distance to lie inside `bounds`.
+fn inside(rect: Rect, bounds: Rect) -> Rect {
+    let shift =
+        |low: f32, high: f32, min: f32, max: f32| (min - low).max(0.0) + (max - high).min(0.0);
+    rect.translate(vec2(
+        shift(rect.left(), rect.right(), bounds.left(), bounds.right()),
+        shift(rect.top(), rect.bottom(), bounds.top(), bounds.bottom()),
+    ))
+}
+
+/// A window let go partly outside the scene, gliding back inside it.
+#[derive(Clone, Copy)]
+struct Settle {
+    glide: Glide,
+    to: Rect,
+}
+
+/// The centre to show a floating window at while it glides back inside the
+/// scene after being let go partly outside it. Its last frame lands exactly.
+fn settling(ctx: &egui::Context, window: Id, scene: Rect) -> Option<egui::Pos2> {
+    let id = window.with("settle");
+    let (now, frame) = (ctx.input(|input| input.time), ctx.cumulative_frame_nr());
+    if dock::carried(ctx, window).is_some() {
+        ctx.data_mut(|data| data.remove::<Settle>(id));
+        return None;
+    }
+    let released = ctx
+        .data(|data| data.get_temp::<Drawn>(drawn_id(window)))
+        .filter(|last| {
+            last.carried
+                && !last.docked
+                && last.frame + 1 >= frame
+                && !scene.contains_rect(last.rect)
+        });
+    if let Some(last) = released {
+        let settle = Settle {
+            glide: Glide {
+                from: last.rect,
+                started: now,
+            },
+            to: inside(last.rect, scene),
+        };
+        ctx.data_mut(|data| data.insert_temp(id, settle));
+    }
+    let settle = ctx.data(|data| data.get_temp::<Settle>(id))?;
+    if now - settle.glide.started >= f64::from(ANIMATION_SECONDS) {
+        ctx.data_mut(|data| data.remove::<Settle>(id));
+        return Some(settle.to.center());
+    }
+    ctx.request_repaint();
+    Some(settle.glide.sample(settle.to, now).0.center())
+}
+
+/// egui spends a new area's first frame measuring it, invisibly. Do that
+/// for the fixed area while the window floats, so its first glide or
+/// docking shows from its first frame rather than blinking out.
+fn prepare_fixed_area(ctx: &egui::Context, window: Id) {
+    let id = fixed_area_id(window);
+    if egui::AreaState::load(ctx, id).is_none() {
+        egui::Area::new(id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos2(-10_000.0, -10_000.0))
+            .constrain(false)
+            .interactable(false)
+            .show(ctx, |_| {});
+    }
+}
+
+fn fixed_area_id(window: Id) -> Id {
+    window.with("docked-area")
 }
 
 /// The caller's content, under one ID whether floating or docked, so its

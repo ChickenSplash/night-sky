@@ -104,6 +104,9 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
   (the screen beside any sidebar) and the window minimum, except while the
   window is carried: it then passes freely over the sidebar and past the
   screen's edges, and when let go outside the scene it glides back inside.
+  This return moves the same floating window, keeping its fill, shadow,
+  blur registration and scrollbar layout throughout. Its layout clip travels
+  with it so egui does not pin scrollbars to the screen edge.
 - Clicking a window brings it forward. The existing scene-blur registration
   stays in the shared frame; do not replace it when adding a panel.
 - `aligned_close_button` centres the visible glyph on title ink, rather than
@@ -133,6 +136,8 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
     drawn at a fixed rect (the docked style) on the way, its fill blending
     between translucent and opaque and the scene blurred behind it while
     translucent. A window carried out follows the pointer instead.
+    The fixed area is measured invisibly ahead of its first use, so switching
+    to it does not lose the first animation frame.
   - a docked window coming to the front (tab switch, reopening) slides in
     24 points from the right and fades up.
 - The carry is kit state, not an egui drag: the widget that starts it (a tab

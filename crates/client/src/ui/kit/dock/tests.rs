@@ -15,6 +15,8 @@ struct Harness {
     open: Cell<[bool; 2]>,
     /// Each window's content ID, as drawn in the last frame.
     content: Cell<[Option<Id>; 2]>,
+    scroll: Cell<bool>,
+    scrollbar: Cell<Option<Rect>>,
 }
 
 impl Harness {
@@ -30,6 +32,8 @@ impl Harness {
             time: Cell::new(0.0),
             open: Cell::new(open),
             content: Cell::new([None; 2]),
+            scroll: Cell::new(false),
+            scrollbar: Cell::new(None),
         }
     }
 
@@ -50,7 +54,20 @@ impl Harness {
                     Window::new(key, key).show(ctx, &Theme::GAME, &mut open[index], |ui| {
                         content[index] = Some(ui.id());
                         ui.label(format!("{key} content"));
-                        ui.allocate_space(ui.available_size());
+                        if self.scroll.get() {
+                            let bar = ui.make_persistent_id(Id::new("scroll_area")).with(1_usize);
+                            super::super::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.allocate_space(vec2(50.0, 2000.0));
+                                });
+                            if index == 0 {
+                                self.scrollbar
+                                    .set(ui.ctx().read_response(bar).map(|response| response.rect));
+                            }
+                        } else {
+                            ui.allocate_space(ui.available_size());
+                        }
                     });
                 }
             },
@@ -692,7 +709,7 @@ fn a_carried_window_passes_the_screen_edge_then_glides_back_inside() {
     );
     harness.frame(vec![press(to, false)]);
     harness.frame(vec![]);
-    let gliding = docked_rect(&harness, "first");
+    let gliding = harness.floating("first");
     assert!(
         gliding.left() < 0.0 && gliding.left() > carried.left(),
         "let go, it glides back rather than jumping: {carried:?} -> {gliding:?}"
@@ -734,5 +751,72 @@ fn a_window_landing_from_a_glide_does_not_fade_in_again() {
     for index in 0..10 {
         let alpha = content_alpha(&harness.frame(vec![]), "first");
         assert_eq!(alpha, Some(255), "frame {index} after letting go");
+    }
+}
+
+#[test]
+fn first_and_repeated_edge_returns_keep_the_frame_and_scrollbar_together() {
+    check_edge_returns(false);
+    check_edge_returns(true);
+}
+
+fn check_edge_returns(sidebar: bool) {
+    let harness = Harness::new([true, sidebar]);
+    harness.scroll.set(true);
+    if sidebar {
+        harness.dock("second");
+    }
+    harness.settle();
+    let scrollbar = || harness.scrollbar.get().expect("vertical scrollbar");
+    let initial_gap = harness.floating("first").right() - scrollbar().right();
+    for attempt in 0..2 {
+        let from = harness.header("first");
+        // The pointer stays before the dock zone, but the window extends
+        // beyond the screen. The scrollbar must not clamp to the screen.
+        let to = pos2(harness.scene().right() - 80.0, 250.0);
+        harness.frame(vec![Event::PointerMoved(from)]);
+        harness.frame(vec![press(from, true)]);
+        harness.frame(vec![Event::PointerMoved(from + vec2(-100.0, 20.0))]);
+        harness.frame(vec![Event::PointerMoved(to)]);
+        harness.frame(vec![]);
+        assert!(harness.floating("first").right() > harness.scene().right());
+        for step in 0..10 {
+            let events = if step == 0 {
+                vec![press(to, false)]
+            } else {
+                vec![]
+            };
+            let output = harness.frame(events);
+            let rect = harness.floating("first");
+            assert!(
+                ((rect.right() - scrollbar().right()) - initial_gap).abs() < 1.0,
+                "scrollbar detached on attempt {attempt}, step {step}: window {rect:?}, bar {:?}, gap {initial_gap}",
+                scrollbar()
+            );
+            assert_eq!(content_alpha(&output, "first"), Some(255));
+            fn collect_frames(shape: &Shape, rect: Rect, frames: &mut Vec<egui::Color32>) {
+                match shape {
+                    Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            collect_frames(shape, rect, frames);
+                        }
+                    }
+                    Shape::Rect(frame) if (frame.rect.size() - rect.size()).length() < 1.0 => {
+                        frames.push(frame.fill);
+                    }
+                    _ => {}
+                }
+            }
+            let mut frames = Vec::new();
+            for shape in &output.shapes {
+                collect_frames(&shape.shape, rect, &mut frames);
+            }
+            assert_eq!(
+                frames,
+                vec![egui::Color32::from_black_alpha(140), Theme::GAME.fill],
+                "missing, duplicated or changed frame on attempt {attempt}, step {step}"
+            );
+        }
+        assert!(harness.scene().contains_rect(harness.floating("first")));
     }
 }
