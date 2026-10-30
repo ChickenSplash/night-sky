@@ -724,34 +724,67 @@ fn a_carried_window_passes_the_screen_edge_then_glides_back_inside() {
 }
 
 /// The alpha of the window `key`'s content text, if drawn: egui fades a
-/// window in through its text colour.
+/// window through its text's opacity factor.
 fn content_alpha(output: &FullOutput, key: &str) -> Option<u8> {
     let label = format!("{key} content");
     output.shapes.iter().find_map(|shape| match &shape.shape {
-        Shape::Text(text) if text.galley.text() == label => Some(text.fallback_color.a()),
+        Shape::Text(text) if text.galley.text() == label => {
+            Some((f32::from(text.fallback_color.a()) * text.opacity_factor).round() as u8)
+        }
         _ => None,
     })
 }
 
 #[test]
-fn a_window_landing_from_a_glide_does_not_fade_in_again() {
+fn a_window_landing_from_the_sidebar_does_not_fade_in_again() {
+    let harness = Harness::new([true, false]);
+    harness.dock("first");
+    let tab = harness.tab("first");
+    harness.time.set(harness.time.get() + 1.0);
+    harness.frame(vec![Event::PointerMoved(tab)]);
+    for _ in 0..2 {
+        harness.frame(vec![press(tab, true)]);
+        harness.frame(vec![press(tab, false)]);
+    }
+    // Through the glide and well past its landing.
+    let frames: Vec<_> = (0..12)
+        .map(|_| content_alpha(&harness.frame(vec![]), "first"))
+        .collect();
+    assert!(!is_docked(&harness.ctx, window_id("first")));
+    assert!(frames.iter().all(|alpha| *alpha == Some(255)), "{frames:?}");
+}
+
+#[test]
+fn a_reopened_window_fades_in_all_the_way() {
+    let harness = Harness::new([true, false]);
+    harness.settle();
+    harness.open.set([false, false]);
+    harness.settle();
+    harness.open.set([true, false]);
+    let frames: Vec<u8> = (0..6)
+        .map(|_| content_alpha(&harness.frame(vec![]), "first").unwrap())
+        .collect();
+    assert!(frames[0] < 128, "{frames:?}");
+    assert!(frames[1] > frames[0] && frames[1] < 255, "{frames:?}");
+    assert!(
+        frames.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{frames:?}"
+    );
+    assert_eq!(frames.last(), Some(&255));
+}
+
+#[test]
+fn a_first_docking_draws_from_its_first_frame() {
     let harness = Harness::new([true, false]);
     let from = harness.header("first");
-    let to = Pos2::new(5.0, 300.0);
+    let edge = Pos2::new(SCREEN.right() - 10.0, 450.0);
     harness.frame(vec![Event::PointerMoved(from)]);
     harness.frame(vec![press(from, true)]);
-    harness.frame(vec![Event::PointerMoved(Pos2::new(600.0, 300.0))]);
-    harness.frame(vec![Event::PointerMoved(to)]);
-    harness.frame(vec![]);
-    assert!(
-        harness.floating("first").left() < 0.0,
-        "carried past the edge"
-    );
-    harness.frame(vec![press(to, false)]);
-    for index in 0..10 {
-        let alpha = content_alpha(&harness.frame(vec![]), "first");
-        assert_eq!(alpha, Some(255), "frame {index} after letting go");
-    }
+    harness.frame(vec![Event::PointerMoved(edge - egui::vec2(200.0, 0.0))]);
+    harness.frame(vec![Event::PointerMoved(edge)]);
+    let released = harness.frame(vec![press(edge, false)]);
+    assert!(is_docked(&harness.ctx, window_id("first")));
+    assert_eq!(content_alpha(&released, "first"), Some(255));
 }
 
 #[test]

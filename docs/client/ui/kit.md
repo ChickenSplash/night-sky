@@ -137,7 +137,9 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
     between translucent and opaque and the scene blurred behind it while
     translucent. A window carried out follows the pointer instead.
     The fixed area is measured invisibly ahead of its first use, so switching
-    to it does not lose the first animation frame.
+    to it does not lose the first animation frame. egui's own fade-in runs
+    in full when a floating window opens, but not when one lands from a
+    glide, since it was on screen all along.
   - a docked window coming to the front (tab switch, reopening) slides in
     24 points from the right and fades up.
 - The carry is kit state, not an egui drag: the widget that starts it (a tab

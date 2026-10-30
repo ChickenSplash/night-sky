@@ -305,11 +305,19 @@ impl<'a> Window<'a> {
         frame_style.visuals.widgets.active.fg_stroke.color = theme.accent;
         ctx.set_style(frame_style);
         // egui fades in a window that was not drawn last frame. Only fade
-        // one opening: one landing from a glide was on screen all along.
-        let frame_nr = ctx.cumulative_frame_nr();
-        let opening = ctx
+        // one opening, through to the end: one landing from a glide was on
+        // screen all along.
+        let (now, frame_nr) = (ctx.input(|input| input.time), ctx.cumulative_frame_nr());
+        let opened_id = window_id.with("opened");
+        if ctx
             .data(|data| data.get_temp::<Drawn>(drawn_id(window_id)))
-            .is_none_or(|drawn| drawn.frame + 1 < frame_nr);
+            .is_none_or(|drawn| drawn.frame + 1 < frame_nr)
+        {
+            ctx.data_mut(|data| data.insert_temp(opened_id, now));
+        }
+        let opening = ctx
+            .data(|data| data.get_temp::<f64>(opened_id))
+            .is_some_and(|opened| now - opened < f64::from(ctx.style().animation_time));
         let window = egui::Window::new(self.title)
             .id(window_id)
             .fade_in(opening)
