@@ -74,6 +74,13 @@ fn main() {
         search::SearchPlugin,
         ui::browser::BrowserPlugin,
     ))
+    // bevy_egui replaces its font atlas with a new image when the atlas
+    // grows. Unordered, the image's asset event reaches the render world a
+    // frame late, and every egui shape blinks out for that frame.
+    .configure_sets(
+        PostUpdate,
+        bevy::asset::AssetEventSystems.after(bevy_egui::EguiPostUpdateSet::PostProcessOutput),
+    )
     .insert_resource(ClearColor(render::SPACE_BLUE))
     .insert_resource(bevy_egui::EguiGlobalSettings {
         auto_create_primary_context: false,

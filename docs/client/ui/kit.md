@@ -180,6 +180,12 @@ Keep its existing scene-specific appearance and pointer-capture behaviour.
   ID mapping and easing in both directions.
 - Restore local styles after scoped work. `ScrollArea` restores its opacity
   settings after rendering; row/fact groups scope their zero vertical spacing.
+- egui's font atlas grows when new text fills it, and bevy_egui then uploads
+  it as a new image. `main.rs` orders Bevy's `AssetEventSystems` after
+  bevy_egui's texture update so the render world sees that image in the same
+  frame; unordered, the whole UI blinked out for one frame (once per growth,
+  so typically the first time a window filled with new text). Keep this
+  ordering when upgrading Bevy or bevy_egui.
 
 ## Extension checklist
 
