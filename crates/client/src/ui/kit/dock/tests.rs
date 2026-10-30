@@ -413,14 +413,20 @@ fn later_drags_and_redocking_continue_from_the_chosen_whole_point_width() {
     );
 }
 
-/// Drop previews: closed four-cornered outlines, by their bounds.
+/// Drop previews: borderless subtle accent fills, full height against the
+/// screen's right edge.
 fn previews(output: &FullOutput) -> Vec<Rect> {
     output
         .shapes
         .iter()
         .filter_map(|shape| match &shape.shape {
-            Shape::Path(path) if path.closed && path.points.len() == 4 => {
-                Some(Rect::from_points(&path.points))
+            Shape::Rect(rect)
+                if rect.fill == THEME.accent.gamma_multiply(Theme::SUBTLE_ACCENT_OPACITY)
+                    && rect.stroke.is_empty()
+                    && rect.rect.right() == SCREEN.right()
+                    && rect.rect.y_range() == SCREEN.y_range() =>
+            {
+                Some(rect.rect)
             }
             _ => None,
         })
@@ -444,11 +450,12 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
         .map(|output| previews(&output))
         .unwrap();
     assert_eq!(preview.len(), 1, "one preview while over the edge");
+    let width = harness.floating("first").width();
     assert!(
-        (preview[0].size() - PREVIEW_SIZE).length() < 1.0
-            && (preview[0].right() - (SCREEN.right() - f32::from(THEME.padding))).abs() < 1.0
-            && (preview[0].center().y - SCREEN.center().y).abs() < 1.0,
-        "a small preview floats against the screen's edge: {:?}",
+        preview[0].right() == SCREEN.right()
+            && preview[0].y_range() == SCREEN.y_range()
+            && (preview[0].width() - width).abs() < 1.0,
+        "the preview covers the area the sidebar would take: {:?}",
         preview[0]
     );
     assert!(
@@ -459,6 +466,25 @@ fn carrying_a_header_to_the_right_edge_previews_the_sidebar_then_docks() {
     harness.settle();
     assert!(is_docked(&harness.ctx, window_id("first")));
     assert!(!carrying(&harness.ctx));
+}
+
+#[test]
+fn carrying_over_an_open_sidebar_previews_its_whole_area() {
+    let harness = Harness::new([true, true]);
+    harness.dock("first");
+    let sidebar = harness.scene().right();
+    let from = harness.header("second");
+    harness.frame(vec![Event::PointerMoved(from)]);
+    harness.frame(vec![press(from, true)]);
+    harness.frame(vec![Event::PointerMoved(Pos2::new(sidebar - 100.0, 450.0))]);
+    harness.frame(vec![Event::PointerMoved(Pos2::new(sidebar + 40.0, 450.0))]);
+    let preview = previews(&harness.settle());
+    assert_eq!(preview.len(), 1, "one preview over the sidebar");
+    assert!(
+        (preview[0].left() - sidebar).abs() < 1.0,
+        "the preview covers the sidebar: {:?}, sidebar from {sidebar}",
+        preview[0]
+    );
 }
 
 #[test]
