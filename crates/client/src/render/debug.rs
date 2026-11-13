@@ -34,6 +34,9 @@ pub enum DebugSwitch {
     /// End each line of sight where the air in front turns opaque, whether
     /// or not ground lies beyond. Needs the tables.
     AtmosphereStopOpaque,
+    /// Bunch each line of sight's steps around its densest visible air,
+    /// rather than spreading them along it.
+    AtmosphereFocusSteps,
     /// Add the light scattered more than once, from a table built per air
     /// (`atmosphere/multiple.rs`). Needs the tables.
     AtmosphereMultiple,
@@ -87,6 +90,9 @@ impl DebugSwitch {
             Self::AtmosphereStopOpaque => {
                 "End each line of sight where the air in front of the camera turns opaque, so thick air such as Venus's hides its ground and all the steps go where light can be seen. Uses the lookup tables, so does nothing with them off. Turn off to compare."
             }
+            Self::AtmosphereFocusSteps => {
+                "Bunch each line of sight's steps around its densest visible air, finest there and growing with the distance away, so rays grazing the planet see its air rather than stepping over it and the limb has no hard edge. Turn off for steps spread along the whole ray."
+            }
             Self::AtmosphereMultiple => {
                 "Add the light that scatters more than once in the air, read from a table built once per air, so thick air such as Venus's glows through instead of turning black, and twilight lasts longer. Uses the lookup tables, so does nothing with them off. Turn off to compare."
             }
@@ -122,6 +128,7 @@ pub struct RenderDebug {
     pub atmospheres: bool,
     pub atmosphere_tables: bool,
     pub atmosphere_stop_opaque: bool,
+    pub atmosphere_focus_steps: bool,
     pub atmosphere_multiple: bool,
     pub atmosphere_ground: bool,
     pub giant_descent: bool,
@@ -144,6 +151,7 @@ impl Default for RenderDebug {
             atmospheres: true,
             atmosphere_tables: true,
             atmosphere_stop_opaque: true,
+            atmosphere_focus_steps: true,
             atmosphere_multiple: true,
             atmosphere_ground: true,
             giant_descent: true,
@@ -168,6 +176,7 @@ impl RenderDebug {
             DebugSwitch::Atmospheres => self.atmospheres,
             DebugSwitch::AtmosphereTables => self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => self.atmosphere_stop_opaque,
+            DebugSwitch::AtmosphereFocusSteps => self.atmosphere_focus_steps,
             DebugSwitch::AtmosphereMultiple => self.atmosphere_multiple,
             DebugSwitch::AtmosphereGround => self.atmosphere_ground,
             DebugSwitch::GiantDescent => self.giant_descent,
@@ -190,6 +199,7 @@ impl RenderDebug {
             DebugSwitch::Atmospheres => &mut self.atmospheres,
             DebugSwitch::AtmosphereTables => &mut self.atmosphere_tables,
             DebugSwitch::AtmosphereStopOpaque => &mut self.atmosphere_stop_opaque,
+            DebugSwitch::AtmosphereFocusSteps => &mut self.atmosphere_focus_steps,
             DebugSwitch::AtmosphereMultiple => &mut self.atmosphere_multiple,
             DebugSwitch::AtmosphereGround => &mut self.atmosphere_ground,
             DebugSwitch::GiantDescent => &mut self.giant_descent,

@@ -219,10 +219,14 @@ $$
 $$
 
 so an optically thick step (Venus's lower air) keeps its light instead of
-losing it. Step lengths grow with the square of the step index when the
-camera is at the ground, easing to even spacing at the top of the air, so
-the air close to the camera, which sets the colour in thick air, is sampled
-finely. Every ray spreads its steps over its own path through the air.
+losing it. By default, steps are evenly spaced in asinh of distance from a
+focus near the ray's densest visible air. The foreground prepass records where
+mean optical depth reaches one, limiting the focus distance and width so steps
+do not concentrate behind opaque air. The width follows the local gas scale
+height (growing as radius squared for spherical gas), capped by active haze.
+This resolves grazing columns without adding steps or pixel noise, including
+after pole stretching. `set_debug atmosphere_focus_steps false` restores
+quadratically growing steps near the ground, easing to even spacing above the air.
 
 **Stopping where opaque.** A ray ends where the air between the camera and
 the point reaches optical depth 10 in its least dimmed channel (less than

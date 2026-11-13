@@ -28,7 +28,8 @@ struct Air {
     shape: vec4<f32>,
     absorption: vec4<f32>,
     gas_absorption: vec4<f32>,
-    // Stop at opacity, ground includes air lighting, presentation fade, padding.
+    // Stop at opacity, ground includes air lighting, presentation fade, and
+    // focus the view steps on the densest visible air.
     switches: vec4<f32>,
     // The pole, and the stretch along it that makes the planet round.
     pole: vec4<f32>,
@@ -160,6 +161,8 @@ struct Foreground {
     depth: vec3<f32>,
     opaque: bool,
     complete: bool,
+    // Where the mean depth reaches one, or -1 if it never does.
+    seen: f32,
 }
 
 // Integrate only positive local extinction, never differences of large table
@@ -176,6 +179,7 @@ fn foreground(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32) -> Foreg
     let span = end - start;
     var t = 0.0;
     var depth = vec3(0.0);
+    var seen = -1.0;
     for (var i = 0; i < 1024 && t < span; i++) {
         let along = start + t;
         let r = length(nearest + dir * along);
@@ -183,6 +187,11 @@ fn foreground(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32) -> Foreg
         let local_extinction = medium(r - 1.0).extinction;
         let ds = min(min(span - t, 0.25 * scale / rate), 1.0 / max(least(local_extinction), 1e-30));
         let x = medium(length(nearest + dir * (along + 0.5 * ds)) - 1.0).extinction * ds;
+        let before = dot(depth, vec3(1.0 / 3.0));
+        let after = dot(depth + x, vec3(1.0 / 3.0));
+        if seen < 0.0 && after >= 1.0 {
+            seen = t + ds * clamp((1.0 - before) / max(after - before, 1e-30), 0.0, 1.0);
+        }
         if least(depth + x) >= OPAQUE {
             var low = 0.0;
             var high = ds;
@@ -196,14 +205,38 @@ fn foreground(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32) -> Foreg
                 }
             }
             let local = medium(length(nearest + dir * (along + 0.5 * high)) - 1.0).extinction * high;
-            return Foreground(t + high, depth + local, true, true);
+            return Foreground(t + high, depth + local, true, true, seen);
         }
         depth += x;
         t += ds;
     }
     // If the safety budget is exhausted, do not claim an opaque stop or use
     // an incomplete foreground depth for transmission; retain the view march.
-    return Foreground(span, depth, false, t >= span);
+    return Foreground(span, depth, false, t >= span, seen);
+}
+
+// Where to bunch the view steps, from the start of the march: the densest
+// air along it, or nearer where the mean depth reaches one, since little light
+// comes from beyond; and the distance either side over which that air thins
+// by e. Its scale height grows as the square of the radius in spherical gas.
+fn focus(d2: f32, start: f32, span: f32, seen: f32) -> vec2<f32> {
+    var centre = clamp(-start, 0.0, span);
+    if seen >= 0.0 {
+        centre = min(centre, seen);
+    }
+    let along = start + centre;
+    let r = sqrt(d2 + along * along);
+    let rate = abs(along) / r;
+    let lift = 1.0 + air.gas_absorption.w * (r - 1.0);
+    var scale = air.rayleigh.w * lift * lift;
+    if any(air.mie.rgb > vec3(0.0)) || air.mie.w > 0.0 {
+        scale = min(scale, air.shape.x);
+    }
+    var width = 2.0 * scale / (rate + sqrt(rate * rate + 2.0 * scale / r));
+    if seen >= 0.0 {
+        width = min(width, max(seen, 1e-9));
+    }
+    return vec2(centre, width);
 }
 
 #ifdef MULTIPLE
@@ -268,20 +301,33 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if air.switches.x != 0.0 && front.opaque {
         span = front.end;
     }
-    // Steps bunch up near a camera low in the air; from the top of the air
-    // and above they are even.
+    // Focused, the steps are even in asinh of the distance from the focus,
+    // so they are finest there and grow in proportion to the distance away.
+    // Otherwise they bunch up near a camera low in the air, and are even from
+    // the top of the air and above.
     let count = air.steps.y;
+    let focused = air.switches.w != 0.0;
+    let around = focus(d2, start, span, front.seen);
+    let low = asinh(-around.x / around.y);
+    let high = asinh((span - around.x) / around.y);
     let height = clamp((length(eye) - 1.0) / (top - 1.0), 0.0, 1.0);
     let power = mix(2.0, 1.0, height);
-    // Fixed midpoint sampling, without pixel noise.
-    let offset = 0.5;
     var last = 0.0;
     var depth = vec3(0.0);
     var light = vec3(0.0);
     for (var i = 0.0; i < count && last < span; i += 1.0) {
-        let to = min(span * pow((i + 1.0) / count, power), span);
+        var to = min(span * pow((i + 1.0) / count, power), span);
+        // Fixed midpoint sampling, without pixel noise.
+        var mid = mix(last, to, 0.5);
+        if focused {
+            to = clamp(around.x + around.y * sinh(mix(low, high, (i + 1.0) / count)), last, span);
+            if i + 1.0 >= count {
+                to = span;
+            }
+            mid = clamp(around.x + around.y * sinh(mix(low, high, (i + 0.5) / count)), last, to);
+        }
         let ds = to - last;
-        let p = nearest + dir * (start + mix(last, to, offset));
+        let p = nearest + dir * (start + mid);
         last = to;
         let m = medium(length(p) - 1.0);
         // Light scattered across the step, dimmed by the air in front of

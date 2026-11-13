@@ -177,6 +177,7 @@ pub(super) fn publish(
             "split_multiples": debug.split_multiples, "atmospheres": debug.atmospheres,
             "atmosphere_tables": debug.atmosphere_tables,
             "atmosphere_stop_opaque": debug.atmosphere_stop_opaque,
+            "atmosphere_focus_steps": debug.atmosphere_focus_steps,
             "atmosphere_multiple": debug.atmosphere_multiple,
             "atmosphere_ground": debug.atmosphere_ground,
             "oblateness": debug.oblateness,

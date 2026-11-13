@@ -243,6 +243,14 @@ fn debug_controls(
             out,
         );
     });
+    switch_row(
+        ui,
+        debug,
+        DebugSwitch::AtmosphereFocusSteps,
+        "Focus atmosphere steps",
+        air,
+        out,
+    );
     terminal::heading(ui, "ground");
     switch_row(
         ui,
@@ -382,7 +390,7 @@ mod tests {
         );
     }
 
-    const SWITCHES: [(&str, DebugSwitch); 17] = [
+    const SWITCHES: [(&str, DebugSwitch); 18] = [
         ("4x MSAA", DebugSwitch::Msaa),
         ("Resolve multiple-star systems", DebugSwitch::SplitMultiples),
         ("Flattened bodies", DebugSwitch::Oblateness),
@@ -402,6 +410,7 @@ mod tests {
             "Stop atmosphere at opaque",
             DebugSwitch::AtmosphereStopOpaque,
         ),
+        ("Focus atmosphere steps", DebugSwitch::AtmosphereFocusSteps),
         ("Colour chunks by detail level", DebugSwitch::GroundLevels),
     ];
 

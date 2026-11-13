@@ -4,6 +4,8 @@
 #[cfg(test)]
 mod foreground_tests;
 pub mod generated;
+#[cfg(test)]
+mod march_tests;
 mod multiple;
 #[cfg(test)]
 mod reference;
@@ -464,8 +466,8 @@ pub struct AtmosphereMaterial {
     #[uniform(0)]
     gas_absorption: Vec4,
     /// End each ray where the air turns opaque (with tables only), mark surfaces
-    /// already including atmospheric lighting, and the presentation fade.
-    /// The fourth component is padding.
+    /// already including atmospheric lighting, the presentation fade, and
+    /// focus the view steps on the densest visible air.
     #[uniform(0)]
     switches: Vec4,
     /// The pole, and how far to stretch along it to make the planet round:
@@ -563,13 +565,13 @@ impl Shell {
     /// `near` is the camera's near plane, in render units; `switches` end each
     /// ray where the air turns opaque and add the light scattered more than
     /// once; the third switch marks ground that
-    /// already includes atmospheric lighting.
+    /// already includes atmospheric lighting; the fourth focuses the view steps.
     fn material(
         &self,
         eye: Vec3,
         near: f32,
         steps: (u32, u32),
-        switches: [bool; 3],
+        switches: [bool; 4],
         tables: Option<Tables>,
     ) -> AtmosphereMaterial {
         let from_eye = self.centre - eye;
@@ -598,7 +600,12 @@ impl Shell {
                 .air
                 .gas_absorption
                 .extend(u8::from(self.air.spherical) as f32),
-            switches: Vec4::new(opaque, f32::from(u8::from(switches[2])), self.fade, 0.0),
+            switches: Vec4::new(
+                opaque,
+                f32::from(u8::from(switches[2])),
+                self.fade,
+                f32::from(u8::from(switches[3])),
+            ),
             pole: self.pole.extend(1.0 / (1.0 - self.flattening)),
             lights: self.lights,
             suns: self.suns,
@@ -669,6 +676,7 @@ pub(super) fn sync_atmospheres(
                     .0
                     .get(index)
                     .is_some_and(|s| s.table.is_some()),
+                debug.atmosphere_focus_steps,
             ],
             debug
                 .atmosphere_tables

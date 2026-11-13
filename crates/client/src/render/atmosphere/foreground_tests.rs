@@ -21,7 +21,7 @@ fn black_floor_uniform_requires_an_explicit_proxy_not_just_rebased_coordinates()
         suns: [Vec4::ZERO; super::MAX_LIGHTS],
     };
     let material =
-        |shell: &super::Shell| shell.material(Vec3::Z * 2.0, 0.001, (16, 8), [false; 3], None);
+        |shell: &super::Shell| shell.material(Vec3::Z * 2.0, 0.001, (16, 8), [false; 4], None);
     assert!(material(&shell).steps.w > 0.0);
     shell.air.opaque_proxy = false;
     assert!(shell.air.radius_scale < 1.0);
