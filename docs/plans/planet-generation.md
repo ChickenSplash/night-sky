@@ -1,0 +1,212 @@
+# Planet generation: one model and a varied population
+
+## Status and goal
+
+**Proposed, 14 November 2026. Nothing below is implemented.** Current behaviour
+is described in [planetary systems](../simulation/planetary-systems.md) and the
+[composition guide](../simulation/planet-composition.md).
+
+Two goals, in this order:
+
+1. **One source of truth.** A planet's mass, radius, surface pressure, surface
+   temperature, surface type and escaped material are decided once by one
+   physical model. The layered solve may add detail to that answer; it may not
+   change it.
+2. **A realistic and highly varied population.** Formation priors follow
+   physical causes (disc mass, metallicity, snow and ice lines, core mass,
+   stellar activity), and every change is judged on whether it keeps or widens
+   the range of worlds a player can find.
+
+This is still a simulator, not a research code: prefer the simplest plausible
+model, with named and bounded approximations.
+
+| Document | Owns |
+| --- | --- |
+| This plan | Delivery order, decisions and acceptance for G1 to G4 |
+| [Planetary systems](../simulation/planetary-systems.md) | Implemented generation behaviour |
+| [Composition guide](../simulation/planet-composition.md) | Implemented structure, retention and adoption |
+| [Composition plan](planet-composition.md) | History of the layered solver and fallback (P1 to P4) |
+
+## Evidence: where the two passes disagree
+
+From the coverage report of 13 November 2026 (399 systems, 4,367 planets,
+`data/tmp/composition-coverage.{md,tsv}`). "Fast" is the synchronous fallback
+with its reference partition; "detailed" is the layered result.
+
+| Measure | Result |
+| --- | --- |
+| Planets with a detailed result | 3,663 (83.9%); 704 stay on the fast model |
+| Radius difference, rock and water route | 1.5% median, 9.7% p95, 15.3% maximum |
+| Radius difference, envelope route | 2.4% median, 22.8% p95, 70% maximum |
+| Sub-Neptune radius, detailed against fast | 3.7% smaller at the median, 27% smaller at p5 |
+| Surface pressure differing by more than 100x | 338 of 2,221 comparable rock and water planets |
+| Greenhouse warming above 300 K, absent from the fast pass | 330 planets |
+| Extra gas lost in the detailed pass | 457 planets, up to 3.7% of mass |
+| Labelled rocky, metal-rich or water-rich with a one-bar envelope surface | 303 planets |
+| Detailed cost per planet | 304 ms mean; envelopes 755 ms median; 6.2 s maximum |
+
+Causes, none of them numerical precision:
+
+- **Different rules.** The fast partition exposes 0.001% of water; the layered
+  solve exchanges all of it. The fast pass has no greenhouse and no blow-off.
+  The fast radius uses published fits; the layered radius uses the project's
+  own equations of state.
+- **Order of decisions.** H/He survival is solved on the fast radius. The
+  layered pass then changes the radius, so the survival equation no longer
+  holds for the planet that is shown.
+- **Two answers per planet.** Adopted results are session-only and search reads
+  fast facts, so a planet depends on visit order and restarts.
+
+Why the detailed pass is slow:
+
+- The radial integration runs at 1e-10 relative tolerance, and `dry::Controls`
+  rejects anything looser. Coupling closes pressure to 0.01 Pa and temperature
+  to 1e-9, on a model that is a few percent accurate.
+- The whole interior is solved again on each of up to 32 coupling iterations,
+  although a few bar of gas barely moves the condensed radius.
+- Greenhouse warming scans upward from equilibrium in 0.5% steps, each a
+  column partition.
+
+## Design rules
+
+- **Decisions and elaboration are separate.** The synchronous stage owns every
+  bulk fact listed in goal 1. The layered stage is a deterministic elaboration:
+  layers, phases and profiles inside the decided mass and radius.
+- **The fast path evaluates the detailed model.** It reads a table computed
+  from the project's own solver, not an independent fit. Agreement is then a
+  property of the design, checked by a test, instead of a hope.
+- **Agreement is tested.** A census test asserts, for every planet with a
+  layered result: radius within 1%, the same surface type, the same escaped
+  inventory, surface pressure within 5% and surface temperature within 1 K.
+  The exact bounds are set in G1 once measured.
+- **Variety is a requirement, not a side effect.** No change may empty a
+  region of the population that is physically plausible. See
+  [variety targets](#variety-targets).
+- Existing rules still hold: deterministic generation, stable identities,
+  conserved inventories, labels never drive physics, and alpha status allows
+  regenerating every body.
+
+## G1: speed the layered solve and measure
+
+Purpose: find out how fast the detailed model can be before designing around
+its cost. No population change.
+
+1. Add a per-stage timing and work breakdown to the coverage report: radial
+   integration, coupling iterations, greenhouse scan, column partition, EOS.
+2. Allow looser radial tolerance in `dry::Controls` and add a "survey"
+   control set (target about 1e-5 relative, pressure closure scaled to the
+   load, temperature to 0.01 K). Keep the current set as "reference".
+3. Solve the interior once per planet where the gas load is negligible, then
+   couple the column on fixed mass and radius with one correction pass.
+4. Replace the 0.5% greenhouse scan with a bracketed root find that keeps its
+   "coolest stable balance" meaning.
+5. Report survey against reference on the 399-system probe: outcome and
+   surface labels, radius, pressure, temperature and escaped fraction.
+
+Acceptance: identical outcome and surface labels; radius within 0.1%,
+temperature within 0.1 K and pressure within 1% of reference; median and p95
+solve time reported. Decision recorded here: whether the speed-up makes the
+G3 table optional for visits (it stays needed for search either way).
+
+## G2: one place decides the bulk facts
+
+1. Move greenhouse temperature, full water exchange and unbound-column
+   blow-off into the synchronous stage, on the stage's own mass and radius.
+   The layered solve receives the final inventory and adds no escape.
+2. Use one water exposure rule in both stages.
+3. Solve retention against the same radius the planet will finally have
+   (the table in G3; until then, the fast radius with the G2 corrections).
+4. Derive descriptions from the decided surface: a body whose surface is a
+   one-bar envelope is not labelled rocky.
+5. Add the agreement census test from the design rules to `check.sh` at a
+   size that stays within its time budget, with the full probe opt-in.
+
+Acceptance: the agreement test passes; no layered result reports blow-off;
+the 303 mislabelled planets are gone.
+
+## G3: the fast path reads the detailed model
+
+1. Add an offline preparation step, in the style of
+   `scripts/prepare-hhe-density.py`, that runs the reference solver over a
+   grid and writes a checksummed table:
+   - condensed bodies: radius and inertia over mass, metal share and water
+     share, with a temperature axis only if G1 shows it matters;
+   - envelopes: radius over core mass, envelope share, equilibrium
+     temperature and age.
+2. Replace `structure/fallback/fits.rs` with interpolation in that table.
+   Cells the solver refuses are filled from a smooth labelled surrogate and
+   flagged, so the result stays total.
+3. Retention and search use the table. Their answers match the layered model
+   to interpolation error.
+4. Persist layered results to `data/` keyed by `PhysicalRevision`, so a
+   restart does not revert adopted planets. Because G2 fixes the bulk facts,
+   adoption no longer moves mass or radius and most deferral rules become
+   unnecessary; simplify them in the same step.
+5. Decide whether refusals still need a separate label once the surrogate
+   cells exist.
+
+Acceptance: agreement test passes with the table in place; search and the
+inspector report the same bulk facts before and after a visit and across a
+restart; fallback fit code is removed.
+
+## G4: formation priors and variety
+
+Each item is a separate change with a before and after census. The table
+from G3 depends only on structure physics, so none of these needs it rebuilt.
+
+1. **Gas loss.** Replace the smooth survival curve, which never reaches zero,
+   with energy-limited loss integrated over the host's activity history, and
+   complete stripping below a boil-off floor. Expected: bare inner rocky
+   worlds, a radius valley, and surviving envelopes farther out.
+2. **Gas accretion.** Replace the 5.5-decade log-uniform ratio with a critical
+   core mass that falls with distance. Below it: envelopes of a fraction of a
+   percent to tens of percent, scaling with core mass and disc lifetime.
+   Above it: runaway to a giant, limited by the disc.
+3. **Disc budget.** Give each host a solid and gas budget scaling with host
+   mass and a new metallicity input by galactic component and age, with wide
+   scatter. Planet masses are drawn from the budget, which correlates
+   neighbours and removes the reversed host-mass trend (median 0.146 Earth
+   masses under 0.5 solar masses against 0.082 for Sun-like hosts).
+4. **Planet count and architecture.** Replace the uniform 7 to 14 with a count
+   that follows the budget and spacing. Draw an architecture per system
+   (for example compact chain, mixed with outer giants, giant-dominated,
+   sparse and wide, debris-poor remnant) as a continuous prior, not a class
+   template. Remove the mass-floor pile-up from the compact retry.
+5. **Refractory mix.** Centre the metal share on a per-system value from host
+   abundance, with rare stripped-mantle and iron-poor outliers kept.
+6. **Volatile mix by distance.** Use ice lines for CO2, NH3, CH4, CO and N2,
+   with the volatile share rising outward.
+7. **Dynamics.** Tie eccentricity to multiplicity and neighbouring giants;
+   make close-in giants rare and migration-labelled; let giants clear gaps.
+8. **Spin.** Make tidal locking depend on age and planet properties.
+
+### Variety targets
+
+Realism must not flatten the population. Each G4 census reports the share of
+these outcomes, and a change that removes one needs a stated reason:
+
+- Bare hot rock, lava worlds and stripped cores close in.
+- Airless rock, thin CO2 or N2 air, thick Venus-like air, steam atmospheres.
+- Ocean worlds, ice shells over oceans, deep-ice worlds, frost-covered rock.
+- Cold nitrogen and methane worlds beyond the outer ice lines.
+- Iron-rich and iron-poor bodies as outliers, not a fifth of all planets.
+- Sub-Neptunes on both sides of the radius valley, low-density puffy worlds.
+- Ice giants, gas giants, hot and warm giants, very massive giants.
+- Systems of different kinds: tight chains, giant-dominated, sparse, empty.
+
+Variety is measured, not assumed: the census prints these shares per galactic
+component, host mass band and age band, with one named example ID for each.
+
+## Out of scope
+
+Moons, rings, belts as bodies, N-body evolution, atmospheric chemistry and
+climate. Terrain and surface rendering follow this plan, not the reverse.
+
+## Risks
+
+- Looser tolerances can move bodies across phase seams. G1 compares labels,
+  not just numbers.
+- A table adds a prepared resource to the build. It must be reproducible from
+  the repository and checksummed like the H/He resource.
+- G4 changes every generated body. That is allowed in alpha, but each item
+  lands separately so its effect on the census can be reviewed.

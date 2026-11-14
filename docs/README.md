@@ -99,6 +99,8 @@ The Bevy/egui client in `crates/client`:
   per-planet rendering work, validation history and explicitly deferred follow-ups.
 - [Planet surfaces](plans/planet-surfaces.md): bodies flattened by their spin,
   landing on the ground, then geology, water and giants' depths.
+- [Planet generation](plans/planet-generation.md): proposed single physical
+  model for fast and layered results, and realistic, varied formation priors.
 - [Planet composition replacement](plans/planet-composition.md): rock-and-water
   prototype first, completed headless foundation, conserved-region contract, then
   envelopes and default cutover. Methane physics is parked on its own branch.
