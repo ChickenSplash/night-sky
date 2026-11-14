@@ -3,6 +3,9 @@ use super::*;
 
 /// Relative scan step. Two balances closer together than this may be merged.
 const SCAN_STEP: f64 = 1.005;
+/// A supply-limited column thins slightly as it warms, so f can fall: by at
+/// most 0.07 K per K in the 399-system probe. Halving the step allows 1 K per K.
+const JUMP_FRACTION: f64 = 0.5;
 // Keep root error well below the outer coupling's temperature/allocation tests.
 const ROOT_RELATIVE_TOLERANCE: f64 = TEMPERATURE_RELATIVE_TOLERANCE * 0.001;
 
@@ -14,7 +17,9 @@ pub(super) fn temperatures(
     match request.temperature {
         Temperature::Prescribed { column_k, water_k } => Ok((column_k, water_k)),
         Temperature::Greenhouse { equilibrium_k } => {
-            let t = surface_temperature(request, equilibrium_k, base.0, base.1)?;
+            let t = profile::time(profile::Stage::Warming, || {
+                surface_temperature(request, equilibrium_k, base.0, base.1)
+            })?;
             Ok((t, Some(t)))
         }
     }
@@ -48,7 +53,11 @@ fn surface_temperature(
     }
     let mut low = equilibrium_k;
     let (high, high_excess) = loop {
-        let t = (low * SCAN_STEP).min(MAX_COLUMN_TEMPERATURE_K);
+        // While f falls no faster than T rises, no balance lies below the
+        // midpoint of low and f(low). Step there when it is beyond the scan step.
+        let t = (low * SCAN_STEP)
+            .max(low + JUMP_FRACTION * low_excess)
+            .min(MAX_COLUMN_TEMPERATURE_K);
         match excess(t) {
             Ok(e) if e <= 0.0 => break (t, e),
             Ok(_) if t == MAX_COLUMN_TEMPERATURE_K => return Err(Error::WarmingOutsideDomain),
@@ -63,8 +72,10 @@ fn surface_temperature(
     refine(low, high, low_excess, high_excess, excess)
 }
 
-/// Bracket-preserving interpolation. A central bisection step bounds progress
-/// when interpolation hugs an endpoint (for example near an evaporation seam).
+/// Bracket-preserving false position with the Illinois weighting: an endpoint
+/// kept twice running has its excess halved, so both ends close in. A central
+/// bisection step bounds progress whenever two steps fail to halve the bracket
+/// (for example near an evaporation seam).
 fn refine(
     mut low: f64,
     mut high: f64,
@@ -72,13 +83,22 @@ fn refine(
     mut high_excess: f64,
     excess: impl Fn(f64) -> Result<f64, Error>,
 ) -> Result<f64, Error> {
+    // Weighted copies steer the interpolation only; signs stay those evaluated.
+    let (mut low_weight, mut high_weight) = (low_excess, high_excess);
+    let mut kept_low = None;
+    let mut checkpoint = (0_u8, high - low);
     loop {
-        if high - low <= ROOT_RELATIVE_TOLERANCE * low {
+        let width = high - low;
+        if width <= ROOT_RELATIVE_TOLERANCE * low {
             return Ok(high);
         }
-        let width = high - low;
-        let interpolated = low + width * (low_excess / (low_excess - high_excess));
-        let mid = if interpolated > low + 0.1 * width && interpolated < high - 0.1 * width {
+        let interpolated = low + width * (low_weight / (low_weight - high_weight));
+        checkpoint.0 += 1;
+        let stalled = checkpoint.0 > 2;
+        if stalled || width <= 0.5 * checkpoint.1 {
+            checkpoint = (0, width);
+        }
+        let mid = if !stalled && interpolated > low && interpolated < high {
             interpolated
         } else {
             0.5 * (low + high)
@@ -91,10 +111,24 @@ fn refine(
             Ok(e) if e < 0.0 => {
                 high = mid;
                 high_excess = e;
+                high_weight = e;
+                if kept_low == Some(true) {
+                    low_weight *= 0.5;
+                } else {
+                    low_weight = low_excess;
+                }
+                kept_low = Some(true);
             }
             Ok(e) => {
                 low = mid;
                 low_excess = e;
+                low_weight = e;
+                if kept_low == Some(false) {
+                    high_weight *= 0.5;
+                } else {
+                    high_weight = high_excess;
+                }
+                kept_low = Some(false);
             }
             Err(e) => return Err(e),
         }

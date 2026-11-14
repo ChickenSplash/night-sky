@@ -110,6 +110,7 @@ struct Row {
     model: &'static str,
     /// NaN when the layered solve succeeded.
     fallback_radius_km: f64,
+    profile: super::profile::Snapshot,
 }
 
 struct Solved {
@@ -141,30 +142,36 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String, f64)> {
     let light_mass = retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium);
     let light = light_mass > 0.0;
     let environment = p.environment.as_ref().unwrap();
-    let escaping = prototype::solve(&p.body.budget, environment, coupled::Controls::default())
-        .map_err(|e| {
-            // The warmed surface temperature is unknown on failure, so water
-            // errors are not binned by temperature here.
-            let (category, detail) = coupled_error(f64::NAN, &e);
-            let fallback = crate::system::physical::fallback(&super::fallback::solve(
-                &p.body.budget,
-                environment,
-                e,
-            ));
-            check_record(&fallback, p);
-            assert!(
-                fallback
-                    .fallback_reason
-                    .as_ref()
-                    .is_some_and(|s| !s.is_empty())
-            );
-            let radius = fallback.physical.reference_radius_m;
-            if light && matches!(category, Category::GasDomain | Category::MassDomain) {
-                (Category::Envelope, detail, radius)
-            } else {
-                (category, detail, radius)
-            }
-        })?;
+    let mut controls = coupled::Controls::default();
+    if let Some(tolerance) = std::env::var("NS_COVERAGE_TOLERANCE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        controls.radial.relative_tolerance = tolerance;
+    }
+    let escaping = prototype::solve(&p.body.budget, environment, controls).map_err(|e| {
+        // The warmed surface temperature is unknown on failure, so water
+        // errors are not binned by temperature here.
+        let (category, detail) = coupled_error(f64::NAN, &e);
+        let fallback = crate::system::physical::fallback(&super::fallback::solve(
+            &p.body.budget,
+            environment,
+            e,
+        ));
+        check_record(&fallback, p);
+        assert!(
+            fallback
+                .fallback_reason
+                .as_ref()
+                .is_some_and(|s| !s.is_empty())
+        );
+        let radius = fallback.physical.reference_radius_m;
+        if light && matches!(category, Category::GasDomain | Category::MassDomain) {
+            (Category::Envelope, detail, radius)
+        } else {
+            (category, detail, radius)
+        }
+    })?;
     let atmosphere = &escaping.structure;
     let escaped = escaping.blowoff;
     let t = atmosphere.surface_temperature_k();
@@ -278,11 +285,13 @@ fn radial_error(t: f64, e: &dry::SolveError) -> (Category, String) {
 fn row(p: &Hosted) -> Row {
     let retained = p.body.budget.retained();
     let mass = retained.total_mass_kg();
-    let start = Instant::now();
     crate::system::materials::molecular::LAST_CONDENSATION.set(None);
+    super::profile::take();
+    let start = Instant::now();
     let outcome = route(p);
-    let condensation = crate::system::materials::molecular::LAST_CONDENSATION.take();
     let milliseconds = start.elapsed().as_secs_f64() * 1e3;
+    let profile = super::profile::take();
+    let condensation = crate::system::materials::molecular::LAST_CONDENSATION.take();
     let initial_radius_m = p.body.radius_km * 1e3;
     let env = p.environment.as_ref().unwrap();
     let (category, detail, solved, fallback_radius_m) = match outcome {
@@ -339,7 +348,53 @@ fn row(p: &Hosted) -> Row {
         outer_residual_pa: solved.as_ref().map_or(f64::NAN, |s| s.outer_residual_pa),
         model: solved.as_ref().map_or("", |s| s.model),
         fallback_radius_km: fallback_radius_m / 1000.0,
+        profile,
     }
+}
+
+/// Where solve time goes, by route. Stage times are inclusive: a coupled
+/// attempt contains its trials, warming and partitions, and warming contains
+/// its own partitions.
+fn profile_report(rows: &[Row]) -> String {
+    use super::profile::Stage;
+    let mut out = "\n## Stage profile\n\nInclusive CPU seconds summed over planets, share of that route's total solve time, and calls per planet p50 / p95 / max.\n".to_owned();
+    for (title, envelope) in [("Thin route", false), ("Envelope route", true)] {
+        let rows: Vec<&Row> = rows
+            .iter()
+            .filter(|r| (r.profile[Stage::Envelope as usize].0 > 0) == envelope)
+            .collect();
+        let total: f64 = rows.iter().map(|r| r.milliseconds / 1e3).sum();
+        let _ = writeln!(
+            out,
+            "\n### {title}: {} planets, {total:.1} s\n\n| Stage | Seconds | Share | Calls per planet |\n| --- | ---: | ---: | --- |",
+            rows.len()
+        );
+        for stage in Stage::ALL {
+            let seconds: f64 = rows.iter().map(|r| r.profile[stage as usize].1).sum();
+            let _ = writeln!(
+                out,
+                "| {} | {seconds:.1} | {:.0}% | {} |",
+                stage.label(),
+                100.0 * seconds / total.max(f64::MIN_POSITIVE),
+                quantiles(
+                    rows.iter()
+                        .map(|r| r.profile[stage as usize].0 as f64)
+                        .collect()
+                )
+            );
+        }
+        let _ = writeln!(
+            out,
+            "| EOS evaluations (solved) | | | {} |",
+            quantiles(
+                rows.iter()
+                    .filter(|r| r.category == Category::Solved)
+                    .map(|r| r.eos_evaluations as f64)
+                    .collect()
+            )
+        );
+    }
+    out
 }
 
 fn env_usize(name: &str, default: usize) -> usize {
@@ -728,7 +783,8 @@ fn composition_coverage() {
     });
     rows.sort_by(|a, b| a.id.cmp(&b.id));
     let seconds = start.elapsed().as_secs_f64();
-    let summary = report(&rows, systems, threads, seconds);
+    let mut summary = report(&rows, systems, threads, seconds);
+    summary.push_str(&profile_report(&rows));
     eprintln!("{summary}");
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/tmp");
     std::fs::create_dir_all(&dir).unwrap();

@@ -30,7 +30,9 @@ pub(crate) fn solve_protected(
     order.sort_by(|a, b| a.molecular_mass_u().total_cmp(&b.molecular_mass_u()));
     let mut order = order.into_iter().map(Material::from_gas);
     loop {
-        match super::solve_protected(&request, protected, controls) {
+        match profile::time(profile::Stage::Coupled, || {
+            super::solve_protected(&request, protected, controls)
+        }) {
             Err(Error::WeakBindingUnsupported) => {
                 let lightest = order
                     .find(|&m| request.exchangeable.mass_kg(m) > 0.0)

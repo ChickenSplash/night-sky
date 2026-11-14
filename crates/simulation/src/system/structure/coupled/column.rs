@@ -51,6 +51,17 @@ pub(super) fn partition(
     mass: f64,
     radius: f64,
 ) -> Result<Inventory, Error> {
+    profile::time(profile::Stage::Partition, || {
+        partition_unprofiled(request, temperature, mass, radius)
+    })
+}
+
+fn partition_unprofiled(
+    request: &Request,
+    temperature: f64,
+    mass: f64,
+    radius: f64,
+) -> Result<Inventory, Error> {
     if request.exchangeable.total_mass_kg() == 0.0 {
         return Ok(Inventory::default());
     }

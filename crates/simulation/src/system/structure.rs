@@ -9,6 +9,7 @@ pub mod dry;
 pub mod envelope;
 pub mod fallback;
 pub mod parameters;
+mod profile;
 pub mod prototype;
 mod radial;
 pub mod water;

@@ -2,7 +2,8 @@
 
 ## Status and goal
 
-**Proposed, 14 November 2026. Nothing below is implemented.** Current behaviour
+**G1 complete, 14 November 2026. G2 to G4 are proposed, not implemented.**
+Current behaviour
 is described in [planetary systems](../simulation/planetary-systems.md) and the
 [composition guide](../simulation/planet-composition.md).
 
@@ -107,6 +108,62 @@ Acceptance: identical outcome and surface labels; radius within 0.1%,
 temperature within 0.1 K and pressure within 1% of reference; median and p95
 solve time reported. Decision recorded here: whether the speed-up makes the
 G3 table optional for visits (it stays needed for search either way).
+
+### G1 result
+
+Same 399 systems and 4,367 planets, 20 threads, same tolerances as before.
+Evidence: `data/tmp/g1/{reference,after}.{md,tsv}`, compared with
+`data/tmp/g1/compare.py`.
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Total solve CPU time | 1,329 s | 385 s |
+| Report wall time | 74.4 s | 21.1 s |
+| Rock and water solve, median / p95 | 103 / 701 ms | 29 / 79 ms |
+| Envelope solve, median / p95 | 748 / 1,534 ms | 194 / 570 ms |
+| Slowest planet | 6.2 s | 2.6 s |
+| Layered results | 3,663 | 3,681 |
+
+What changed:
+
+- **Greenhouse search.** Steps of half the excess replace the fixed 0.5% scan,
+  and Illinois false position replaces what was in practice bisection.
+- **Shooting.** A secant through high-side trials replaces bisection in the
+  dry, water and envelope solvers: 70 trials per rock and water planet became 21.
+- **Stage profile** in the coverage report, compiled into test builds only.
+
+Agreement with the reference:
+
+- **Rock and water route:** every outcome, surface and escape label matches.
+  Largest differences: radius 3e-7 relative, temperature 1e-6 K.
+- **Envelope route:** 26 of 1,325 planets change outcome. 21 that failed at
+  the floating-point limit of the boundary now solve; 3 that solved now run
+  out of work budget; 2 fail for a different reason. Solved radii agree to
+  3e-7. The acceptance rule of identical labels is therefore missed by
+  0.6% of planets, all at an existing numerical edge.
+
+Findings that change later steps:
+
+- **`f` is not monotone.** The guide said greenhouse warming never falls with
+  temperature. It does, once all supply has evaporated. A full-excess step
+  skipped the coolest balance on 6 planets, so the step is halved.
+- **Looser tolerance is not adopted.** At 1e-6 the rock and water route keeps
+  every label and agrees to 2e-7 in radius, but saves only a further third.
+  The envelope route loses over half its solutions, because shooting from the
+  centre to a 10 mbar boundary amplifies integration error past the 1 Pa
+  acceptance band. One tolerance set stays; no survey mode was added.
+- **Solving the interior once was not attempted.** Evaporating water changes
+  the condensed inventory between coupling iterations, so it is not a pure
+  load change.
+- **Remaining cost** is radial integration: 57% of the rock and water route
+  and 96% of the envelope route.
+
+Decision: a median visit now costs about 35 ms per planet and 2.6 s at worst,
+on one thread. That is fast enough for a visited system but not for search
+across many systems, and 16% of planets still have no layered result. The G3
+table stays required. Two follow-ups are added to G3: condition the envelope's
+outer boundary so it does not need 1e-10 integration, and tabulate the EOS
+calls that dominate each trial.
 
 ## G2: one place decides the bulk facts
 

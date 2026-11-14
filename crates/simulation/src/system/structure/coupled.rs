@@ -9,7 +9,7 @@ pub mod escape;
 mod tests;
 mod warming;
 
-use super::{dry, water};
+use super::{dry, profile, water};
 use crate::{
     system::{
         atmosphere::{AtmosphereError, Column, GasAtmosphere, ONE_BAR_PA, greenhouse},
@@ -454,6 +454,7 @@ pub(super) fn solve_protected(
     let mut work = 0;
     let mut central_pressure_pa = None;
     for iteration in 1..=controls.max_iterations {
+        profile::count(profile::Stage::Iteration);
         let (column_k, water_k) = temperature;
         let gas = column::partition(request, column_k, base.0, base.1)?;
         let exposed = Inventory::new(

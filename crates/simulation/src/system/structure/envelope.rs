@@ -534,24 +534,48 @@ fn phase_allocations(
         .collect()
 }
 
+/// Step noise can leave no representable central pressure inside the boundary
+/// band. Which pressures are tried then decides the outcome, so a guided
+/// failure is retried by plain bisection before it is reported. The retry
+/// gets its own per-solve evaluation ceiling; both attempts are still counted.
 fn shoot(
     solver: &mut radial::Solver<'_>,
     controls: dry::Controls,
 ) -> Result<(radial::Trial, f64), Error> {
+    let guided = shoot_with(solver, controls, true);
+    if !matches!(guided, Err(Error::BoundaryResolution { .. })) {
+        return guided;
+    }
+    let spent = std::mem::take(&mut solver.work.eos_evaluations);
+    let retried = shoot_with(solver, controls, false);
+    solver.work.eos_evaluations += spent;
+    retried
+}
+
+fn shoot_with(
+    solver: &mut radial::Solver<'_>,
+    controls: dry::Controls,
+    guided: bool,
+) -> Result<(radial::Trial, f64), Error> {
     let mut low = OUTER_PRESSURE_PA;
     let mut high = cold::MAX_PRESSURE_PA;
     let mut upper = solver.trial(high);
+    let mut shooting = radial::Shooting::default();
     for _ in 0..controls.max_shooting_iterations {
-        if let Ok(Some(t)) = &upper {
-            let residual = t.regions.last().unwrap().outer().pressure_pa - OUTER_PRESSURE_PA;
-            if (0.0..=PRESSURE_TOLERANCE_PA).contains(&residual) {
-                return Ok((upper.unwrap().unwrap(), high));
-            }
+        let residual = match &upper {
+            Ok(Some(t)) => Some(t.regions.last().unwrap().outer().pressure_pa - OUTER_PRESSURE_PA),
+            _ => None,
+        };
+        if guided {
+            shooting.high(high, residual);
+        }
+        if residual.is_some_and(|r| (0.0..=PRESSURE_TOLERANCE_PA).contains(&r)) {
+            return Ok((upper.unwrap().unwrap(), high));
         }
         if let Err(SolveError::WorkBudgetExhausted(_)) = &upper {
             return Err(Error::WorkBudget);
         }
-        let mid = low + (high - low) * 0.5;
+        let mid = shooting.next(low, high, PRESSURE_TOLERANCE_PA);
         if mid == low || mid == high {
             return Err(match upper {
                 Err(e) => Error::Radial(e),
@@ -564,7 +588,10 @@ fn shoot(
         }
         solver.work.shooting_iterations += 1;
         match solver.trial(mid) {
-            Ok(None) => low = mid,
+            Ok(None) => {
+                low = mid;
+                shooting.low();
+            }
             result => {
                 high = mid;
                 upper = result;

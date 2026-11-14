@@ -122,13 +122,15 @@ pub fn solve(
         (m, mass)
     }))
     .map_err(Error::Composition)?;
-    let (interior, envelope) = super::envelope::solve(
-        budget.retained(),
-        &protected,
-        environment.equilibrium_temperature_k,
-        super::envelope::intrinsic_k(budget.retained().total_mass_kg(), environment.age_gyr),
-        controls,
-    )
+    let (interior, envelope) = super::profile::time(super::profile::Stage::Envelope, || {
+        super::envelope::solve(
+            budget.retained(),
+            &protected,
+            environment.equilibrium_temperature_k,
+            super::envelope::intrinsic_k(budget.retained().total_mass_kg(), environment.age_gyr),
+            controls,
+        )
+    })
     .map_err(Error::Envelope)?;
     Ok(Solved {
         structure: CoupledStructure::from_envelope(interior, envelope),

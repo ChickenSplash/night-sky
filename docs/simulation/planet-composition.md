@@ -1402,7 +1402,11 @@ are not modelled. These are cold material proxies, not a reconstruction of Earth
 The solver integrates mass conservation, hydrostatic balance and axial inertia.
 It uses dimensionless volume and `x=(m/M)^(1/3)` as the independent coordinate,
 with a regular centre expansion, adaptive Dormand-Prince 5(4) integration and
-central-pressure bracketing/bisection. Steps end exactly at material mass
+central-pressure bracketing. The boundary residual exists only above the
+root, so shooting takes a secant through the two latest high-side trials,
+aimed at the middle of the accepted residual band, and bisects after any
+undershoot or doubtful slope. The envelope route retries a boundary-resolution
+failure by plain bisection, with its own per-solve evaluation ceiling. Steps end exactly at material mass
 coordinates; interface radius, mass and pressure are continuous, while each
 region retains its own one-sided density. Error control measures volume/inertia
 **increments**, rather than letting a large accumulated state hide error in a
@@ -1893,12 +1897,16 @@ temperature `T_s`.
   `T_s = f(T_s)`, where `f` warms `T_eq` by the optical depth of the gas
   partitioned at `T_s`. Warming raises the caps, so frost and water evaporate,
   which warms further.
-- **The coolest balance.** `f` never falls as `T` rises, so a scan up from
-  `T_eq` in 0.5% steps finds the first crossing, then refines that same bracket
-  with safeguarded linear interpolation (bisection when the estimate lies in
-  the outer 10% of either end). Refinement stops at relative temperature width
-  10⁻¹², three orders tighter than the coupling test, or an exact zero. As before,
-  balances closer than a scan step may be missed. This is the balance a planet warming up from equilibrium would
+- **The coolest balance.** A search up from `T_eq` finds the first crossing,
+  then refines that bracket. Each step is the larger of 0.5% and half the
+  excess `f(T) - T`. `f` mostly rises with `T`, but a supply-limited column
+  thins slightly as it warms, so `f` can fall: by at most 0.07 K per K in the
+  399-system probe. The half step stays safe while `f` falls no faster than
+  `T` rises; that is an assumed bound, checked on the probe, not a proof.
+  Refinement is false position with Illinois weighting, and a bisection step
+  whenever two steps fail to halve the bracket. It stops at relative
+  temperature width 10⁻¹², three orders tighter than the coupling test, or an
+  exact zero. As before, balances closer than a scan step may be missed. This is the balance a planet warming up from equilibrium would
   reach. Hotter balances, which a planet that started hot (a magma-ocean steam
   world) could keep, are not explored.
 - **The unwarmed column is checked first.** If the column at `T_eq` is already
@@ -1971,7 +1979,8 @@ pressure bisections, are permitted. The aggregate ceiling is
 **16,000,000 radial EOS evaluations**, including nested work and retries. Each
 radial call retains its existing 2,000,000 maximum and other ceilings. Remaining
 aggregate budget limits each subsequent call; a failed call terminates the
-request, never retries with reset work. Controls can lower ceilings, not raise
+request, never retries with reset work (the envelope route's one
+[bisection retry](#headless-dry-body-solver) excepted). Controls can lower ceilings, not raise
 them. Nonconvergence is explicit.
 
 After the first interior solve, coupling carries forward its central pressure
@@ -2228,7 +2237,13 @@ cargo test --release -p space-simulation composition_coverage -- --ignored --noc
 
 `NS_COVERAGE_SYSTEMS` sets systems per galactic component (default 20, using the
 census keys `composition-calibration:{component:?}:{index}`).
-`NS_COVERAGE_THREADS=1` gives uncontended per-planet timings. The summary is
+`NS_COVERAGE_THREADS=1` gives uncontended per-planet timings.
+`NS_COVERAGE_TOLERANCE` overrides the radial relative tolerance (10⁻¹³ to
+10⁻⁶) for sensitivity runs; generation always uses 10⁻¹⁰. The summary ends
+with a stage profile: inclusive time and calls per planet for coupled
+attempts, coupling iterations, radial trials, greenhouse searches, column
+partitions and envelope solves, by route. That timing is compiled only into
+test builds. The summary is
 printed and written to `data/tmp/composition-coverage.md`, with one row per
 planet in `data/tmp/composition-coverage.tsv` for diffing between steps.
 Use `NS_COVERAGE_THREADS=20` for comparisons on the development machine.

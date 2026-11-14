@@ -42,7 +42,7 @@ impl Default for Controls {
 impl Controls {
     pub(super) fn validate(self) -> Result<(), SolveError> {
         let valid = self.relative_tolerance.is_finite()
-            && (1e-13..=1e-10).contains(&self.relative_tolerance)
+            && (1e-13..=1e-6).contains(&self.relative_tolerance)
             && self.max_step.is_finite()
             && (1e-5..=1.0 / 32.0).contains(&self.max_step)
             && self.max_bracket_expansions <= 64
@@ -324,11 +324,14 @@ fn solve_with_policy(
         };
         (low, high, high_trial)
     };
+    let mut shooting = radial::Shooting::default();
     loop {
         let residual = high_trial.regions.last().unwrap().outer().pressure_pa - outer_pressure_pa;
+        let tolerance = boundary_tolerance.unwrap_or_else(|| 1.0_f64.max(1e-8 * high));
+        shooting.high(high, Some(residual));
         // Require the converged solution to approach the requested boundary from
         // above, so the EOS never evaluates a negative physical pressure.
-        if residual <= boundary_tolerance.unwrap_or_else(|| 1.0_f64.max(1e-8 * high)) {
+        if residual <= tolerance {
             let result = DryStructure {
                 model_id: MODEL_ID,
                 regions: high_trial.regions,
@@ -347,7 +350,7 @@ fn solve_with_policy(
             return Err(SolveError::WorkBudgetExhausted(WorkLimit::Shooting));
         }
         solver.work.shooting_iterations += 1;
-        let mid = low + (high - low) * 0.5;
+        let mid = shooting.next(low, high, tolerance);
         if mid == high || mid == low {
             return Err(SolveError::NonConvergence {
                 material: if retained.mass_kg(Material::Silicate) > 0.0 {
@@ -363,6 +366,7 @@ fn solve_with_policy(
             high_trial = trial;
         } else {
             low = mid;
+            shooting.low();
         }
     }
 }

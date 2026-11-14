@@ -527,7 +527,14 @@ fn solve_with_volume_factor(
         };
         (low, high, upper)
     };
+    let mut shooting = radial::Shooting::default();
     loop {
+        shooting.high(
+            high,
+            upper
+                .as_ref()
+                .map(|t| t.regions.last().unwrap().outer().pressure_pa - outer_pressure_pa),
+        );
         if let Some(trial) = upper.as_ref() {
             let residual = trial.regions.last().unwrap().outer().pressure_pa - outer_pressure_pa;
             if (0.0..=BOUNDARY_TOLERANCE_PA).contains(&residual) {
@@ -577,7 +584,7 @@ fn solve_with_volume_factor(
             return Err(SolveError::WorkBudgetExhausted(WorkLimit::Shooting));
         }
         solver.work.shooting_iterations += 1;
-        let mid = low + (high - low) * 0.5;
+        let mid = shooting.next(low, high, BOUNDARY_TOLERANCE_PA);
         if mid == low || mid == high {
             return Err(if upper.is_none() {
                 SolveError::UnsupportedWaterProfile
@@ -589,7 +596,10 @@ fn solve_with_volume_factor(
             });
         }
         match solver.trial(mid) {
-            Ok(None) => low = mid,
+            Ok(None) => {
+                low = mid;
+                shooting.low();
+            }
             trial => {
                 high = mid;
                 upper = classify_upper(trial)?;

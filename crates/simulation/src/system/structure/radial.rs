@@ -3,6 +3,7 @@
 
 use super::super::{composition::Inventory, materials::Material};
 use super::dry::{Controls, Region, Sample, SolveError, Work, WorkLimit};
+use super::profile;
 use crate::units::GRAVITATIONAL_CONSTANT;
 use std::f64::consts::PI;
 
@@ -56,6 +57,59 @@ pub(super) struct Trial {
     pub density_sides: Vec<DensitySide>,
     pub inertia_kg_m2: f64,
     pub hydrogen_inner_inertia_kg_m2: Option<f64>,
+}
+
+/// Chooses the next trial central pressure inside a shooting bracket. The
+/// boundary residual is only defined on the high side, so two high-side
+/// trials give a secant aimed inside the accepted residual band; anything
+/// doubtful falls back to bisection, which alone guarantees progress.
+#[derive(Default)]
+pub(super) struct Shooting {
+    /// Most recent high-side (central pressure, boundary residual), newest first.
+    high: [Option<(f64, f64)>; 2],
+    /// Central pressure of the current upper bound, with or without a residual.
+    bound: Option<f64>,
+    /// The last trial fell below the root: bisect before trusting the slope again.
+    undershot: bool,
+}
+
+impl Shooting {
+    /// Record the trial now bounding the bracket from above. `None` means its
+    /// residual is unknown (a classified high-side refusal). Repeating the
+    /// current bound changes nothing.
+    pub fn high(&mut self, central_pressure: f64, residual: Option<f64>) {
+        if self.bound == Some(central_pressure) {
+            return;
+        }
+        self.bound = Some(central_pressure);
+        self.high = [
+            residual.map(|r| (central_pressure, r)),
+            self.high[0].filter(|_| residual.is_some()),
+        ];
+        self.undershot = false;
+    }
+
+    pub fn low(&mut self) {
+        self.undershot = true;
+    }
+
+    /// Strictly inside (low, high) whenever such a value is representable.
+    pub fn next(&self, low: f64, high: f64, tolerance: f64) -> f64 {
+        let bisection = low + (high - low) * 0.5;
+        let [Some((p1, r1)), Some((p0, r0))] = self.high else {
+            return bisection;
+        };
+        let target = 0.5 * tolerance;
+        if self.undershot || p1 != high || p0 <= p1 || r0 <= r1 || r1 <= target {
+            return bisection;
+        }
+        let secant = p1 - (r1 - target) * (p0 - p1) / (r0 - r1);
+        if secant > low && secant < high {
+            secant
+        } else {
+            bisection
+        }
+    }
 }
 
 pub(super) struct Solver<'a> {
@@ -211,6 +265,10 @@ impl<'a> Solver<'a> {
 
     /// None means central pressure is too low, not a valid partial structure.
     pub fn trial(&mut self, central_pressure: f64) -> Result<Option<Trial>, SolveError> {
+        profile::time(profile::Stage::Trial, || self.integrate(central_pressure))
+    }
+
+    fn integrate(&mut self, central_pressure: f64) -> Result<Option<Trial>, SolveError> {
         let mut regions = Vec::new();
         let mut density_sides = Vec::new();
         let mut x = 0.0;

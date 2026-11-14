@@ -934,7 +934,9 @@ fn located_ice_liquid_interfaces_conserve_and_close_independent_integrals() {
                     }
                 }
                 let (m, i, dp) = quadrature(r);
-                close(m, r.inventory().total_mass_kg(), 1e-8);
+                // The check's own quadrature limits a shell of a dozen samples
+                // to about 2e-8, wherever in the boundary band the solve ends.
+                close(m, r.inventory().total_mass_kg(), 1e-7);
                 close(dp, r.inner().pressure_pa - r.outer().pressure_pa, 2e-4);
                 inertia += i;
             }
@@ -1254,8 +1256,25 @@ fn compressed_liquid_model_interfaces_refine_and_nested_work_limits_are_exact() 
 
 #[test]
 fn unavailable_dense_profiles_and_numerical_failures_are_not_repaired() {
+    // Guided shooting fits this heavily loaded water ball inside the default
+    // budget. A budget it cannot meet is still reported, not repaired.
+    let heavy = inventory(0.0001, 1.0);
+    let body = solve(&heavy, 300.0, 80e6, Controls::default()).unwrap();
+    close(
+        body.retained_inventory().mass_kg(Material::Water),
+        heavy.mass_kg(Material::Water),
+        1e-15,
+    );
     assert_eq!(
-        solve(&inventory(0.0001, 1.0), 300.0, 80e6, Controls::default()),
+        solve(
+            &heavy,
+            300.0,
+            80e6,
+            Controls {
+                max_eos_evaluations: body.diagnostics().work.eos_evaluations / 2,
+                ..Controls::default()
+            }
+        ),
         Err(SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations))
     );
     let loaded = solve(&inventory(0.0001, 0.01), 500.0, 1e9, Controls::default()).unwrap();
