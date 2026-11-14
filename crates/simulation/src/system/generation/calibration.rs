@@ -68,8 +68,11 @@ impl CoverageSample {
             );
             if accessible > 0.0 {
                 record(format!("protected_fraction:{}", m.id()), protected / mass);
+                // Long-term escape spares the protected supply. Blow-off of
+                // an unbound steam column does not: all water exchanges.
                 assert!(
-                    retained.mass_kg(m) >= protected * (1.0 - 1e-13),
+                    retained.mass_kg(m) >= protected * (1.0 - 1e-13)
+                        || (m == Material::Water && p.body.blowoff.mass_kg(m) > 0.0),
                     "{} {m:?}: protected material lost",
                     p.id()
                 );

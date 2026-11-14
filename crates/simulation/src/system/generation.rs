@@ -86,6 +86,10 @@ pub struct Body {
     /// Conservative pre-escape spacing mass.
     pub formation_mass_earth: f64,
     pub retention_solve: RetentionSolve,
+    /// Generation's surface decision, which the layered solve must keep.
+    pub decision: super::structure::prototype::Decision,
+    /// Stripped from an unbound column; already counted in the budget's escape.
+    pub blowoff: super::composition::Inventory,
 }
 
 impl Body {
@@ -316,6 +320,8 @@ fn generate_system(star: &str, formed: &Formation, compact: bool, limit_au: f64)
             formation_mass_earth: mass,
             formation_distance_au: tentative,
             retention_solve: RetentionSolve::NoEnvelope,
+            decision: super::structure::prototype::Decision::Undecided,
+            blowoff: Default::default(),
         });
     }
     bodies

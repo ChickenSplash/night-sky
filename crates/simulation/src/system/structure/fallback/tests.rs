@@ -36,7 +36,9 @@ fn zero_irradiation_uses_the_cold_fit_bound_not_earth_flux() {
     let warm = initial(&b, &environment(1361.0, 250.0, 4.5));
     assert_eq!(cold.radius_m, tiny.radius_m);
     assert!(cold.radius_m < warm.radius_m);
-    assert_eq!(cold.surface_temperature_k, MIN_TEMPERATURE_K);
+    // A one-bar level carries the envelope's intrinsic heat above the floor.
+    assert!(cold.surface_temperature_k > MIN_TEMPERATURE_K);
+    assert!(cold.surface_temperature_k < 100.0);
     assert!(cold.extrapolated);
     physical::validate_record(&physical::fallback(&cold)).unwrap();
 }
@@ -85,7 +87,8 @@ fn solve_checked(budget: &Budget, environment: &PlanetEnvironment) -> Fallback {
         assert!(pair[0].inner_pressure_pa >= pair[1].inner_pressure_pa);
     }
     for r in &f.regions {
-        assert!(r.outer_radius_m > r.inner_radius_m, "{r:?}");
+        // A trace layer may add less than one radius ulp: see the fallback note.
+        assert!(r.outer_radius_m >= r.inner_radius_m, "{r:?}");
         assert!(r.outer_radius_m.is_finite());
         assert!(r.inner_pressure_pa.is_finite() && r.inner_pressure_pa >= r.outer_pressure_pa);
         assert!(r.outer_pressure_pa >= 0.0);

@@ -13,12 +13,13 @@ const ROOT_RELATIVE_TOLERANCE: f64 = TEMPERATURE_RELATIVE_TOLERANCE * 0.001;
 pub(super) fn temperatures(
     request: &Request,
     base: (f64, f64),
+    dense: bool,
 ) -> Result<(f64, Option<f64>), Error> {
     match request.temperature {
         Temperature::Prescribed { column_k, water_k } => Ok((column_k, water_k)),
         Temperature::Greenhouse { equilibrium_k } => {
             let t = profile::time(profile::Stage::Warming, || {
-                surface_temperature(request, equilibrium_k, base.0, base.1)
+                surface_temperature(request, equilibrium_k, base.0, base.1, dense)
             })?;
             Ok((t, Some(t)))
         }
@@ -34,19 +35,19 @@ fn surface_temperature(
     equilibrium_k: f64,
     mass: f64,
     radius: f64,
+    dense: bool,
 ) -> Result<f64, Error> {
     let gm = GRAVITATIONAL_CONSTANT * mass;
     let excess = |t: f64| -> Result<f64, Error> {
-        let gas = column::partition(request, t, mass, radius)?;
-        let tau = column::atmosphere(&gas, t, gm, radius)?
-            .map_or(0.0, |air| greenhouse::optical_depth(&air));
+        let (_, air) = column::partition_column(request, t, mass, radius)?;
+        let tau = air.map_or(0.0, |air| greenhouse::optical_depth(&air));
         Ok(greenhouse::surface_temperature_k(equilibrium_k, tau) - t)
     };
     // A column already outside the domain unwarmed (a dense H/He column, say)
     // is reported as such, not as a runaway its broadening would drive.
     let gas = column::partition(request, equilibrium_k, mass, radius)?;
     let air = column::atmosphere(&gas, equilibrium_k, gm, radius)?;
-    column::validate(&gas, air.as_ref(), gm, radius)?;
+    column::validate(&gas, air.as_ref(), gm, radius, dense)?;
     let mut low_excess = excess(equilibrium_k)?;
     if low_excess <= 0.0 {
         return Ok(equilibrium_k);

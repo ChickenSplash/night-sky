@@ -17,6 +17,7 @@ use std::{collections::BTreeMap, fmt::Write as _, time::Instant};
 
 const DEFAULT_SYSTEMS_PER_COMPONENT: usize = 20;
 
+mod agreement;
 mod census;
 mod plausibility;
 mod traces;
@@ -149,31 +150,33 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String, f64)> {
     {
         controls.radial.relative_tolerance = tolerance;
     }
-    let escaping = prototype::solve(&p.body.budget, environment, controls).map_err(|e| {
-        // The warmed surface temperature is unknown on failure, so water
-        // errors are not binned by temperature here.
-        let (category, detail) = coupled_error(f64::NAN, &e);
-        let fallback = crate::system::physical::fallback(&super::fallback::solve(
-            &p.body.budget,
-            environment,
-            e,
-        ));
-        check_record(&fallback, p);
-        assert!(
-            fallback
-                .fallback_reason
-                .as_ref()
-                .is_some_and(|s| !s.is_empty())
-        );
-        let radius = fallback.physical.reference_radius_m;
-        if light && matches!(category, Category::GasDomain | Category::MassDomain) {
-            (Category::Envelope, detail, radius)
-        } else {
-            (category, detail, radius)
-        }
-    })?;
+    let escaping = prototype::solve_decided(&p.body.budget, environment, p.body.decision, controls)
+        .map_err(|e| {
+            // The warmed surface temperature is unknown on failure, so water
+            // errors are not binned by temperature here.
+            let (category, detail) = coupled_error(f64::NAN, &e);
+            let fallback = crate::system::physical::fallback(&super::fallback::solve(
+                &p.body.budget,
+                environment,
+                e,
+            ));
+            check_record(&fallback, p);
+            assert!(
+                fallback
+                    .fallback_reason
+                    .as_ref()
+                    .is_some_and(|s| !s.is_empty())
+            );
+            let radius = fallback.physical.reference_radius_m;
+            if light && matches!(category, Category::GasDomain | Category::MassDomain) {
+                (Category::Envelope, detail, radius)
+            } else {
+                (category, detail, radius)
+            }
+        })?;
     let atmosphere = &escaping.structure;
-    let escaped = escaping.blowoff;
+    // Blow-off is generation's synchronous decision, not this solve's.
+    let escaped = p.body.blowoff;
     let t = atmosphere.surface_temperature_k();
     let pressure = if let Some(envelope) = atmosphere.envelope() {
         envelope.reference_pressure_pa()
@@ -303,10 +306,13 @@ fn row(p: &Hosted) -> Row {
         && (category == Category::Envelope
             || solved.as_ref().is_some_and(|s| s.surface == "envelope"))
     {
-        trace_audit.thin_refusal = format!(
-            "{:?}",
-            prototype::thin_route_diagnostic(&p.body.budget, env).unwrap_err()
-        );
+        // Generation routed this body to the envelope on its fitted radius.
+        // On the layered radius the thin column can occasionally fit.
+        trace_audit.thin_refusal = prototype::thin_route_diagnostic(&p.body.budget, env)
+            .map_or_else(
+                |e| format!("{e:?}"),
+                |_| "none on the layered radius".to_owned(),
+            );
     }
     Row {
         suspended: solved.as_ref().and_then(|s| s.suspended),

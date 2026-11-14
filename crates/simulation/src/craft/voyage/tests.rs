@@ -775,7 +775,18 @@ fn a_charted_list_page_is_flown_to_from_galactic_space() {
     let list = &lists.systems[0];
     let page = list.first_page();
     let page_star = page_star_id(list, page);
-    let target = list.on_page(page).next().unwrap().id.clone();
+    // An airless body: a hot, extended column can leave no safe standoff
+    // inside a close-in planet's orbit reach, which is refused by design.
+    let target = list
+        .on_page(page)
+        .find(|p| {
+            p.environment
+                .as_ref()
+                .is_some_and(|e| e.atmosphere.is_none())
+        })
+        .unwrap()
+        .id
+        .clone();
     let mut library = Library::new(lists.clone());
     library.supply(&Wait::Star(page_star.clone()));
     let candidate = library.locate(&page_star).unwrap().unwrap().clone();

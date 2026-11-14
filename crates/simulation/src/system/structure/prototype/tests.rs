@@ -39,7 +39,7 @@ fn check(s: &Solved, b: &Budget) {
         assert!((retained.mass_kg(m) + s.escaped.mass_kg(m) - initial).abs() <= 1e-10 * initial);
     }
     assert_eq!(s.source, *b.source());
-    assert_eq!(s.escaped, b.escaped().checked_add(&s.blowoff).unwrap());
+    assert_eq!(s.escaped, *b.escaped());
     assert!(structure.diagnostics().interface_residual_pa.abs() <= 0.02);
     let interior = structure.condensed().retained_inventory();
     assert!(
@@ -139,18 +139,29 @@ fn layered_record_is_contiguous_conserved_and_grants_ground_only_to_rock_or_ice(
 }
 
 #[test]
-fn blowoff_preserves_protected_species_and_previous_escape() {
+fn unbound_columns_are_refused_here_and_stripped_by_the_synchronous_decision() {
+    use crate::system::structure::fallback;
     let b = budget(0.0, 0.0002);
-    let s = solve(&b, &environment(1000.0), Controls::default()).unwrap();
-    check(&s, &b);
-    assert!(s.structure.atmosphere().is_none());
-    let n = b.retained().mass_kg(Material::Nitrogen);
-    assert!((s.blowoff.mass_kg(Material::Nitrogen) / n - 0.1).abs() < 1e-12);
-    assert_eq!(s.blowoff.mass_kg(Material::Hydrogen), 0.0);
+    let env = environment(1000.0);
     assert_eq!(
-        s.escaped.mass_kg(Material::Hydrogen),
+        solve(&b, &env, Controls::default()).unwrap_err(),
+        Error::WeakBindingUnsupported
+    );
+    let decided = fallback::decide(&fallback::initial(&b, &env), &env).unwrap();
+    assert!(matches!(decided.decision, Decision::Thin { .. }));
+    let n = b.retained().mass_kg(Material::Nitrogen);
+    let blowoff = decided.fallback.blowoff;
+    assert!((blowoff.mass_kg(Material::Nitrogen) / n - 0.1).abs() < 1e-12);
+    assert_eq!(blowoff.mass_kg(Material::Hydrogen), 0.0);
+    assert_eq!(
+        decided.budget.escaped().mass_kg(Material::Hydrogen),
         b.escaped().mass_kg(Material::Hydrogen)
     );
+    // The layered solve keeps that inventory and removes nothing further.
+    let s = solve_decided(&decided.budget, &env, decided.decision, Controls::default()).unwrap();
+    check(&s, &decided.budget);
+    assert!(s.structure.atmosphere().is_none());
+    assert_eq!(s.structure.surface_temperature_k(), 1000.0);
 }
 
 #[test]
@@ -188,7 +199,13 @@ fn unsupported_and_budget_failures_never_fall_back() {
         .unwrap();
     let envelope = Budget::new(source, source, Inventory::default(), Inventory::default()).unwrap();
     assert_eq!(
-        solve_thin(&envelope, &environment(250.0), Controls::default()).unwrap_err(),
+        solve_thin(
+            &envelope,
+            &environment(250.0),
+            Decision::Undecided,
+            Controls::default()
+        )
+        .unwrap_err(),
         Error::GasMassOutsideDomain
     );
 }
@@ -267,5 +284,5 @@ fn empty_protected_supply_matches_the_original_coupling_route() {
     )
     .unwrap();
     assert_eq!(s.structure, original.structure);
-    assert_eq!(s.blowoff, original.escaped);
+    assert_eq!(original.escaped, Inventory::default());
 }

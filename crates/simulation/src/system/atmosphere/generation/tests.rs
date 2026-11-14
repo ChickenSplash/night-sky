@@ -81,6 +81,8 @@ fn body() -> Body {
         formation_mass_earth: 1.0,
         formation_distance_au: 1.0,
         retention_solve: RetentionSolve::NoEnvelope,
+        decision: crate::system::structure::prototype::Decision::Undecided,
+        blowoff: Default::default(),
     }
 }
 
@@ -533,9 +535,13 @@ fn population_is_deterministic_valid_and_varied_without_changing_orbits() {
                 if air.composition().fraction(species) > 0.0 {
                     assert!(gas_mass > 0.0);
                 }
+                // A decided surface caps warm water at IF97 saturation; the
+                // undecided partition keeps the shared cold-trap fit.
                 assert!(
                     air.pressure_pa() * air.composition().fraction(species)
-                        <= vapour_pressure(species, data.temperature_k) * (1.0 + 1e-9)
+                        <= vapour_pressure(species, data.temperature_k).max(
+                            crate::system::structure::coupled::cap_pa(species, data.temperature_k)
+                        ) * (1.0 + 1e-8)
                 );
             }
             let encoded = serde_json::to_string(environment).unwrap();

@@ -1,4 +1,5 @@
-//! Bounded final-orbit survival on fast fallback facts and immutable forcing.
+//! Bounded final-orbit survival on fast fallback facts and immutable forcing,
+//! then the one synchronous surface decision (`structure::fallback::decide`).
 use super::*;
 use crate::system::{
     composition::{Budget, Inventory, Material, Reservoir},
@@ -202,6 +203,8 @@ pub(crate) fn finalise(
     body.budget = prepared.budget;
     body.initial_result = prepared.result;
     body.retention_solve = solve;
+    body.decision = prepared.decision;
+    body.blowoff = prepared.blowoff;
     body.spin = planet_spin(&mut Rng::new(&format!("{id}:spin:v2")), body, host_mass);
     environment
 }
@@ -290,6 +293,25 @@ mod tests {
                             reconcile(&budget, &forcing).unwrap(),
                             (budget, physical.clone(), status)
                         );
+                        // The surface decision is total on every retained budget,
+                        // and what it strips is still accounted as escape.
+                        let prepared = crate::system::physical::initial_with_atmosphere(
+                            &physical,
+                            &forcing.environment(),
+                            forcing.revision("grid", &budget),
+                        )
+                        .unwrap();
+                        crate::system::physical::validate_result(&prepared.result).unwrap();
+                        for m in Material::ALL {
+                            let decided = &prepared.budget;
+                            assert_eq!(decided.source().mass_kg(m), budget.source().mass_kg(m));
+                            assert!(decided.retained().mass_kg(m) <= budget.retained().mass_kg(m));
+                            assert!(
+                                decided.escaped().mass_kg(m)
+                                    >= budget.escaped().mass_kg(m) + prepared.blowoff.mass_kg(m)
+                                        - 1e-9 * budget.source().mass_kg(m)
+                            );
+                        }
                         match status {
                             RetentionSolve::NoEnvelope => absent += 1,
                             RetentionSolve::Converged { steps } => {

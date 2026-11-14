@@ -97,7 +97,17 @@ pub(super) fn classify(physical: &space_shared::PlanetPhysical) -> Class {
         Class::GasGiant
     } else if fraction >= classification::ENVELOPE_WORLD_MASS_FRACTION {
         Class::EnvelopeWorld
-    } else if fraction >= classification::SIGNIFICANT_H_HE_MASS_FRACTION {
+    } else if fraction >= classification::SIGNIFICANT_H_HE_MASS_FRACTION
+        || (physical.radius_reference == space_shared::RadiusReference::OneBar
+            && fraction * physical.retained_mass_kg.powi(2) * crate::units::GRAVITATIONAL_CONSTANT
+                >= 4.0
+                    * std::f64::consts::PI
+                    * crate::system::atmosphere::ONE_BAR_PA
+                    * physical.condensed_radius_m.powi(4))
+    {
+        // H/He that alone holds a one-bar level above the ground is an
+        // envelope, however little of the mass it is: never labelled as bare
+        // rock or water. A thick secondary atmosphere keeps its bulk class.
         Class::SubNeptune
     } else if share(Material::Water) >= classification::WATER_RICH_MASS_FRACTION {
         Class::WaterRich
@@ -153,11 +163,17 @@ mod tests {
             let (_, s) = sample(water, metal, light);
             assert_eq!(classify(&s.physical), expected);
         }
+        // H/He that alone holds one bar is an envelope below the mass-fraction
+        // threshold too; without a one-bar level the bulk class stands.
+        let (_, trace) = sample(0.0, 0.3, 1e-5);
+        assert_eq!(classify(&trace.physical), Class::SubNeptune);
+        let mut ground = trace.physical.clone();
+        ground.radius_reference = space_shared::RadiusReference::SolidSurface;
+        assert_eq!(classify(&ground), Class::Rocky);
         // Both sides of label boundaries keep the continuous physical solution.
         for (water, metal, light) in [
             (0.25, 0.3, 0.0),
             (0.0, 0.5, 0.0),
-            (0.0, 0.3, 0.001),
             (0.0, 0.3, 0.1),
             (0.0, 0.3, 0.5),
         ] {

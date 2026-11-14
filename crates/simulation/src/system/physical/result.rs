@@ -185,10 +185,11 @@ pub fn validate_refinement(active: &PlanetResult, candidate: &PlanetResult) -> C
             .iter()
             .map(|m| m.source_kg)
             .sum::<f64>();
-    if (additional_loss - candidate.record.blowoff_kg).abs()
-        > tolerance + 1e-9 * candidate.record.blowoff_kg
+    // Escape is generation's decision. A refinement adds none, and reports
+    // the same blow-off its base did.
+    if additional_loss.abs() > tolerance || candidate.record.blowoff_kg != active.record.blowoff_kg
     {
-        return Err("inconsistent refinement blow-off");
+        return Err("refinement changed escape");
     }
     Ok(())
 }

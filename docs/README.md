@@ -32,8 +32,9 @@ seed helpers, object identities and photometry stay at the crate root; see
   formation/retained budgets, approximate generated radii, bounded H/He retention
   and separate headless dry/water radial solvers, protected traces in dry and
    water-bearing hosts, atmosphere coupling and default-on background refinement.
-   Live planets start on one synchronous fallback each; complete layered results
-   are adopted when camera/craft/route safety permits, with visible deferral reasons.
+   Live planets start on one synchronous fallback each, which decides surface
+   temperature, gas, frost, blow-off and route; complete layered results keep
+   those and are adopted when camera/craft/route safety permits.
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.
@@ -99,8 +100,9 @@ The Bevy/egui client in `crates/client`:
   per-planet rendering work, validation history and explicitly deferred follow-ups.
 - [Planet surfaces](plans/planet-surfaces.md): bodies flattened by their spin,
   landing on the ground, then geology, water and giants' depths.
-- [Planet generation](plans/planet-generation.md): proposed single physical
-  model for fast and layered results, and realistic, varied formation priors.
+- [Planet generation](plans/planet-generation.md): one physical model for fast
+  and layered results (speed and the single surface decision done; table and
+  formation priors proposed).
 - [Planet composition replacement](plans/planet-composition.md): rock-and-water
   prototype first, completed headless foundation, conserved-region contract, then
   envelopes and default cutover. Methane physics is parked on its own branch.
@@ -124,8 +126,9 @@ The Bevy/egui client in `crates/client`:
   predicted impacts outside warp are shown but not enforced.
 - Bodies use gizmos or pooled per-body meshes; further body batching remains future work.
 - Atmospheres use approximate generated columns and visible optics,
-  not solved climate or atmospheric evolution. No generated clouds/aerosols or
-  greenhouse solution yet. Supported columns use spherical variable gravity;
+  not solved climate or atmospheric evolution. No generated clouds/aerosols.
+  Surface temperature is a grey greenhouse estimate decided at generation,
+  with blow-off of unbound columns; a refused runaway stays at equilibrium. Supported columns use spherical variable gravity;
   weak-binding cases retain an explicitly unresolved exponential fallback.
   Bulk mass/radius, atmospheric gas and cold condensates now share conserved
   inventories. Descriptive labels never select physical properties; composition
@@ -167,8 +170,9 @@ The Bevy/egui client in `crates/client`:
   condensed boundaries; it does not itself cover dense envelopes or unsupported
   condensed molecules.
    A bounded hot ideal-steam approximation extends the column to 2,000 K and
-   50 kg/m³ for ≥90%-water gas; denser columns remain unsupported. An opt-in
-   [blow-off wrapper](simulation/planet-composition.md#unbound-column-blow-off)
+   50 kg/m³ for ≥90%-water gas; denser columns keep generation's ideal column
+   and no layered result. Generation's
+   [surface decision](simulation/planet-composition.md#synchronous-surface-decision)
    strips the lightest gases from weakly bound columns, with no escape rate.
   Nothing stops the camera at the ground, and close up the near plane cuts it
   away.

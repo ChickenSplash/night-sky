@@ -37,12 +37,16 @@ fn check(initial: &Fallback, env: &PlanetEnvironment) -> Partitioned {
     assert_eq!(solved.fallback.source, initial.source);
     assert_eq!(solved.fallback.retained, initial.retained);
     assert_eq!(solved.fallback.escaped, initial.escaped);
-    assert_eq!(solved.fallback.radius_m, initial.radius_m);
+    // A fully evaporated volatile layer is removed, shrinking the boundary.
+    assert!(solved.fallback.radius_m <= initial.radius_m);
+    assert!(solved.fallback.condensed_radius_m <= initial.condensed_radius_m);
     assert_eq!(
-        solved.fallback.condensed_radius_m,
-        initial.condensed_radius_m
+        solved.fallback.reference == RadiusReference::OneBar,
+        initial.reference == RadiusReference::OneBar
     );
-    assert_eq!(solved.fallback.reference, initial.reference);
+    physical::validate_record(&physical::fallback(&solved.fallback)).unwrap();
+    // Generation enters through the surface decision, which keeps this
+    // partition only when it leaves the surface undecided.
     let prepared = physical::initial_with_atmosphere(
         initial,
         env,
@@ -54,31 +58,49 @@ fn check(initial: &Fallback, env: &PlanetEnvironment) -> Partitioned {
     )
     .unwrap();
     physical::validate_result(&prepared.result).unwrap();
-    assert_eq!(prepared.result.record.physical, {
-        let mut p = physical::fallback(&solved.fallback).physical;
-        p.approximations.push(MODEL_ID.into());
-        p
-    });
+    let decided = matches!(
+        prepared.decision,
+        crate::system::structure::prototype::Decision::Thin { .. }
+    );
+    // An envelope decision re-references a thick boundary column at one bar.
+    let same_reference = (prepared.result.record.physical.radius_reference
+        == RadiusReference::OneBar)
+        == (solved.fallback.reference == RadiusReference::OneBar);
+    if !decided && same_reference {
+        assert_eq!(prepared.result.record.physical, {
+            let mut p = physical::fallback(&solved.fallback).physical;
+            p.approximations.push(MODEL_ID.into());
+            p
+        });
+    }
     let record = &prepared.result.record;
     for m in &record.physical.materials {
         let material = Material::from_id(&m.material).unwrap();
-        assert_eq!(m.retained_kg, initial.retained.mass_kg(material));
+        assert!(m.retained_kg <= initial.retained.mass_kg(material));
+        if !decided {
+            assert_eq!(m.retained_kg, initial.retained.mass_kg(material));
+        }
         assert!(
             (m.interior_kg + m.condensed_kg + m.gas_kg - m.retained_kg).abs()
                 <= 1e-12 * m.retained_kg
         );
     }
-    if let Some(air) = solved.atmosphere {
-        let wire = prepared.environment.atmosphere.as_ref().unwrap();
+    if let Some(wire) = prepared.environment.atmosphere.as_ref() {
         assert_eq!(wire.pressure_pa, record.surface_pressure_pa);
         assert_eq!(wire.temperature_k, record.surface_temperature_k);
         crate::system::atmosphere::optics::boundary::OpticalColumn::from_result(
             &prepared.result,
-            &air,
+            &GasAtmosphere::try_from(wire).unwrap(),
         )
         .unwrap();
     } else {
-        assert!(prepared.environment.atmosphere.is_none());
+        assert_eq!(record.surface_pressure_pa, 0.0);
+    }
+    if !decided {
+        assert_eq!(
+            solved.atmosphere.is_some(),
+            prepared.environment.atmosphere.is_some()
+        );
     }
     assert_eq!(resolve(initial).unwrap().fallback, solved.fallback);
     solved

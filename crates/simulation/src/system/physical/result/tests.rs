@@ -198,7 +198,12 @@ fn stale_revisions_and_inconsistent_lifecycle_are_rejected() {
     let env = environment(250.0);
     let active = initial_result(&b, &env, revision(0)).unwrap();
     let candidate = resolved_result(
-        &structure::prototype::resolve(&b, &env, Default::default()),
+        &structure::prototype::resolve(
+            &b,
+            &env,
+            structure::prototype::Decision::Undecided,
+            Default::default(),
+        ),
         revision(1),
     )
     .unwrap();
@@ -352,11 +357,32 @@ fn per_species_escape_and_blowoff_survive_refinement_without_replaying_history()
         .unwrap();
     let b = Budget::new(source, retained, Inventory::default(), Inventory::default()).unwrap();
     let env = environment(1000.0);
-    let active = initial_result(&b, &env, revision(0)).unwrap();
-    let outcome = structure::prototype::resolve(&b, &env, Default::default());
-    let candidate = resolved_result(&outcome, revision(1)).unwrap();
-    assert!(candidate.record.blowoff_kg > 0.0);
+    // Generation's synchronous decision strips the unbound column; the layered
+    // solve keeps that budget and the refinement carries the amount forward.
+    let prepared = crate::system::physical::initial_with_atmosphere(
+        &structure::fallback::initial(&b, &env),
+        &env,
+        revision(0),
+    )
+    .unwrap();
+    let active = prepared.result;
+    assert!(active.record.blowoff_kg > 0.0);
+    let outcome = structure::prototype::resolve(
+        &prepared.budget,
+        &env,
+        prepared.decision,
+        Default::default(),
+    );
+    assert!(matches!(outcome, structure::prototype::Outcome::Layered(_)));
+    let candidate = crate::system::physical::prepare_refinement(&active, &env, &outcome)
+        .unwrap()
+        .result;
+    assert_eq!(candidate.record.blowoff_kg, active.record.blowoff_kg);
     validate_refinement(&active, &candidate).unwrap();
+    // A layered solve that removed more would not be this base's refinement.
+    let mut leaking = candidate.clone();
+    leaking.record.blowoff_kg *= 2.0;
+    assert!(validate_refinement(&active, &leaking).is_err());
     round_trip(&candidate);
     assert!(validate_refinement(&candidate, &candidate).is_err());
     let mut unrelated = active.clone();

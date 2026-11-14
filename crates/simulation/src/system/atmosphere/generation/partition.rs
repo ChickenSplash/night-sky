@@ -85,7 +85,7 @@ pub(crate) fn solve(
             .map(|&gas| inventory.mass_kg(Material::from_gas(gas)) / gas.molecular_mass_u())
             .sum()
     };
-    let (mut low, mut high) = if one_bar {
+    let (low, high) = if one_bar {
         let light_moles = available.mass_kg(Material::Hydrogen) / Gas::Hydrogen.molecular_mass_u()
             + available.mass_kg(Material::Helium) / Gas::Helium.molecular_mass_u();
         (
@@ -102,16 +102,15 @@ pub(crate) fn solve(
             max * weight_per_area / (1.0 - (-EXTENT_SCALE_HEIGHTS).exp()),
         )
     };
-    // Fixed bounded bisection, molecular masses give the boundary-column bracket.
+    // Bracketed root; molecular masses give the boundary-column bracket.
     // No unsolved iterative clipping of mole fractions after condensation.
-    for _ in 0..64 {
-        let coefficient = (low + high) * 0.5;
+    let high = super::super::profile::upper_root(low, high, |coefficient| {
         let gas = allocated(coefficient);
         let moles = mole_weight(&gas);
-        let below = if one_bar {
-            coefficient * moles < ONE_BAR_PA
+        if one_bar {
+            coefficient * moles - ONE_BAR_PA
         } else if moles == 0.0 {
-            false
+            0.0
         } else {
             let pressure = coefficient * moles;
             let mean_mass = gas.total_mass_kg() / moles * crate::units::ATOMIC_MASS_KG;
@@ -119,14 +118,9 @@ pub(crate) fn solve(
                 / mean_mass
                 / (crate::units::GRAVITATIONAL_CONSTANT * mass_kg / radius_m.powi(2));
             let profile = super::super::profile::Profile::new(radius_m, height, pressure);
-            pressure * profile.mass_factor(pressure) < gas.total_mass_kg() * weight_per_area
-        };
-        if below {
-            low = coefficient;
-        } else {
-            high = coefficient;
+            pressure * profile.mass_factor(pressure) - gas.total_mass_kg() * weight_per_area
         }
-    }
+    });
     // Upper bracket ensures saturation caps are not exceeded by roundoff.
     let gas = allocated(high);
     let mut partitioned = *budget;

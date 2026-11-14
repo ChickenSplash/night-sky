@@ -13,15 +13,28 @@ use space_shared::PlanetEnvironment;
 
 pub const MODEL_ID: &str = "generated_layered_rock_water_v1";
 
+/// What generation decided synchronously and the layered solve must keep.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Decision {
+    /// A condensed surface under a thin column at this greenhouse temperature.
+    /// Blow-off has already been taken from the budget.
+    Thin { surface_temperature_k: f64 },
+    /// A self-gravitating H/He envelope.
+    Envelope,
+    /// The synchronous surface model refused: so does the layered solve.
+    Refused(Error),
+    /// Nothing was decided (headless callers): the thin route solves its own
+    /// greenhouse balance, then the envelope.
+    Undecided,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Solved {
     pub structure: CoupledStructure,
     /// Original formation supply, including generation's prior losses.
     pub source: Inventory,
-    /// All losses: generation's escape plus this solve's blow-off.
+    /// Generation's losses, unchanged: this solve removes nothing.
     pub escaped: Inventory,
-    /// Subset of `escaped`, useful for diagnosing the additional blow-off.
-    pub blowoff: Inventory,
     /// Audit-only supply, already owned by the returned interior regions.
     pub protected: Inventory,
 }
@@ -71,8 +84,13 @@ pub enum Outcome {
 
 /// Every generated body gets a result: layered when supported, else the
 /// explicitly labelled fallback structure. Never a legacy substitution.
-pub fn resolve(budget: &Budget, environment: &PlanetEnvironment, controls: Controls) -> Outcome {
-    match solve(budget, environment, controls) {
+pub fn resolve(
+    budget: &Budget,
+    environment: &PlanetEnvironment,
+    decision: Decision,
+    controls: Controls,
+) -> Outcome {
+    match solve_decided(budget, environment, decision, controls) {
         Ok(solved) => Outcome::Layered(Box::new(solved)),
         Err(reason) => Outcome::Fallback(Box::new(super::fallback::solve(
             budget,
@@ -82,30 +100,55 @@ pub fn resolve(budget: &Budget, environment: &PlanetEnvironment, controls: Contr
     }
 }
 
-/// Generation's existing retained budget is authoritative. Its reservoir split
-/// is not: repartition from immutable supply, without replaying retention history.
-/// All water exchanges with the atmosphere; only other secondaries are entrained.
+/// Generation's retained budget and surface decision are authoritative. The
+/// reservoir split is not: repartition from immutable supply, without
+/// replaying retention history. No gas escapes here.
+pub fn solve_decided(
+    budget: &Budget,
+    environment: &PlanetEnvironment,
+    decision: Decision,
+    controls: Controls,
+) -> Result<Solved, Error> {
+    match decision {
+        Decision::Thin { .. } => return solve_thin(budget, environment, decision, controls),
+        Decision::Envelope => return solve_envelope(budget, environment, controls),
+        Decision::Refused(error) => return Err(error),
+        Decision::Undecided => {}
+    }
+    let error = match solve_thin(budget, environment, decision, controls) {
+        Ok(solved) => return Ok(solved),
+        Err(error) => error,
+    };
+    if routes_to_envelope(&error, budget.retained()) {
+        solve_envelope(budget, environment, controls)
+    } else {
+        Err(error)
+    }
+}
+
+/// Headless entry with nothing decided: the thin route solves its own
+/// greenhouse balance. Still no escape; an unbound column is refused.
 pub fn solve(
     budget: &Budget,
     environment: &PlanetEnvironment,
     controls: Controls,
 ) -> Result<Solved, Error> {
-    let error = match solve_thin(budget, environment, controls) {
-        Ok(solved) => return Ok(solved),
-        Err(error) => error,
-    };
-    if !matches!(
+    solve_decided(budget, environment, Decision::Undecided, controls)
+}
+
+/// A thin-column refusal that an H/He envelope can represent instead.
+pub(crate) fn routes_to_envelope(error: &Error, retained: &Inventory) -> bool {
+    matches!(
         error,
         Error::GasMassOutsideDomain
             | Error::DenseGasUnsupported
             | Error::Radial(super::dry::SolveError::OutsideMassDomain(_))
-    ) || budget.retained().mass_kg(Material::Hydrogen)
-        + budget.retained().mass_kg(Material::Helium)
-        == 0.0
-    {
-        return Err(error);
-    }
-    let protected = Inventory::new(&Material::ALL.map(|m| {
+    ) && retained.mass_kg(Material::Hydrogen) + retained.mass_kg(Material::Helium) > 0.0
+}
+
+/// Deep secondaries never offered to the atmosphere or to escape.
+fn protected(source: &Inventory, retained: &Inventory) -> Result<Inventory, Error> {
+    Inventory::new(&Material::ALL.map(|m| {
         let mass = if matches!(
             m,
             Material::CarbonDioxide
@@ -114,14 +157,21 @@ pub fn solve(
                 | Material::Oxygen
                 | Material::Argon
         ) {
-            (budget.source().mass_kg(m) * (1.0 - accessible_fraction(m)))
-                .min(budget.retained().mass_kg(m))
+            (source.mass_kg(m) * (1.0 - accessible_fraction(m))).min(retained.mass_kg(m))
         } else {
             0.0
         };
         (m, mass)
     }))
-    .map_err(Error::Composition)?;
+    .map_err(Error::Composition)
+}
+
+fn solve_envelope(
+    budget: &Budget,
+    environment: &PlanetEnvironment,
+    controls: Controls,
+) -> Result<Solved, Error> {
+    let protected = protected(budget.source(), budget.retained())?;
     let (interior, envelope) = super::profile::time(super::profile::Stage::Envelope, || {
         super::envelope::solve(
             budget.retained(),
@@ -136,7 +186,6 @@ pub fn solve(
         structure: CoupledStructure::from_envelope(interior, envelope),
         source: *budget.source(),
         escaped: *budget.escaped(),
-        blowoff: Inventory::default(),
         protected,
     })
 }
@@ -146,36 +195,27 @@ pub(super) fn thin_route_diagnostic(
     budget: &Budget,
     environment: &PlanetEnvironment,
 ) -> Result<Solved, Error> {
-    solve_thin(budget, environment, Controls::default())
+    solve_thin(
+        budget,
+        environment,
+        Decision::Undecided,
+        Controls::default(),
+    )
 }
 
-fn solve_thin(
-    budget: &Budget,
+/// The one exposure rule, shared by generation's synchronous surface decision
+/// and the layered thin route: all water and every unprotected secondary
+/// exchange with the column, which takes the greenhouse surface temperature.
+pub(crate) fn thin_request(
+    source: &Inventory,
+    retained: &Inventory,
     environment: &PlanetEnvironment,
-    controls: Controls,
-) -> Result<Solved, Error> {
-    let retained = budget.retained();
+) -> Result<(Request, Inventory), Error> {
     let equilibrium = environment.equilibrium_temperature_k;
     if !equilibrium.is_finite() || equilibrium <= 0.0 {
         return Err(Error::InvalidInput("equilibrium temperature"));
     }
-    let protected = Inventory::new(&Material::ALL.map(|m| {
-        let secondary = matches!(
-            m,
-            Material::CarbonDioxide
-                | Material::Nitrogen
-                | Material::Methane
-                | Material::Oxygen
-                | Material::Argon
-        );
-        let mass = if secondary {
-            (budget.source().mass_kg(m) * (1.0 - accessible_fraction(m))).min(retained.mass_kg(m))
-        } else {
-            0.0
-        };
-        (m, mass)
-    }))
-    .map_err(Error::Composition)?;
+    let protected = protected(source, retained)?;
     let exchangeable = Inventory::new(&Material::ALL.map(|m| {
         (
             m,
@@ -194,25 +234,40 @@ fn solve_thin(
     {
         return Err(Error::GasMassOutsideDomain);
     }
-    let escaping = coupled::escape::solve_protected(
-        &Request {
+    Ok((
+        Request {
             retained: *retained,
             exchangeable,
             temperature: Temperature::Greenhouse {
                 equilibrium_k: equilibrium.max(coupled::MIN_COLUMN_TEMPERATURE_K),
             },
         },
-        &protected,
-        controls,
-    )?;
-    let escaped = budget
-        .escaped()
-        .checked_add(&escaping.escaped)
-        .map_err(Error::Composition)?;
-    let allocated = escaping
-        .structure
+        protected,
+    ))
+}
+
+fn solve_thin(
+    budget: &Budget,
+    environment: &PlanetEnvironment,
+    decision: Decision,
+    controls: Controls,
+) -> Result<Solved, Error> {
+    let (mut request, protected) = thin_request(budget.source(), budget.retained(), environment)?;
+    if let Decision::Thin {
+        surface_temperature_k,
+    } = decision
+    {
+        request.temperature = Temperature::Prescribed {
+            column_k: surface_temperature_k,
+            water_k: Some(surface_temperature_k),
+        };
+    }
+    let structure = super::profile::time(super::profile::Stage::Coupled, || {
+        coupled::solve_protected(&request, &protected, controls)
+    })?;
+    let allocated = structure
         .retained_inventory()
-        .checked_add(&escaped)
+        .checked_add(budget.escaped())
         .map_err(Error::Composition)?;
     for m in Material::ALL {
         if (allocated.mass_kg(m) - budget.source().mass_kg(m)).abs()
@@ -222,10 +277,9 @@ fn solve_thin(
         }
     }
     Ok(Solved {
-        structure: escaping.structure,
+        structure,
         source: *budget.source(),
-        escaped,
-        blowoff: escaping.escaped,
+        escaped: *budget.escaped(),
         protected,
     })
 }

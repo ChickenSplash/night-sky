@@ -75,7 +75,19 @@ pub fn prepare_refinement(
         .checked_add(1)
         .ok_or("revision overflow")?;
     let result = match outcome {
-        Outcome::Layered(_) => resolved_result(outcome, revision)?,
+        Outcome::Layered(_) => {
+            // The layered solve keeps generation's decisions; carry their
+            // audit facts forward instead of dropping them at adoption.
+            let mut result = resolved_result(outcome, revision)?;
+            result.record.blowoff_kg = initial.record.blowoff_kg;
+            if result.record.surface != "envelope" {
+                result.record.greenhouse_optical_depth = initial
+                    .record
+                    .greenhouse_optical_depth
+                    .or(result.record.greenhouse_optical_depth);
+            }
+            result
+        }
         Outcome::Fallback(f) => {
             let refused = fallback(f);
             let reason = refused.fallback_reason.ok_or("missing refusal reason")?;

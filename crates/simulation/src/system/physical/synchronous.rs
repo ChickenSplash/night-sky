@@ -2,8 +2,8 @@
 //! facts together as the live projections; nothing else may supply them.
 use crate::system::{
     atmosphere::{generation::MIN_PRESSURE_PA, optics::boundary::OpticalColumn},
-    composition::Budget,
-    structure::fallback,
+    composition::{Budget, Inventory},
+    structure::{fallback, prototype::Decision},
 };
 use space_shared::{PhysicalRevision, PlanetEnvironment, PlanetResult};
 
@@ -13,6 +13,10 @@ pub struct PreparedInitial {
     pub budget: Budget,
     /// Includes positive trace columns. See `live_environment`.
     pub environment: PlanetEnvironment,
+    /// What the layered solve must keep.
+    pub decision: Decision,
+    /// Stripped from an unbound column; already counted in the budget's escape.
+    pub blowoff: Inventory,
 }
 
 impl PreparedInitial {
@@ -28,8 +32,8 @@ impl PreparedInitial {
     }
 }
 
-/// Partition at the fallback's fixed reference. Neither legacy boundary
-/// resolution nor a second structure/retention/EOS solve is used.
+/// Decide the surface on the retention fallback: temperature, gas, frost,
+/// blow-off and the layered route. No radial structure or EOS solve is used.
 pub fn initial_with_atmosphere(
     fallback: &fallback::Fallback,
     forcing: &PlanetEnvironment,
@@ -44,20 +48,31 @@ pub fn initial_with_atmosphere(
     )?;
     if !forcing.equilibrium_temperature_k.is_finite()
         || forcing.equilibrium_temperature_k < 0.0
-        || forcing.equilibrium_temperature_k.max(20.0) != fallback.surface_temperature_k
+        || fallback.surface_temperature_k
+            != if fallback.reference == space_shared::RadiusReference::OneBar {
+                fallback::one_bar_temperature_k(
+                    forcing.equilibrium_temperature_k.max(20.0),
+                    fallback.mass_kg(),
+                    forcing.age_gyr,
+                    fallback.radius_m,
+                )
+            } else {
+                forcing.equilibrium_temperature_k.max(20.0)
+            }
     {
         return Err("inconsistent synchronous thermal input");
     }
-    let partitioned = fallback::partition::resolve(fallback).map_err(|error| match error {
+    let partitioned = fallback::decide(fallback, forcing).map_err(|error| match error {
         crate::system::atmosphere::AtmosphereError::InvalidValue(name) => name,
-        _ => "invalid synchronous fallback partition",
+        _ => "invalid synchronous surface decision",
     })?;
     let mut result = super::initial_from_fallback(&partitioned.fallback, revision)?;
-    result
-        .record
-        .physical
-        .approximations
-        .push(fallback::partition::MODEL_ID.into());
+    let approximations = &mut result.record.physical.approximations;
+    if matches!(partitioned.decision, Decision::Thin { .. }) {
+        approximations.extend(fallback::decide::MODEL_IDS.map(String::from));
+    } else {
+        approximations.push(fallback::partition::MODEL_ID.into());
+    }
     super::validate_result(&result)?;
     let facts = &result.record.physical;
     let mut environment = forcing.clone();
@@ -78,5 +93,7 @@ pub fn initial_with_atmosphere(
         result,
         budget: partitioned.budget,
         environment,
+        decision: partitioned.decision,
+        blowoff: partitioned.fallback.blowoff,
     })
 }

@@ -279,7 +279,8 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
         surface_pressure_pa,
         greenhouse_optical_depth: s.greenhouse_optical_depth(),
         one_bar_radius_m: s.one_bar_radius_m().ok().flatten(),
-        blowoff_kg: solved.blowoff.total_mass_kg(),
+        // Generation's decision; refinement carries its amount forward.
+        blowoff_kg: 0.0,
         layers,
     }
 }
@@ -313,6 +314,8 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
                 model_limitations: vec![
                     if atmosphere {
                         "Finite mass-normalised isothermal gas column; weak-binding pressure remains approximate"
+                    } else if r.kind == fallback::Kind::Frost {
+                        "Even global frost layer of fixed solid density; phase unresolved"
                     } else if envelope {
                         "H/He envelope mass-radius fit; prescribed thinning density profile"
                     } else {
@@ -354,7 +357,7 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
                     retained_kg: f.retained.mass_kg(m),
                     escaped_kg: f.escaped.mass_kg(m),
                     interior_kg: in_kind(m, &[K::Core, K::Mantle]),
-                    condensed_kg: in_kind(m, &[K::Water, K::Volatiles]),
+                    condensed_kg: in_kind(m, &[K::Water, K::Volatiles, K::Frost]),
                     gas_kg: in_kind(m, &[K::Envelope, K::Atmosphere]),
                 })
                 .collect(),
@@ -373,9 +376,9 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
         surface: f.surface().into(),
         surface_temperature_k: f.surface_temperature_k,
         surface_pressure_pa: f.surface_pressure_pa,
-        greenhouse_optical_depth: None,
+        greenhouse_optical_depth: f.optical_depth,
         one_bar_radius_m: f.one_bar_radius_m,
-        blowoff_kg: 0.0,
+        blowoff_kg: f.blowoff.total_mass_kg(),
         layers,
     }
 }

@@ -10,8 +10,10 @@ region/boundary contract; the [scientific reference](planet-composition-referenc
 owns input bounds, selected/candidate sources and future acceptance requests.
 Implemented radial solvers are separate headless APIs, described below.
 Default generation is now authoritative on one synchronous
-[labelled fallback result](#synchronous-reference-partition) per planet,
-`Planet::initial_result`. Live mass, radius, inertia, reservoirs, atmosphere and
+[labelled fallback result](#synchronous-surface-decision) per planet,
+`Planet::initial_result`. That result also decides the bulk surface facts
+(greenhouse temperature, gas and frost, blow-off and the layered route), which
+the layered solve keeps. Live mass, radius, inertia, reservoirs, atmosphere and
 spin are all projections of it, installed together; the legacy
 `structure::derive` model and boundary solver have been removed. Background
 loading refines those results by default and adopts complete revisions when
@@ -23,8 +25,9 @@ solves at both 250 K and 300 K. Cold deep ice is explicitly approximate rather
 than resolved into individual polymorphs. The standalone
 Lai ice-VII branch remains separate, not used by the radial solver.
 [Condensed-boundary/atmosphere coupling](#headless-atmosphere-and-condensed-boundary-coupling)
-is available through the headless solver and background refinement, never as
-an expensive synchronous generation step.
+is available through the headless solver and background refinement. Its column
+side alone (no radial integration) runs synchronously as the
+[surface decision](#synchronous-surface-decision).
 [Protected secondary traces in dry hosts](#headless-protected-traces-in-dry-hosts)
 and [water-bearing hosts](#headless-protected-traces-in-water-bearing-hosts)
 are available as headless APIs and used by the background layered solver.
@@ -77,7 +80,8 @@ transport consistency only. All physical fit prescriptions remain unchanged.
 - `validate_result` additionally checks provenance, refinement status, nonempty
   revision keys and justified surface knowledge. `validate_refinement` requires
   the same input/model identities, exactly the next adoption sequence, unchanged
-  formation supply, preserved prior loss and accounted additional blow-off.
+  formation supply, unchanged escape and the base's blow-off amount. A layered
+  refinement removes nothing: escape is generation's decision.
   It rejects stale/unrelated candidates without modifying either result.
 - No validator re-runs a structure, EOS, retention or atmosphere-partition solve.
   Accepting an internally coherent nonlegacy radius and small positive inertia
@@ -86,8 +90,9 @@ transport consistency only. All physical fit prescriptions remain unchanged.
 
 Generated `Body::initial_result` stores this result. Formation constructs it from
 provisional forcing; final retention replaces it using all-star forcing and
-retained supply, with its own [reference gas partition](#synchronous-reference-partition).
-Classification uses its model-neutral material/mass fractions. A single
+retained supply, with its own [surface decision](#synchronous-surface-decision).
+Classification uses its model-neutral material/mass fractions, and its radius
+reference where H/He alone holds a one-bar level. A single
 `physical::export_planet` adapter carries it through both natural and overlay
 wire paths as `Planet::initial_result`, and every live field is projected from it
 (see [live projection](#live-projection)).
@@ -97,8 +102,8 @@ retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
 prescriptions. The current generation key is
-`generation_physics_v2:fallback_partition_v1:layered_adoption_v2:NSHHE001-b4e7a79ecc35d846`,
-covering the initial partition, refinement adapter and checksum-pinned H/He resource.
+`generation_physics_v3:surface_decision_v1:layered_adoption_v3:NSHHE001-b4e7a79ecc35d846`,
+covering the surface decision, refinement adapter and checksum-pinned H/He resource.
 Its availability is process-local and fixed by the table's `OnceLock`: installing
 or changing it requires restarting the process, not reusing an old refusal.
 Background jobs capture the original result and sequence before dispatch;
@@ -1943,6 +1948,12 @@ it as `escaped` and re-solves, until the column binds or no gas is left.
 It is a second escape on top of generation's population-level secondary escape,
 not a replacement for it.
 
+Generation applies this loop once, synchronously, in its
+[surface decision](#synchronous-surface-decision) (`escape::strip` around the
+surface state). The layered generation route (`prototype::solve_decided`)
+never strips: an unbound column there is a refusal. `solve_escaping` remains a
+headless wrapper only.
+
 ### Frost surface deposit
 
 Cold-trapped CO₂, N₂, CH₄ and Ar settle on the ground as ice, as on Mars, Pluto
@@ -2140,8 +2151,9 @@ carry `model: fallback_mass_radius_v1` and `fallback_reason`, and never count as
 layered coverage. The fallback is total by construction: closed-form fits and
 fixed quadrature, no iteration, work budget, external data or error path.
 
-- **Condensed stack**, centre outwards: metal core, silicate mantle, water,
-  then secondary volatiles (N₂, CO₂, CH₄, O₂, Ar) at a water-density proxy.
+- **Condensed stack**, centre outwards: metal core, silicate mantle (holding
+  the protected secondaries, as in the layered solve), water, then the
+  accessible secondary volatiles (N₂, CO₂, CH₄, O₂, Ar) at a water-density proxy.
   Each region's volume is its mass share of the Seager et al. (2007) pure-
   material radius at the whole condensed mass, as in the
   [cold compressed radius](#cold-compressed-heavy-material-radius), with the
@@ -2165,9 +2177,12 @@ fixed quadrature, no iteration, work budget, external data or error path.
   lower calibration bound. Flux/age repairs, non-finite temperature and fit-bound clamping mark the
   record `extrapolated` with a limitation note; otherwise it is `approximate`.
   Temperature is the equilibrium estimate (at least 20 K), with no greenhouse.
+  At a one-bar reference it is the envelope's prescribed profile at one bar
+  (`fallback::one_bar_temperature_k`: the same closed form and mass/age
+  intrinsic trend as the layered envelope, on the fitted gravity).
 - **Surface:** `envelope` at a one-bar reference, else `rock` (nominal boundary,
   not certified solid phase or landing permission),
-  `unresolved water` or `unresolved volatiles`.
+  `unresolved water`, `unresolved volatiles` or, on a decided surface, `frost`.
 
 Checks (`structure/fallback/tests.rs`, in `check.sh`): an Earth twin within 5%
 of Earth's radius with inertia factor 0.30–0.36; a Jupiter twin at 9–13 Earth
@@ -2184,13 +2199,88 @@ phase, thermal structure or greenhouse. For bodies with under 1% H/He, fallback 
 treats that gas as a thin column) by up to 61%; layered solves of similar
 bodies exceed legacy by a median 32%, so the legacy value is the outlier.
 
-### Synchronous reference partition
+### Synchronous surface decision
 
 `physical::initial_with_atmosphere` prepares the initial `PlanetResult` with its
-matching reservoir budget and `PlanetEnvironment`. It starts with the converged
-retention fallback and applies `fallback_reference_partition_v1`, without a
-legacy structure/boundary solve, EOS access or re-running retention. Retention
-installs all of it as the [live projection](#live-projection).
+matching reservoir budget, `PlanetEnvironment` and `prototype::Decision`. It
+starts from the converged retention fallback and calls
+`structure::fallback::decide`. Retention installs all of it as the
+[live projection](#live-projection). One place decides; the layered solve keeps
+it.
+
+**Order, all synchronous:** formation draw, orbits, long-term escape
+(secondaries, then H/He survival), then this decision:
+
+1. **Surface state** (`coupled::surface::state`,
+   `synchronous_surface_decision_v1`): the coupled solve's own column rules on
+   prescribed geometry. Same supply checks, partition, vapour caps,
+   [greenhouse balance](#greenhouse-surface-temperature), frost deposit and
+   column validity; only the radial integration is replaced by the fitted
+   condensed radius (`fallback::condensed_radius_m`). It iterates gas, frost
+   and radius to the coupling's own tolerances.
+2. **Blow-off** (`escape::strip`): an unbound column loses its lightest
+   exchangeable gas entirely and step 1 repeats. The radius is refitted to
+   what is left on every pass.
+3. **Route** (`prototype::Decision`):
+   - `Thin { surface_temperature_k }`: a condensed surface under a boundary
+     column. The layered solve takes that temperature as prescribed.
+   - `Envelope`: the thin column refused for gas mass, density or mass domain
+     and H/He is present. The layered solve goes straight to the envelope.
+   - `Refused(error)`: any other refusal (a runaway beyond 2,000 K or 1% gas
+     mass, say). The layered solve returns the same refusal.
+
+**One exposure rule** (`prototype::thin_request`), shared by the decision and
+the layered thin route: all water and every unprotected secondary exchange
+with the column. The `1e-5` accessible water fraction is now only the share
+exposed to long-term escape.
+
+**Dense columns.** A column beyond the layered density mask is an envelope only
+where its H/He alone holds one bar on the fitted radius. Otherwise it is a
+thick secondary or steam atmosphere over a surface: the decision keeps the
+ideal column and its greenhouse balance (Venus-like and steam worlds), notes
+it, and the layered solve refuses it as `DenseGasUnsupported`. The decided
+facts then stand.
+
+**Decided record.** Layers are metal, rock (with protected secondaries),
+condensed water, `frost`, then one finite `atmosphere` region. It carries
+`greenhouse_optical_depth` and `blowoff_kg`, which refinement copies forward.
+Water phase is not decided here; it follows from the decided temperature in
+the layered solve.
+
+**Undecided results** (`Envelope` and `Refused`) keep the reference partition
+below, at the equilibrium temperature. An `Envelope` decision whose boundary
+column reaches one bar is re-referenced at that level of its own profile, as
+the layered envelope does.
+
+Limits:
+
+- The radius is still the published fit, up to about 11% from the layered
+  radius on rock and water worlds. Supply-limited pressure scales as R⁻⁴, so
+  it can differ by up to a factor 1.6 until [G3](../plans/planet-generation.md).
+  Temperature, escape, route and surface kind do not.
+- Whether a trace of frost saturates depends on that radius: 1 of 4,367 census
+  planets changes between frost and bare ice.
+- A refused surface (runaway) is shown at its equilibrium temperature with the
+  cold-trap partition, as before.
+
+Checks: `structure/coverage/agreement.rs` (`generation_agreement`, in
+`check.sh` at two systems per component; `NS_AGREEMENT_SYSTEMS=57` for the
+full probe, writing `data/tmp/generation-agreement.{md,tsv}`). It asserts that
+the layered solve changes no surface kind, escape or decided temperature and
+that no H/He envelope carries a bulk-composition label. The retention grid
+test asserts the decision is total and conserving.
+
+Cost: about 0.2 ms per planet synchronously (0.09 ms before the decision), after
+the column quadrature and partition root were made cheaper
+(`atmosphere/profile.rs`: a series for thin columns, Gauss-Legendre otherwise,
+and a bracketed Illinois root in place of 64 bisections).
+
+### Synchronous reference partition
+
+Used where the [surface decision](#synchronous-surface-decision) leaves the
+surface undecided. It applies `fallback_reference_partition_v1` to the
+retention fallback, without a legacy structure/boundary solve, EOS access or
+re-running retention.
 
 This bounded approximation deliberately holds the fallback's condensed proxy
 volumes, radius and reference meaning fixed. Accessible water/secondary mass
@@ -2198,7 +2288,9 @@ enters gas through the existing source-bounded cold-trap prescription; protected
 material and prior escape remain accounted for. Condensed densities, loading
 pressures and inertia are recomputed for their reduced masses, not left at the
 pre-partition values. Fixed proxy volumes are a disclosed approximation, **not**
-a coupled phase/volume, greenhouse or thermal-structure solution.
+a coupled phase/volume, greenhouse or thermal-structure solution. An accessible
+volatile layer that evaporates completely is removed, shrinking the boundary
+by its small thickness; the column keeps its pre-shrink pressure normalisation.
 
 - A condensed reference gets one finite `atmosphere` region, normalised to the
   actual gas inventory. Its pressure/temperature match the prepared atmosphere.
@@ -2317,9 +2409,10 @@ Logs: `data/tmp/p3-cleanup-{check,envelope,audit,coverage}.log`.
    the air is saturated, leaving an ocean or ice below, or all of it becomes
    steam over dry rock. Generation's 99.999% protection shields water from
    escape only, which has already been applied.
-   The coupled call goes through the [blow-off wrapper](#unbound-column-blow-off),
-   so a weakly bound column loses its lightest gases instead of failing. The
-   report counts escaping planets, their species and escaped mass fraction.
+   Since G2 the report solves each body with generation's
+   [surface decision](#synchronous-surface-decision): the decided temperature
+   is prescribed, the decided route is the only one attempted and nothing
+   escapes here. The escape columns report generation's blow-off.
 3. Each iteration uses the dry or water protected-trace radial solver under
    the coupled load (gas pressure plus any frost deposit), with the same
    central-pressure hints and shared work ceiling. Protected mass contributes
@@ -2557,7 +2650,9 @@ precedence uses retained mass fractions in this order:
 
 1. H₂/He at least 50%: **Gas giant**.
 2. H₂/He at least 10%: **Envelope world**.
-3. H₂/He at least 0.1%: **Sub-Neptune**.
+3. H₂/He at least 0.1%, or H₂/He that alone holds a one-bar reference level
+   above the ground: **Sub-Neptune**. A thick secondary atmosphere referenced
+   at one bar keeps its bulk class.
 4. Water at least 25%: **Water-rich planet**.
 5. Iron/nickel at least 50%: **Metal-rich planet**.
 6. Otherwise: **Rocky planet**.

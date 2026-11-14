@@ -14,7 +14,10 @@ structure first on fast fallback facts, sharing this module's final-orbit all-st
 heating samples. Flux, activity-weighted loss forcing, seeded albedo and age are
 prepared as independent inputs before retention. Atmosphere output never feeds
 back into that solve. Each planet's live atmosphere is then its result's own
-[reference partition](planet-composition.md#synchronous-reference-partition),
+[surface decision](planet-composition.md#synchronous-surface-decision): the
+greenhouse-warmed column, frost and blow-off on a condensed surface, or the
+[reference partition](planet-composition.md#synchronous-reference-partition)
+where that decision is an envelope or a refusal. It is
 installed with its radius, inertia and spin. Atmospheric supply and cold
 condensates use those same budgets. Re-evaluating
 population at a different age can change retained mass, radius and spin, but never

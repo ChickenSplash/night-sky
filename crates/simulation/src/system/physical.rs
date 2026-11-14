@@ -63,10 +63,19 @@ pub fn validate(planet: &Planet) -> Result<Option<&PlanetPhysical>, &'static str
     if !env.equilibrium_temperature_k.is_finite()
         || env.equilibrium_temperature_k < 0.0
         || (result.provenance == space_shared::ResultProvenance::Fallback
-            && !close(
-                env.equilibrium_temperature_k.max(20.0),
-                record.surface_temperature_k,
-            ))
+            && if record.greenhouse_optical_depth.is_some()
+                || data.radius_reference == space_shared::RadiusReference::OneBar
+            {
+                // A decided surface is greenhouse-warmed and a one-bar level
+                // carries intrinsic heat: never cooler than equilibrium.
+                record.surface_temperature_k
+                    < env.equilibrium_temperature_k.max(20.0) * (1.0 - 1e-12)
+            } else {
+                !close(
+                    env.equilibrium_temperature_k.max(20.0),
+                    record.surface_temperature_k,
+                )
+            })
     {
         return Err("inconsistent boundary temperature");
     }

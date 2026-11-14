@@ -2,7 +2,7 @@
 
 ## Status and goal
 
-**G1 complete, 14 November 2026. G2 to G4 are proposed, not implemented.**
+**G1 and G2 complete, 14 November 2026. G3 and G4 are proposed, not implemented.**
 Current behaviour
 is described in [planetary systems](../simulation/planetary-systems.md) and the
 [composition guide](../simulation/planet-composition.md).
@@ -179,7 +179,81 @@ calls that dominate each trial.
    size that stays within its time budget, with the full probe opt-in.
 
 Acceptance: the agreement test passes; no layered result reports blow-off;
-the 303 mislabelled planets are gone.
+the 303 mislabelled planets are gone. **Met**, with radius and
+supply-limited pressure left to G3 as planned.
+
+### G2 result
+
+4,367 planets (57 systems per component), layered solve run on every planet
+with generation's decision (`data/tmp/g2/`).
+
+| Measure | Before G2 | After G2 |
+| --- | ---: | ---: |
+| Extra gas lost in the detailed pass | 457 planets | 0 |
+| Greenhouse warming above 300 K missing from the fast pass | 330 planets | 0 |
+| Surface temperature moved by the detailed pass, rock and water | up to 1,237 K | 0 |
+| One-bar temperature moved, envelopes, p95 / max | 5 K / 82 K | 1.3 K / 11 K |
+| Surface pressure differing by more than 100x | 338 planets | 0 (largest factor 1.6) |
+| Surface kind decided by the fast pass | never (unresolved) | always; 1 planet changes |
+| Bulk label on an H/He envelope surface | 303 planets | 0 |
+| Radius difference, rock and water, p95 / max | 9.7% / 15.3% | 8.8% / 11.3% |
+| Radius difference, envelopes, p95 / max | 22.8% / 70% | 31% / 53% |
+| Synchronous generation, per planet | 0.09 ms | 0.20 ms |
+| Layered solve, total CPU | 385 s | 274 s |
+| Layered solve, median per planet | 36 ms | 12 ms |
+| Planets with a layered result | 84.3% | 81.6% |
+
+"Before" is the evidence table above and the G1 result; the two temperature
+rows are from a 1,544-planet sample taken just before the change.
+
+What changed:
+
+- **One decision.** `structure::fallback::decide` runs after long-term escape:
+  surface state, blow-off, then a `Decision` (thin surface with its
+  temperature, envelope, or refused). The layered solve takes it as input,
+  attempts only that route and removes nothing. See the
+  [composition guide](../simulation/planet-composition.md#synchronous-surface-decision).
+- **One exposure rule.** All water and every unprotected secondary exchange
+  with the column in both stages. The `1e-5` water fraction now only limits
+  long-term escape.
+- **Protected secondaries sit in the rock** in the fast stack too, so the
+  fast surface is rock, water or frost, as the layered one is.
+- **Labels.** H/He that alone holds a one-bar level is a Sub-Neptune however
+  little of the mass it is: 495 planets (11%) moved from rocky, water-rich or
+  metal-rich. A thick secondary atmosphere keeps its bulk class.
+- **Gas giants and envelopes** report the one-bar temperature of the same
+  intrinsic-heat profile the layered envelope uses.
+- **Column maths 20x cheaper** (series and Gauss quadrature, bracketed root),
+  which is what makes the decision affordable synchronously. It also removed
+  the greenhouse stage from the layered solve.
+
+Findings:
+
+- **Dense columns were the hidden disagreement.** 174 planets (4%) balance
+  their greenhouse on a column denser than the layered mask (median 348 bar
+  and 1,160 K: Venus-like and steam worlds). A trace of H/He used to send
+  them to the envelope solver, which returned a cold one-bar envelope; with
+  no H/He they were refused and shown cold with no greenhouse. They now keep
+  the decided hot surface, and the layered solve refuses them. That is the
+  2.7 point drop in layered coverage.
+- **Greenhouse matters widely.** 1,491 of 3,125 decided surfaces warm by more
+  than 1 K, 476 by more than 300 K. 452 planets lose gas to blow-off.
+- **Radius is now the only bulk fact the stages disagree on:** up to 11% on
+  rock and water worlds, up to 53% on envelopes. Supply-limited pressure
+  follows it (up to a factor 1.6), and so does 1 frost case in 4,367.
+- **Navigation exclusions grew.** Planets whose drag clearance exceeds their
+  radius rose from 13% to 21% (ten radii: 4% to 10%), because warm, light
+  columns are now present from the start instead of after adoption. A close-in
+  planet of that kind can refuse a ship standoff.
+- Retention still solves H/He survival on the fitted radius (step 3). That
+  moves to the table in G3.
+
+Not done, moved to G3 with the table: water phase (ocean or ice) in the
+synchronous record, and the envelope solver's 1e-5 water exposure at one bar.
+
+Candidate follow-up, not scheduled: a stricter blow-off criterion than the
+static sonic-radius guard, so marginal hot columns escape instead of staying
+as very extended trace atmospheres.
 
 ## G3: the fast path reads the detailed model
 

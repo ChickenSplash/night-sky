@@ -38,9 +38,22 @@ fn generated_clearance_uses_enclosed_reference_gravity_not_exterior_total_mass()
         .iter()
         .flat_map(|s| &s.planets)
         .find(|p| {
-            p.physical
+            // The bound is only open where gas lies beyond the reference
+            // radius: a boundary column holding a visible share of the mass.
+            p.environment
                 .as_ref()
-                .is_some_and(|d| d.h_he_mass_fraction > 0.3)
+                .is_some_and(|e| e.atmosphere.is_some())
+                && p.initial_result.as_ref().is_some_and(|result| {
+                    let facts = &result.record.physical;
+                    let enclosed: f64 = result
+                        .record
+                        .layers
+                        .iter()
+                        .filter(|l| l.outer_radius_m <= facts.reference_radius_m)
+                        .map(|l| l.mass_kg)
+                        .sum();
+                    enclosed < facts.retained_mass_kg * (1.0 - 1e-6)
+                })
         })
         .unwrap();
     let original = Policy::default().planet(world).unwrap();
@@ -62,6 +75,7 @@ fn generated_clearance_uses_enclosed_reference_gravity_not_exterior_total_mass()
     let gas = GasAtmosphere::try_from(data.atmosphere.as_ref().unwrap()).unwrap();
     data.atmosphere = Some(gas.to_data(gravity * radius.powi(2), radius).unwrap());
     let bound = Policy::default().planet(&lower_gravity).unwrap();
+    eprintln!("DBG {} {} {:?} {:?}", minimum, gravity, bound, original);
     assert!(bound.atmosphere_height_m > original.atmosphere_height_m);
     let mut unchecked = lower_gravity;
     unchecked.initial_result = None;

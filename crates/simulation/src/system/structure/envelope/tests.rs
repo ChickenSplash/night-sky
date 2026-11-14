@@ -66,7 +66,6 @@ fn sub_bar_envelope_reports_condensed_radius_and_actual_boundary_facts() {
         structure: coupled::CoupledStructure::from_envelope(interior, envelope),
         source: request,
         escaped: Inventory::default(),
-        blowoff: Inventory::default(),
         protected: Inventory::default(),
     };
     let record = physical::layered(&solved);
@@ -463,7 +462,6 @@ fn transport_is_conserved_and_one_bar_is_not_ground() {
         structure: coupled::CoupledStructure::from_envelope(interior, envelope),
         source: requested,
         escaped: Inventory::default(),
-        blowoff: Inventory::default(),
         protected: Inventory::default(),
     };
     let record = crate::system::physical::layered(&solved);
@@ -617,7 +615,6 @@ fn rich_molecular_reference_and_refinement() {
         structure: coupled::CoupledStructure::from_envelope(interior, e),
         source: request,
         escaped: Inventory::default(),
-        blowoff: Inventory::default(),
         protected: Inventory::default(),
     };
     let record = crate::system::physical::layered(&solved);
@@ -734,7 +731,6 @@ fn shallow_water_checks(source_backed: bool) {
             structure: coupled::CoupledStructure::from_envelope(interior, envelope),
             source: request,
             escaped: Inventory::default(),
-            blowoff: Inventory::default(),
             protected,
         };
         let record = crate::system::physical::layered(&solved);

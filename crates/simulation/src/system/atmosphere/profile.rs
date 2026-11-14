@@ -24,16 +24,9 @@ impl Profile {
         let planar = gas_mass_kg * gravity / (4.0 * std::f64::consts::PI * radius.powi(2));
         // A finite cutoff omits a tiny tail even in the planar limit. Include
         // that bound so very thin spherical columns are bracketed as well.
-        let (mut low, mut high) = (0.0, planar / (1.0 - (-EXTENT_SCALE_HEIGHTS).exp()));
-        for _ in 0..64 {
-            let mid = 0.5 * (low + high);
-            if mid * Self::new(radius, height, mid).mass_factor(mid) < planar {
-                low = mid;
-            } else {
-                high = mid;
-            }
-        }
-        high
+        upper_root(0.0, planar / (1.0 - (-EXTENT_SCALE_HEIGHTS).exp()), |p| {
+            p * Self::new(radius, height, p).mass_factor(p) - planar
+        })
     }
 
     pub fn new(radius_m: f64, scale_height_m: f64, pressure_pa: f64) -> Self {
@@ -83,14 +76,111 @@ impl Profile {
             return 1.0;
         }
         let end = Self::cutoff_drop(pressure_pa).min(64.0);
-        const STEPS: usize = 512;
-        let dz = end / STEPS as f64;
-        let at = |z: f64| (-z).exp() / (1.0 - z * self.scale_height_m / self.radius_m).powi(4);
-        let mut sum = at(0.0) + at(end);
-        for i in 1..STEPS {
-            sum += if i % 2 == 0 { 2.0 } else { 4.0 } * at(i as f64 * dz);
+        let ratio = self.scale_height_m / self.radius_m;
+        if ratio * end <= SERIES_LIMIT {
+            return series(ratio, end);
         }
-        sum * dz / 3.0
+        let panels = PANELS.max(end.ceil() as usize);
+        let width = end / panels as f64;
+        (0..panels)
+            .map(|panel| {
+                GAUSS
+                    .iter()
+                    .map(|(x, w)| {
+                        let z = (panel as f64 + x) * width;
+                        w * (-z).exp() / (1.0 - z * ratio).powi(4)
+                    })
+                    .sum::<f64>()
+                    * width
+            })
+            .sum()
+    }
+}
+
+/// Thin columns: expand (1 - zε)^-4 in ε and integrate each power of z exactly
+/// with the incomplete-gamma recurrence γ(k+2) = (k+1) γ(k+1) - E^(k+1) e^-E.
+/// Converges to roundoff within about 30 terms below this value of εE.
+const SERIES_LIMIT: f64 = 0.3;
+
+fn series(ratio: f64, end: f64) -> f64 {
+    let decay = (-end).exp();
+    let (mut gamma, mut power, mut scale, mut sum) = (1.0 - decay, 1.0, 1.0, 0.0);
+    for k in 0..64 {
+        let n = k as f64;
+        let term = (n + 1.0) * (n + 2.0) * (n + 3.0) / 6.0 * scale * gamma;
+        sum += term;
+        if term <= f64::EPSILON * 0.1 * sum {
+            break;
+        }
+        power *= end;
+        gamma = (n + 1.0) * gamma - power * decay;
+        scale *= ratio;
+    }
+    sum
+}
+
+/// Extended columns: composite five-point Gauss-Legendre, panels at most one
+/// potential drop wide. The integrand's pole lies at least 2 beyond the
+/// cutoff, so the rule holds about 1e-12.
+const PANELS: usize = 24;
+const GAUSS: [(f64, f64); 5] = [
+    (0.046_910_077_030_668, 0.118_463_442_528_095),
+    (0.230_765_344_947_158, 0.239_314_335_249_683),
+    (0.5, 0.284_444_444_444_444),
+    (0.769_234_655_052_842, 0.239_314_335_249_683),
+    (0.953_089_922_969_332, 0.118_463_442_528_095),
+];
+
+/// Upper end of a bracket closed to float resolution around the sign change
+/// of `residual`, negative at `low`. Illinois false position, with a central
+/// step whenever two steps fail to halve the bracket. The returned point never
+/// has a negative residual, so callers' caps are not exceeded by roundoff.
+pub(crate) fn upper_root(mut low: f64, mut high: f64, residual: impl Fn(f64) -> f64) -> f64 {
+    let (mut low_weight, mut high_weight) = (residual(low), residual(high));
+    // Degenerate brackets keep the limits plain bisection converged to.
+    if low_weight.is_nan() || high_weight.is_nan() || low_weight >= 0.0 {
+        return low + (high - low) * f64::EPSILON;
+    }
+    if high_weight < 0.0 {
+        return high;
+    }
+    let mut kept_low = None;
+    let mut checkpoint = (0_u8, high - low);
+    loop {
+        let width = high - low;
+        if width <= 4.0 * f64::EPSILON * high {
+            return high;
+        }
+        let interpolated = low + width * (low_weight / (low_weight - high_weight));
+        checkpoint.0 += 1;
+        let stalled = checkpoint.0 > 2;
+        if stalled || width <= 0.5 * checkpoint.1 {
+            checkpoint = (0, width);
+        }
+        let mid = if !stalled && interpolated > low && interpolated < high {
+            interpolated
+        } else {
+            0.5 * (low + high)
+        };
+        if mid <= low || mid >= high {
+            return high;
+        }
+        let value = residual(mid);
+        if value < 0.0 {
+            low = mid;
+            low_weight = value;
+            if kept_low == Some(false) {
+                high_weight *= 0.5;
+            }
+            kept_low = Some(false);
+        } else {
+            high = mid;
+            high_weight = value;
+            if kept_low == Some(true) {
+                low_weight *= 0.5;
+            }
+            kept_low = Some(true);
+        }
     }
 }
 

@@ -3,8 +3,11 @@
 //! grey greenhouse estimate sets the surface temperature.
 
 mod column;
+#[cfg(test)]
+pub(crate) use column::cap_pa;
 mod deposit;
 pub mod escape;
+pub(crate) mod surface;
 #[cfg(test)]
 mod tests;
 mod warming;
@@ -395,62 +398,13 @@ pub(super) fn solve_protected(
     if controls.max_iterations > 32 || controls.max_total_eos_evaluations > 16_000_000 {
         return Err(Error::InvalidInput("coupling controls"));
     }
-    let column_k = match request.temperature {
-        Temperature::Prescribed { column_k, water_k } => {
-            if let Some(t) = water_k
-                && (!t.is_finite() || t <= 0.0)
-            {
-                return Err(Error::InvalidInput("water temperature"));
-            }
-            column_k
-        }
-        Temperature::Greenhouse { equilibrium_k } => equilibrium_k,
-    };
-    if !column_k.is_finite()
-        || !(MIN_COLUMN_TEMPERATURE_K..=MAX_COLUMN_TEMPERATURE_K).contains(&column_k)
-    {
-        return Err(Error::InvalidInput("column temperature (20..=2000 K)"));
-    }
-    for material in Material::ALL {
-        let offered = request.exchangeable.mass_kg(material);
-        let shielded = protected.mass_kg(material);
-        if shielded > 0.0
-            && !matches!(
-                material,
-                Material::CarbonDioxide
-                    | Material::Nitrogen
-                    | Material::Methane
-                    | Material::Oxygen
-                    | Material::Argon
-            )
-        {
-            return Err(Error::UnsupportedCondensate(material));
-        }
-        if shielded > request.retained.mass_kg(material)
-            || offered > request.retained.mass_kg(material) - shielded
-        {
-            return Err(Error::InvalidInput("exchangeable exceeds retained"));
-        }
-        if offered > 0.0 && material.properties().gas.is_none() {
-            return Err(Error::InvalidInput("exchangeable refractory"));
-        }
-        if !matches!(
-            material,
-            Material::Metal | Material::Silicate | Material::Water
-        ) && offered != request.retained.mass_kg(material) - shielded
-        {
-            return Err(Error::UnsupportedCondensate(material));
-        }
-    }
+    admit(request, protected)?;
     let total = request.retained.total_mass_kg();
-    if !super::in_domain(total / EARTH_MASS_KG, 0.0001, 20.0) {
-        return Err(Error::Radial(dry::SolveError::OutsideMassDomain(total)));
-    }
     // Ambient density is only an iteration seed, never a returned radius fit.
     let mut radius = (3.0 * total / (4.0 * PI * 4100.0)).cbrt();
     // Mass and radius under the gas column: condensed body plus deposit.
     let mut base = (total, radius);
-    let mut temperature = warming::temperatures(request, base)?;
+    let mut temperature = warming::temperatures(request, base, false)?;
     let mut work = 0;
     let mut central_pressure_pa = None;
     for iteration in 1..=controls.max_iterations {
@@ -524,7 +478,7 @@ pub(super) fn solve_protected(
         let top = deposit.top_radius_m(radius);
         let actual_air = column::atmosphere(&gas, column_k, gm, top)?;
         base = (host_mass + deposit.mass_kg(), top);
-        temperature = warming::temperatures(request, base)?;
+        temperature = warming::temperatures(request, base, false)?;
         let next_gas = column::partition(request, temperature.0, base.0, base.1)?;
         let partition_residual = Material::ALL
             .iter()
@@ -545,7 +499,7 @@ pub(super) fn solve_protected(
             && partition_residual <= ALLOCATION_RELATIVE_TOLERANCE
             && (temperature.0 - column_k).abs() <= TEMPERATURE_RELATIVE_TOLERANCE * column_k
         {
-            column::validate(&gas, actual_air.as_ref(), gm, top)?;
+            column::validate(&gas, actual_air.as_ref(), gm, top, false)?;
             let interface_residual = condensed.outer().pressure_pa - actual_load;
             if !interface_residual.is_finite()
                 || interface_residual.abs() > 2.0 * PRESSURE_TOLERANCE_PA
@@ -580,6 +534,62 @@ pub(super) fn solve_protected(
         }
     }
     Err(Error::NonConvergence)
+}
+
+/// Domain and supply checks shared with the synchronous surface decision.
+fn admit(request: &Request, protected: &Inventory) -> Result<(), Error> {
+    let column_k = match request.temperature {
+        Temperature::Prescribed { column_k, water_k } => {
+            if let Some(t) = water_k
+                && (!t.is_finite() || t <= 0.0)
+            {
+                return Err(Error::InvalidInput("water temperature"));
+            }
+            column_k
+        }
+        Temperature::Greenhouse { equilibrium_k } => equilibrium_k,
+    };
+    if !column_k.is_finite()
+        || !(MIN_COLUMN_TEMPERATURE_K..=MAX_COLUMN_TEMPERATURE_K).contains(&column_k)
+    {
+        return Err(Error::InvalidInput("column temperature (20..=2000 K)"));
+    }
+    for material in Material::ALL {
+        let offered = request.exchangeable.mass_kg(material);
+        let shielded = protected.mass_kg(material);
+        if shielded > 0.0
+            && !matches!(
+                material,
+                Material::CarbonDioxide
+                    | Material::Nitrogen
+                    | Material::Methane
+                    | Material::Oxygen
+                    | Material::Argon
+            )
+        {
+            return Err(Error::UnsupportedCondensate(material));
+        }
+        if shielded > request.retained.mass_kg(material)
+            || offered > request.retained.mass_kg(material) - shielded
+        {
+            return Err(Error::InvalidInput("exchangeable exceeds retained"));
+        }
+        if offered > 0.0 && material.properties().gas.is_none() {
+            return Err(Error::InvalidInput("exchangeable refractory"));
+        }
+        if !matches!(
+            material,
+            Material::Metal | Material::Silicate | Material::Water
+        ) && offered != request.retained.mass_kg(material) - shielded
+        {
+            return Err(Error::UnsupportedCondensate(material));
+        }
+    }
+    let total = request.retained.total_mass_kg();
+    if !super::in_domain(total / EARTH_MASS_KG, 0.0001, 20.0) {
+        return Err(Error::Radial(dry::SolveError::OutsideMassDomain(total)));
+    }
+    Ok(())
 }
 
 /// Condensed remainder: metal, rock and water to the radial host, cold-trapped

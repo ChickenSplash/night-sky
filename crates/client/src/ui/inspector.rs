@@ -1157,7 +1157,13 @@ mod tests {
             .find_map(|j| {
                 Some((
                     j,
-                    prototype::solve(&j.budget, &j.environment, Default::default()).ok()?,
+                    prototype::solve_decided(
+                        &j.budget,
+                        &j.environment,
+                        j.decision,
+                        Default::default(),
+                    )
+                    .ok()?,
                 ))
             })
             .unwrap();

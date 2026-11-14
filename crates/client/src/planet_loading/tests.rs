@@ -186,6 +186,7 @@ fn selected_planet_runs_first_and_solves_off_thread() {
                 },
             )
             .unwrap(),
+            decision: space_simulation::system::structure::prototype::Decision::Undecided,
         });
     }
     l.dispatch(Some("selected"));

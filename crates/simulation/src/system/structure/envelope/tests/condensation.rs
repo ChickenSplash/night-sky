@@ -115,7 +115,6 @@ fn check(source: bool) {
             structure: coupled::CoupledStructure::from_envelope(interior, e),
             source: request,
             escaped: Inventory::default(),
-            blowoff: Inventory::default(),
             protected,
         };
         let record = crate::system::physical::layered(&solved);

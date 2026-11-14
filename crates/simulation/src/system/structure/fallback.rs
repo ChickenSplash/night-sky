@@ -7,23 +7,27 @@ use super::{
     parameters::{CONDENSED_FIT_LIMIT_EARTH, EARTH_REFERENCE_FLUX_W_M2, EARTH_REFERENCE_RADIUS_M},
 };
 use crate::{
-    system::composition::{Budget, Inventory, Material},
+    system::{
+        composition::{Budget, Inventory, Material},
+        generation::retention::accessible_fraction,
+    },
     units::{ATOMIC_MASS_KG, BOLTZMANN_J_K, EARTH_MASS_KG, GRAVITATIONAL_CONSTANT},
 };
 use space_shared::{PlanetEnvironment, RadiusReference};
 use std::f64::consts::PI;
 
+pub mod decide;
 mod fits;
 pub mod partition;
+pub use decide::{Decided, decide};
 
 pub const MODEL_ID: &str = "fallback_mass_radius_v1";
 pub const NOTES: &[&str] = &[
     "Fallback: published mass-radius fits, not a hydrostatic EOS solve",
     "Uniform condensed layers and a linearly thinning gas layer; pressures follow these prescribed profiles",
-    "Temperature is the equilibrium estimate; no greenhouse, phase or thermal structure",
+    "Temperature is the equilibrium estimate, or at a one-bar reference the envelope's prescribed intrinsic-heat profile; no greenhouse or phase",
 ];
-pub const VOLATILE_PROXY_NOTE: &str =
-    "Secondary volatiles use a condensed water-density proxy; no separate atmosphere";
+pub const VOLATILE_PROXY_NOTE: &str = "Accessible secondary volatiles use a condensed water-density proxy; protected ones stay in the rock";
 pub const CLAMPED_NOTE: &str = "Inputs outside the fits' calibration were clamped to their bounds";
 pub const CONTINUATION_NOTE: &str =
     "Condensed mass above 20 Earth masses uses a power-law continuation of the fit";
@@ -53,6 +57,8 @@ pub enum Kind {
     Mantle,
     Water,
     Volatiles,
+    /// Cold-trapped secondaries on a decided surface.
+    Frost,
     Envelope,
     Atmosphere,
 }
@@ -64,6 +70,7 @@ impl Kind {
             Self::Mantle => "mantle",
             Self::Water => "water_compression",
             Self::Volatiles => "volatiles",
+            Self::Frost => "frost",
             Self::Envelope => "envelope",
             Self::Atmosphere => "atmosphere",
         }
@@ -96,6 +103,10 @@ pub struct Fallback {
     pub surface_temperature_k: f64,
     pub surface_pressure_pa: f64,
     pub inertia_kg_m2: f64,
+    /// Present only when the synchronous surface decision set the temperature.
+    pub optical_depth: Option<f64>,
+    /// Subset of `escaped` the surface decision stripped from an unbound column.
+    pub blowoff: Inventory,
     /// Fit inputs were clamped or continued beyond calibration.
     pub extrapolated: bool,
     pub notes: Vec<&'static str>,
@@ -118,6 +129,7 @@ impl Fallback {
         {
             Some(r) if r.kind == Kind::Water => "unresolved water",
             Some(r) if r.kind == Kind::Volatiles => "unresolved volatiles",
+            Some(r) if r.kind == Kind::Frost => "frost",
             _ => "rock",
         }
     }
@@ -149,48 +161,37 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         )
         .expect("subset of a valid inventory")
     };
-    let volatiles = only(&SECONDARIES);
+    // Protected secondaries stay in the rock, as in the layered solve. Only
+    // the accessible supply forms the volatile layer the partition draws on.
+    let protected = |m: Material| {
+        (budget.source().mass_kg(m) * (1.0 - accessible_fraction(m))).min(retained.mass_kg(m))
+    };
+    let mantle = Inventory::new(
+        &std::iter::once((Material::Silicate, retained.mass_kg(Material::Silicate)))
+            .chain(SECONDARIES.map(|m| (m, protected(m))))
+            .collect::<Vec<_>>(),
+    )
+    .expect("subset of a valid inventory");
+    let volatiles = Inventory::new(&SECONDARIES.map(|m| (m, retained.mass_kg(m) - protected(m))))
+        .expect("subset of a valid inventory");
     if volatiles.total_mass_kg() > 0.0 {
         notes.push(VOLATILE_PROXY_NOTE);
     }
     let mut stack = vec![
         (Kind::Core, only(&[Material::Metal])),
-        (Kind::Mantle, only(&[Material::Silicate])),
+        (Kind::Mantle, mantle),
         (Kind::Water, only(&[Material::Water])),
         (Kind::Volatiles, volatiles),
     ];
     stack.retain(|(_, inventory)| inventory.total_mass_kg() > 0.0);
     let gas = (h_he > 0.0).then(|| only(&[Material::Hydrogen, Material::Helium]));
 
-    // Seager-fit volumes at the whole condensed mass, as compressed volume mixing.
     let condensed_kg: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
-    let condensed_earth = condensed_kg / EARTH_MASS_KG;
-    if condensed_earth > CONDENSED_FIT_LIMIT_EARTH {
+    if condensed_kg / EARTH_MASS_KG > CONDENSED_FIT_LIMIT_EARTH {
         extrapolated = true;
         notes.push(CONTINUATION_NOTE);
     }
-    let mut regions = Vec::new();
-    let mut volume = 0.0;
-    for (kind, inventory) in stack {
-        let proxy = match kind {
-            Kind::Core => Material::Metal,
-            Kind::Mantle => Material::Silicate,
-            _ => Material::Water,
-        };
-        let inner = EARTH_REFERENCE_RADIUS_M * f64::cbrt(volume);
-        volume += inventory.total_mass_kg() / condensed_kg
-            * fits::pure_radius_earth(proxy, condensed_earth)
-                .expect("refractory and water fits exist")
-                .powi(3);
-        regions.push(Region {
-            kind,
-            inventory,
-            inner_radius_m: inner,
-            outer_radius_m: EARTH_REFERENCE_RADIUS_M * f64::cbrt(volume),
-            inner_pressure_pa: 0.0,
-            outer_pressure_pa: 0.0,
-        });
-    }
+    let mut regions = condensed_regions(stack);
     let condensed_radius_m = regions.last().map_or(0.0, |r| r.outer_radius_m);
     let surface_temperature_k =
         sanitised(environment.equilibrium_temperature_k, MIN_TEMPERATURE_K).max(MIN_TEMPERATURE_K);
@@ -275,6 +276,14 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         region.inner_pressure_pa = pressure;
         inertia_kg_m2 += shell.inertia_kg_m2();
     }
+    // The layered envelope reports its prescribed profile's temperature at
+    // one bar, warmer than equilibrium by the intrinsic heat. Same closed form
+    // here, on the fitted gravity. Outside its domain the estimate is kept.
+    let surface_temperature_k = if reference == RadiusReference::OneBar {
+        one_bar_temperature_k(surface_temperature_k, mass_kg, age, radius_m)
+    } else {
+        surface_temperature_k
+    };
     let surface_pressure_pa = match reference {
         RadiusReference::OneBar => crate::system::atmosphere::ONE_BAR_PA,
         _ => regions
@@ -296,9 +305,89 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         surface_temperature_k,
         surface_pressure_pa,
         inertia_kg_m2,
+        optical_depth: None,
+        blowoff: Inventory::default(),
         extrapolated,
         notes,
     }
+}
+
+/// The envelope's prescribed profile at one bar, over this floored
+/// equilibrium temperature. Outside the profile's domain the floor is kept.
+pub(crate) fn one_bar_temperature_k(
+    equilibrium_k: f64,
+    mass_kg: f64,
+    age_gyr: f64,
+    radius_m: f64,
+) -> f64 {
+    super::envelope::Thermal::new(
+        equilibrium_k,
+        super::envelope::intrinsic_k(mass_kg, age_gyr),
+        GRAVITATIONAL_CONSTANT * mass_kg / radius_m.powi(2),
+    )
+    .and_then(|thermal| thermal.temperature_k(crate::system::atmosphere::ONE_BAR_PA))
+    .unwrap_or(equilibrium_k)
+}
+
+/// Seager-fit volumes at the whole condensed mass, as compressed volume
+/// mixing. Innermost first; pressures are filled in by the caller.
+fn condensed_regions(stack: Vec<(Kind, Inventory)>) -> Vec<Region> {
+    let condensed_kg: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
+    let condensed_earth = condensed_kg / EARTH_MASS_KG;
+    let mut regions = Vec::new();
+    let mut volume = 0.0;
+    for (kind, inventory) in stack {
+        let proxy = match kind {
+            Kind::Core => Material::Metal,
+            Kind::Mantle => Material::Silicate,
+            _ => Material::Water,
+        };
+        let inner = EARTH_REFERENCE_RADIUS_M * f64::cbrt(volume);
+        volume += inventory.total_mass_kg() / condensed_kg
+            * fits::pure_radius_earth(proxy, condensed_earth)
+                .expect("refractory and water fits exist")
+                .powi(3);
+        regions.push(Region {
+            kind,
+            inventory,
+            inner_radius_m: inner,
+            outer_radius_m: EARTH_REFERENCE_RADIUS_M * f64::cbrt(volume),
+            inner_pressure_pa: 0.0,
+            outer_pressure_pa: 0.0,
+        });
+    }
+    regions
+}
+
+/// Layers under a decided surface: metal, then rock holding the protected
+/// secondaries, then condensed water. H/He is never part of this stack.
+fn decided_stack(host: &Inventory) -> Vec<(Kind, Inventory)> {
+    let only = |materials: &[Material]| {
+        Inventory::new(
+            &materials
+                .iter()
+                .map(|&m| (m, host.mass_kg(m)))
+                .collect::<Vec<_>>(),
+        )
+        .expect("subset of a valid inventory")
+    };
+    let mut mantle = vec![Material::Silicate];
+    mantle.extend(SECONDARIES);
+    let mut stack = vec![
+        (Kind::Core, only(&[Material::Metal])),
+        (Kind::Mantle, only(&mantle)),
+        (Kind::Water, only(&[Material::Water])),
+    ];
+    stack.retain(|(_, inventory)| inventory.total_mass_kg() > 0.0);
+    stack
+}
+
+/// The radius the synchronous surface decision stands on. G3 replaces this
+/// fit with a table computed from the layered solver.
+pub(crate) fn condensed_radius_m(host: &Inventory) -> f64 {
+    condensed_regions(decided_stack(host))
+        .last()
+        .map_or(0.0, |r| r.outer_radius_m)
 }
 
 /// Non-finite or negative environment values take a neutral fit input instead

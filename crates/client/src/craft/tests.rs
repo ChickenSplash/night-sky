@@ -332,7 +332,18 @@ fn planet_system() -> (StarSystem, u32, String) {
     let galaxy = space_simulation::demo_galaxy();
     let system = galaxy.systems[0].clone();
     let page = system.first_page();
-    let planet = system.on_page(page).next().unwrap().id.clone();
+    // An airless body: a hot, extended column around a close-in planet can
+    // exclude routes out to most of its orbit reach, by design.
+    let planet = system
+        .on_page(page)
+        .find(|p| {
+            p.environment
+                .as_ref()
+                .is_some_and(|e| e.atmosphere.is_none())
+        })
+        .unwrap()
+        .id
+        .clone();
     (system, page, planet)
 }
 

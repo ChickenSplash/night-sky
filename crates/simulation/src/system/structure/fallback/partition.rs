@@ -12,6 +12,7 @@ pub const NOTES: &[&str] = &[
     "Secondary gas is cold-trapped at the fallback reference; not a coupled EOS or climate solve",
     "Sub-resolution vapour transfers remain condensed and are excluded from the trace pressure solve",
     "Condensed proxy volumes are held fixed when accessible volatiles enter gas; densities and inertia are updated",
+    "A fully evaporated volatile layer is removed; its column keeps the pressure normalised before that small shrink",
     "Boundary gas inertia uses a mass-normalised finite column; weak-binding reference pressure retains the planar approximation",
     "Bulk envelope inertia and deep pressure retain the prescribed thinning profile, not the outer optical column",
 ];
@@ -77,8 +78,27 @@ pub fn resolve(initial: &Fallback) -> Result<Partitioned, AtmosphereError> {
             .map_err(|_| invalid())?;
         }
     }
-    // Retention's protected secondary supply leaves every existing condensed
-    // layer positive. Do not retain an empty shell with invented density.
+    // A layer whose whole supply evaporated is removed, never kept as an empty
+    // shell with invented density. Only the outermost accessible layer can be.
+    let mut radius_m = initial.radius_m;
+    let mut condensed_radius_m = initial.condensed_radius_m;
+    while fallback
+        .regions
+        .last()
+        .is_some_and(|r| r.inventory.total_mass_kg() <= 0.0)
+    {
+        fallback.regions.pop();
+        let top = fallback.regions.last().ok_or_else(invalid)?;
+        condensed_radius_m = top.outer_radius_m;
+        if !one_bar {
+            radius_m = condensed_radius_m;
+            fallback.reference = if matches!(top.kind, Kind::Core | Kind::Mantle) {
+                RadiusReference::SolidSurface
+            } else {
+                RadiusReference::UnresolvedVolatileBoundary
+            };
+        }
+    }
     if fallback
         .regions
         .iter()
@@ -86,6 +106,8 @@ pub fn resolve(initial: &Fallback) -> Result<Partitioned, AtmosphereError> {
     {
         return Err(invalid());
     }
+    fallback.radius_m = radius_m;
+    fallback.condensed_radius_m = condensed_radius_m;
     if gas.total_mass_kg() > 0.0 {
         let air = atmosphere.as_ref().ok_or_else(invalid)?;
         let top = if one_bar {
@@ -96,12 +118,12 @@ pub fn resolve(initial: &Fallback) -> Result<Partitioned, AtmosphereError> {
                 .ok_or_else(invalid)?
                 .outer_radius_m
         } else {
-            initial.radius_m
+            radius_m
                 + air
-                    .column(GRAVITATIONAL_CONSTANT * initial.mass_kg(), initial.radius_m)?
+                    .column(GRAVITATIONAL_CONSTANT * initial.mass_kg(), radius_m)?
                     .extent_m
         };
-        if !top.is_finite() || top <= initial.condensed_radius_m {
+        if !top.is_finite() || top <= condensed_radius_m {
             return Err(invalid());
         }
         fallback.regions.push(Region {
@@ -111,13 +133,35 @@ pub fn resolve(initial: &Fallback) -> Result<Partitioned, AtmosphereError> {
                 Kind::Atmosphere
             },
             inventory: gas,
-            inner_radius_m: initial.condensed_radius_m,
+            inner_radius_m: condensed_radius_m,
             outer_radius_m: top,
             inner_pressure_pa: 0.0,
             outer_pressure_pa: 0.0,
         });
     }
-    fallback.surface_pressure_pa = atmosphere.as_ref().map_or(0.0, |air| air.pressure_pa());
+    close(
+        &mut fallback,
+        atmosphere.as_ref(),
+        GRAVITATIONAL_CONSTANT * initial.mass_kg(),
+        radius_m,
+    )?;
+    Ok(Partitioned {
+        fallback,
+        budget,
+        atmosphere,
+    })
+}
+
+/// Hydrostatic pressures and inertia from the prescribed profiles, outermost
+/// first. A boundary column stands on `radius_m` under `gm`.
+pub(super) fn close(
+    fallback: &mut Fallback,
+    atmosphere: Option<&GasAtmosphere>,
+    gm: f64,
+    radius_m: f64,
+) -> Result<(), AtmosphereError> {
+    let invalid = || AtmosphereError::InvalidValue("fallback reference partition");
+    fallback.surface_pressure_pa = atmosphere.map_or(0.0, |air| air.pressure_pa());
     fallback.inertia_kg_m2 = 0.0;
     let mut enclosed = Vec::new();
     let mut mass = 0.0;
@@ -126,18 +170,16 @@ pub fn resolve(initial: &Fallback) -> Result<Partitioned, AtmosphereError> {
         mass += r.inventory.total_mass_kg();
     }
     let mut pressure = 0.0;
+    let surface_pressure_pa = fallback.surface_pressure_pa;
     for (region, inner_mass) in fallback.regions.iter_mut().zip(enclosed).rev() {
         if region.kind == Kind::Atmosphere {
             region.outer_pressure_pa = 0.0;
-            pressure = fallback.surface_pressure_pa;
+            pressure = surface_pressure_pa;
             region.inner_pressure_pa = pressure;
-            let column = atmosphere
-                .as_ref()
-                .ok_or_else(invalid)?
-                .column(GRAVITATIONAL_CONSTANT * initial.mass_kg(), initial.radius_m)?;
+            let column = atmosphere.ok_or_else(invalid)?.column(gm, radius_m)?;
             fallback.inertia_kg_m2 += column_inertia(
                 &column.profile,
-                fallback.surface_pressure_pa,
+                surface_pressure_pa,
                 region.inventory.total_mass_kg(),
             );
         } else {
@@ -151,11 +193,7 @@ pub fn resolve(initial: &Fallback) -> Result<Partitioned, AtmosphereError> {
     if !fallback.inertia_kg_m2.is_finite() || fallback.inertia_kg_m2 <= 0.0 {
         return Err(invalid());
     }
-    Ok(Partitioned {
-        fallback,
-        budget,
-        atmosphere,
-    })
+    Ok(())
 }
 
 /// Same finite-column coordinates as the atmosphere, normalised to its actual

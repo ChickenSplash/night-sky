@@ -45,7 +45,9 @@ accreting into planets. For each permitted host (a star or close pair):
     escape, solve H/He survival and structure together, then assign independently
     seeded spin and descriptions. Partition retained gas and condensates.
     Retention trials use fast fallback facts and independent forcing inputs.
-    The converged fallback, with its own gas/condensate partition, becomes the
+    The converged fallback then takes the one
+    [surface decision](planet-composition.md#synchronous-surface-decision)
+    (greenhouse temperature, gas and frost, blow-off, layered route) and becomes the
     planet's result (`Planet::initial_result`); mass, radius, inertia,
     atmosphere and spin are all installed from it together.
 8. Recheck stability using final retained masses. Escape only reduces masses,
