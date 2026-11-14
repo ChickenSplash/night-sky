@@ -234,7 +234,10 @@ the point reaches optical depth 10 in its least dimmed channel (less than
 deterministic foreground prepass integrates positive local extinction directly.
 Adaptive midpoint steps limit radial profile changes and tangent curvature,
 using one quarter of the shortest active profile height and at most about one
-optical depth per step in the least dimmed channel. Twelve local halvings refine
+optical depth per step in the least dimmed channel. The gas's height is the
+local one (growing as radius squared for spherical gas), so a puffy envelope
+whose top lies several radii up costs tens of steps from high in its air, not
+hundreds through near-vacuum. Twelve local halvings refine
 the crossing step. Scattering samples cover the resulting visible interval,
 including the last step's light. Distances are relative to the ray entry to keep
 sub-f32-radius mean free paths representable in dense air.

@@ -33,15 +33,16 @@ struct Path {
     depth: Vec3,
     opaque: bool,
     complete: bool,
+    steps: u32,
 }
 
 fn march(air: &Air, impact: f32, start: f32, end: f32) -> Path {
-    let mut scale = air.rayleigh.w;
+    let mut fixed = f32::MAX;
     if air.mie.max_element() > 0.0 {
-        scale = scale.min(air.shape.x);
+        fixed = air.shape.x;
     }
     if air.absorption.max_element() > 0.0 {
-        scale = scale.min(air.shape.w);
+        fixed = fixed.min(air.shape.w);
     }
     let medium = |t: f32| {
         let h = impact.hypot(t) - 1.0;
@@ -61,12 +62,20 @@ fn march(air: &Air, impact: f32, start: f32, end: f32) -> Path {
     let span = end - start;
     let mut t = 0.0;
     let mut depth = Vec3::ZERO;
+    let mut steps = 0;
     for _ in 0..1024 {
         if t >= span {
             break;
         }
+        steps += 1;
         let along = start + t;
         let r = impact.hypot(along);
+        let lift = if air.spherical {
+            1.0 + (r - 1.0).max(0.0)
+        } else {
+            1.0
+        };
+        let scale = (air.rayleigh.w * lift * lift).min(fixed);
         let rate = (along.abs() / r).max((scale / r).sqrt());
         let ds = (span - t)
             .min(0.25 * scale / rate)
@@ -87,6 +96,7 @@ fn march(air: &Air, impact: f32, start: f32, end: f32) -> Path {
                 depth: depth + medium(along + 0.5 * high) * high,
                 opaque: true,
                 complete: true,
+                steps,
             };
         }
         depth += x;
@@ -97,6 +107,7 @@ fn march(air: &Air, impact: f32, start: f32, end: f32) -> Path {
         depth,
         opaque: false,
         complete: t >= span,
+        steps,
     }
 }
 
@@ -205,6 +216,34 @@ fn foreground_handles_presets_giant_descent_and_inside_cameras() {
             if start < half {
                 check(&air, impact, start, half);
             }
+        }
+    }
+}
+
+/// Spherical gas thins ever more slowly with height, so a puffy envelope's
+/// top lies several radii up. Steps follow the local scale height: a camera
+/// high in such air must not pay for hundreds of steps through near-vacuum.
+#[test]
+fn puffy_envelope_resolves_in_few_steps_from_high_in_the_air() {
+    let air = super::march_tests::puffy();
+    assert!(air.spherical && air.top > 4.0);
+    for eye in [1.3_f32, 2.0, 4.0, 0.9 * (air.top - 1.0) + 1.0] {
+        for degrees in (-60..=60).step_by(5) {
+            let elevation = (degrees as f32).to_radians();
+            let impact = eye * elevation.cos();
+            let half = (air.top * air.top - impact * impact).sqrt();
+            let start = eye * elevation.sin();
+            let end = if impact < 1.0 && elevation < 0.0 {
+                -(1.0 - impact * impact).sqrt()
+            } else {
+                half
+            };
+            let path = check(&air, impact, start, end);
+            assert!(
+                path.steps <= 80,
+                "eye {eye}, {degrees} degrees: {} steps",
+                path.steps
+            );
         }
     }
 }

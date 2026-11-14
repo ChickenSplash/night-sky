@@ -169,12 +169,14 @@ struct Foreground {
 // depths. Limit radial profile changes and tangent curvature to resolve both
 // sides of the limb identically. Independent of table readiness.
 fn foreground(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32) -> Foreground {
-    var scale = air.rayleigh.w;
+    // The shortest of the other profiles' heights, which do not vary with
+    // radius; none leaves the gas alone to set the steps.
+    var fixed = 1e30;
     if any(air.mie.rgb > vec3(0.0)) || air.mie.w > 0.0 {
-        scale = min(scale, air.shape.x);
+        fixed = air.shape.x;
     }
     if any(air.absorption.rgb > vec3(0.0)) {
-        scale = min(scale, air.shape.w);
+        fixed = min(fixed, air.shape.w);
     }
     let span = end - start;
     var t = 0.0;
@@ -183,6 +185,11 @@ fn foreground(nearest: vec3<f32>, dir: vec3<f32>, start: f32, end: f32) -> Foreg
     for (var i = 0; i < 1024 && t < span; i++) {
         let along = start + t;
         let r = length(nearest + dir * along);
+        // Spherical gas's scale height grows as the square of the radius, so
+        // steps lengthen through the thin air high up instead of staying as
+        // fine as at the ground.
+        let lift = 1.0 + air.gas_absorption.w * max(r - 1.0, 0.0);
+        let scale = min(air.rayleigh.w * lift * lift, fixed);
         let rate = max(abs(along) / r, sqrt(scale / r));
         let local_extinction = medium(r - 1.0).extinction;
         let ds = min(min(span - t, 0.25 * scale / rate), 1.0 / max(least(local_extinction), 1e-30));

@@ -129,7 +129,7 @@ fn pixel(air: &Air, table: &[DVec3], eye: DVec3, dir: DVec3, sun: DVec3, steps: 
 
 /// A deep, puffy envelope like `g1724b6d.2.20326/5`'s: hydrogen at 788 K
 /// under 0.497 m/s², continued below one bar.
-fn puffy() -> Air {
+pub(super) fn puffy() -> Air {
     use space_simulation::{
         system::atmosphere::{Composition, Gas, GasAtmosphere, ReferenceLevel},
         units::{EARTH_SOLAR, SUN_GM},
