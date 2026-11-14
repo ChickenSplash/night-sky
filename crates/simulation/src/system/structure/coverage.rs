@@ -403,7 +403,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
           - Non-envelope planets solved: {}\n\
           - Envelope-route planets solved: {}\n\
          - Wall time: {seconds:.1} s on {threads} threads\n\
-          - Thin temperature: grey greenhouse; envelope: radiative/deep profile, 100 K intrinsic\n",
+          - Thin temperature: grey greenhouse; envelope: radiative/deep profile, mass/age intrinsic trend\n",
         Component::ALL.len(),
         rows.len(),
         ratio(solved, rocky.len()),

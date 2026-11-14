@@ -299,7 +299,7 @@ impl CoupledStructure {
                 "No conversion of secondary inventory into water; protected material and all water remain in separate interior parcels",
                 "No validated heavy-mixture phase diagram, excess mixing volume, dissociation, ionisation or metallic-depth chemistry",
                 "Conservative pure-condensation and near-critical screens still refuse; no liquid/solid secondary layers",
-                "Prescribed H/He-oriented grey opacity, fixed 2/7 deep gradient and 100 K intrinsic reference retained even for secondary-dominated mixtures",
+                "Prescribed H/He-oriented grey opacity, fixed 2/7 deep gradient and mass/age intrinsic trend retained even for secondary-dominated mixtures",
                 "Composition-dependent thermal structure unresolved; no whole-planet physical accuracy bound",
                 "One bar is an exact reference level, never ground; the finite envelope ends at 10 mbar",
             ];
@@ -315,7 +315,7 @@ impl CoupledStructure {
                 "Secondary molecular EOS restricted to 80-625 K and at most 1,000 bar, with conservative pure-condensation and near-critical screens",
                 "No binary excess volume, mixture phase equilibrium, dense metallic-depth chemistry or separate liquid/solid secondary layers",
                 "Protected traces and water retain their separate interior allocations; no material discarded",
-                "Prescribed grey thermal profile with 100 K intrinsic reference, not cooling evolution",
+                "Prescribed grey thermal profile with a mass/age intrinsic trend, not cooling evolution",
                 "Reference gravity from the new one-bar event; one bar is never ground",
             ];
         }
@@ -324,7 +324,7 @@ impl CoupledStructure {
                 "Uniform H/He mixture with separate conserved origins; no helium rain or heavy-water mixing",
                 "CMS19/HG23 density with bounded conservative pure-fluid and ion-quantum screens",
                 "Pure-He melting screen continued as a labelled conservative restriction through 1e13 Pa, not a mixture phase prediction",
-                "Grey prescribed thermal profile, fixed 2/7 deep slope and 100 K intrinsic reference, not cooling evolution",
+                "Grey prescribed thermal profile, fixed 2/7 deep slope and a mass/age intrinsic trend, not cooling evolution",
                 "Reference gravity iterated from enclosed new-model mass and exact one-bar event",
                 "All water retained below H/He; separate shallow/deep pressure-only compression proxies, phase and thermal expansion unresolved",
                 "Protected secondaries remain in heavy parcels; accessible secondary traces share envelope host volume without becoming protected",

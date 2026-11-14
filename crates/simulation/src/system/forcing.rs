@@ -40,7 +40,7 @@ impl Forcing {
             inputs,
             // The lineage covers both the initial fallback and its refinement
             // prescription, including the checksum-pinned NSHHE001 resource.
-            model: "generation_physics_v2:fallback_partition_v1:layered_adoption_v1:NSHHE001-b4e7a79ecc35d846"
+            model: "generation_physics_v2:fallback_partition_v1:layered_adoption_v2:NSHHE001-b4e7a79ecc35d846"
                 .into(),
             sequence: 0,
         }

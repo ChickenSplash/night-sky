@@ -17,6 +17,7 @@ mod mixture;
 mod thermal;
 pub use thermal::MODEL_ID as THERMAL_MODEL_ID;
 pub use thermal::Thermal;
+pub use thermal::intrinsic_k;
 #[cfg(test)]
 mod tests;
 

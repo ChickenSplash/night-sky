@@ -888,3 +888,25 @@ fn envelope_reference_cases() {
         }
     }
 }
+
+#[test]
+fn intrinsic_temperature_follows_the_giants_and_cools_with_age() {
+    use crate::units::EARTH_MASS_KG;
+    let at = |mass_earth: f64, age: f64| intrinsic_k(mass_earth * EARTH_MASS_KG, age);
+    // Measured: Jupiter about 99 K, Saturn about 77 K, Neptune about 53 K.
+    for (mass, measured) in [(317.83, 99.0), (95.16, 77.0), (17.15, 53.0)] {
+        assert!(
+            (at(mass, 4.57) - measured).abs() < 2.0,
+            "{mass} Earth masses"
+        );
+    }
+    assert!(at(9.5, 6.9) < 50.0);
+    assert!(at(9.5, 0.5) > at(9.5, 5.0));
+    assert!(at(100.0, 5.0) > at(10.0, 5.0));
+    // Always inside the profile's accepted range, whatever the inputs.
+    for (mass, age) in [(1e-4, 13.0), (1200.0, 1e-3), (0.0, 1.0), (1.0, 0.0)] {
+        let t = at(mass, age);
+        assert!((thermal::INTRINSIC_RANGE_K[0]..=thermal::INTRINSIC_RANGE_K[1]).contains(&t));
+        Thermal::new(300.0, t, 10.0).unwrap();
+    }
+}

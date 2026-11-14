@@ -126,7 +126,7 @@ pub fn solve(
         budget.retained(),
         &protected,
         environment.equilibrium_temperature_k,
-        100.0,
+        super::envelope::intrinsic_k(budget.retained().total_mass_kg(), environment.age_gyr),
         controls,
     )
     .map_err(Error::Envelope)?;

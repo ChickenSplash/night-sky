@@ -97,7 +97,7 @@ retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
 prescriptions. The current generation key is
-`generation_physics_v2:fallback_partition_v1:layered_adoption_v1:NSHHE001-b4e7a79ecc35d846`,
+`generation_physics_v2:fallback_partition_v1:layered_adoption_v2:NSHHE001-b4e7a79ecc35d846`,
 covering the initial partition, refinement adapter and checksum-pinned H/He resource.
 Its availability is process-local and fixed by the table's `OnceLock`: installing
 or changing it requires restarting the process, not reusing an old refusal.
@@ -440,9 +440,16 @@ cryptographic source authentication.
   mixing are unresolved. Its displayed temperature is the shared outer-boundary
   temperature. The original local water EOS masks and thin solvers are unchanged.
 - The thermal form selected above is prescribed, not a cooling calculation.
-  This experimental route uses a **100 K intrinsic reference**, not the 50 K
-  decision-probe experiment, and does not claim it is right for every mass/age.
-  The headless API accepts 20–200 K for sensitivity work. Reference gravity is
+  Generation sets the intrinsic temperature from retained mass and age,
+  `T_int = 100 K (M/M_Jupiter)^0.215 (age/4.57 Gyr)^-0.1`, clamped to
+  20–200 K (`envelope/thermal.rs`). The mass exponent joins Jupiter (about
+  100 K) and Neptune (about 53 K) today, with Saturn then at its measured 77 K;
+  below Neptune's mass it is an extrapolation. The age exponent is deliberately
+  far gentler than giant cooling luminosity implies (about -0.3): that value
+  inflated young low-mass envelopes to several times the retained fit's radius.
+  It replaced a fixed 100 K for every body, which
+  [inflated old low-mass envelopes](#intrinsic-temperature-census). The headless
+  API still accepts 20–200 K for sensitivity work. Reference gravity is
    iterated with bounded secant updates from newly integrated enclosed mass at
    the radius reference (one bar, or the condensed boundary for a sub-bar gas
    shell). Require relative gravity closure below 10⁻⁸. No legacy radius seeds
@@ -600,6 +607,36 @@ planets; no further numerical or physics change was made for this validation.
 Evidence is saved locally in `data/tmp/p2-step7-399/`, with run logs at
 `data/tmp/p2-step7-{399,trends,envelope,density,check}.log`.
 
+#### Intrinsic temperature census
+
+The figures above and the plausibility audit below describe the original fixed
+100 K intrinsic temperature. Retention only sees the fallback radius, so a
+layered radius far above it is never checked for escape: `g1724b6d.2.20326/5`
+(9.5 Earth masses, 18% H/He, 784 K, 6.9 Gyr) was 30,437 km in the fallback and
+87,242 km layered, with the fallback the one consistent with published cooled
+models. The mass/age trend was then compared on the same 399-system probe, for
+the 717 planets with more than 0.1% H/He. The binding parameter here is
+`G M m_H / (k T_eq R)`.
+
+| | Fixed 100 K | Mass/age trend |
+| --- | --- | --- |
+| Binding parameter below 20 / below 10 | 60 / 10 | 30 / 4 |
+| Lowest binding parameter | 4.7 | 7.3 |
+| Layered radius over 1.5 / 2 times fallback | 29 / 6 | 1 / 0 |
+| Largest layered to fallback radius ratio | 3.38 | 1.70 |
+| Layered, all planets | 4,052 (92.8%) | 3,663 (83.9%) |
+| Checked labelled fallbacks | 315 | 704 |
+
+The former worst case, `composition-calibration:ThinDisc:5/1`, falls from
+90,670 km to 33,175 km. The four planets still below 10 hold at most 4% H/He.
+**Layered coverage fell**: cooler interiors leave the supported density domain
+more often. First blockers are now cold dense H/He 280, suspended near-critical
+151, suspended condensate model 106, conservative melting screen 55 and central
+shooting resolution 19. These bodies keep their checked fallback result. An age
+exponent of -0.3 was rejected: 13 layered radii exceeded twice the fallback and
+one reached 132,000 km at a binding parameter of 4.3. No boil-off rule was
+added; escape is still solved on fallback radii only.
+
 #### Saved-population plausibility audit
 
 The post-validation audit scans **all 4,367 saved results**, not just fixtures.
@@ -636,7 +673,8 @@ separate `original_refusal` preserves the original census reason.
   validity limits, new fallback criteria or proven phase/escape diagnoses.
   No body triggers the broad condensed-density (below 500 or above 20,000 kg/m³)
   or inertia (outside 0.01–2/3) screens as implemented in the script.
-- **Very puffy envelopes remain a physical concern.** The worst is
+- **Very puffy envelopes remain a physical concern** (largely resolved since by
+  the [mass/age intrinsic temperature](#intrinsic-temperature-census)). The worst is
   `composition-calibration:ThinDisc:5/1`: 7.14 Earth masses, 13.2% H/He,
   90,670 km at one bar and 812 K, density 13.7 kg/m³. Its condensed boundary
   is 10,309 km and its operational 10 mbar shell reaches 158,540 km.
