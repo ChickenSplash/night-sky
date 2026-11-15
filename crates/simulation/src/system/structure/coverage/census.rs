@@ -252,7 +252,7 @@ fn census_candidates_and_input_columns() {
             inertia_factor: f64::NAN,
             interface_pressure_pa: f64::NAN,
             gravity_residual: f64::NAN,
-            outer_residual_pa: f64::NAN,
+            interface_residual_pa: f64::NAN,
             model: "",
             fallback_radius_km: f64::NAN,
             profile: Default::default(),

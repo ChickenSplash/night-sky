@@ -57,6 +57,21 @@ impl Thermal {
         let tau = (4.0 * (2.0 / 7.0) * a) / (0.75 * (2.0 - 4.0 * (2.0 / 7.0)));
         (2.0 * self.gravity_m_s2 * 1e5 * tau / 0.001).sqrt()
     }
+    /// Pressure at which the profile reaches `t`; `None` where it never does.
+    /// Temperature rises monotonically with pressure, so this is unique.
+    pub fn pressure_at_pa(self, t: f64) -> Option<f64> {
+        let join = self.boundary_pressure_pa();
+        let radiative = (t.powi(4) - self.equilibrium_k.powi(4))
+            / (0.75 * self.intrinsic_k.powi(4))
+            - 2.0 / 3.0;
+        let p = (radiative * 2.0 * self.gravity_m_s2 * 1e5 / 0.001).sqrt();
+        if p <= join {
+            return Some(p);
+        }
+        let joined = self.temperature_k(join).ok()?;
+        let p = join * (t / joined).powf(3.5);
+        (t > joined && p.is_finite()).then_some(p)
+    }
     pub fn temperature_k(self, p: f64) -> Result<f64, Error> {
         if !p.is_finite() || !(1e-2..=1e14).contains(&p) {
             return Err(Error::InvalidInput("thermal pressure"));

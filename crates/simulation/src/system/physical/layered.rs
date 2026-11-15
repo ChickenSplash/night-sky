@@ -30,9 +30,19 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     let mut layers = Vec::new();
     if let Some(envelope) = s.envelope() {
         for (index, r) in envelope.regions().iter().enumerate().rev() {
+            // The gas and the condensed body are solved towards each other and
+            // meet within the solver's tolerance; the record has one boundary.
+            let inner = if index == 0 {
+                dry::Sample {
+                    radius_m: s.condensed().radius_m(),
+                    ..r.inner()
+                }
+            } else {
+                r.inner()
+            };
             let mut layer = region(
                 r.inventory(),
-                r.inner(),
+                inner,
                 r.outer(),
                 envelope.thermal().temperature_k(r.outer().pressure_pa).ok(),
                 "envelope",

@@ -417,11 +417,27 @@ cryptographic source authentication.
 
 ### Mechanics, allocations and thermal coupling
 
-- Integrate `dr/dm`, `dP/dm` and `dI/dm` from the regular centre through metal,
-  silicate, water (if positive), then the H/He parcel. The actual enclosed mass
-  includes every parcel, so envelope self-gravity and interior compression are
-  solved together. Shared interface radius, pressure and enclosed mass are
-  identical by construction. Inertia comes from RK integration, including the
+- The condensed body and the gas are integrated **towards each other** and
+  matched where they meet (`envelope/shell.rs`):
+  - metal, silicate and water (if positive) run outward from the regular centre
+    in the radial kernel, as `dr/dm`, `dP/dm` and `dI/dm`;
+  - the H/He parcel runs inward from its outer boundary in log pressure, as mass
+    above, depth below the boundary and its own inertia. Pressure is the
+    independent variable, so the outer boundary, one bar and model events are
+    exact, and steps end on the H/He table's knots, where its interpolation is
+    only continuous;
+  - the unknowns are central pressure and outer radius. A shell depends on its
+    outer radius alone, so shells solved for one core trial are reused for the
+    next, as is the largest radius the gas models refuse.
+
+  The actual enclosed mass includes every parcel on both sides, so envelope
+  self-gravity and interior compression are still solved together. Enclosed
+  mass at the meeting point is identical by construction; radius closes to a
+  relative 10⁻¹⁰ and pressure to the layer-boundary tolerance of the transport
+  record (0.02 Pa or 10⁻⁹ relative). Both residuals are recorded, not removed:
+  the record's single boundary radius is the condensed one. An outward-only
+  integration instead has to resolve the 10 mbar boundary as the difference of
+  two interior loads. Inertia comes from RK integration, including the
   cumulative interior contribution, not a fitted core or shell formula.
 - Internal carrier coordinates are not origin identities: the heavy parcels
   include protected secondary mass, while the outer carrier owns the complete
@@ -455,9 +471,10 @@ cryptographic source authentication.
   It replaced a fixed 100 K for every body, which
   [inflated old low-mass envelopes](#intrinsic-temperature-census). The headless
   API still accepts 20–200 K for sensitivity work. Reference gravity is
-   iterated with bounded secant updates from newly integrated enclosed mass at
-   the radius reference (one bar, or the condensed boundary for a sub-bar gas
-   shell). Require relative gravity closure below 10⁻⁸. No legacy radius seeds
+  matched inside each shell: integrating inward reaches the radius reference
+  (one bar, or the base of a sub-bar gas shell) first, so only that outer part
+  is repeated until the gravity assumed and the one found agree to 10⁻¹⁰. The
+  delivered structure requires closure below 10⁻⁸. No legacy radius seeds
   this fixed point. Molecular heat-capacity variation and true deep adiabats
   remain unresolved, so radius accuracy is not established.
 
@@ -501,16 +518,15 @@ returned. Mathematical shooting trials may use the pressure-only water row
 below its accepted depth, but a final structure outside the depth bound is
 refused, never exposed as a solved water layer.
 
-The whole retained envelope is represented in a finite shell ending near
-**10 mbar**, with an operational endpoint tolerance of **0.01 mbar**. One bar is
+The whole retained envelope is represented in a finite shell ending at exactly
+**10 mbar**, where its inward integration starts. One bar is
 located as an exact pressure event *inside* that shell, not used as a pressure
-floor, ground or an invented material interface. Centre shooting at central
-loads of tens of millions of bar cannot universally resolve a 0.0001 mbar outer
-residual in f64; the new shell's endpoint contract is 0.01 mbar, recorded without pressure translation or radius
-rescaling. Existing P1 tolerances are unchanged. The one-bar radius and total
+floor, ground or an invented material interface. No pressure is translated and
+no radius rescaled: the only residuals are those recorded where the gas meets
+the condensed body. Existing P1 tolerances are unchanged. The one-bar radius and total
 inertia pass tighter-integration/half-step refinement checks at relative 10⁻⁷
-in the source-backed small-envelope fixture. More extreme ill-conditioned
-shoots explicitly fail rather than loosening their acceptance further.
+in the source-backed small-envelope fixture; across the 399-system probe a
+five-times tighter tolerance moves no radius by more than 3 × 10⁻¹².
 
 The radius and inertia factor use the one-bar reference when it exists. If the
 gas base is at less than one bar, they use the shared condensed/gas boundary
@@ -525,7 +541,7 @@ unresolved compressed water is not labelled as solid ground. The existing
 10 mbar shell endpoint and all EOS/closure gates remain unchanged.
 
 Integration remains at relative
-10⁻¹⁰ by default, with bounded 32 gravity iterations, 128 shooting iterations,
+10⁻¹⁰ by default, with bounded 32 gravity passes per shell, 128 core trials,
 2 million EOS evaluations per radial solve and 16 million across the request.
 An independent sample quadrature checks total inertia within 0.1%; it is not
 the delivered inertia and does not relax integration tolerances.

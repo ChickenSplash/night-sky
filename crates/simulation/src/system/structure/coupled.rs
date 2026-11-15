@@ -163,7 +163,7 @@ impl CoupledStructure {
             diagnostics: Diagnostics {
                 iterations: envelope.iterations,
                 total_eos_evaluations: envelope.evaluations,
-                interface_residual_pa: 0.0,
+                interface_residual_pa: envelope.interface_pressure_residual_pa(),
                 partition_relative_residual: 0.0,
             },
             envelope: Some(Box::new(envelope)),

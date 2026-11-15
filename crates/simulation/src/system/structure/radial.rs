@@ -38,11 +38,11 @@ type Density<'a> =
     &'a dyn Fn(Material, f64, DensitySide, &mut Work, usize) -> Result<f64, SolveError>;
 
 /// Dimensionless volume, pressure and axial moment of inertia.
-type State = [f64; 3];
+pub(super) type State = [f64; 3];
 
-struct Step {
-    state: State,
-    error: State,
+pub(super) struct Step {
+    pub state: State,
+    pub error: State,
 }
 
 /// An invalid RK stage rejects only the proposed step, never the central load.
@@ -56,7 +56,6 @@ pub(super) struct Trial {
     pub regions: Vec<Region>,
     pub density_sides: Vec<DensitySide>,
     pub inertia_kg_m2: f64,
-    pub hydrogen_inner_inertia_kg_m2: Option<f64>,
 }
 
 /// Chooses the next trial central pressure inside a shooting bracket. The
@@ -275,9 +274,6 @@ impl<'a> Solver<'a> {
         let mut y = [0.0, central_pressure / self.pressure_scale, 0.0];
         let mut cumulative = 0.0;
         let mut steps = 0;
-        let mut hydrogen_inner_inertia_kg_m2 = None;
-        // Hydrogen is also an internal carrier coordinate for a full H/He
-        // mixture parcel. Its caller restores the separate origin inventories.
         for material in [
             Material::Metal,
             Material::Silicate,
@@ -287,9 +283,6 @@ impl<'a> Solver<'a> {
             let mass = self.inventory.mass_kg(material);
             if mass == 0.0 {
                 continue;
-            }
-            if material == Material::Hydrogen {
-                hydrogen_inner_inertia_kg_m2 = Some(y[2] * self.mass * self.radius_scale.powi(2));
             }
             cumulative += mass;
             let end = (cumulative / self.mass).cbrt();
@@ -503,7 +496,6 @@ impl<'a> Solver<'a> {
             regions,
             density_sides,
             inertia_kg_m2: y[2] * self.mass * self.radius_scale.powi(2),
-            hydrogen_inner_inertia_kg_m2,
         }))
     }
 
@@ -602,7 +594,7 @@ impl<'a> Solver<'a> {
     }
 }
 
-fn rk_step<E>(
+pub(super) fn rk_step<E>(
     x: f64,
     y: State,
     h: f64,

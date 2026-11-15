@@ -165,6 +165,42 @@ table stays required. Two follow-ups are added to G3: condition the envelope's
 outer boundary so it does not need 1e-10 integration, and tabulate the EOS
 calls that dominate each trial.
 
+### Envelope boundary follow-up, 15 November 2026
+
+The first follow-up is done, ahead of the G3 table. The gas is now integrated
+inward from its outer boundary in log pressure and matched to a core integrated
+outward ([mechanics](../simulation/planet-composition.md#mechanics-allocations-and-thermal-coupling)).
+Same 399 systems, 20 threads, default tolerance. Evidence:
+`data/tmp/g3-inward/{baseline,after,fine}.{md,tsv}`, compared with
+`data/tmp/g3-inward/compare.py`.
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Solved envelope, median / p95 / max | 190 / 593 / 1,590 ms | 22 / 47 / 102 ms |
+| Refused envelope attempt, median / p95 | 43 / 284 ms | 25 / 52 ms |
+| Envelope route CPU time | 208 s | 31 s |
+| Report wall time | 14.7 s | 5.6 s |
+| Envelope-route planets solved | 616 of 1,353 | 638 of 1,353 |
+
+- **Where the time went.** Each solve repeated the whole shoot 4 to 5 times to
+  settle reference gravity, about 17 trials each, and the gas took about 14
+  steps per H/He table cell because the table is only continuous at its knots.
+  Gravity is now settled on the outer part of the shell alone, and steps end on
+  the knots: about 3 per cell.
+- **Agreement.** All 616 earlier solutions remain, with identical surface
+  labels. Radius differs by 1.7e-10 at the median and 8e-7 at most; the new
+  solve agrees with itself at a five-times tighter tolerance to 3e-12, so the
+  larger differences are the old 0.01 mbar endpoint band. Rock and water rows
+  are unchanged.
+- **22 more solve**: 12 that ran out of work budget, 2 at the old floating-point
+  limit, the rest at domain edges the old shooting path could not reach.
+- **Looser tolerance is now safe to consider**, measured but not adopted: at
+  1e-8 no solution is lost, radii stay within 1.5e-10 of the refined run and the
+  median solve is 9 ms. G1 lost over half the envelope solutions at 1e-6.
+
+Still open from G1: tabulating the EOS calls. Whether visits still need the
+envelope table at these costs is for G3 to decide; search does.
+
 ## G2: one place decides the bulk facts
 
 1. Move greenhouse temperature, full water exchange and unbound-column

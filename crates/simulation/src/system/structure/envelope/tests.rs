@@ -350,15 +350,22 @@ fn unified_kernel_closes_interfaces_origins_and_shell_inertia() {
         &density,
     )
     .unwrap();
+    // The core and the gas are integrated towards each other: their meeting
+    // point closes to the recorded residuals, the mass coordinate exactly.
     let base = e.regions.first().unwrap().inner();
+    let surface = core.regions().last().unwrap().outer();
+    assert_eq!(surface.enclosed_mass_kg, base.enclosed_mass_kg);
     assert_eq!(
-        core.regions().last().unwrap().outer().radius_m,
-        base.radius_m
+        e.interface_radius_residual_m(),
+        base.radius_m - surface.radius_m
     );
     assert_eq!(
-        core.regions().last().unwrap().outer().pressure_pa,
-        base.pressure_pa
+        e.interface_pressure_residual_pa(),
+        surface.pressure_pa - base.pressure_pa
     );
+    assert!(e.interface_radius_residual_m().abs() <= 1e-10 * surface.radius_m);
+    assert!(e.interface_pressure_residual_pa().abs() <= interface_tolerance_pa(base.pressure_pa));
+    assert_eq!(e.outer_pressure_residual_pa(), 0.0);
     assert!(e.gravity_residual.abs() < GRAVITY_TOLERANCE);
     let outer = e.regions.last().unwrap().outer();
     let analytic = 8.0 * std::f64::consts::PI / 15.0

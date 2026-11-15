@@ -9,6 +9,9 @@ use std::sync::OnceLock;
 pub const MODEL_ID: &str = "cms19_hg23_screened_density_v1";
 pub const COLD_MODEL_ID: &str = "dilute_hhe_100k_volume_anchor_v1";
 pub const MAX_PRESSURE_PA: f64 = 1e13;
+/// Log10 spacing of both table axes. Pressure knots start at 1 Pa and
+/// temperature knots at 100 K; interpolation is only continuous across them.
+pub(crate) const KNOT_DEX: f64 = 0.05;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -99,8 +102,8 @@ impl Table {
     }
 
     fn volume(&self, p: f64, t: f64, y: f64) -> Result<f64, Error> {
-        let ti = (t.log10() - 2.0) / 0.05;
-        let pi = p.log10() / 0.05;
+        let ti = (t.log10() - 2.0) / KNOT_DEX;
+        let pi = p.log10() / KNOT_DEX;
         let i = (ti.floor() as usize).min(59);
         let j = (pi.floor() as usize).min(259);
         let u = ti - i as f64;
@@ -147,7 +150,7 @@ impl Table {
             let difference = |row: usize| {
                 value(&self.nodes[row * 261 + j + 1]) - value(&self.nodes[row * 261 + j])
             };
-            ((1.0 - u) * difference(i) + u * difference(i + 1)) / 0.05
+            ((1.0 - u) * difference(i) + u * difference(i + 1)) / KNOT_DEX
         };
         let dv_dlnp = -(1.0 - y) / rh * pressure_slope(|n| n.h)
             - y / rhe * pressure_slope(|n| n.he)

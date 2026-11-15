@@ -1,5 +1,6 @@
-//! One centre-to-outer-boundary solve using the existing radial kernel.
-//! H/He self-gravity, interface load, volumes and inertia are integrated together.
+//! A core integrated outward by the radial kernel and a gas shell integrated
+//! inward from its outer boundary, matched where they meet. H/He self-gravity,
+//! interface load, volumes and inertia are all part of the one fit.
 use super::{
     coupled,
     dry::{self, Region, SolveError, WorkLimit},
@@ -14,6 +15,7 @@ use crate::{
 };
 
 mod mixture;
+mod shell;
 mod thermal;
 pub use thermal::MODEL_ID as THERMAL_MODEL_ID;
 pub use thermal::Thermal;
@@ -26,9 +28,14 @@ pub const WATER_MODEL_ID: &str = "loaded_effective_water_compression_v1";
 pub const TRACE_MODEL_ID: &str = "passive_secondary_envelope_host_volume_v1";
 pub const OUTER_PRESSURE_PA: f64 = 1000.0;
 // Operational 0.01-bar shell boundary, not a physical surface or radius
-// reference. Centre-shooting quantisation at TPa central loads prevents a
-// universal 0.01-Pa endpoint residual. The exact one-bar event is independent.
+// reference. The shell starts exactly there; this is only the pressure below
+// which a core trial counts as having run out before its surface.
 const PRESSURE_TOLERANCE_PA: f64 = 1.0;
+/// Pressure step allowed where the gas meets the core: the layer-boundary
+/// tolerance of `physical::validate_record`.
+fn interface_tolerance_pa(pressure_pa: f64) -> f64 {
+    0.02_f64.max(1e-9 * pressure_pa)
+}
 const GRAVITY_TOLERANCE: f64 = 1e-8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,6 +84,8 @@ pub struct Envelope {
     pub(super) evaluations: usize,
     pub(super) iterations: usize,
     pub(super) gravity_residual: f64,
+    interface_radius_residual_m: f64,
+    interface_pressure_residual_pa: f64,
     molecular_mixture: bool,
     secondary_enriched: bool,
     effective_boundary_pa: Option<f64>,
@@ -148,6 +157,14 @@ impl Envelope {
     }
     pub fn outer_pressure_residual_pa(&self) -> f64 {
         self.regions.last().unwrap().outer().pressure_pa - OUTER_PRESSURE_PA
+    }
+    /// Gas base minus core surface, where the two integrations meet.
+    pub fn interface_radius_residual_m(&self) -> f64 {
+        self.interface_radius_residual_m
+    }
+    /// Core surface minus gas base.
+    pub fn interface_pressure_residual_pa(&self) -> f64 {
+        self.interface_pressure_residual_pa
     }
     pub fn regions(&self) -> &[Region] {
         &self.regions
@@ -247,203 +264,228 @@ fn solve_with_density(
         None
     };
     let scale = heavy.total_mass_kg() / host.total_mass_kg();
-    let parcels = Inventory::new(&Material::ALL.map(|m| {
-        (
-            m,
-            if m == Material::Hydrogen {
-                gas.total_mass_kg()
-            } else {
-                host.mass_kg(m) * scale
-            },
-        )
-    }))
-    .unwrap();
-    let y = gas.mass_kg(Material::Helium) / light;
-    let mut thermal = Thermal::new(equilibrium_k.max(20.0), intrinsic_k, 10.0)?;
-    let mut total_work = 0;
-    let mut cumulative = dry::Work::default();
-    let mut previous_gravity: Option<(f64, f64)> = None;
-    for iteration in 0..controls.max_iterations {
-        let component_route = mixture
-            .map(|_| mixture::ComponentRoute::new(thermal, gas))
-            .transpose()?;
-        let remaining = controls
-            .max_total_eos_evaluations
-            .saturating_sub(total_work);
-        if remaining == 0 {
+    // Validates the temperatures before any work is spent.
+    Thermal::new(equilibrium_k.max(20.0), intrinsic_k, 10.0)?;
+    let heavy_parcels =
+        Inventory::new(&Material::ALL.map(|m| (m, host.mass_kg(m) * scale))).unwrap();
+    let heavy_density = |m, p: f64, side, _: &mut dry::Work, _| {
+        if m == Material::Water {
+            // Separate shallow and deep barotropes, never phase/thermal EOS.
+            // Honour the one-sided branch at the located model boundary.
+            let shallow = match side {
+                radial::DensitySide::Branch(i) => i > 0,
+                radial::DensitySide::Equilibrium => p < loaded::BOUNDARY_PA,
+            };
+            if shallow {
+                return loaded::density_kg_m3(p)
+                    .ok_or(SolveError::InvalidInput("shallow water pressure"));
+            }
+            if !(0.0..=cold::MAX_PRESSURE_PA).contains(&p) {
+                return Err(SolveError::InvalidInput("heavy water pressure"));
+            }
+            Ok(1460.0 + 0.00311 * p.powf(0.513))
+        } else {
+            cold::density_kg_m3(m, p).map_err(SolveError::Eos)
+        }
+    };
+    let radial_controls = dry::Controls {
+        max_eos_evaluations: controls
+            .radial
+            .max_eos_evaluations
+            .min(controls.max_total_eos_evaluations),
+        ..controls.radial
+    };
+    // The core is integrated outward from the centre and the gas inward from
+    // its outer boundary; the two meet at the core's surface. Neither then has
+    // to resolve a 10 mbar boundary as the difference of two interior loads.
+    let mut solver = radial::Solver::new(
+        &heavy_parcels,
+        OUTER_PRESSURE_PA,
+        radial_controls,
+        &heavy_density,
+        radial::Policy {
+            pressure_floor_pa: OUTER_PRESSURE_PA,
+            boundary_tolerance_pa: Some(PRESSURE_TOLERANCE_PA),
+            interfaces: vec![radial::PressureInterface {
+                material: Material::Water,
+                pressure_pa: loaded::BOUNDARY_PA,
+            }],
+            ..Default::default()
+        },
+    );
+    let carrier = shell::Gas {
+        eos,
+        inventory: gas,
+        helium_fraction: gas.mass_kg(Material::Helium) / light,
+        mixture,
+    };
+    let mut matcher = shell::Matcher::new(
+        &carrier,
+        equilibrium_k.max(20.0),
+        intrinsic_k,
+        heavy_parcels.total_mass_kg(),
+        controls,
+    );
+    let ceiling = cold::MAX_PRESSURE_PA;
+    let seed = (2.0 * solver.pressure_scale()).clamp(2.0 * OUTER_PRESSURE_PA, ceiling);
+    let mut search = shell::Search::new(OUTER_PRESSURE_PA, ceiling, Some(seed), 0.5 * seed);
+    let mut refusal = None;
+    let mut closest: Option<(f64, f64)> = None;
+    let mut solved = None;
+    for _ in 0..radial_controls.max_shooting_iterations {
+        let Some(central) = search.next() else {
+            break;
+        };
+        solver.work.shooting_iterations += 1;
+        let trial = solver.trial(central);
+        if solver.work.eos_evaluations + matcher.work.eos_evaluations
+            >= controls.max_total_eos_evaluations
+        {
             return Err(Error::WorkBudget);
         }
-        let radial_controls = dry::Controls {
-            max_eos_evaluations: controls.radial.max_eos_evaluations.min(remaining),
-            ..controls.radial
-        };
-        let density = |m, p: f64, side, work: &mut dry::Work, limit| {
-            if m == Material::Hydrogen {
-                let t = thermal
-                    .temperature_k(p)
-                    .map_err(|_| SolveError::InvalidInput("envelope thermal domain"))?;
-                let density = eos(p, t, y).map_err(SolveError::Envelope)?;
-                match mixture {
-                    Some(mix) if component_route.as_ref().unwrap().effective(p, side) => {
-                        component_route
-                            .as_ref()
-                            .unwrap()
-                            .density(mix, p, t, density, work, limit)
-                    }
-                    Some(_) if component_route.as_ref().unwrap().suspended => {
-                        suspended::State::new(&gas, p, t, density)
-                            .map(|s| s.density_kg_m3)
-                            .map_err(|e| SolveError::Mixture(hhe_mixture::Error::Suspended(e)))
-                    }
-                    Some(mix) => mix
-                        .density_kg_m3(p, t, density)
-                        .map_err(SolveError::Mixture),
-                    None => Ok(density),
-                }
-            } else if m == Material::Water {
-                // Separate shallow and deep barotropes, never phase/thermal EOS.
-                // Honour the one-sided branch at the located model boundary.
-                let shallow = match side {
-                    radial::DensitySide::Branch(i) => i > 0,
-                    radial::DensitySide::Equilibrium => p < loaded::BOUNDARY_PA,
-                };
-                if shallow {
-                    return loaded::density_kg_m3(p)
-                        .ok_or(SolveError::InvalidInput("shallow water pressure"));
-                }
-                if !(0.0..=cold::MAX_PRESSURE_PA).contains(&p) {
-                    return Err(SolveError::InvalidInput("heavy water pressure"));
-                }
-                Ok(1460.0 + 0.00311 * p.powf(0.513))
-            } else {
-                cold::density_kg_m3(m, p).map_err(SolveError::Eos)
+        let trial = match trial {
+            Err(SolveError::WorkBudgetExhausted(_)) => return Err(Error::WorkBudget),
+            Err(error) => {
+                refusal = Some(Error::Radial(error));
+                search.record(central, true, None);
+                continue;
             }
+            Ok(None) => {
+                search.record(central, false, None);
+                continue;
+            }
+            Ok(Some(trial)) => trial,
         };
-        let mut interfaces = vec![radial::PressureInterface {
-            material: Material::Water,
-            pressure_pa: loaded::BOUNDARY_PA,
-        }];
-        interfaces.extend(component_route.as_ref().map_or_else(
-            || {
-                vec![radial::PressureInterface {
-                    material: Material::Hydrogen,
-                    pressure_pa: 1e5,
-                }]
-            },
-            |route| route.interfaces(),
-        ));
-        let mut solver = radial::Solver::new(
-            &parcels,
-            OUTER_PRESSURE_PA,
-            radial_controls,
-            &density,
-            radial::Policy {
-                pressure_floor_pa: OUTER_PRESSURE_PA,
-                boundary_tolerance_pa: Some(PRESSURE_TOLERANCE_PA),
-                interfaces,
-                ..Default::default()
-            },
-        );
-        let (mut trial, central) = shoot(&mut solver, radial_controls)?;
-        total_work += solver.work.eos_evaluations;
-        cumulative.eos_evaluations = total_work;
-        cumulative.attempted_steps += solver.work.attempted_steps;
-        cumulative.shooting_iterations += solver.work.shooting_iterations;
-        cumulative.bracket_expansions += solver.work.bracket_expansions;
-        let reference = reference_sample(&trial.regions)?;
-        let gravity =
-            GRAVITATIONAL_CONSTANT * reference.enclosed_mass_kg / reference.radius_m.powi(2);
-        let residual = gravity / thermal.gravity_m_s2 - 1.0;
-        #[cfg(test)]
-        if std::env::var_os("NS_ENVELOPE_TRACE").is_some() {
-            eprintln!(
-                "g iteration {iteration}: guess={} actual={gravity} residual={residual} work={total_work}",
-                thermal.gravity_m_s2
-            );
-        }
-        if residual.abs() > GRAVITY_TOLERANCE {
-            let x = thermal.gravity_m_s2.ln();
-            let f = (gravity / thermal.gravity_m_s2).ln();
-            let next = previous_gravity
-                .and_then(|(old_x, old_f)| {
-                    let denominator = f - old_f;
-                    (denominator.abs() > 1e-14).then(|| x - f * (x - old_x) / denominator)
-                })
-                .filter(|v| v.is_finite() && (*v - x).abs() <= 4.0_f64.ln())
-                .unwrap_or_else(|| gravity.ln());
-            previous_gravity = Some((x, f));
-            thermal = Thermal::new(thermal.equilibrium_k, intrinsic_k, next.exp())?;
-            continue;
-        }
-        let mut envelope_regions = Vec::new();
-        let mut heavy_regions = Vec::new();
-        for mut region in trial.regions.drain(..) {
-            if region.inventory().mass_kg(Material::Hydrogen) > 0.0 {
-                region.inventory = gas
-                    .scaled(region.inventory.total_mass_kg() / gas.total_mass_kg())
-                    .map_err(|_| Error::InvalidInput("gas origins"))?;
-                envelope_regions.push(region);
-            } else {
-                let full = region.inventory.total_mass_kg();
-                region.inventory = region
-                    .inventory
-                    .scaled(1.0 / scale)
-                    .unwrap()
-                    .checked_add(&protected.scaled(full / heavy.total_mass_kg()).unwrap())
-                    .unwrap();
-                heavy_regions.push(region);
+        let core = trial.regions.last().unwrap().outer();
+        matcher.limit = controls
+            .max_total_eos_evaluations
+            .saturating_sub(solver.work.eos_evaluations);
+        match matcher.fit(core) {
+            Err(failure) if failure.is_final() => return Err(failure.error),
+            Err(failure) => {
+                refusal = Some(failure.error);
+                search.record(central, true, None);
+            }
+            Ok(shell::Fit::Heavier) => search.record(central, false, None),
+            Ok(shell::Fit::Matched(shell)) => {
+                let base = shell.base().pressure_pa;
+                let residual = core.pressure_pa - base;
+                #[cfg(test)]
+                if std::env::var_os("NS_ENVELOPE_TRACE").is_some() {
+                    eprintln!(
+                        "trial {}: central={central} base={base} residual={residual} gas work={}",
+                        solver.work.shooting_iterations, matcher.work.eos_evaluations
+                    );
+                }
+                if residual.abs() <= interface_tolerance_pa(base) {
+                    solved = Some((trial, *shell, central));
+                    break;
+                }
+                if closest.is_none_or(|(r, _)| residual.abs() < r.abs()) {
+                    closest = Some((residual, central));
+                }
+                search.record(central, residual > 0.0, Some(residual));
             }
         }
-        validate(
-            retained,
-            &heavy_regions,
-            &envelope_regions,
-            trial.inertia_kg_m2,
-        )?;
-        let heavy_inertia = trial.hydrogen_inner_inertia_kg_m2.unwrap();
-        let suspended = component_route.as_ref().is_some_and(|r| r.suspended);
-        let condensates = if suspended {
-            phase_allocations(
-                &envelope_regions,
-                &gas,
-                thermal,
-                component_route.as_ref().unwrap().boundary_pa,
-                &mut total_work,
-                controls.max_total_eos_evaluations,
-            )?
-        } else {
-            vec![Inventory::default(); envelope_regions.len()]
-        };
-        cumulative.eos_evaluations = total_work;
-        let diagnostics = dry::Diagnostics {
-            central_pressure_pa: central,
-            boundary_residual_pa: 0.0,
-            work: cumulative,
-        };
-        let interior = water::envelope_interior(heavy_regions, heavy_inertia, diagnostics, thermal);
-        return Ok((
-            interior,
-            Envelope {
-                regions: envelope_regions,
-                inventory: gas,
-                inertia_kg_m2: trial.inertia_kg_m2,
-                reference_radius_m: reference.radius_m,
-                reference_enclosed_mass_kg: reference.enclosed_mass_kg,
-                reference_pressure_pa: reference.pressure_pa,
-                thermal,
-                evaluations: total_work,
-                iterations: iteration + 1,
-                gravity_residual: residual,
-                molecular_mixture: mixture.is_some(),
-                secondary_enriched: secondary_fraction
-                    > hhe_mixture::MAX_SECONDARY_MASS_FRACTION * (1.0 + 8.0 * f64::EPSILON),
-                effective_boundary_pa: component_route.as_ref().map(|r| r.boundary_pa),
-                suspended,
-                condensates,
-            },
-        ));
     }
-    Err(Error::NonConvergence)
+    let Some((mut trial, shell, central)) = solved else {
+        return Err(match (refusal, closest) {
+            (Some(error), _) => error,
+            (None, Some((residual_pa, central_pa))) => Error::BoundaryResolution {
+                residual_pa,
+                central_pa,
+            },
+            (None, None) => Error::Radial(SolveError::Unbracketed {
+                maximum_central_pressure_pa: ceiling,
+            }),
+        });
+    };
+    let mut total_work = solver.work.eos_evaluations + matcher.work.eos_evaluations;
+    let cumulative = dry::Work {
+        eos_evaluations: total_work,
+        attempted_steps: solver.work.attempted_steps + matcher.work.attempted_steps,
+        ..solver.work
+    };
+    let core = trial.regions.last().unwrap().outer();
+    let base = shell.base();
+    let thermal = shell.thermal;
+    // A shell wholly below one bar is referenced to the condensed boundary itself.
+    let reference = match reference_sample(&shell.regions)? {
+        sample if sample == base => core,
+        sample => sample,
+    };
+    let residual = GRAVITATIONAL_CONSTANT * reference.enclosed_mass_kg
+        / reference.radius_m.powi(2)
+        / thermal.gravity_m_s2
+        - 1.0;
+    if residual.abs() > GRAVITY_TOLERANCE {
+        return Err(Error::NonConvergence);
+    }
+    let heavy_inertia = trial.inertia_kg_m2;
+    let inertia = heavy_inertia + shell.inertia_kg_m2;
+    let mut envelope_regions = shell.regions;
+    for region in &mut envelope_regions {
+        region.inventory = gas
+            .scaled(region.inventory.total_mass_kg() / gas.total_mass_kg())
+            .map_err(|_| Error::InvalidInput("gas origins"))?;
+    }
+    let mut heavy_regions = Vec::new();
+    for mut region in trial.regions.drain(..) {
+        let full = region.inventory.total_mass_kg();
+        region.inventory = region
+            .inventory
+            .scaled(1.0 / scale)
+            .unwrap()
+            .checked_add(&protected.scaled(full / heavy.total_mass_kg()).unwrap())
+            .unwrap();
+        heavy_regions.push(region);
+    }
+    validate(retained, &heavy_regions, &envelope_regions, inertia)?;
+    let suspended = shell.route.as_ref().is_some_and(|r| r.suspended);
+    let condensates = if suspended {
+        phase_allocations(
+            &envelope_regions,
+            &gas,
+            thermal,
+            shell.route.as_ref().unwrap().boundary_pa,
+            &mut total_work,
+            controls.max_total_eos_evaluations,
+        )?
+    } else {
+        vec![Inventory::default(); envelope_regions.len()]
+    };
+    let diagnostics = dry::Diagnostics {
+        central_pressure_pa: central,
+        boundary_residual_pa: core.pressure_pa - base.pressure_pa,
+        work: dry::Work {
+            eos_evaluations: total_work,
+            ..cumulative
+        },
+    };
+    let interior = water::envelope_interior(heavy_regions, heavy_inertia, diagnostics, thermal);
+    Ok((
+        interior,
+        Envelope {
+            regions: envelope_regions,
+            inventory: gas,
+            inertia_kg_m2: inertia,
+            reference_radius_m: reference.radius_m,
+            reference_enclosed_mass_kg: reference.enclosed_mass_kg,
+            reference_pressure_pa: reference.pressure_pa,
+            thermal,
+            evaluations: total_work,
+            iterations: cumulative.shooting_iterations,
+            gravity_residual: residual,
+            interface_radius_residual_m: base.radius_m - core.radius_m,
+            interface_pressure_residual_pa: core.pressure_pa - base.pressure_pa,
+            molecular_mixture: mixture.is_some(),
+            secondary_enriched: secondary_fraction
+                > hhe_mixture::MAX_SECONDARY_MASS_FRACTION * (1.0 + 8.0 * f64::EPSILON),
+            effective_boundary_pa: shell.route.as_ref().map(|r| r.boundary_pa),
+            suspended,
+            condensates,
+        },
+    ))
 }
 
 /// Use the located one-bar event when present. A genuinely sub-bar shell uses
@@ -534,75 +576,6 @@ fn phase_allocations(
         .collect()
 }
 
-/// Step noise can leave no representable central pressure inside the boundary
-/// band. Which pressures are tried then decides the outcome, so a guided
-/// failure is retried by plain bisection before it is reported. The retry
-/// gets its own per-solve evaluation ceiling; both attempts are still counted.
-fn shoot(
-    solver: &mut radial::Solver<'_>,
-    controls: dry::Controls,
-) -> Result<(radial::Trial, f64), Error> {
-    let guided = shoot_with(solver, controls, true);
-    if !matches!(guided, Err(Error::BoundaryResolution { .. })) {
-        return guided;
-    }
-    let spent = std::mem::take(&mut solver.work.eos_evaluations);
-    let retried = shoot_with(solver, controls, false);
-    solver.work.eos_evaluations += spent;
-    retried
-}
-
-fn shoot_with(
-    solver: &mut radial::Solver<'_>,
-    controls: dry::Controls,
-    guided: bool,
-) -> Result<(radial::Trial, f64), Error> {
-    let mut low = OUTER_PRESSURE_PA;
-    let mut high = cold::MAX_PRESSURE_PA;
-    let mut upper = solver.trial(high);
-    let mut shooting = radial::Shooting::default();
-    for _ in 0..controls.max_shooting_iterations {
-        let residual = match &upper {
-            Ok(Some(t)) => Some(t.regions.last().unwrap().outer().pressure_pa - OUTER_PRESSURE_PA),
-            _ => None,
-        };
-        if guided {
-            shooting.high(high, residual);
-        }
-        if residual.is_some_and(|r| (0.0..=PRESSURE_TOLERANCE_PA).contains(&r)) {
-            return Ok((upper.unwrap().unwrap(), high));
-        }
-        if let Err(SolveError::WorkBudgetExhausted(_)) = &upper {
-            return Err(Error::WorkBudget);
-        }
-        let mid = shooting.next(low, high, PRESSURE_TOLERANCE_PA);
-        if mid == low || mid == high {
-            return Err(match upper {
-                Err(e) => Error::Radial(e),
-                Ok(Some(t)) => Error::BoundaryResolution {
-                    residual_pa: t.regions.last().unwrap().outer().pressure_pa - OUTER_PRESSURE_PA,
-                    central_pa: high,
-                },
-                _ => Error::NonConvergence,
-            });
-        }
-        solver.work.shooting_iterations += 1;
-        match solver.trial(mid) {
-            Ok(None) => {
-                low = mid;
-                shooting.low();
-            }
-            result => {
-                high = mid;
-                upper = result;
-            }
-        }
-    }
-    Err(Error::Radial(SolveError::WorkBudgetExhausted(
-        WorkLimit::Shooting,
-    )))
-}
-
 fn integrate_inertia(regions: &[Region]) -> f64 {
     regions
         .iter()
@@ -623,7 +596,7 @@ fn validate(
 ) -> Result<(), Error> {
     let mut allocated = Inventory::default();
     let mut previous = None;
-    for r in heavy.iter().chain(gas) {
+    for (index, r) in heavy.iter().chain(gas).enumerate() {
         allocated = allocated
             .checked_add(r.inventory())
             .map_err(|_| Error::InvalidInput("allocation closure"))?;
@@ -633,10 +606,17 @@ fn validate(
         }
         if let Some(p) = previous {
             let p: dry::Sample = p;
-            if p.radius_m != r.inner().radius_m
-                || p.enclosed_mass_kg != r.inner().enclosed_mass_kg
-                || p.pressure_pa != r.inner().pressure_pa
-            {
+            let inner = r.inner();
+            // The core and the gas are integrated towards each other, so
+            // their meeting point alone closes to a tolerance, not exactly.
+            let closed = if index == heavy.len() {
+                (inner.radius_m - p.radius_m).abs() <= shell::RADIUS_TOLERANCE * p.radius_m
+                    && (inner.pressure_pa - p.pressure_pa).abs()
+                        <= interface_tolerance_pa(inner.pressure_pa)
+            } else {
+                p.radius_m == inner.radius_m && p.pressure_pa == inner.pressure_pa
+            };
+            if !closed || p.enclosed_mass_kg != inner.enclosed_mass_kg {
                 return Err(Error::InvalidInput("interface closure"));
             }
         }

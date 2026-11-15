@@ -107,7 +107,7 @@ struct Row {
     inertia_factor: f64,
     interface_pressure_pa: f64,
     gravity_residual: f64,
-    outer_residual_pa: f64,
+    interface_residual_pa: f64,
     model: &'static str,
     /// NaN when the layered solve succeeded.
     fallback_radius_km: f64,
@@ -127,7 +127,7 @@ struct Solved {
     inertia_factor: f64,
     interface_pressure_pa: f64,
     gravity_residual: f64,
-    outer_residual_pa: f64,
+    interface_residual_pa: f64,
     model: &'static str,
 }
 
@@ -218,9 +218,9 @@ fn route(p: &Hosted) -> Result<Solved, (Category, String, f64)> {
         gravity_residual: atmosphere
             .envelope()
             .map_or(f64::NAN, |e| e.gravity_residual()),
-        outer_residual_pa: atmosphere
+        interface_residual_pa: atmosphere
             .envelope()
-            .map_or(f64::NAN, |e| e.outer_pressure_residual_pa()),
+            .map_or(f64::NAN, |e| e.interface_pressure_residual_pa()),
         model: escaping.model_id(),
     })
 }
@@ -351,7 +351,9 @@ fn row(p: &Hosted) -> Row {
             .as_ref()
             .map_or(f64::NAN, |s| s.interface_pressure_pa),
         gravity_residual: solved.as_ref().map_or(f64::NAN, |s| s.gravity_residual),
-        outer_residual_pa: solved.as_ref().map_or(f64::NAN, |s| s.outer_residual_pa),
+        interface_residual_pa: solved
+            .as_ref()
+            .map_or(f64::NAN, |s| s.interface_residual_pa),
         model: solved.as_ref().map_or("", |s| s.model),
         fallback_radius_km: fallback_radius_m / 1000.0,
         profile,
@@ -643,7 +645,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
         .collect();
     let _ = writeln!(
         out,
-        "\n## Solved envelopes\n\nAll statistics p50 / p95 / max. Legacy differences are not accuracy measurements.\n\n- One-bar radius, km: {}\n- Inertia factor at one bar: {}\n- Interior interface pressure, bar: {}\n- Absolute reference-gravity residual: {}\n- Outer-shell pressure residual, mbar: {}\n- EOS evaluations: {}\n- Solve time, ms: {}\n\n| Legacy class | Solved envelopes |\n| --- | --- |",
+        "\n## Solved envelopes\n\nAll statistics p50 / p95 / max. Legacy differences are not accuracy measurements.\n\n- One-bar radius, km: {}\n- Inertia factor at one bar: {}\n- Interior interface pressure, bar: {}\n- Absolute reference-gravity residual: {}\n- Absolute core/gas interface pressure residual, relative to that pressure: {}\n- EOS evaluations: {}\n- Solve time, ms: {}\n\n| Legacy class | Solved envelopes |\n| --- | --- |",
         quantiles(envelopes.iter().map(|r| r.new_radius_km).collect()),
         quantiles(envelopes.iter().map(|r| r.inertia_factor).collect()),
         quantiles(
@@ -653,10 +655,10 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
                 .collect()
         ),
         scientific_quantiles(envelopes.iter().map(|r| r.gravity_residual.abs()).collect()),
-        quantiles(
+        scientific_quantiles(
             envelopes
                 .iter()
-                .map(|r| r.outer_residual_pa / 100.0)
+                .map(|r| (r.interface_residual_pa / r.interface_pressure_pa).abs())
                 .collect()
         ),
         quantiles(envelopes.iter().map(|r| r.eos_evaluations as f64).collect()),
@@ -675,7 +677,7 @@ fn report(rows: &[Row], systems: usize, threads: usize, seconds: f64) -> String 
 fn table(rows: &[Row]) -> String {
     let mut out =
         "id\tclass\tmass_earth\twater_fraction\thhe_fraction\tequilibrium_k\tsurface_k\toutcome\tdetail\t\
-                    surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tinitial_pa\tradius_change\teos_evaluations\tms\thydrogen_fraction\thelium_fraction\trefractory_fraction\thhe_mass_earth\theavy_mass_earth\thelium_in_hhe\tnew_radius_km\tinitial_radius_km\tinertia_factor\tinterface_pa\tgravity_residual\touter_residual_pa\tmodel\tfallback_radius_km\n"
+                    surface\tsurface_pa\tdeposit_m\tescaped\tescaped_fraction\tinitial_pa\tradius_change\teos_evaluations\tms\thydrogen_fraction\thelium_fraction\trefractory_fraction\thhe_mass_earth\theavy_mass_earth\thelium_in_hhe\tnew_radius_km\tinitial_radius_km\tinertia_factor\tinterface_pa\tgravity_residual\tinterface_residual_pa\tmodel\tfallback_radius_km\n"
             .to_owned();
     for r in rows {
         let _ = writeln!(
@@ -715,7 +717,7 @@ fn table(rows: &[Row]) -> String {
             r.inertia_factor,
             r.interface_pressure_pa,
             r.gravity_residual,
-            r.outer_residual_pa,
+            r.interface_residual_pa,
             r.model,
             r.fallback_radius_km,
         );
