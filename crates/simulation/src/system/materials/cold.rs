@@ -6,6 +6,9 @@ use std::fmt;
 
 pub const MODEL_ID: &str = "seager_2007_modified_polytrope_v1";
 pub const MAX_PRESSURE_PA: f64 = 1e13;
+/// The source fits' own stated range. Only cores under an H/He envelope, whose
+/// centres pass 1e13 Pa from about 25 Earth masses, use it beyond the above.
+pub const FIT_MAX_PRESSURE_PA: f64 = 1e16;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ColdEosError {
@@ -25,7 +28,7 @@ impl fmt::Display for ColdEosError {
                 pressure_pa,
             } => write!(
                 f,
-                "cold {} EOS pressure outside [0, 1e13] Pa: {pressure_pa}",
+                "cold {} EOS pressure outside its domain: {pressure_pa}",
                 material.id()
             ),
         }
@@ -35,12 +38,23 @@ impl fmt::Display for ColdEosError {
 impl std::error::Error for ColdEosError {}
 
 pub fn density_kg_m3(material: Material, pressure_pa: f64) -> Result<f64, ColdEosError> {
+    if pressure_pa > MAX_PRESSURE_PA {
+        return Err(ColdEosError::OutsidePressureDomain {
+            material,
+            pressure_pa,
+        });
+    }
+    fit_density_kg_m3(material, pressure_pa)
+}
+
+/// The same fits over their full published range.
+pub fn fit_density_kg_m3(material: Material, pressure_pa: f64) -> Result<f64, ColdEosError> {
     let (rho0, c, n) = match material {
         Material::Metal => (8300.0, 0.00349, 0.528),
         Material::Silicate => (4100.0, 0.00161, 0.541),
         _ => return Err(ColdEosError::UnsupportedMaterial(material)),
     };
-    if !pressure_pa.is_finite() || !(0.0..=MAX_PRESSURE_PA).contains(&pressure_pa) {
+    if !pressure_pa.is_finite() || !(0.0..=FIT_MAX_PRESSURE_PA).contains(&pressure_pa) {
         return Err(ColdEosError::OutsidePressureDomain {
             material,
             pressure_pa,

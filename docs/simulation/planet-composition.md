@@ -102,7 +102,7 @@ retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
 prescriptions. The current generation key is
-`generation_physics_v4:structure_table_v1:surface_decision_v1:layered_adoption_v4:NSHHE001-b4e7a79ecc35d846`,
+`generation_physics_v4:structure_table_v2:surface_decision_v1:layered_adoption_v4:NSHHE002-3fe0293c8a340e38`,
 covering the [structure table](#structure-table), surface decision, refinement
 adapter and checksum-pinned H/He resource.
 Its availability is process-local and fixed by the table's `OnceLock`: installing
@@ -178,9 +178,9 @@ interpolation of it, and `physical::layered::rescale` stretches the whole
 profile by that ratio before the refinement is validated: layer boundaries,
 condensed radius and one-bar level scale together, mean density and gravity
 follow, and mass, pressures and the inertia factor are the solve's own. The
-record says so in its limitations. In the 4,367-planet census none of 3,599
+record says so in its limitations. In the 4,367-planet census none of 3,846
 layered results is installed on a different radius; the stretch is 0.03% at the
-median and at most 0.26% on condensed surfaces, 0.36% and at most 11% on
+median and at most 0.26% on condensed surfaces, 0.49% and at most 6.6% on
 envelopes. Surface pressure can still move by up to 1% and an envelope's
 one-bar temperature by a few kelvin.
 
@@ -410,6 +410,9 @@ SHA-256-pinned CMS19/HG23 originals:
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/prepare-hhe-density.py data/composition-sources data/composition-sources/hhe-density.bin
 ```
 
+The format is `NSHHE002` since November 2026 (wider pressure and temperature
+axes). An older `NSHHE001` file is rejected as invalid: rerun the command.
+
 No source dataset or converted resource is committed, downloaded automatically
 or bundled with the client. This keeps unresolved upstream redistribution
 permission separate from local experimentation, rather than interpreting a
@@ -467,7 +470,7 @@ cryptographic source authentication.
   is attempted, not a widened passive trace approximation.
 - Water retains separate regions. Above 10,000 bar,
   `loaded_effective_water_compression_v1` uses the existing Seager pressure-only
-  water row, through 100,000,000 bar. Below that a separate
+  water row, through the fit's published 10¹⁶ Pa. Below that a separate
   [shallow loaded-water proxy](#shallow-loaded-water-approximation) applies.
   Their phase is `UnresolvedCompression`, not
   ice or identified fluid; thermal expansion, internal heat transport and
@@ -491,9 +494,10 @@ cryptographic source authentication.
   this fixed point. Molecular heat-capacity variation and true deep adiabats
   remain unresolved, so radius accuracy is not established.
 
-The new full-planet route admits 0.0001–1,200 Earth masses and up to 100 Earth
-masses of heavy inventory, but never widens the refractory pressure ceiling of
-100,000,000 bar. Both a positive heavy host and positive H/He supply are required;
+The new full-planet route admits 0.0001–1,200 Earth masses. Its core follows
+the refractory fits to their published 10¹⁶ Pa, past the 100,000,000 bar that
+bodies without an envelope stop at, and its heavy inventory is no longer capped
+at 100 Earth masses (see the restrictions below). Both a positive heavy host and positive H/He supply are required;
 core-free pure-gas spheres are not an accepted input. These are request bounds, not a guarantee all such bodies
 solve. The existing standalone dry/water 20-Earth-mass contracts stay unchanged.
 
@@ -505,24 +509,41 @@ positive interpolated mixture compressibility. Returned profiles also reject
 outward density inversions. No table entropy, cp/cv or supplied adiabatic
 gradient is used.
 
-The density-table runtime bounds are 100–100,000 K and **0.01 mbar to
-100,000,000 bar**. The cold dilute prescription below is a separate extension.
-Density-table bounds alone are not a validity mask. The runtime applies:
+The density-table runtime bounds are 100–1,000,000 K and **0.01 mbar to
+10,000 Mbar** (resource `NSHHE002`, 81 × 301 knots; `NSHHE001` stopped at
+100,000 K and 100 Mbar, short of a Jupiter-mass planet's centre). States below
+the source's lowest tabulated density (10⁻⁵ kg/m³) are outside the domain. The
+cold prescription below is a separate extension. Density-table bounds alone are
+not a validity mask. The runtime applies:
 
-- CMS19 H₂ melting screen up to 3,000,000 bar; beyond that, require a hot path
-  of at least 10,000 K rather than extrapolating the turning molecular curve.
-- The CMS19 pure-He Simon melting screen, conservatively **continued as an
-  engineering restriction** through the bounded pressure rectangle. This
-  continuation beyond the audit's restricted experimental comparison is named
-  `bounded_pure_he_melting_screen_extension_v1`, not presented as a validated
-  mixture freezing curve. It can exclude real fluid mixtures and remains a
-  known giant-coverage limitation.
+- CMS19 H₂ melting screen up to 3 Mbar. Beyond that the curve is not
+  extrapolated: hydrogen must be above the curve's own maximum, 1,000 K.
+- The CMS19 pure-He Simon melting screen **only where helium is the solvent**
+  (more than half the gas by mass). Helium dissolved in fluid hydrogen keeps its
+  fluid table volume below the pure-helium curve. This is a labelled
+  approximation, not a mixture phase diagram: no demixing or helium rain.
+  Helium is about a tenth of the mixture's volume there, so the error in
+  density is small beside the thermal prescription's. Until November 2026 the
+  pure curve screened every mixture and refused nearly every cold gas giant.
 - CMS19 equation 3's ion-quantum temperature screen for each present pure
-  endpoint, with source cgs density units converted explicitly.
-- Below 100 K, `dilute_hhe_100k_volume_anchor_v1` uses the molecular ideal
-  specific volume plus the table's 100 K nonideal volume residual. It is
-  continuous in value at 100 K and allowed only when ideal density is at most
-  0.1 kg/m³, down to 20 K. Cold dense inputs are refused, not extrapolated.
+  endpoint, **only above the density where the source leaves its molecular and
+  atomic model for the dense-plasma one** (50 kg/m³ for hydrogen, 100 kg/m³ for
+  helium). The limit belongs to that plasma model; applied to cold molecular
+  gas it refused Neptune-like envelopes at a few bar.
+- Below 100 K, `cold_hhe_hydrogen_virial_100k_anchor_v2` uses the molecular
+  ideal specific volume, the table's 100 K nonideal volume residual, and the
+  change in hydrogen's second virial coefficient since 100 K (Hodges et al.
+  2004, J. Chem. Phys. 120, 710, equation 24; helium and cross terms stay at
+  their 100 K values). It is continuous in value at 100 K. From 40 K it is
+  accepted while the virial term is at most a tenth of the ideal volume, about
+  13 bar at 40 K. Below 40 K the fit is an extrapolation and hydrogen nears
+  its critical point, so only ideal densities up to 0.1 kg/m³ are accepted,
+  down to 20 K. Colder dense gas is refused, not extrapolated.
+
+Cores under an envelope use the Seager metal, rock and deep-water fits to their
+published 10¹⁶ Pa limit, since a core's centre passes 100 Mbar from about
+25 M⊕. Bodies without an envelope keep the 100 Mbar limit. The envelope route
+no longer caps the heavy mass at 100 M⊕.
 
 These are labelled conservative restrictions, not complete mixture-phase
 thermodynamics or statistical accuracy bounds. Unsupported phase/quantum/table
@@ -2230,7 +2251,7 @@ the build of the table needs.
 | --- | --- | --- |
 | Condensed | mass 10⁻⁴ to 20 M⊕ (41, log), metal share of the refractory (9), water share (19), water temperature 20 to 623.15 K (21) | ln radius, inertia factor |
 | Core under an envelope | the same mass, metal and water axes | ln radius |
-| Envelope | total mass 0.05 to 1,200 M⊕ (48, log), H/He share 10⁻⁷ to 0.99 (36), equilibrium temperature 20 to 2,000 K (17), intrinsic temperature 20 to 200 K (10) | reference core radius over one-bar radius |
+| Envelope | total mass 0.05 to 1,200 M⊕ (48, log), H/He share 10⁻⁷ to 0.99 (40, dense above 0.9), equilibrium temperature 20 to 2,000 K (17), intrinsic temperature 20 to 200 K (10) | reference core radius over one-bar radius |
 
 Lookups are multilinear, and total for any positive mass.
 
@@ -2269,7 +2290,7 @@ Lookups are multilinear, and total for any positive mass.
 
 Rebuild with `./scripts/prepare-structure-table.sh` whenever structure physics,
 the H/He resource or a grid changes, and commit the resource with the change.
-It runs `prepare_structure_table` (about six minutes on 18 threads; it uses half the machine's,
+It runs `prepare_structure_table` (about ten minutes on 10 threads; it uses half the machine's,
 writing `data/tmp/structure-table.md` and the envelope cells as a TSV) and then
 `structure_table_accuracy`, which compares lookups with fresh solves at 20,000
 points between the knots of each grid:
@@ -2278,30 +2299,44 @@ points between the knots of each grid:
 | --- | ---: | --- |
 | Condensed | 146,318 of 147,231 (99.4%) | 0.03% / 0.11% / 0.20% / 0.82% |
 | Condensed, inertia factor | | 0.15% / 0.44% / 0.73% / 1.5% |
-| Core under an envelope | 6,966 of 7,011 (99.4%) | not sampled separately |
-| Envelope, all cells solved | 95,525 of 293,760 (32.5%) | 0.03% / 0.75% / 2.6% / 9.4% |
-| Envelope, any filled cell | | 0.04% / 2.3% / 9.2% / 29% |
+| Core under an envelope | 7,009 of 7,011 (100.0%) | not sampled separately |
+| Envelope, all cells solved | 212,583 of 326,400 (65.1%) | 0.03% / 0.58% / 2.1% / 9.4% |
+| Envelope, any filled cell | | 0.06% / 23% / 41% / 49% |
 
-On the planets generation actually makes, envelope interpolation is tighter:
-0.05% at the median and 0.22% at the 95th percentile against the solver on the
-same reference core. The uniform sample's tail is hot bodies of about an Earth
-mass with a trace of gas, which retention rarely leaves.
+The uniform sample's solved tail is hot bodies of about an Earth mass with a
+trace of gas, which retention rarely leaves. Its filled tail is the unbound
+corner below: no planet is generated there.
 
-Solved share is the solver's own coverage. Envelope refusals are mostly
-combinations no planet has (over 100 M⊕ of rock under a trace of gas, bodies
-under 1 M⊕ that are mostly gas), then the cold limit below about 100 K and the
-melting screen that refuses gas giants.
+Solved share is the solver's own coverage. It was 32.5% until the solver was
+widened in November 2026 (cold gas to 40 K, helium as a solute, pressure
+ceilings; see the
+[density restrictions](#density-restrictions-and-finite-outer-boundary)), which
+brought in gas giants up to 1,200 M⊕ and envelopes down to about 45 K. What
+still refuses:
+
+- **Unbound gas** (about half of the refusals): bodies under a few M⊕ that are
+  mostly gas, and hot ones. Their envelopes inflate until gravity leaves the
+  thermal model's range.
+- **Gas colder than 40 K at depth**: an equilibrium temperature under about
+  40 K with little internal heat.
+- **Massive, cold giants**: above about 500 M⊕ with an intrinsic temperature
+  under about 50 K, the dense interior crosses the ion-quantum limit. The
+  intrinsic trend gives such masses over 100 K.
 
 Limits:
 
 - **Core composition is simplified.** The additive form leaves envelope radii
-  0.36% from the layered solve at the median, 2.3% at the 95th percentile and
-  11% at worst on the census (79% within 1%, 93% within 2%). The worst are wet
-  cores above the 20 M⊕ continuation.
+  0.49% from the layered solve at the median, 3.4% at the 95th percentile and
+  6.6% at worst on the census (70% within 1%, 85% within 2%). The census now
+  includes the giants and cold envelopes the solver used to refuse; on the
+  planets it solved before, the figures were 0.36%, 2.3% and 11%.
 - **Gas composition is not an axis.** A trace of H/He under heavier secondary
   gas is tabulated as pure H/He and comes out up to 7% large.
-- **Giants are surrogate cells**, as are envelopes colder than about 100 K: the
-  layered solver refuses both, so nothing checks those radii.
+- **Giants and cold envelopes are now checked, and are the loosest.** On the
+  census, planets over 25 M⊕ differ by 1.8% at the median and 5.8% at worst,
+  and envelopes under 100 K by 1.3% and 5.8%; warmer envelopes up to 25 M⊕
+  stay near 0.4%. Wet cores under deep gas come out large: the core's own
+  radius is added unloaded.
 - **Hot, young giants are large.** The layered model inflates them, and
   generation now shows it: a 200 M⊕ planet at 1,100 K and 14 Myr is 27 Earth
   radii, where the retired fit gave 11. Beyond the solver's hot limit the
@@ -2689,8 +2724,8 @@ deep water or phase seam 1.0%.
 Generation no longer evaluates this closed form. It survives in
 `structure/table/build.rs` as the **surrogate** for envelope cells the layered
 solver refuses, anchored to their solved neighbours as the
-[structure table](#structure-table) describes. Gas giants and envelopes colder
-than about 100 K are such cells. Only the thin-column supply check in the last
+[structure table](#structure-table) describes. Unbound low-mass gas bodies and
+envelopes colder than about 40 K are such cells. Only the thin-column supply check in the last
 paragraph still runs at generation.
 
 The input is retained H₂+He mass fraction `f`, total mass `M`, current bolometric

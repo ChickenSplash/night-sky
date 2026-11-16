@@ -17,9 +17,11 @@ spec.loader.exec_module(probe)
 
 def compile_table(directory):
     source = probe.DensityReference(directory)
-    out = bytearray(b"NSHHE001" + struct.pack("<II", 61, 261))
-    for i in range(61):
-        for j in range(261):
+    # 100 K to 1e6 K and 1 Pa to 1e15 Pa, both in steps of 0.05 dex.
+    temperatures, pressures = 81, 301
+    out = bytearray(b"NSHHE002" + struct.pack("<II", temperatures, pressures))
+    for i in range(temperatures):
+        for j in range(pressures):
             h, he = (source.grids[name][i, j] for name in ("H", "He"))
             flags = int(h[6] > 0) | (int(he[6] > 0) << 1)
             out.extend(struct.pack("<dddB", h[2], he[2], source.correction[i, j][0], flags))

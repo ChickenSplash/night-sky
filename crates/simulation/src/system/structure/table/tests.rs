@@ -166,3 +166,25 @@ fn structure_table_accuracy() {
         eprintln!("  {:.3e} {}", row.0, row.2);
     }
 }
+
+/// `cargo test --release -p space-simulation giants_and_cold_envelopes_solve -- --ignored`.
+#[test]
+#[ignore = "local pinned source resource; run in release"]
+fn giants_and_cold_envelopes_solve() {
+    let earth_radii = |mass, fraction, equilibrium, intrinsic| {
+        solve_envelope(mass, fraction, equilibrium, intrinsic).map(|r| r / 6.371e6)
+    };
+    // Jupiter and Saturn analogues (real: 11.2 and 9.4 at one bar), a
+    // Neptune-cold ice giant, and three Jupiter masses.
+    for (mass, fraction, equilibrium, intrinsic, range) in [
+        (318.0, 0.97, 110.0, 100.0, 10.5..12.0),
+        (95.0, 0.9, 80.0, 77.0, 9.0..10.5),
+        (17.0, 0.1, 47.0, 53.0, 3.0..4.0),
+        (950.0, 0.97, 300.0, 130.0, 10.5..13.0),
+    ] {
+        let radius = earth_radii(mass, fraction, equilibrium, intrinsic).unwrap();
+        assert!(range.contains(&radius), "{mass} M: {radius}");
+    }
+    // Gas that stays under 40 K at depth is still refused, not extrapolated.
+    assert!(earth_radii(17.0, 0.1, 25.0, 25.0).is_err());
+}

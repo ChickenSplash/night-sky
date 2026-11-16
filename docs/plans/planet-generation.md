@@ -353,7 +353,7 @@ Steps 1 to 3 are done. Current behaviour is in the
 
 What changed:
 
-- **One embedded table** (`structure/table.rs`, 2.4 MB, built in six minutes by
+- **One embedded table** (`structure/table.rs`, 2.6 MB, built in ten minutes by
   `scripts/prepare-structure-table.sh`): condensed bodies, cores under an
   envelope, and envelopes. It is compiled in, not a local resource, so
   generation does not depend on who has the H/He data.
@@ -388,12 +388,44 @@ Findings:
 - **Only a third of envelope cells solve**, most of the rest in corners no
   planet occupies. The real gaps are gas giants (melting screen) and anything
   colder than about 100 K. Those planets read the anchored surrogate, and
-  nothing checks it.
+  nothing checks it. (Since widened: see solver coverage below.)
+
+### Solver coverage, 16 November 2026
+
+The envelope solver now reaches gas giants and cold envelopes, so the table is
+solved there instead of filled. Evidence in `data/tmp/g3-coverage/`.
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Census planets with a layered solve | 3,599 (82%) | 3,846 (88%) |
+| Refused: cold H/He | 265 | 33 |
+| Refused: helium melting screen, core pressure ceiling | 63 | 0 |
+| Refused: ion-quantum limit | 0 | 13 |
+| Envelope table cells solved | 32.5% | 65.1% |
+| Jupiter and Saturn analogues | refused | 11.4 and 9.8 Earth radii (real 11.2, 9.4) |
+| Envelope radius difference, p50 / p95 / max | 0.36% / 2.3% / 11% | 0.49% / 3.4% / 6.6% |
+
+What changed:
+
+- **Cold gas** below 100 K is solved from 40 K with a hydrogen virial term,
+  where only near-vacuum was accepted.
+- **Helium** below its pure melting curve is treated as dissolved in fluid
+  hydrogen. The pure curve had refused nearly every cold giant.
+- **The ion-quantum limit** applies only to the dense plasma it describes.
+- **Pressure ceilings**: the H/He resource now spans 10,000 Mbar and
+  1,000,000 K (`NSHHE002`, regenerate with `scripts/prepare-hhe-density.py`),
+  and cores under an envelope use the rock and metal fits' full range.
+- **Four more gas-share knots** above 0.9: giants were 5 to 7% out between
+  the old ones.
+
+The median and 95th percentile rose because the census now counts 247 planets
+it could not check before. Still refused: the secondary-gas condensate limits
+(253), which are now the largest envelope gap, and gas under 40 K.
 
 Still open in G3:
 
-- **Solver coverage of giants and cold envelopes.** New, and the most useful
-  next step: the table is only as wide as the solver.
+- **Giant and cold envelope accuracy.** Coverage is done (below); these
+  planets now miss the 1% target by the most.
 - **Envelope inertia** is not tabulated (7% median difference, 58% at worst),
   so an enveloped planet's flattening can shift on a visit.
 - **Step 4, persistence.** Proposed to drop: a re-solve costs milliseconds and

@@ -249,7 +249,6 @@ fn solve_with_density(
     let light = gas.mass_kg(Material::Hydrogen) + gas.mass_kg(Material::Helium);
     if host.total_mass_kg() <= 0.0
         || light <= 0.0
-        || heavy.total_mass_kg() / EARTH_MASS_KG > 100.0
         || !(0.0001..=1200.0).contains(&(retained.total_mass_kg() / EARTH_MASS_KG))
     {
         return Err(Error::InvalidInput("mass domain"));
@@ -280,12 +279,12 @@ fn solve_with_density(
                 return loaded::density_kg_m3(p)
                     .ok_or(SolveError::InvalidInput("shallow water pressure"));
             }
-            if !(0.0..=cold::MAX_PRESSURE_PA).contains(&p) {
+            if !(0.0..=cold::FIT_MAX_PRESSURE_PA).contains(&p) {
                 return Err(SolveError::InvalidInput("heavy water pressure"));
             }
             Ok(1460.0 + 0.00311 * p.powf(0.513))
         } else {
-            cold::density_kg_m3(m, p).map_err(SolveError::Eos)
+            cold::fit_density_kg_m3(m, p).map_err(SolveError::Eos)
         }
     };
     let radial_controls = dry::Controls {
@@ -326,7 +325,7 @@ fn solve_with_density(
         heavy_parcels.total_mass_kg(),
         controls,
     );
-    let ceiling = cold::MAX_PRESSURE_PA;
+    let ceiling = cold::FIT_MAX_PRESSURE_PA;
     let seed = (2.0 * solver.pressure_scale()).clamp(2.0 * OUTER_PRESSURE_PA, ceiling);
     let mut search = shell::Search::new(OUTER_PRESSURE_PA, ceiling, Some(seed), 0.5 * seed);
     let mut refusal = None;

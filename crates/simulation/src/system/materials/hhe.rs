@@ -7,11 +7,48 @@ use crate::{
 use std::sync::OnceLock;
 
 pub const MODEL_ID: &str = "cms19_hg23_screened_density_v1";
-pub const COLD_MODEL_ID: &str = "dilute_hhe_100k_volume_anchor_v1";
-pub const MAX_PRESSURE_PA: f64 = 1e13;
+pub const COLD_MODEL_ID: &str = "cold_hhe_hydrogen_virial_100k_anchor_v2";
+pub const MAX_PRESSURE_PA: f64 = 1e15;
+pub const MAX_TEMPERATURE_K: f64 = 1e6;
 /// Log10 spacing of both table axes. Pressure knots start at 1 Pa and
 /// temperature knots at 100 K; interpolation is only continuous across them.
 pub(crate) const KNOT_DEX: f64 = 0.05;
+/// Knots along temperature (100 K to 1e6 K) and pressure (1 Pa to 1e15 Pa).
+pub(crate) const TEMPERATURE_KNOTS: usize = 81;
+pub(crate) const PRESSURE_KNOTS: usize = 301;
+/// Lowest density the source tabulates, 1e-8 g/cm3.
+const MIN_SOURCE_DENSITY_KG_M3: f64 = 1e-5;
+/// Above these pure densities the source leaves the molecular and atomic model
+/// (SCvH) for the dense-plasma one, whose ion quantum limit is its equation 3.
+const PLASMA_HYDROGEN_KG_M3: f64 = 50.0;
+const PLASMA_HELIUM_KG_M3: f64 = 100.0;
+/// Highest point of the source's hydrogen melting curve (990 K at 0.76 Mbar).
+/// Beyond the curve's 3 Mbar range hydrogen is taken as fluid only above it.
+const HYDROGEN_MELTING_MAXIMUM_K: f64 = 1000.0;
+/// Helium at or below this mass fraction is a solute in hydrogen, so the pure
+/// helium melting curve does not apply to it.
+pub const SOLUTE_HELIUM_FRACTION: f64 = 0.5;
+/// Below this the hydrogen virial fit is an extrapolation and hydrogen nears
+/// its critical point (33 K): only the dilute limit is accepted.
+const VIRIAL_FLOOR_K: f64 = 40.0;
+/// Largest second-virial share of the ideal volume the cold route accepts.
+const VIRIAL_LIMIT: f64 = 0.1;
+/// Ideal density accepted below the virial floor, kg/m3.
+const DILUTE_LIMIT_KG_M3: f64 = 0.1;
+
+/// Second virial coefficient of hydrogen, m3/mol: Hodges et al. (2004,
+/// J. Chem. Phys. 120, 710), equation 24 and table IV, fitted to data from
+/// about 98 K upward. Used here as a difference from its own 100 K value.
+fn hydrogen_virial_m3_mol(t: f64) -> f64 {
+    let x = t / 100.0;
+    1e-6 * (42.0803 * x.powf(-0.33) - 143.982 * x.powf(-1.4) + 146.918 * x.powf(-1.8)
+        - 47.5601 * x.powf(-2.2))
+}
+
+/// Pure-helium melting temperature, the source's equation 7.
+pub fn helium_melting_k(pressure_pa: f64) -> f64 {
+    61.0 * (pressure_pa / 1e8).powf(0.639)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -68,9 +105,10 @@ impl Table {
     }
 
     fn decode(data: &[u8]) -> Result<Self, Error> {
-        if data.len() != 16 + 61 * 261 * 25
-            || &data[..8] != b"NSHHE001"
-            || data[8..16] != [61, 0, 0, 0, 5, 1, 0, 0]
+        if data.len() != 16 + TEMPERATURE_KNOTS * PRESSURE_KNOTS * 25
+            || &data[..8] != b"NSHHE002"
+            || data[8..12] != (TEMPERATURE_KNOTS as u32).to_le_bytes()
+            || data[12..16] != (PRESSURE_KNOTS as u32).to_le_bytes()
         {
             return Err(Error::InvalidLocalTable);
         }
@@ -80,7 +118,7 @@ impl Table {
         if checksum != TABLE_CHECKSUM {
             return Err(Error::InvalidLocalTable);
         }
-        let mut nodes = Vec::with_capacity(61 * 261);
+        let mut nodes = Vec::with_capacity(TEMPERATURE_KNOTS * PRESSURE_KNOTS);
         for row in data[16..].chunks_exact(25) {
             let number = |offset| f64::from_le_bytes(row[offset..offset + 8].try_into().unwrap());
             let node = Node {
@@ -104,8 +142,8 @@ impl Table {
     fn volume(&self, p: f64, t: f64, y: f64) -> Result<f64, Error> {
         let ti = (t.log10() - 2.0) / KNOT_DEX;
         let pi = p.log10() / KNOT_DEX;
-        let i = (ti.floor() as usize).min(59);
-        let j = (pi.floor() as usize).min(259);
+        let i = (ti.floor() as usize).min(TEMPERATURE_KNOTS - 2);
+        let j = (pi.floor() as usize).min(PRESSURE_KNOTS - 2);
         let u = ti - i as f64;
         let v = pi - j as f64;
         let mut h = 0.0;
@@ -117,7 +155,7 @@ impl Table {
                 if weight == 0.0 {
                     continue;
                 }
-                let node = &self.nodes[(i + di) * 261 + j + dj];
+                let node = &self.nodes[(i + di) * PRESSURE_KNOTS + j + dj];
                 if (y < 1.0 && node.flags & 1 == 0) || (y > 0.0 && node.flags & 2 == 0) {
                     return Err(Error::UnstableInterpolation);
                 }
@@ -128,27 +166,39 @@ impl Table {
         }
         let rh = 1000.0 * 10.0_f64.powf(h);
         let rhe = 1000.0 * 10.0_f64.powf(he);
-        // Equation-7 He melting is a bounded conservative pure-endpoint screen,
-        // not a prediction of mixture freezing or a licence for extrapolation.
-        if (y > 0.0 && t < 61.0 * (p / 1e8).powf(0.639))
-            || (y < 1.0
-                && p <= 3e11
-                && t < 4.853 * (1.0 + p / 2.3e7).powf(0.748) * (-0.0098 * p / 1e9).exp())
+        if (y < 1.0 && rh < MIN_SOURCE_DENSITY_KG_M3) || (y > 0.0 && rhe < MIN_SOURCE_DENSITY_KG_M3)
+        {
+            return Err(Error::OutsideDomain);
+        }
+        // Each pure melting curve screens its own species where that species
+        // is the solvent. Helium dissolved in fluid hydrogen keeps its fluid
+        // table volume below the pure-helium curve: a labelled approximation,
+        // not a mixture phase diagram (no demixing or helium rain).
+        let hydrogen_melting_k = if p <= 3e11 {
+            4.853 * (1.0 + p / 2.3e7).powf(0.748) * (-0.0098 * p / 1e9).exp()
+        } else {
+            HYDROGEN_MELTING_MAXIMUM_K
+        };
+        if (y > SOLUTE_HELIUM_FRACTION && t < helium_melting_k(p))
+            || (y < 1.0 && t < hydrogen_melting_k)
         {
             return Err(Error::PureMeltingScreen);
         }
-        // CMS19 eq.3, rho in g/cm³. Beyond the molecular melting interval H is
-        // accepted only on a hot path, not via extrapolating its melting curve.
-        if (y < 1.0 && (t < 10.0_f64.powf(3.3) * (rh / 1000.0).sqrt() || (p > 3e11 && t < 10000.0)))
+        // CMS19 eq.3, rho in g/cm3: the limit of the dense-plasma model's ion
+        // quantum correction. It has no meaning in the molecular gas.
+        let quantum_k = |rho: f64| 10.0_f64.powf(3.3) * (rho / 1000.0).sqrt();
+        if (y < 1.0 && rh > PLASMA_HYDROGEN_KG_M3 && t < quantum_k(rh))
             || (y > 0.0
-                && t < 10.0_f64.powf(3.3) * (rhe / 1000.0).sqrt() * 2.0 * 4.0_f64.powf(-5.0 / 3.0))
+                && rhe > PLASMA_HELIUM_KG_M3
+                && t < quantum_k(rhe) * 2.0 * 4.0_f64.powf(-5.0 / 3.0))
         {
             return Err(Error::IonQuantumScreen);
         }
         let volume = (1.0 - y) / rh + y / rhe + y * (1.0 - y) * correction;
         let pressure_slope = |value: fn(&Node) -> f64| {
             let difference = |row: usize| {
-                value(&self.nodes[row * 261 + j + 1]) - value(&self.nodes[row * 261 + j])
+                value(&self.nodes[row * PRESSURE_KNOTS + j + 1])
+                    - value(&self.nodes[row * PRESSURE_KNOTS + j])
             };
             ((1.0 - u) * difference(i) + u * difference(i + 1)) / KNOT_DEX
         };
@@ -167,19 +217,31 @@ impl Table {
     pub fn density_kg_m3(&self, p: f64, t: f64, y: f64) -> Result<f64, Error> {
         if ![p, t, y].iter().all(|v| v.is_finite())
             || !(1.0..=MAX_PRESSURE_PA).contains(&p)
-            || !(20.0..=1e5).contains(&t)
+            || !(20.0..=MAX_TEMPERATURE_K).contains(&t)
             || !(0.0..=1.0).contains(&y)
         {
             return Err(Error::OutsideDomain);
         }
         if t < 100.0 {
-            let r = BOLTZMANN_J_K / ATOMIC_MASS_KG
-                * ((1.0 - y) / Gas::Hydrogen.molecular_mass_u()
-                    + y / Gas::Helium.molecular_mass_u());
-            if p / (r * t) > 0.1 {
+            // Ideal volume at the real temperature, the table's own nonideal
+            // residual at 100 K, and the change in hydrogen's second virial
+            // coefficient since 100 K. Helium and cross terms stay at 100 K.
+            let moles_per_kg = (1.0 - y) / (Gas::Hydrogen.molecular_mass_u() * 1e-3)
+                + y / (Gas::Helium.molecular_mass_u() * 1e-3);
+            let r = BOLTZMANN_J_K / ATOMIC_MASS_KG * moles_per_kg * 1e-3;
+            let hydrogen = (1.0 - y) / (Gas::Hydrogen.molecular_mass_u() * 1e-3) / moles_per_kg;
+            let virial = |t: f64| hydrogen * hydrogen * hydrogen_virial_m3_mol(t);
+            let ideal = r * t / p;
+            let accepted = if t < VIRIAL_FLOOR_K {
+                1.0 / ideal <= DILUTE_LIMIT_KG_M3
+            } else {
+                virial(t).abs() * moles_per_kg <= VIRIAL_LIMIT * ideal
+            };
+            if !accepted {
                 return Err(Error::ColdDenseUnsupported);
             }
-            let v = r * t / p + self.volume(p, 100.0, y)? - r * 100.0 / p;
+            let shift = (virial(t.max(VIRIAL_FLOOR_K)) - virial(100.0)) * moles_per_kg;
+            let v = ideal + self.volume(p, 100.0, y)? - r * 100.0 / p + shift;
             if v <= 0.0 || !v.is_finite() {
                 return Err(Error::UnstableInterpolation);
             }
@@ -190,7 +252,7 @@ impl Table {
 }
 
 // Filled from prepare-hhe-density.py after SHA-256 verification of all sources.
-const TABLE_CHECKSUM: u64 = 0xb4e7a79ecc35d846;
+const TABLE_CHECKSUM: u64 = 0x3fe0293c8a340e38;
 
 #[cfg(test)]
 mod tests {
@@ -199,7 +261,7 @@ mod tests {
     fn malformed_resources_are_explicit() {
         assert!(matches!(Table::decode(&[]), Err(Error::InvalidLocalTable)));
         assert!(matches!(
-            Table::decode(&vec![0; 16 + 61 * 261 * 25]),
+            Table::decode(&vec![0; 16 + TEMPERATURE_KNOTS * PRESSURE_KNOTS * 25]),
             Err(Error::InvalidLocalTable)
         ));
     }
@@ -214,10 +276,35 @@ mod tests {
         ] {
             assert!((table.density_kg_m3(p, t, 0.25).unwrap() / expected - 1.0).abs() < 1e-12);
         }
+        // Below the pure-helium curve: refused as helium, fluid as a solute.
+        let (p, t) = (1e11, 10.0_f64.powf(3.7));
+        assert!(t < helium_melting_k(p));
         assert_eq!(
-            table.density_kg_m3(1e11, 10.0_f64.powf(3.7), 0.25),
+            table.density_kg_m3(p, t, 1.0),
             Err(Error::PureMeltingScreen)
         );
+        assert!((table.density_kg_m3(p, t, 0.25).unwrap() / 761.474 - 1.0).abs() < 1e-6);
+        assert_eq!(
+            table.density_kg_m3(1e11, 500.0, 0.25),
+            Err(Error::PureMeltingScreen)
+        );
+        assert_eq!(
+            table.density_kg_m3(1e12, 2000.0, 0.25),
+            Err(Error::IonQuantumScreen)
+        );
+        // Cold gas: a few bar at 50 K is solved, and denser than ideal.
+        let cold = table.density_kg_m3(3e5, 50.0, 0.25).unwrap();
+        let ideal = 3e5 / (3614.0 * 50.0);
+        assert!(cold > ideal && cold < 1.03 * ideal);
+        assert_eq!(
+            table.density_kg_m3(3e7, 50.0, 0.25),
+            Err(Error::ColdDenseUnsupported)
+        );
+        assert_eq!(
+            table.density_kg_m3(1e5, 35.0, 0.25),
+            Err(Error::ColdDenseUnsupported)
+        );
+        assert!(table.density_kg_m3(1e14, 5e5, 0.25).is_ok());
         assert_eq!(
             table.density_kg_m3(1e5, 20.0, 0.25),
             Err(Error::ColdDenseUnsupported)
@@ -227,7 +314,7 @@ mod tests {
         assert!((cold / warm - 1.0).abs() < 1e-7);
         for (p, t, y) in [
             (0.0, 1000.0, 0.25),
-            (1e14, 1000.0, 0.25),
+            (1e16, 1000.0, 0.25),
             (1e6, f64::NAN, 0.25),
             (1e6, 1000.0, -0.1),
         ] {

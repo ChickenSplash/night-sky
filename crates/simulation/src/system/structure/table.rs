@@ -11,7 +11,7 @@ mod build;
 #[cfg(test)]
 mod tests;
 
-pub const MODEL_ID: &str = "layered_structure_table_v1";
+pub const MODEL_ID: &str = "layered_structure_table_v2";
 
 static BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -63,7 +63,11 @@ const WATER_TEMPERATURES_K: [f64; 21] = [
     600.0,
     MAX_WATER_TEMPERATURE_K,
 ];
-const LIGHT_FRACTIONS_HIGH: [f64; 11] = [0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99];
+/// Dense towards pure gas: there the core shrinks with the heavy share, not
+/// with the logarithm of the gas share the axis is stored in.
+const LIGHT_FRACTIONS_HIGH: [f64; 15] = [
+    0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.93, 0.95, 0.965, 0.975, 0.983, 0.99,
+];
 
 /// Knot coordinates, innermost axis last. Mass and light fraction are stored
 /// as natural logarithms, shares and temperatures as they are.

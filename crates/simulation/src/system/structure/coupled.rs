@@ -325,8 +325,10 @@ impl CoupledStructure {
         if self.envelope.is_some() {
             return &[
                 "Uniform H/He mixture with separate conserved origins; no helium rain or heavy-water mixing",
-                "CMS19/HG23 density with bounded conservative pure-fluid and ion-quantum screens",
-                "Pure-He melting screen continued as a labelled conservative restriction through 1e13 Pa, not a mixture phase prediction",
+                "CMS19/HG23 density to 10,000 Mbar and 1,000,000 K, screened by hydrogen's melting curve and the dense-plasma ion-quantum limit",
+                "Helium is treated as dissolved in fluid hydrogen below the pure-helium melting curve, keeping its fluid table volume; not a mixture phase prediction",
+                "Gas below 100 K uses the ideal volume, the table's 100 K residual and hydrogen's second virial change; refused below 40 K unless dilute",
+                "Core metal, rock and deep water follow their pressure-only fits beyond 100 Mbar, within the fits' published range",
                 "Grey prescribed thermal profile, fixed 2/7 deep slope and a mass/age intrinsic trend, not cooling evolution",
                 "Reference gravity iterated from enclosed new-model mass and exact one-bar event",
                 "All water retained below H/He; separate shallow/deep pressure-only compression proxies, phase and thermal expansion unresolved",

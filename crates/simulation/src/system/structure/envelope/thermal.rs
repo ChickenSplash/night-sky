@@ -1,4 +1,5 @@
 use super::Error;
+use crate::system::materials::hhe;
 pub const MODEL_ID: &str = "grey_pressure_opacity_fixed_gradient_mass_age_intrinsic_v2";
 
 /// Intrinsic temperature range the profile accepts.
@@ -73,7 +74,7 @@ impl Thermal {
         (t > joined && p.is_finite()).then_some(p)
     }
     pub fn temperature_k(self, p: f64) -> Result<f64, Error> {
-        if !p.is_finite() || !(1e-2..=1e14).contains(&p) {
+        if !p.is_finite() || !(1e-2..=hhe::MAX_PRESSURE_PA).contains(&p) {
             return Err(Error::InvalidInput("thermal pressure"));
         }
         let join = self.boundary_pressure_pa();
@@ -89,7 +90,7 @@ impl Thermal {
         } else {
             radiative(join) * (p / join).powf(2.0 / 7.0)
         };
-        if !t.is_finite() || !(20.0..=1e5).contains(&t) {
+        if !t.is_finite() || !(20.0..=hhe::MAX_TEMPERATURE_K).contains(&t) {
             return Err(Error::InvalidInput("thermal temperature"));
         }
         Ok(t)

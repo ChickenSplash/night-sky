@@ -5,7 +5,7 @@
 
 use super::mixture::ComponentRoute;
 use super::*;
-use crate::system::materials::hhe::KNOT_DEX;
+use crate::system::materials::hhe::{KNOT_DEX, MAX_PRESSURE_PA, PRESSURE_KNOTS, TEMPERATURE_KNOTS};
 use std::f64::consts::PI;
 
 /// Agreement between the gravity the thermal profile assumed and the one found.
@@ -189,7 +189,7 @@ impl<'a> Matcher<'a> {
             max_iterations: controls.max_iterations,
             work: dry::Work::default(),
             limit: controls.max_total_eos_evaluations,
-            knots: (0..=280)
+            knots: (0..PRESSURE_KNOTS as u32)
                 .map(|j| 10.0_f64.powf(f64::from(j) * KNOT_DEX))
                 .filter(|&p| p > OUTER_PRESSURE_PA)
                 .collect(),
@@ -372,12 +372,12 @@ impl<'a> Matcher<'a> {
         let mut points: Vec<(f64, bool)> = events.iter().map(|&p| (p, true)).collect();
         points.extend(self.knots.iter().map(|&p| (p, false)));
         points.extend(
-            (0..=60)
+            (0..TEMPERATURE_KNOTS as u32)
                 .filter_map(|i| {
                     thermal.pressure_at_pa(10.0_f64.powf(2.0 + f64::from(i) * KNOT_DEX))
                 })
                 .chain([thermal.boundary_pressure_pa()])
-                .filter(|&p| p > OUTER_PRESSURE_PA && p < 1e14)
+                .filter(|&p| p > OUTER_PRESSURE_PA && p < MAX_PRESSURE_PA)
                 .map(|p| (p, false)),
         );
         points.sort_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
