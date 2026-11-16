@@ -26,6 +26,7 @@ mod tests;
 pub const MODEL_ID: &str = "self_gravitating_loaded_hhe_v1";
 pub const WATER_MODEL_ID: &str = "loaded_effective_water_compression_v1";
 pub const TRACE_MODEL_ID: &str = "passive_secondary_envelope_host_volume_v1";
+pub const WATER_TRACE_MODEL_ID: &str = "prescribed_water_vapour_trace_host_volume_v1";
 pub const OUTER_PRESSURE_PA: f64 = 1000.0;
 // Operational 0.01-bar shell boundary, not a physical surface or radius
 // reference. The shell starts exactly there; this is only the pressure below
@@ -92,9 +93,15 @@ pub struct Envelope {
     suspended: bool,
     /// Disjoint phase SUB-allocations, already included in each region inventory.
     condensates: Vec<Inventory>,
+    prescribed_allocation: bool,
 }
 
 impl Envelope {
+    /// Generated gas is a conserved carrier reservoir. Deep local phases are
+    /// detail within it, not a second decision of the visible atmosphere.
+    pub fn has_prescribed_allocation(&self) -> bool {
+        self.prescribed_allocation
+    }
     pub fn density_model_id(&self) -> &'static str {
         if self.suspended {
             if self.uses_effective_components() {
@@ -200,6 +207,45 @@ pub fn solve(
 
 type Density<'a> = &'a dyn Fn(f64, f64, f64) -> Result<f64, hhe::Error>;
 
+#[derive(Clone, Copy)]
+struct Boundary {
+    gas: Inventory,
+    gravity_m_s2: f64,
+}
+
+pub(crate) fn solve_prescribed(
+    budget: &crate::system::composition::Budget,
+    equilibrium_k: f64,
+    intrinsic_k: f64,
+    gravity_m_s2: f64,
+    controls: coupled::Controls,
+) -> Result<(water::WaterStructure, Envelope), Error> {
+    use crate::system::composition::Reservoir;
+    let gas = *budget.reservoir(Reservoir::Gas);
+    let protected = Inventory::new(&Material::ALL.map(|m| {
+        (
+            m,
+            if matches!(m, Material::Metal | Material::Silicate | Material::Water) {
+                0.0
+            } else {
+                budget.reservoir(Reservoir::Interior).mass_kg(m)
+                    + budget.reservoir(Reservoir::CondensedVolatiles).mass_kg(m)
+            },
+        )
+    }))
+    .map_err(|_| Error::InvalidInput("prescribed condensed inventory"))?;
+    let table = hhe::Table::local().map_err(Error::Eos)?;
+    solve_allocated_with_density(
+        budget.retained(),
+        &protected,
+        equilibrium_k,
+        intrinsic_k,
+        controls,
+        &|p, t, y| table.density_kg_m3(p, t, y),
+        Some(Boundary { gas, gravity_m_s2 }),
+    )
+}
+
 /// Metal, rock and water under an envelope: cold fits to their published
 /// limit, and water compressed by pressure alone.
 fn heavy_density(
@@ -301,6 +347,26 @@ fn solve_with_density(
     controls: coupled::Controls,
     eos: Density<'_>,
 ) -> Result<(water::WaterStructure, Envelope), Error> {
+    solve_allocated_with_density(
+        retained,
+        protected,
+        equilibrium_k,
+        intrinsic_k,
+        controls,
+        eos,
+        None,
+    )
+}
+
+fn solve_allocated_with_density(
+    retained: &Inventory,
+    protected: &Inventory,
+    equilibrium_k: f64,
+    intrinsic_k: f64,
+    controls: coupled::Controls,
+    eos: Density<'_>,
+    boundary: Option<Boundary>,
+) -> Result<(water::WaterStructure, Envelope), Error> {
     if !equilibrium_k.is_finite() || equilibrium_k <= 0.0 {
         return Err(Error::InvalidInput("equilibrium temperature"));
     }
@@ -312,7 +378,7 @@ fn solve_with_density(
         (
             m,
             if matches!(m, Material::Metal | Material::Silicate | Material::Water) {
-                retained.mass_kg(m)
+                retained.mass_kg(m) - boundary.map_or(0.0, |b| b.gas.mass_kg(m))
             } else {
                 0.0
             },
@@ -337,8 +403,11 @@ fn solve_with_density(
     let heavy = host
         .checked_add(protected)
         .map_err(|_| Error::InvalidInput("heavy inventory"))?;
-    let gas = Inventory::new(&Material::ALL.map(|m| (m, retained.mass_kg(m) - heavy.mass_kg(m))))
-        .map_err(|_| Error::InvalidInput("envelope inventory"))?;
+    let gas = match boundary {
+        Some(b) => b.gas,
+        None => Inventory::new(&Material::ALL.map(|m| (m, retained.mass_kg(m) - heavy.mass_kg(m))))
+            .map_err(|_| Error::InvalidInput("envelope inventory"))?,
+    };
     let light = gas.mass_kg(Material::Hydrogen) + gas.mass_kg(Material::Helium);
     if host.total_mass_kg() <= 0.0
         || light <= 0.0
@@ -349,9 +418,29 @@ fn solve_with_density(
     if protected.total_mass_kg() / heavy.total_mass_kg() > dry::protected::MAX_TRACE_FRACTION {
         return Err(Error::TraceDomain);
     }
-    let secondary_fraction = (gas.total_mass_kg() - light) / gas.total_mass_kg();
+    // Generation may put a trace of water vapour in the atmosphere. The
+    // molecular mixture has no water EOS: within the existing passive-trace
+    // mass bound only, give that fixed trace the other carrier's specific
+    // volume. Larger water fractions remain unsupported, never moved back
+    // into the core to make a solve pass.
+    if gas.mass_kg(Material::Water) / gas.total_mass_kg() > dry::protected::MAX_TRACE_FRACTION {
+        return Err(Error::TraceDomain);
+    }
+    let density_inventory = Inventory::new(&Material::ALL.map(|m| {
+        (
+            m,
+            if m == Material::Water {
+                0.0
+            } else {
+                gas.mass_kg(m)
+            },
+        )
+    }))
+    .map_err(|_| Error::InvalidInput("density inventory"))?;
+    let secondary_fraction =
+        (density_inventory.total_mass_kg() - light) / density_inventory.total_mass_kg();
     let mixture = if secondary_fraction > dry::protected::MAX_TRACE_FRACTION {
-        Some(hhe_mixture::Mixture::new_enriched(&gas).map_err(Error::Mixture)?)
+        Some(hhe_mixture::Mixture::new_enriched(&density_inventory).map_err(Error::Mixture)?)
     } else {
         None
     };
@@ -380,8 +469,10 @@ fn solve_with_density(
     let carrier = shell::Gas {
         eos,
         inventory: gas,
+        density_inventory,
         helium_fraction: gas.mass_kg(Material::Helium) / light,
         mixture,
+        reference_gravity_m_s2: boundary.map(|b| b.gravity_m_s2),
     };
     let mut matcher = shell::Matcher::new(
         &carrier,
@@ -482,7 +573,7 @@ fn solve_with_density(
         / reference.radius_m.powi(2)
         / thermal.gravity_m_s2
         - 1.0;
-    if residual.abs() > GRAVITY_TOLERANCE {
+    if boundary.is_none() && residual.abs() > GRAVITY_TOLERANCE {
         return Err(Error::NonConvergence);
     }
     let heavy_inertia = trial.inertia_kg_m2;
@@ -509,7 +600,7 @@ fn solve_with_density(
     let condensates = if suspended {
         phase_allocations(
             &envelope_regions,
-            &gas,
+            &density_inventory,
             thermal,
             shell.route.as_ref().unwrap().boundary_pa,
             &mut total_work,
@@ -548,6 +639,7 @@ fn solve_with_density(
             effective_boundary_pa: shell.route.as_ref().map(|r| r.boundary_pa),
             suspended,
             condensates,
+            prescribed_allocation: boundary.is_some(),
         },
     ))
 }

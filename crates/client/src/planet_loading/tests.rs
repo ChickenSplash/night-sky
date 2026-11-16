@@ -201,6 +201,9 @@ fn selected_planet_runs_first_and_solves_off_thread() {
         .unwrap()
         .recv_timeout(std::time::Duration::from_secs(10))
         .unwrap();
+    if let Message::Ready { refinement, .. } = &message {
+        refinement.as_ref().expect("prepared refinement");
+    }
     assert!(
         matches!(&message, Message::Ready { id, record, refinement: Ok(_), .. } if record.fallback_reason.is_none() && id == "selected")
     );

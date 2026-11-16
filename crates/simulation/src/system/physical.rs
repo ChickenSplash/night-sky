@@ -12,6 +12,7 @@ pub(crate) use export::export_planet;
 mod refinement;
 mod result;
 mod synchronous;
+pub(crate) use layered::PRESCRIBED_BOUNDARY_MODEL_ID;
 pub use layered::{fallback, layered, outcome};
 pub use refinement::{Refinement, prepare_refinement};
 pub(crate) use result::initial_from_fallback;

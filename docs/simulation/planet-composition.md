@@ -80,8 +80,10 @@ transport consistency only. All physical fit prescriptions remain unchanged.
 - `validate_result` additionally checks provenance, refinement status, nonempty
   revision keys and justified surface knowledge. `validate_refinement` requires
   the same input/model identities, exactly the next adoption sequence, unchanged
-  formation supply, unchanged escape and the base's blow-off amount. A layered
-  refinement removes nothing: escape is generation's decision.
+   formation supply, unchanged escape and the base's blow-off amount. It also
+   requires bit-identical mass, radius, inertia, condensed radius, reference
+   gravity, surface pressure/temperature and every material allocation. A layered
+   refinement removes nothing: escape and atmosphere are generation's decisions.
   It rejects stale/unrelated candidates without modifying either result.
 - No validator re-runs a structure, EOS, retention or atmosphere-partition solve.
   Accepting an internally coherent nonlegacy radius and small positive inertia
@@ -102,7 +104,7 @@ retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
 prescriptions. The current generation key is
-`generation_physics_v4:structure_table_v3:surface_decision_v1:layered_adoption_v4:NSHHE002-3fe0293c8a340e38`,
+`generation_physics_v4:structure_table_v3:surface_decision_v1:layered_adoption_v5:NSHHE002-3fe0293c8a340e38`,
 covering the [structure table](#structure-table), surface decision, refinement
 adapter and checksum-pinned H/He resource.
 Its availability is process-local and fixed by the table's `OnceLock`: installing
@@ -149,8 +151,10 @@ solution. Rendering may show a condensed top through its atmosphere, or retain a
 separate [opaque visual proxy](../client/rendering.md#giant-descent) when the
 bounded continuation cannot reach it. A gas coordinate is never terrain.
 
-Clearance validates the active projections and builds its column with enclosed
-reference gravity. Orbital motion/drag speed still use retained total mass.
+Clearance validates the active projections and builds its column with the
+decided reference gravity. Generated planets use `GM_total/R²`; standalone
+envelope results can instead carry enclosed-mass gravity. Orbital motion/drag
+speed uses retained total mass.
 Camera neighbourhood fields refresh when the system record changes, including
 physical revision changes with the same system ID. Craft retain an immutable
 field and route snapshot; adoption never replaces those snapshots mid-flight.
@@ -172,19 +176,31 @@ forcing must still match, and every loaded copy must pass refinement validation.
 Stale work is discarded, never renumbered. Changed input/model identities restart
 preparation with a new cancellation epoch.
 
-**The radius does not change.** Generation's radius is the planet's. The
-layered solve lands within the [structure table](#structure-table)'s
-interpolation of it, and `physical::layered::rescale` stretches the whole
-profile by that ratio before the refinement is validated: layer boundaries,
-condensed radius and one-bar level scale together, mean density and gravity
-follow, and mass, pressures and the inertia factor are the solve's own. The
-record says so in its limitations. In the 4,367-planet census none of 3,846
-layered results is installed on a different radius; the stretch is 0.03% at the
-median and at most 0.26% on condensed surfaces, 0.24% and at most 6.5% on
-envelopes. The inertia factor, and so the flattening, is the table's on both
-routes: it differs from the solve's by 0.17% at the median and at most 0.8% on
-condensed surfaces, 0.37% and at most 11% on envelopes. Surface pressure can still move by up to 1% and an envelope's
-one-bar temperature by a few kelvin.
+**The atmosphere and bulk geometry do not change.** Generation's radii,
+mass and inertia are the planet's. The layered solve receives its atmospheric
+allocation and boundary conditions as described under
+[surface decision](#synchronous-surface-decision), rather than deriving a
+second column and having it discarded. Refinement preserves the complete
+`PlanetEnvironment`, including airless and sub-presentation-threshold cases.
+
+Interior detail is fitted between two fixed anchors: the condensed radius and
+the reference radius. First the radial profile is stretched onto the reference
+radius; then its core is scaled onto the condensed radius and the intervening
+shell is mapped between them. Frost therefore retains its decided top too.
+Shared layer boundaries remain contiguous. The surface pressure, temperature,
+one-bar level, material split, reference gravity and inertia retain generation's
+exact bits; deeper layer pressures remain the integration's. This is labelled
+geometric fitting, not a new hydrostatic solution on the fitted coordinates.
+
+On the 4,367-planet census, all **3,863** layered results install with identical
+atmosphere records and optical columns, including five previously blocked by
+deep condensate optical checks. Before this change, installed envelope
+condensed radii moved by up to **6.86%**, atmosphere scale height by **1.91%**,
+and extent by **1.93%**; all are now zero. Thin-route scale height and extent
+previously moved by up to **0.114%** and **0.119%**, also now zero. The raw
+radius still differs from the table by up to 0.26% on thin surfaces and 6.32%
+on envelopes. Full before/after figures and changed refusals are in
+[G3 step 4.3](../plans/planet-generation.md#step-43-the-layered-solve-receives-the-atmosphere).
 
 The update barrier runs after camera placement and before camera neighbourhood,
 inspection and drawing consumers. It publishes at most two planets per frame,
@@ -192,9 +208,12 @@ replacing inertia, physical record, atmosphere and result as one operation. Safe
 rotating through the ready queue so a deferred planet cannot starve later ones.
 Identity, tasks/pages, orbital elements and spin phase/period
 stay fixed; shape is recomputed from the new facts with the existing flattening
-bound. The atmosphere uses the result's gas inventories/reference conditions,
-not the old atmosphere rescaled to a new radius. Unsupported cloud/optical inputs
-retain the active fallback with an explicit unavailable/adoption reason.
+bound. The atmosphere is the unchanged generated column. Local deep-envelope
+phase allocations are inspector detail, not a replacement cloud profile:
+`generated_prescribed_atmospheric_boundary_v1` explicitly marks that boundary.
+Standalone results without that prescription still refuse unsupported
+condensate optics. Ground chunk keys retain generation input/model identity
+and shape, but no longer include the adoption sequence.
 
 Publication is conservatively deferred:
 
@@ -2349,11 +2368,14 @@ still refuses:
 Limits:
 
 - **Core composition is simplified.** Substituting the body's own core
-  leaves envelope radii 0.24% from the layered solve at the median, 2.3% at
-  the 95th percentile and 6.5% at worst on the census (79% within 1%, 92%
-  within 2%), and the inertia factor 0.37%, 4.0% and 11%. Before the core
+  leaves envelope radii 0.23% from the prescribed-boundary layered solve at
+  the median, 2.12% at the 95th percentile and 6.32% at worst on the census,
+  and raw inertia factor differences of 0.35%, 3.79% and 11%. Before the core
   was tabulated under load the radius figures were 0.49%, 3.4% and 6.6%, and
   the untabulated inertia 6.2%, 14% and 58%.
+  Before imposing the generated atmosphere, this same table differed from the
+  unconstrained solve by 0.24% / 2.3% / 6.5% in radius (79% within 1%, 92%
+  within 2%). No cells changed when the atmospheric boundary became prescribed.
 - **Gas composition is not an axis.** A trace of H/He under heavier secondary
   gas is tabulated as pure H/He and comes out up to 7% large.
 - **Wet cores under deep gas are the loosest.** On the census, planets
@@ -2390,17 +2412,49 @@ it.
    exchangeable gas entirely and step 1 repeats. The radius is read again for
    what is left on every pass.
 3. **Route** (`prototype::Decision`):
-   - `Thin { surface_temperature_k }`: a condensed surface under a boundary
-     column. The layered solve takes that temperature as prescribed.
+    - `Thin { surface_temperature_k }`: a condensed surface under a boundary
+      column. Generated jobs also pass the initial physical record: its gas,
+      frost, condensed host, pressure and temperature are prescribed.
    - `Envelope`: the thin column refused for gas mass, density or mass domain
      and H/He is present. The layered solve goes straight to the envelope.
    - `Refused(error)`: any other refusal (a runaway beyond 2,000 K or 1% gas
      mass, say). The layered solve returns the same refusal.
 
 **One exposure rule** (`prototype::thin_request`), shared by the decision and
-the layered thin route: all water and every unprotected secondary exchange
-with the column. The `1e-5` accessible water fraction is now only the share
-exposed to long-term escape.
+the standalone coupled thin route: all water and every unprotected secondary
+exchange with the column. Generated refinement does not exchange them again.
+The `1e-5` accessible water fraction still limits long-term escape and the
+reference partition used for envelopes/refusals.
+
+**Prescribed refinement boundary** (`prototype::resolve_generated`):
+
+- **Thin:** integrate the retained host once under the decided atmospheric
+  pressure plus frost weight at generation's condensed radius. No column
+  partition or greenhouse iteration runs. Validate the supplied column on
+  the geometry that decided it; the integration's raw radius is only an
+  interpolation diagnostic until fitted to the fixed boundaries.
+- **Envelope:** integrate a self-gravitating shell with generation's fixed gas
+  inventory. The remaining material stays below it. Condensed secondaries
+  share the heavy host's existing bounded trace-volume prescription; their
+  global condensed/interior bookkeeping remains generation's. The thermal
+  profile receives generation's `GM_total/R²`, so its one-bar temperature is
+  the same closed form as generation's. The mechanical integration still
+  uses local enclosed mass. The standalone/table API continues to solve its
+  own gravity and allocation and has not changed its physics.
+- **Water vapour:** generation's reference partition can put a small amount
+  of water into the envelope. `prescribed_water_vapour_trace_host_volume_v1`
+  gives it the non-water carrier's specific volume only up to **0.301% of
+  envelope mass**, the existing passive-trace bound. It stays a conserved
+  gas-origin inventory, never silently returned to the core. Above that bound
+  the generated solve refuses. This is not a water-mixture EOS or deep water
+  phase prediction; four formerly solved census planets now hit this bound.
+- **Deep phases:** local suspended-condensate density and phase suballocations
+  remain solved within the shell. They do not subtract from the already-decided
+  atmospheric reservoir or supply clouds to its optical model. The prescribed
+  boundary explicitly separates that column from deep phase detail.
+- **Publication:** rejects a solve with a different gas inventory, pressure,
+  temperature, source or escape, fits interior geometry to both fixed radii, and carries the decided
+  facts forward exactly. It does not construct another `GasAtmosphere`.
 
 **Dense columns.** A column beyond the layered density mask is an envelope only
 where its H/He alone holds one bar on the tabulated radius. Otherwise it is a
@@ -2415,17 +2469,17 @@ condensed water, `frost`, then one finite `atmosphere` region. It carries
 Water phase is not decided here; it follows from the decided temperature in
 the layered solve.
 
-**Undecided results** (`Envelope` and `Refused`) keep the reference partition
+**Reference-partition results** (`Envelope` and `Refused`) keep the reference partition
 below, at the equilibrium temperature. An `Envelope` decision whose boundary
 column reaches one bar is re-referenced at that level of its own profile, as
 the layered envelope does.
 
 Limits:
 
-- The radius is the table's, within 0.26% of the layered radius on every
-  decided surface in the census (0.03% at the median). Supply-limited pressure
-  scales as R⁻⁴ and stays within 1%. Temperature, escape, route and surface
-  kind do not differ at all.
+- The radius is the table's, within 0.26% of the raw layered radius on every
+  decided surface in the census (0.03% at the median). The raw thin solve now
+  receives exactly the decided pressure, temperature and gas mix. After
+  boundary fitting, condensed radius and reference gravity agree exactly too.
 - Envelope radii carry the table's simplified core: see its
   [limits](#structure-table).
 - A refused surface (runaway) is shown at its equilibrium temperature with the
@@ -2433,13 +2487,23 @@ Limits:
 
 Checks: `structure/coverage/agreement.rs` (`generation_agreement`, in
 `check.sh` at two systems per component; `NS_AGREEMENT_SYSTEMS=57` for the
-full probe, writing `data/tmp/generation-agreement.{md,tsv}`). It asserts that
+full probe, writing `data/tmp/generation-agreement.{md,tsv}` and
+`data/tmp/generation-agreement-boundaries.jsonl`). It asserts that
 the layered solve changes no surface kind, escape or decided temperature, that
 no H/He envelope carries a bulk-composition label, that decided surfaces agree
-within 1% in radius and 5% in pressure, and that every layered result is
-installed on generation's radius. Envelope radii have regression bounds only
+within 1% in raw radius, and that every layered result installs with the same
+atmosphere record, optical column, radii, gravity, pressure, temperature,
+inertia and reservoir split. Envelope radii have regression bounds only
 (median under 1%, 95th percentile under 5%). The retention grid
 test asserts the decision is total and conserving.
+
+An optional `generation_one_percent_threshold_probe` samples H/He shares
+`0.01 ± 1e-8` before retention. Of 126 mass/water/temperature pairs, 20 switch
+from thin to envelope and expose a discontinuity: below the threshold blow-off
+can strip the gas, while above it the envelope route bypasses that decision.
+The largest radius jump is 396%, from 385 to 1,907 km, with pressure changing
+from airless to 1 bar. These synthetic inputs bypass long-term retention and
+do not measure population frequency. The discontinuity is recorded, not fixed.
 
 Cost: about 0.2 ms per planet synchronously (0.09 ms before the decision), after
 the column quadrature and partition root were made cheaper

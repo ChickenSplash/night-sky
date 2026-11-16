@@ -110,12 +110,22 @@ impl OpticalColumn {
     ) -> Result<Self, AtmosphereError> {
         let reference = Self::reference_from_result(result, gas)?;
         let record = &result.record;
-        if record.layers.iter().any(|layer| {
-            layer
-                .phase_allocations
-                .iter()
-                .any(|phase| phase.condensate_kg > 0.0)
-        }) {
+        // A generated boundary owns its optical column independently of the
+        // deep shell's local phase detail. Standalone coupled results still
+        // require a cloud model when their own atmosphere carries condensate.
+        let prescribed = record
+            .physical
+            .approximations
+            .iter()
+            .any(|m| m == physical::PRESCRIBED_BOUNDARY_MODEL_ID);
+        if !prescribed
+            && record.layers.iter().any(|layer| {
+                layer
+                    .phase_allocations
+                    .iter()
+                    .any(|phase| phase.condensate_kg > 0.0)
+            })
+        {
             return Err(AtmosphereError::UnsupportedOptics(
                 "suspended condensates require local vapour and cloud optical inputs",
             ));

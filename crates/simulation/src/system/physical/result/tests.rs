@@ -158,7 +158,9 @@ fn layered_phases_and_hot_rock_are_not_inferred_from_legacy_ground_labels() {
         .unwrap();
         assert_eq!(candidate.surface_knowledge, expected);
         let initial = initial_result(&b, &env, revision(0)).unwrap();
-        validate_refinement(&initial, &candidate).unwrap();
+        // A valid standalone structure is not yet a generated refinement:
+        // its radius/inertia have not received the decided boundary.
+        assert!(validate_refinement(&initial, &candidate).is_err());
         round_trip(&candidate);
         let mut invented = candidate.clone();
         invented.surface_knowledge = SurfaceKnowledge::GasReference;
@@ -197,16 +199,18 @@ fn stale_revisions_and_inconsistent_lifecycle_are_rejected() {
     let b = budget(0.0, 0.0);
     let env = environment(250.0);
     let active = initial_result(&b, &env, revision(0)).unwrap();
-    let candidate = resolved_result(
+    let candidate = super::super::prepare_refinement(
+        &active,
+        &env,
         &structure::prototype::resolve(
             &b,
             &env,
             structure::prototype::Decision::Undecided,
             Default::default(),
         ),
-        revision(1),
     )
-    .unwrap();
+    .unwrap()
+    .result;
     validate_refinement(&active, &candidate).unwrap();
     for corruption in 0..6 {
         let mut bad = candidate.clone();

@@ -61,16 +61,20 @@ For spheroids use the existing volume-equivalent mean radius; the column
 currently ignores latitude, rotation and atmospheric self-gravity. The column does
 not independently choose geometry. Generation takes the reference from the
 planet's result and gives the same reference to column, optics and clearance.
-Their gravity is the result's enclosed-mass reference value, while orbital
+Their gravity is the result's decided reference value: generated planets keep
+`GM_total/R²`; standalone envelope results use enclosed mass. Orbital
 calculations use retained total mass. Condensed-top geometry is separate from
 that gas coordinate; see [consumer boundaries](planet-composition.md#consumer-boundary-semantics).
 
 The reference temperature is a representative **isothermal gas-column
 temperature**, not an equilibrium-temperature calculation or a solved
-surface climate. Generation currently estimates it from equilibrium temperature
-with a 20 K floor; there is no internal-heat solution, and the
-[grey greenhouse estimate](#grey-greenhouse-estimate) is used only by the opt-in
-coupled structure, not by generation. All stored units
+surface climate. Generation uses the synchronous grey-greenhouse surface
+decision on thin worlds, or the prescribed intrinsic-heat profile at one bar
+on envelopes. Refused surfaces retain the equilibrium estimate with a 20 K
+floor. Generated refinement receives that atmosphere unchanged; local deep
+envelope phases do not replace its gas mix or imply cloud optics. See the
+[surface decision](planet-composition.md#synchronous-surface-decision).
+All stored units
 are SI, including pascals, kelvin, metres and kilograms.
 
 ## Derived column

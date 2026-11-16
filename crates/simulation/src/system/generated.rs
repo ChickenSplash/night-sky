@@ -27,10 +27,11 @@ pub struct PlanetJob {
 impl PlanetJob {
     /// Layered result, or the labelled fallback when the layered solver refuses.
     pub fn resolve(&self) -> prototype::Outcome {
-        prototype::resolve(
+        prototype::resolve_generated(
             &self.budget,
             &self.environment,
             self.decision,
+            &self.initial_result.record,
             Default::default(),
         )
     }

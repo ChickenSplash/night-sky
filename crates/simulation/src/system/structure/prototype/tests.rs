@@ -177,6 +177,58 @@ fn frozen_exchangeable_material_is_not_entrained_twice() {
 }
 
 #[test]
+fn generated_thin_boundary_is_integrated_without_repartition_or_rewarming() {
+    use crate::system::{physical, structure::fallback};
+    for (water, temperature) in [(0.0, 250.0), (0.3, 280.0), (0.3, 30.0)] {
+        let b = budget(water, 1.0);
+        let env = environment(temperature);
+        let decided = fallback::decide(&fallback::initial(&b, &env), &env).unwrap();
+        assert!(matches!(decided.decision, Decision::Thin { .. }));
+        let boundary = physical::fallback(&decided.fallback);
+        let solve = |env: &PlanetEnvironment| {
+            let Outcome::Layered(s) = resolve_generated(
+                &decided.budget,
+                env,
+                decided.decision,
+                &boundary,
+                Controls::default(),
+            ) else {
+                panic!("thin fixture refused")
+            };
+            s
+        };
+        let solved = solve(&env);
+        let restored = solved.structure.retained_inventory();
+        for m in Material::ALL {
+            assert!(
+                (restored.mass_kg(m) - decided.budget.retained().mass_kg(m)).abs()
+                    <= 1e-10 * decided.budget.retained().mass_kg(m)
+            );
+        }
+        assert!(solved.structure.diagnostics().interface_residual_pa.abs() <= 0.02);
+        assert_eq!(solved.structure.diagnostics().iterations, 1);
+        assert_eq!(
+            solved.structure.diagnostics().partition_relative_residual,
+            0.0
+        );
+        let record = physical::layered(&solved);
+        assert_eq!(record.surface_pressure_pa, boundary.surface_pressure_pa);
+        for m in &record.physical.materials {
+            let initial = boundary
+                .physical
+                .materials
+                .iter()
+                .find(|a| a.material == m.material)
+                .unwrap();
+            assert_eq!(m.gas_kg, initial.gas_kg);
+        }
+        // The imposed surface state, not a new greenhouse search from forcing,
+        // is the thermal condition of this integration.
+        assert_eq!(solved, solve(&environment(1000.0)));
+    }
+}
+
+#[test]
 fn unsupported_and_budget_failures_never_fall_back() {
     let b = budget(0.0, 1.0);
     for t in [f64::NAN, f64::INFINITY, 0.0, -1.0] {

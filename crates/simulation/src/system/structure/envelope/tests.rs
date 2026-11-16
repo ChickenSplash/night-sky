@@ -5,6 +5,53 @@ mod enriched;
 mod trends;
 
 #[test]
+fn prescribed_water_trace_conserves_origins_and_obeys_its_mass_bound() {
+    let base = inventory(5.0, 0.01);
+    let light = base.mass_kg(Material::Hydrogen) + base.mass_kg(Material::Helium);
+    for fraction in [0.001, 0.004] {
+        let water = light * fraction / (1.0 - fraction);
+        let retained = base
+            .checked_add(&Inventory::new(&[(Material::Water, water)]).unwrap())
+            .unwrap();
+        let gas = Inventory::new(&[
+            (Material::Hydrogen, base.mass_kg(Material::Hydrogen)),
+            (Material::Helium, base.mass_kg(Material::Helium)),
+            (Material::Water, water),
+        ])
+        .unwrap();
+        let result = solve_allocated_with_density(
+            &retained,
+            &Inventory::default(),
+            250.0,
+            100.0,
+            Default::default(),
+            &|p, t, _| Ok(p / (3600.0 * t)),
+            Some(Boundary {
+                gas,
+                gravity_m_s2: 12.0,
+            }),
+        );
+        if fraction > dry::protected::MAX_TRACE_FRACTION {
+            assert_eq!(result.unwrap_err(), Error::TraceDomain);
+            continue;
+        }
+        let (interior, envelope) = result.unwrap();
+        assert_eq!(envelope.thermal.gravity_m_s2, 12.0);
+        assert_eq!(envelope.inventory, gas);
+        assert_eq!(interior.retained_inventory().mass_kg(Material::Water), 0.0);
+        let restored = interior
+            .retained_inventory()
+            .checked_add(&envelope.inventory)
+            .unwrap();
+        for m in Material::ALL {
+            assert!(
+                (restored.mass_kg(m) - retained.mass_kg(m)).abs() <= 1e-10 * retained.mass_kg(m)
+            );
+        }
+    }
+}
+
+#[test]
 fn radius_reference_distinguishes_sub_bar_shells_from_missed_events() {
     let shell = |inner, outer| Region {
         inventory: Inventory::new(&[(Material::Hydrogen, 1.0)]).unwrap(),

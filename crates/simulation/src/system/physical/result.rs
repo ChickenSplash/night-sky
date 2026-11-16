@@ -175,6 +175,18 @@ pub fn validate_refinement(active: &PlanetResult, candidate: &PlanetResult) -> C
             return Err("refinement changed source or restored escaped mass");
         }
         additional_loss += next.escaped_kg - previous.escaped_kg;
+        for (a, b) in [
+            (previous.source_kg, next.source_kg),
+            (previous.retained_kg, next.retained_kg),
+            (previous.escaped_kg, next.escaped_kg),
+            (previous.interior_kg, next.interior_kg),
+            (previous.condensed_kg, next.condensed_kg),
+            (previous.gas_kg, next.gas_kg),
+        ] {
+            if a.to_bits() != b.to_bits() {
+                return Err("refinement changed a decided material allocation");
+            }
+        }
     }
     let tolerance = 8.0
         * f64::EPSILON
@@ -190,6 +202,27 @@ pub fn validate_refinement(active: &PlanetResult, candidate: &PlanetResult) -> C
     if additional_loss.abs() > tolerance || candidate.record.blowoff_kg != active.record.blowoff_kg
     {
         return Err("refinement changed escape");
+    }
+    let a = &active.record;
+    let b = &candidate.record;
+    for (a, b) in [
+        (a.surface_pressure_pa, b.surface_pressure_pa),
+        (a.surface_temperature_k, b.surface_temperature_k),
+        (a.physical.reference_radius_m, b.physical.reference_radius_m),
+        (a.physical.condensed_radius_m, b.physical.condensed_radius_m),
+        (
+            a.physical.reference_gravity_m_s2,
+            b.physical.reference_gravity_m_s2,
+        ),
+        (a.physical.retained_mass_kg, b.physical.retained_mass_kg),
+        (a.physical.inertia_factor, b.physical.inertia_factor),
+    ] {
+        if a.to_bits() != b.to_bits() {
+            return Err("refinement changed a decided boundary");
+        }
+    }
+    if a.physical.materials != b.physical.materials || a.one_bar_radius_m != b.one_bar_radius_m {
+        return Err("refinement changed a decided allocation or pressure level");
     }
     Ok(())
 }

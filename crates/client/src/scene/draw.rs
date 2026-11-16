@@ -145,7 +145,7 @@ pub(super) fn clip_strip(
     strips
 }
 
-/// Geometry and material/terrain inputs belong to one active revision.
+/// Geometry and generation identity determine terrain, not interior-detail arrival.
 fn ground_key(planet: &space_shared::Planet, shape: &Spheroid) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -153,7 +153,10 @@ fn ground_key(planet: &space_shared::Planet, shape: &Spheroid) -> u64 {
         &planet.id,
         shape.equatorial.to_bits(),
         shape.polar.to_bits(),
-        planet.initial_result.as_ref().map(|r| &r.revision),
+        planet
+            .initial_result
+            .as_ref()
+            .map(|r| (&r.revision.inputs, &r.revision.model)),
     )
         .hash(&mut hasher);
     hasher.finish()

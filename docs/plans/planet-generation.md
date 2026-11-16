@@ -2,8 +2,8 @@
 
 ## Status and goal
 
-**G1 and G2 complete, 14 November 2026. G3 steps 1 to 3, 4.1 and 4.2
-complete, 16 November 2026; steps 4.3 to 4.5, 5 and 6 are open. G4 is proposed, not implemented.**
+**G1 and G2 complete, 14 November 2026. G3 steps 1 to 3 and 4.1 to 4.3
+complete, 16 November 2026; steps 4.4, 4.5, 5 and 6 are open. G4 is proposed, not implemented.**
 Current behaviour
 is described in [planetary systems](../simulation/planetary-systems.md) and the
 [composition guide](../simulation/planet-composition.md).
@@ -339,7 +339,7 @@ as very extended trace atmospheres.
       gas mix, frost and sea are its boundary conditions, as the surface
       temperature, escape and surface kind already are since G2. Discarding
       a second, slightly different answer would hide the disagreement; this
-      removes it. Detail under "Next: step 4.3" below.
+       removes it. Detail under "Step 4.3" below.
    4. The layered result becomes an attachment to the planet's record, read
       by the inspector alone. Attaching it needs no barrier.
    5. Delete the adoption machinery: the update barrier, the deferral rules
@@ -463,7 +463,6 @@ Still open in G3:
 
 In this order, towards deleting the swap (step 4):
 
-- **Step 4.3**, the layered solve receives the atmosphere (next, below).
 - **Steps 4.4 and 4.5**, the layered result as an inspector-only attachment,
   then deleting the adoption machinery.
 - **Step 6**, whether the client still runs the solver.
@@ -525,9 +524,11 @@ atmosphere):
 - The machinery to delete is about 830 lines of client code and 1,000 of
   tests, plus `refinement.rs`, `rescale` and the replay in the voyage cache.
 
-### Next: step 4.3, the layered solve receives the atmosphere
+### Step 4.3, the layered solve receives the atmosphere
 
-Not started. Written as a handover.
+Complete, 16 November 2026. Steps 4.4 and 4.5 remain for interactive client
+checking with the user. Implementation and approximation boundaries are in the
+[surface decision guide](../simulation/planet-composition.md#synchronous-surface-decision).
 
 **Why.** Generation decides the atmosphere with the layered solver's own
 rules on the tabulated radius. The layered solve then reruns those rules on
@@ -546,59 +547,110 @@ any H/He is present:
   (`light_gas_holds_one_bar`); without that it stays a thin, dense column;
 - condensed mass outside 0.0001 to 20 Earth masses.
 
-Not checked: whether radius and pressure are continuous across the 1% line.
+The optional threshold probe below now demonstrates a discontinuity across the
+1% line for some synthetic pre-retention inputs. It is not fixed here.
 
-**Work, in order.**
+**Work completed, in order.**
 
-1. **Measure first.** `coverage/agreement.rs` compares radius, inertia,
-   surface temperature and pressure. Add, per route: gas mole fractions (the
-   largest absolute difference), condensed radius, reference gravity, and
-   the atmosphere record's scale height and extent. Run
-   `NS_AGREEMENT_SYSTEMS=57 cargo test --release -p space-simulation generation_agreement -- --nocapture`
-   and keep the report in `data/tmp/`. This says where generation's rule is
-   visibly simpler than the solve. The expected case is the envelope gas
-   mix: generation uses the reference partition at the equilibrium
-   temperature (`partition::resolve`), the solve allocates suspended
-   condensate by solved region (`physical/layered.rs`, the reservoir split).
-2. **Thin route.** `Decision::Thin` already carries the surface temperature.
-   Extend it, or the request built in `prototype::thin_request`, with the
-   decided gas inventory, frost and surface pressure, and have the coupled
-   solve integrate the interior under that load without repartitioning
-   (`coupled.rs`, `coupled/column.rs`, `coupled/surface.rs`). The solved
-   radius still differs from the table's by interpolation, and
-   `layered::rescale` still stretches the profile onto generation's.
-3. **Envelope route.** The gas shell is part of the structure, so it stays
-   solved. Give it generation's gas mix as fixed, or move generation to the
-   solve's rule if step 1 shows generation's is the poorer one. The one-bar
-   temperature is the same closed form on both sides already
-   (`fallback::one_bar_temperature_k`). Reference gravity differs only
-   because `rescale` divides it by the stretch squared: use `GM/R²` on
-   generation's radius.
-4. **Stop rebuilding.** `prepare_refinement`
-   (`physical/refinement.rs`, the block that builds `GasAtmosphere` from
-   `gas_kg`) keeps the initial `environment` unchanged, and the refined
-   record carries generation's surface pressure, temperature, gravity,
-   condensed radius and reservoir split. `validate_refinement`
-   (`physical/result.rs`) should then require them equal, as it does mass.
-   The five census planets whose refined optics are unsupported
-   ("refined cloud/optical inputs unsupported") then install normally.
-5. **Stop the needless rebuild.** `ground_key` (`client/src/scene/draw.rs`)
-   hashes the result's sequence, so ground chunks rebuild on every swap.
-   Once nothing it draws from can change, drop the sequence from the key.
+1. **Measured first**, without solver changes. Census now distinguishes raw
+   solves from installed records, with gas fractions, condensed radius,
+   gravity, scale height and extent per route. Baseline was reported before
+   implementation. Evidence: `data/tmp/g3-atmosphere-before.{log,md,tsv}`.
+2. **Thin route receives the boundary.** Generated jobs pass their initial
+   record to `prototype::resolve_generated`; `coupled::prescribed` integrates
+   the host once under its fixed pressure and frost load. No repartition or
+   greenhouse iteration runs. Standalone coupled APIs still solve both.
+3. **Envelope route receives the gas and thermal gravity.** It integrates the
+   fixed gas inventory with generation's thermal `GM_total/R²`, while the
+   mechanical shell retains local enclosed-mass self-gravity. Deep phase
+   suballocations do not redefine the visible atmospheric reservoir.
+   Generation's reference mix is retained: the baseline's largest difference
+   came from treating integrated deep condensate as the optical column's mix,
+   which is not a better local atmospheric rule.
+4. **No atmospheric reconstruction.** Refinement rejects different solved gas,
+   pressure, temperature, source or escape, carries the exact environment and decided facts forward,
+   and fits detail between the fixed condensed and reference radii. Validation
+   requires exact boundary/allocation equality. The census also checks full
+   live projection and optical-column equality. All five formerly unsupported
+   cloud columns pass a dedicated source-backed regression.
+   The adapter now explicitly preserves tabulated inertia too; it had still
+   been installing the raw solved value despite the intended invariant.
+5. **Ground keys omit sequence**, retaining generation input/model identity
+   and the actual shape. The adoption barrier and client lifecycle remain.
 
-**Acceptance.** On the census, a refined planet's atmosphere record,
-reference gravity, condensed radius and gas split are bit-identical to
-generation's, on both routes; the agreement test asserts it. Bump the
-`layered_adoption` part of the generation key in `system/forcing.rs`.
+**Acceptance met on the census:** 4,367 planets, **3,863 layered results**
+(2,960 thin, 903 envelope), **zero installation failures**. Atmosphere records,
+gravity, condensed radius and reservoir split are identical on both routes;
+the agreement test asserts this. The generation key is `layered_adoption_v5`.
+
+Installed differences below are p50 / p95 / maximum. Gas fractions are absolute
+differences in mole fraction; all other rows are relative percentages.
+
+| Quantity | Route | Before | After |
+| --- | --- | --- | --- |
+| Gas mole fraction | Thin | 1.11e-16 / 1.13e-4 / 1.06e-3 | 0 / 0 / 0 |
+| Gas mole fraction | Envelope | 2.13e-8 / 3.88e-5 / 1.46e-3 | 0 / 0 / 0 |
+| Condensed radius | Thin | 0 / 0.00000627% / 0.000167% | 0 / 0 / 0 |
+| Condensed radius | Envelope | 0.282% / 2.15% / 6.86% | 0 / 0 / 0 |
+| Reference gravity | Thin | floating-point rounding (max 6.66e-14%) | 0 / 0 / 0 |
+| Reference gravity | Envelope | 0.0000941% / 0.000877% / 0.00534% | 0 / 0 / 0 |
+| Atmosphere scale height | Thin | 3.39e-9% / 0.0109% / 0.114% | 0 / 0 / 0 |
+| Atmosphere scale height | Envelope | 0.00355% / 0.509% / 1.91% | 0 / 0 / 0 |
+| Atmosphere extent | Thin | 0.0000960% / 0.0259% / 0.119% | 0 / 0 / 0 |
+| Atmosphere extent | Envelope | 0.00387% / 0.522% / 1.93% | 0 / 0 / 0 |
+
+- Before installation, the envelope mix differed by up to **0.05136**. The
+  five unsupported columns were excluded from installed baseline statistics.
+  Raw gas fractions and surface pressure/temperature now agree exactly too.
+- Raw envelope radius difference is **0.231% / 2.12% / 6.32%**, previously
+  **0.244% / 2.29% / 6.51%**. Thin radius remains **0.030% / 0.110% / 0.261%**.
+  These are different solved cohorts, not a matched-pair accuracy improvement.
+- This baseline has **3,845** solves, not the earlier documented 3,846. It
+  contains three `InvalidClosure(Water)` refusals, which remain unchanged.
+- **23 gained, 5 lost:** 16 near-critical, five condensate-domain, one region
+  mass-resolution and one density-inversion refusal now solve. Four earlier
+  solutions now exceed the water-vapour trace bound and one hits density
+  inversion. Lost IDs: `Arms:28/2`, `Bulge:0/2`, `NuclearDisc:53#A/7`,
+  `Nucleus:12/3` (water trace), `Bulge:37/8` (density inversion), all under
+  `composition-calibration:`. They retain the same generated planets.
+- **Named additional approximation:** prescribed water vapour up to **0.301%**
+  of envelope mass shares the other carrier's specific volume. Larger amounts
+  refuse rather than silently moving water back below the gas. The molecular
+  mixture still has no water EOS; this is not a phase-equilibrium claim.
+- Layered pipeline CPU time per census planet fell from about **8.0 to 3.2 ms**;
+  synchronous generation remained about **0.22 ms**. These are census timings,
+  not GPU benchmarks. The after run also performs live/optical validation.
+
+After evidence: `data/tmp/g3-atmosphere-after.{log,md,tsv}` and
+`data/tmp/generation-agreement-boundaries.jsonl`. The five-column regression
+is in `data/tmp/g3-atmosphere-cloud-regression.log`; optional headless comparison
+is in `data/tmp/g3-atmosphere-comparison.log`.
+
+Validation: `./scripts/check.sh` passes formatting, workspace tests and strict
+Clippy (`data/tmp/g3-atmosphere-check.log`: 441 client, 481 simulation and one
+server test passed). Optional source-backed checks and the threshold probe were
+run separately as above. GPU/interactive client checks were not run; they belong
+to steps 4.4 and 4.5. No commit or table rebuild was made.
+
+**1% threshold diagnostic, not a fix:** 126 synthetic pairs at H/He shares
+`0.01 ± 1e-8`, seven masses (0.0001 to 20 Earth masses), three water shares
+(0, 0.3, 0.8) and six temperatures (20 to 1,000 K), at 4.57 Gyr. Twenty switch
+from thin to envelope. Radius jumps have p50 / p95 / maximum
+**0.0000410% / 209% / 396%**. The worst is 0.001 Earth masses, 80% water in
+the heavy inventory, 100 K: **385 to 1,907 km**, **airless to 1 bar**. Below the
+guard, blow-off strips the gas (and potentially water); above it, routing goes
+straight to the envelope before that decision. These inputs bypass long-term
+retention, so no population frequency is claimed. Evidence:
+`data/tmp/g3-atmosphere-threshold.{log,tsv}`. This remains an open generation
+issue alongside the wet-core radius limitation.
 
 **Working notes.**
 
 - Run `./scripts/check.sh` after code changes. Cap CPU use at 16 threads:
   `CARGO_BUILD_JOBS=16 RUST_TEST_THREADS=16`, and `NS_TABLE_THREADS=16` for
   a table build.
-- Step 4.3 needs no table rebuild and no new cell values. If the envelope
-  gas mix must be tabulated after all, it is one more value per envelope
-  cell (see `table/build.rs`, `Solved`), nine minutes to rebuild.
+- No table rebuild was needed: the standalone reference physics and cell
+  values are unchanged; generated elaboration now imposes its own boundary.
 - The table build and the envelope tests need the local, git-ignored
   `data/composition-sources/hhe-density.bin` (`NSHHE002`), from
   `scripts/prepare-hhe-density.py`.

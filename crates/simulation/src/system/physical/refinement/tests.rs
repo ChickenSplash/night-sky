@@ -49,6 +49,7 @@ fn complete_projection_preserves_identity_orbits_spin_and_forcing() {
             .equilibrium_temperature_k
     );
     validate(&next).unwrap().unwrap();
+    assert_eq!(planet.environment, next.environment);
     assert!(refinement.project(&next).is_err(), "no duplicate adoption");
     assert_eq!(
         refinement.project(&planet).unwrap(),
@@ -65,6 +66,87 @@ fn complete_projection_preserves_identity_orbits_spin_and_forcing() {
         .push_str(":changed");
     assert!(refinement.project(&stale).is_err());
     assert_eq!(planet.initial_result.as_ref().unwrap().revision.sequence, 0);
+}
+
+#[test]
+fn refinement_rejects_changed_bulk_boundaries_and_allocations() {
+    let (planet, refinement) = fixture();
+    let initial = planet.initial_result.as_ref().unwrap();
+    for edit in [
+        (|r: &mut space_shared::LayeredPlanet| r.physical.inertia_factor *= 1.0001)
+            as fn(&mut space_shared::LayeredPlanet),
+        |r| r.physical.reference_gravity_m_s2 *= 0.99999999,
+        |r| r.surface_temperature_k *= 1.0001,
+        |r| r.surface_pressure_pa = r.surface_pressure_pa.next_up(),
+        |r| r.physical.condensed_radius_m = r.physical.condensed_radius_m.next_up(),
+    ] {
+        let mut candidate = refinement.result.clone();
+        edit(&mut candidate.record);
+        assert!(validate_refinement(initial, &candidate).is_err());
+    }
+}
+
+#[test]
+#[ignore = "local pinned H/He resource; run in release"]
+fn prescribed_atmospheres_keep_all_five_previously_unsupported_cloud_columns() {
+    use crate::{
+        galaxy::Component,
+        system::{
+            atmosphere::{GasAtmosphere, optics::boundary::OpticalColumn},
+            galactic_bodies,
+            generated::PlanetJob,
+            structure::prototype,
+        },
+    };
+    for (component, index, suffix) in [
+        (Component::Nucleus, 34, "/9"),
+        (Component::Bulge, 14, "/5"),
+        (Component::Arms, 11, "#A/10"),
+        (Component::Arms, 32, "/4"),
+        (Component::Halo, 44, "/6"),
+    ] {
+        let key = format!("composition-calibration:{component:?}:{index}");
+        let hosted = galactic_bodies(&key, component)
+            .planets
+            .into_iter()
+            .find(|p| p.id().ends_with(suffix))
+            .unwrap();
+        let job = PlanetJob {
+            id: hosted.id(),
+            designation: String::new(),
+            budget: hosted.body.budget,
+            environment: hosted.environment.clone().unwrap(),
+            initial_result: hosted.body.initial_result.clone(),
+            decision: hosted.body.decision,
+        };
+        let old = prototype::resolve(
+            &job.budget,
+            &job.environment,
+            job.decision,
+            Default::default(),
+        );
+        let Outcome::Layered(old) = old else {
+            panic!("{} headless fixture", job.id)
+        };
+        assert!(
+            layered(&old)
+                .layers
+                .iter()
+                .any(|l| l.phase_allocations.iter().any(|p| p.condensate_kg > 0.0))
+        );
+        let outcome = job.resolve();
+        assert!(matches!(outcome, Outcome::Layered(_)), "{}", job.id);
+        let refinement =
+            prepare_refinement(&job.initial_result, &job.environment, &outcome).unwrap();
+        let planet = export_planet(hosted, 0, String::new(), None);
+        let next = refinement.project(&planet).unwrap();
+        assert_eq!(planet.environment, next.environment);
+        let gas = GasAtmosphere::try_from(job.environment.atmosphere.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            OpticalColumn::from_result(&job.initial_result, &gas).unwrap(),
+            OpticalColumn::from_result(&refinement.result, &gas).unwrap()
+        );
+    }
 }
 
 #[test]

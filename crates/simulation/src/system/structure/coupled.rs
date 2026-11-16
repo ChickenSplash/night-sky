@@ -7,6 +7,7 @@ mod column;
 pub(crate) use column::cap_pa;
 mod deposit;
 pub mod escape;
+pub(crate) mod prescribed;
 pub(crate) mod surface;
 #[cfg(test)]
 mod tests;
@@ -208,13 +209,7 @@ impl CoupledStructure {
     }
     /// Gas pressure plus the deposit's weight: the condensed body's outer load.
     pub fn condensed_load_pa(&self) -> f64 {
-        if self.envelope.is_some() {
-            return self.condensed.outer().pressure_pa;
-        }
-        self.atmosphere.map_or(0.0, |a| a.pressure_pa())
-            + self
-                .deposit
-                .load_pa(self.condensed.mass_kg(), self.condensed.radius_m())
+        self.condensed.outer().pressure_pa
     }
     pub fn retained_inventory(&self) -> Inventory {
         self.condensed

@@ -23,8 +23,10 @@ const MAX_FIT_PASSES: usize = 96;
 pub(super) struct Gas<'a> {
     pub eos: Density<'a>,
     pub inventory: Inventory,
+    pub density_inventory: Inventory,
     pub helium_fraction: f64,
     pub mixture: Option<hhe_mixture::Mixture>,
+    pub reference_gravity_m_s2: Option<f64>,
 }
 
 impl Gas<'_> {
@@ -50,7 +52,7 @@ impl Gas<'_> {
                 route.density(mix, p, t, density, work, limit)
             }
             (Some(_), Some(route)) if route.suspended => {
-                suspended::State::new(&self.inventory, p, t, density)
+                suspended::State::new(&self.density_inventory, p, t, density)
                     .map(|s| s.density_kg_m3)
                     .map_err(|e| SolveError::Mixture(hhe_mixture::Error::Suspended(e)))
             }
@@ -317,10 +319,13 @@ impl<'a> Matcher<'a> {
     /// gravity brought into agreement with the shell's own reference level.
     fn shell(&mut self, outer_radius_m: f64) -> Result<Shell, Failure> {
         let total = self.heavy_mass_kg + self.gas_mass_kg;
-        let mut gravity = match self.gravity {
-            Some((outer, gravity)) => gravity * (outer / outer_radius_m).powi(2),
-            None => GRAVITATIONAL_CONSTANT * total / outer_radius_m.powi(2),
-        };
+        let mut gravity = self
+            .gas
+            .reference_gravity_m_s2
+            .unwrap_or_else(|| match self.gravity {
+                Some((outer, gravity)) => gravity * (outer / outer_radius_m).powi(2),
+                None => GRAVITATIONAL_CONSTANT * total / outer_radius_m.powi(2),
+            });
         let mut previous: Option<(f64, f64)> = None;
         for _ in 0..self.max_iterations {
             // Gravity outside the thermal profile's range reflects the trial
@@ -336,7 +341,7 @@ impl<'a> Matcher<'a> {
             let route = self
                 .gas
                 .mixture
-                .map(|_| ComponentRoute::new(thermal, self.gas.inventory))
+                .map(|_| ComponentRoute::new(thermal, self.gas.density_inventory))
                 .transpose()
                 .map_err(Failure::top)?;
             match self.integrate(outer_radius_m, thermal, route.as_ref())? {
@@ -498,7 +503,9 @@ impl<'a> Matcher<'a> {
                         if p == 1e5 {
                             let found = GRAVITATIONAL_CONSTANT * self.enclosed(y[0])
                                 / (outer_radius_m - y[1]).powi(2);
-                            if (found / thermal.gravity_m_s2 - 1.0).abs() > GRAVITY_MATCH {
+                            if self.gas.reference_gravity_m_s2.is_none()
+                                && (found / thermal.gravity_m_s2 - 1.0).abs() > GRAVITY_MATCH
+                            {
                                 return Ok(Pass::Gravity(found));
                             }
                             referenced = true;
@@ -528,7 +535,9 @@ impl<'a> Matcher<'a> {
             // A shell wholly below one bar is referenced to its base.
             let found =
                 GRAVITATIONAL_CONSTANT * self.heavy_mass_kg / (outer_radius_m - y[1]).powi(2);
-            if (found / thermal.gravity_m_s2 - 1.0).abs() > GRAVITY_MATCH {
+            if self.gas.reference_gravity_m_s2.is_none()
+                && (found / thermal.gravity_m_s2 - 1.0).abs() > GRAVITY_MATCH
+            {
                 return Ok(Pass::Gravity(found));
             }
         }

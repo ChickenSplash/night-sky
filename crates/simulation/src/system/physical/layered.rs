@@ -222,8 +222,19 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
             models.push(crate::system::materials::suspended::MODEL_ID.into());
         }
     }
+    if s.envelope().is_some_and(|e| e.has_prescribed_allocation())
+        && s.gas_inventory().mass_kg(Material::Water) > 0.0
+    {
+        models.push(crate::system::structure::envelope::WATER_TRACE_MODEL_ID.into());
+    }
     let surface = solved.surface();
     let mut limitations = strings(s.approximation_notes());
+    if s.envelope().is_some_and(|e| e.has_prescribed_allocation()) {
+        limitations.push("Generation fixes the atmospheric reservoir and thermal reference gravity; local deep phase allocations do not repartition the visible column".into());
+        if s.gas_inventory().mass_kg(Material::Water) > 0.0 {
+            limitations.push("Prescribed water vapour up to 0.301% of envelope mass shares the other carrier's specific volume; not a water-mixture EOS or deep water phase prediction".into());
+        }
+    }
     if s.envelope().is_some_and(|e| e.one_bar_radius_m().is_none()) {
         limitations.push("Gas base is below one bar: radius, pressure, temperature and gravity reference the condensed boundary; water, when present, remains phase-unresolved".into());
     }
@@ -241,6 +252,9 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
                 .into_iter()
                 .map(|m| {
                     let suspended = s.envelope().map_or(0.0, |e| {
+                        if e.has_prescribed_allocation() {
+                            return 0.0;
+                        }
                         (0..e.regions().len())
                             .map(|i| e.region_condensate(i).mass_kg(m))
                             .sum::<f64>()
@@ -296,6 +310,53 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
 }
 
 pub const RESCALED_NOTE: &str = "Layer radii are scaled as one onto generation's radius; pressures and densities are the solve's own";
+pub(crate) const PRESCRIBED_BOUNDARY_MODEL_ID: &str =
+    "generated_prescribed_atmospheric_boundary_v1";
+
+/// Fit interior detail between the already-decided condensed and reference
+/// boundaries. The atmosphere was supplied to the solve, not re-solved here.
+pub(super) fn receive_boundary(record: &mut LayeredPlanet, initial: &LayeredPlanet) {
+    rescale(record, initial.physical.reference_radius_m);
+    let old_core = record.physical.condensed_radius_m;
+    let new_core = initial.physical.condensed_radius_m;
+    let reference = initial.physical.reference_radius_m;
+    let map = |r: f64| {
+        if r == old_core {
+            new_core
+        } else if r < old_core {
+            r * (new_core / old_core)
+        } else if r < reference && reference > old_core {
+            new_core + (r - old_core) * (reference - new_core) / (reference - old_core)
+        } else {
+            r
+        }
+    };
+    for layer in &mut record.layers {
+        layer.inner_radius_m = map(layer.inner_radius_m);
+        layer.outer_radius_m = map(layer.outer_radius_m);
+    }
+    for index in 1..record.layers.len() {
+        record.layers[index].outer_radius_m = record.layers[index - 1].inner_radius_m;
+    }
+    // Preserve exact decided bits, including sub-presentation-threshold gas.
+    let p = &mut record.physical;
+    p.materials.clone_from(&initial.physical.materials);
+    p.retained_mass_kg = initial.physical.retained_mass_kg;
+    p.reference_radius_m = initial.physical.reference_radius_m;
+    p.condensed_radius_m = new_core;
+    p.mean_density_kg_m3 = initial.physical.mean_density_kg_m3;
+    p.reference_gravity_m_s2 = initial.physical.reference_gravity_m_s2;
+    p.inertia_factor = initial.physical.inertia_factor;
+    p.h_he_mass_fraction = initial.physical.h_he_mass_fraction;
+    p.approximations.push(PRESCRIBED_BOUNDARY_MODEL_ID.into());
+    record.surface_pressure_pa = initial.surface_pressure_pa;
+    record.surface_temperature_k = initial.surface_temperature_k;
+    record.one_bar_radius_m = initial.one_bar_radius_m;
+    record.greenhouse_optical_depth = initial.greenhouse_optical_depth;
+    record.blowoff_kg = initial.blowoff_kg;
+    record.model_limitations.retain(|n| n != RESCALED_NOTE);
+    record.model_limitations.push("Interior radii fitted between generation's fixed condensed and reference boundaries; gas, frost, surface state, gravity and inertia are prescribed by generation".into());
+}
 
 /// Generation's radius is the planet's. The layered solve lands within the
 /// structure table's interpolation of it, and its whole profile is stretched

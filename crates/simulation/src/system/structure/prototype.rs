@@ -82,8 +82,8 @@ pub enum Outcome {
     Fallback(Box<super::fallback::Fallback>),
 }
 
-/// Every generated body gets a result: layered when supported, else the
-/// explicitly labelled fallback structure. Never a legacy substitution.
+/// Headless route diagnostic: layered when supported, else the explicitly
+/// labelled fallback. Generated jobs use `resolve_generated` with their boundary.
 pub fn resolve(
     budget: &Budget,
     environment: &PlanetEnvironment,
@@ -100,9 +100,112 @@ pub fn resolve(
     }
 }
 
-/// Generation's retained budget and surface decision are authoritative. The
-/// reservoir split is not: repartition from immutable supply, without
-/// replaying retention history. No gas escapes here.
+/// Runtime elaboration receives the complete generated boundary, including
+/// positive columns below the environment's presentation threshold.
+pub(crate) fn resolve_generated(
+    budget: &Budget,
+    environment: &PlanetEnvironment,
+    decision: Decision,
+    boundary: &space_shared::LayeredPlanet,
+    controls: Controls,
+) -> Outcome {
+    let solve = || {
+        if decision == Decision::Envelope {
+            let (interior, envelope) = super::envelope::solve_prescribed(
+                budget,
+                environment.equilibrium_temperature_k,
+                super::envelope::intrinsic_k(
+                    budget.retained().total_mass_kg(),
+                    environment.age_gyr,
+                ),
+                boundary.physical.reference_gravity_m_s2,
+                controls,
+            )
+            .map_err(Error::Envelope)?;
+            return Ok(Solved {
+                structure: CoupledStructure::from_envelope(interior, envelope),
+                source: *budget.source(),
+                escaped: *budget.escaped(),
+                protected: protected(budget.source(), budget.retained())?,
+            });
+        }
+        if !matches!(decision, Decision::Thin { .. }) {
+            return solve_decided(budget, environment, decision, controls);
+        }
+        let allocation = |get: fn(&space_shared::MaterialBudget) -> f64| {
+            Inventory::new(&Material::ALL.map(|m| {
+                (
+                    m,
+                    boundary
+                        .physical
+                        .materials
+                        .iter()
+                        .find(|a| a.material == m.id())
+                        .map_or(0.0, get),
+                )
+            }))
+            .map_err(Error::Composition)
+        };
+        let gas = allocation(|m| m.gas_kg)?;
+        let frost = allocation(|m| {
+            if m.material == Material::Water.id() {
+                0.0
+            } else {
+                m.condensed_kg
+            }
+        })?;
+        let host = allocation(|m| {
+            m.interior_kg
+                + if m.material == Material::Water.id() {
+                    m.condensed_kg
+                } else {
+                    0.0
+                }
+        })?;
+        let protected = Inventory::new(&Material::ALL.map(|m| {
+            (
+                m,
+                if matches!(m, Material::Metal | Material::Silicate | Material::Water) {
+                    0.0
+                } else {
+                    host.mass_kg(m)
+                },
+            )
+        }))
+        .map_err(Error::Composition)?;
+        let structure = coupled::prescribed::solve(
+            &coupled::prescribed::Boundary {
+                host,
+                frost,
+                gas,
+                temperature_k: boundary.surface_temperature_k,
+                pressure_pa: boundary.surface_pressure_pa,
+                condensed_radius_m: boundary.physical.condensed_radius_m,
+                surface_radius_m: boundary.physical.reference_radius_m,
+            },
+            &protected,
+            controls,
+        )?;
+        Ok(Solved {
+            structure,
+            source: *budget.source(),
+            escaped: *budget.escaped(),
+            protected,
+        })
+    };
+    match solve() {
+        Ok(solved) => Outcome::Layered(Box::new(solved)),
+        Err(reason) => Outcome::Fallback(Box::new(super::fallback::solve(
+            budget,
+            environment,
+            reason,
+        ))),
+    }
+}
+
+/// Standalone route/temperature diagnostic: repartition immutable retained
+/// supply without replaying retention or escaping gas. This deliberately has
+/// no generated boundary; it is not the runtime refinement entry point.
 pub fn solve_decided(
     budget: &Budget,
     environment: &PlanetEnvironment,
