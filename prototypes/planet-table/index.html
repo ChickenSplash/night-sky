@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Night Sky · A planet, without the wait</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js" defer></script>
+  <script src="lesson.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><a href="#" id="home">NIGHT SKY <span>/ FIELD NOTES 01</span></a><span class="tag">AN ANIMATED EXPLANATION</span></header>
+    <div class="player">
+      <svg id="stage" viewBox="0 0 1600 900" role="img" aria-label="Animated explanation of multidimensional planet structure tables"></svg>
+      <div id="load-error" hidden>Animation library could not load. Connect to the internet and reload.</div>
+    </div>
+    <div class="transport">
+      <button id="play" aria-label="Play">▶ Play</button>
+      <button id="restart" aria-label="Restart">↺</button>
+      <output id="clock">0:00 / 2:40</output>
+      <input id="seek" aria-label="Animation position" type="range" min="0" max="160" value="0" step="0.01">
+      <select id="speed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      <button id="fullscreen" aria-label="Fullscreen">⛶</button>
+    </div>
+    <nav id="chapters" aria-label="Chapters"></nav>
+    <section class="notes"><div><span class="eyebrow">THE IDEA</span><p>Do the expensive physics once.<br>Blend the stored answers when a planet is generated.</p></div><div><span class="eyebrow">HOW TO WATCH</span><p>Space to play or pause · ← / → to skip 5 seconds.<br>Click a chapter or scrub to inspect any frame. No audio track.</p></div><div><span class="eyebrow">SCOPE</span><p>A conceptual film with one real-data example.<br>Current behaviour and future goals are labelled separately.</p></div></section>
+  </main>
+</body>
+</html>
