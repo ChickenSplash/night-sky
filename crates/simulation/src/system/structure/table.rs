@@ -11,13 +11,13 @@ mod build;
 #[cfg(test)]
 mod tests;
 
-pub const MODEL_ID: &str = "layered_structure_table_v2";
+pub const MODEL_ID: &str = "layered_structure_table_v3";
 
 static BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/resources/structure-table.bin"
 ));
-const MAGIC: &[u8; 8] = b"NSSTR001";
+const MAGIC: &[u8; 8] = b"NSSTR002";
 
 /// Condensed bodies: the dry and water solvers' mass domain.
 pub(crate) const CONDENSED_MASS_EARTH: [f64; 2] = [1e-4, 20.0];
@@ -26,6 +26,23 @@ const CONTINUATION_EXPONENT: f64 = 0.2;
 /// Water is tabulated up to the liquid model's ceiling. Hotter condensed
 /// water takes this bound and is labelled.
 pub(crate) const MAX_WATER_TEMPERATURE_K: f64 = 623.15;
+/// Cores under an envelope reach the envelope solver's whole mass domain.
+pub(crate) const CORE_MASS_EARTH: [f64; 2] = [1e-4, 1200.0];
+/// Load on a core's surface from the gas above it. The first knot is the
+/// envelope solver's own outer boundary: a core under no more than a trace.
+pub(crate) const CORE_LOADS_PA: [f64; 15] = [
+    1e3, 1e7, 1e8, 3e8, 1e9, 3e9, 1e10, 3e10, 1e11, 3e11, 1e12, 3e12, 1e13, 1e14, 1e15,
+];
+/// A core of another radius than the reference one carries the same gas at
+/// another base pressure: as radius to the minus fourth under thin gas (its
+/// weight over the core's area), falling to the minus first as the gas
+/// becomes the planet. Fitted to the solver, like the next two.
+const BASE_PRESSURE_EXPONENTS: [f64; 2] = [4.0, 1.0];
+/// Thin gas over a larger core of the same mass is also thicker, for its
+/// lower gravity: as this power of the core radius, below the first H/He
+/// share. Above the second the thickness is the reference core's.
+const THIN_THICKNESS_EXPONENT: f64 = 0.86;
+const THIN_FRACTIONS: [f64; 2] = [0.002, 0.05];
 /// Envelopes: the envelope solver's total-mass domain.
 pub(crate) const ENVELOPE_MASS_EARTH: [f64; 2] = [0.05, 1200.0];
 /// Metal share of the reference core every envelope cell is solved over.
@@ -110,11 +127,16 @@ impl Grid {
     }
 
     /// Condensed mass, metal share of the refractory and water share of a
-    /// core under an envelope. The last axis is unused.
+    /// core under an envelope, and the logarithm of the load on its surface.
     pub fn core() -> Self {
-        let [mass, metal, water, _] = Self::condensed().knots;
+        let [_, metal, water, _] = Self::condensed().knots;
         Self {
-            knots: [mass, metal, water, vec![0.0]],
+            knots: [
+                uniform(CORE_MASS_EARTH[0].ln(), CORE_MASS_EARTH[1].ln(), 55),
+                metal,
+                water,
+                CORE_LOADS_PA.map(f64::ln).to_vec(),
+            ],
         }
     }
 
@@ -230,6 +252,7 @@ pub(crate) struct CondensedCell {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct CoreCell {
     pub ln_radius_m: f32,
+    pub inertia_factor: f32,
     pub filled: bool,
 }
 
@@ -240,6 +263,11 @@ pub(crate) struct CoreCell {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct EnvelopeCell {
     pub compactness: f32,
+    /// Logarithm of the pressure where the gas meets the core.
+    pub ln_base_pa: f32,
+    /// The gas's moment of inertia over its mass and the reference radius
+    /// squared.
+    pub gas_inertia_factor: f32,
     pub filled: bool,
 }
 
@@ -262,11 +290,25 @@ pub struct Condensed {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Core {
+    pub radius_m: f64,
+    pub inertia_factor: f64,
+    pub approximate: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Envelope {
-    /// The core under the gas.
+    /// The core under the gas, compressed by its weight.
     pub core_radius_m: f64,
+    /// That core's moment of inertia over its mass and radius squared.
+    pub core_inertia_factor: f64,
     /// Gas between that core and the one-bar level.
     pub thickness_m: f64,
+    /// The gas's moment of inertia over its mass and the one-bar radius
+    /// squared.
+    pub gas_inertia_factor: f64,
+    /// Pressure where the gas meets the core.
+    pub base_pressure_pa: f64,
     pub approximate: bool,
 }
 
@@ -311,9 +353,12 @@ impl Table {
         }
         for cell in &self.envelope {
             out.extend(cell.compactness.to_le_bytes());
+            out.extend(cell.ln_base_pa.to_le_bytes());
+            out.extend(cell.gas_inertia_factor.to_le_bytes());
         }
         for cell in &self.core {
             out.extend(cell.ln_radius_m.to_le_bytes());
+            out.extend(cell.inertia_factor.to_le_bytes());
         }
         let flags = self
             .condensed
@@ -335,7 +380,7 @@ impl Table {
         let (condensed_grid, envelope_grid, core_grid) =
             (Grid::condensed(), Grid::envelope(), Grid::core());
         let (c, e, k) = (condensed_grid.len(), envelope_grid.len(), core_grid.len());
-        let flags = 16 + 8 * c + 4 * e + 4 * k;
+        let flags = 16 + 8 * c + 12 * e + 8 * k;
         if data.len() != flags + (c + e + k).div_ceil(8) + 8
             || &data[..8] != MAGIC
             || data[8..16] != grid_hash().to_le_bytes()
@@ -354,23 +399,31 @@ impl Table {
             .collect();
         let envelope: Vec<_> = (0..e)
             .map(|i| EnvelopeCell {
-                compactness: number(16 + 8 * c + 4 * i),
+                compactness: number(16 + 8 * c + 12 * i),
+                ln_base_pa: number(20 + 8 * c + 12 * i),
+                gas_inertia_factor: number(24 + 8 * c + 12 * i),
                 filled: filled(c + i),
             })
             .collect();
         let core: Vec<_> = (0..k)
             .map(|i| CoreCell {
-                ln_radius_m: number(16 + 8 * c + 4 * e + 4 * i),
+                ln_radius_m: number(16 + 8 * c + 12 * e + 8 * i),
+                inertia_factor: number(20 + 8 * c + 12 * e + 8 * i),
                 filled: filled(c + e + i),
             })
             .collect();
         (condensed
             .iter()
             .all(|c| c.ln_radius_m.is_finite() && c.inertia_factor > 0.0)
-            && envelope
+            && envelope.iter().all(|c| {
+                c.compactness.is_finite()
+                    && c.compactness > 0.0
+                    && c.ln_base_pa.is_finite()
+                    && c.gas_inertia_factor > 0.0
+            })
+            && core
                 .iter()
-                .all(|c| c.compactness.is_finite() && c.compactness > 0.0)
-            && core.iter().all(|c| c.ln_radius_m.is_finite()))
+                .all(|c| c.ln_radius_m.is_finite() && c.inertia_factor > 0.0))
         .then_some(Self {
             condensed_grid,
             envelope_grid,
@@ -429,29 +482,36 @@ impl Table {
         }
     }
 
-    /// Radius of a condensed body under an H/He envelope, loaded by no more
-    /// than a trace of gas. Same continuations as `condensed`.
-    pub fn core(&self, mass_kg: f64, metal_share: f64, water_share: f64) -> (f64, bool) {
+    /// A condensed body under an H/He envelope whose gas presses on it with
+    /// `load_pa`. Same mass continuations as `condensed`, past this grid's
+    /// own bounds.
+    pub fn core(&self, mass_kg: f64, metal_share: f64, water_share: f64, load_pa: f64) -> Core {
         if mass_kg <= 0.0 {
-            return (0.0, false);
+            return Core {
+                radius_m: 0.0,
+                inertia_factor: 0.4,
+                approximate: false,
+            };
         }
         let mass = mass_kg / EARTH_MASS_KG;
-        let [low, high] = CONDENSED_MASS_EARTH;
+        let [low, high] = CORE_MASS_EARTH;
         let bounded = mass.clamp(low, high);
         let point = [
             bounded.ln(),
             metal_share.clamp(0.0, 1.0),
             water_share.clamp(0.0, 1.0),
-            0.0,
+            load_pa.max(CORE_LOADS_PA[0]).ln(),
         ];
         let mut ln_radius = 0.0;
-        let mut approximate = bounded != mass;
+        let mut inertia_factor = 0.0;
+        let mut approximate = bounded != mass || load_pa > CORE_LOADS_PA[CORE_LOADS_PA.len() - 1];
         for (index, weight) in self.core_grid.corners(point) {
             if weight == 0.0 {
                 continue;
             }
             let cell = &self.core[index];
             ln_radius += weight * f64::from(cell.ln_radius_m);
+            inertia_factor += weight * f64::from(cell.inertia_factor);
             approximate |= cell.filled;
         }
         let exponent = if mass < low {
@@ -459,15 +519,17 @@ impl Table {
         } else {
             CONTINUATION_EXPONENT
         };
-        (
-            ln_radius.exp() * (mass / bounded).powf(exponent),
+        Core {
+            radius_m: ln_radius.exp() * (mass / bounded).powf(exponent),
+            inertia_factor,
             approximate,
-        )
+        }
     }
 
-    /// An H/He envelope's core and the gas above it up to one bar. The gas
-    /// thickness is the reference core's, which a deep envelope barely
-    /// changes with the core beneath it; the core is this body's own.
+    /// An H/He envelope's core and the gas above it up to one bar. The cell
+    /// is the layered solve over the reference core; this body's own core
+    /// replaces that one under the same load, so a compressible core shrinks
+    /// under deep gas as the solver has it.
     pub fn envelope(
         &self,
         mass_kg: f64,
@@ -484,6 +546,8 @@ impl Table {
             intrinsic_k,
         ];
         let mut compactness = 0.0;
+        let mut ln_base = 0.0;
+        let mut gas_inertia_factor = 0.0;
         let mut approximate = point
             .iter()
             .zip(&self.envelope_grid.knots)
@@ -494,6 +558,8 @@ impl Table {
             }
             let cell = &self.envelope[index];
             compactness += weight * f64::from(cell.compactness);
+            ln_base += weight * f64::from(cell.ln_base_pa);
+            gas_inertia_factor += weight * f64::from(cell.gas_inertia_factor);
             approximate |= cell.filled;
         }
         // The reference core is the one the cell was solved over, so it takes
@@ -502,17 +568,48 @@ impl Table {
             let knots = &self.envelope_grid.knots[axis];
             point[axis].clamp(knots[0], knots[knots.len() - 1]).exp()
         });
-        let (reference, _) = self.core(
-            mass * (1.0 - fraction) * EARTH_MASS_KG,
-            REFERENCE_CORE_METAL,
-            0.0,
-        );
-        let (core_radius_m, filled) =
-            self.core(mass_kg * (1.0 - light_fraction), metal_share, water_share);
+        let reference_kg = mass * (1.0 - fraction) * EARTH_MASS_KG;
+        let load_pa = ln_base.exp();
+        // Compactness is stored against the unloaded reference core.
+        let one_bar = self
+            .core(reference_kg, REFERENCE_CORE_METAL, 0.0, 0.0)
+            .radius_m
+            / compactness;
+        let reference = self.core(reference_kg, REFERENCE_CORE_METAL, 0.0, load_pa);
+        let own = |load_pa: f64| {
+            self.core(
+                mass_kg * (1.0 - light_fraction),
+                metal_share,
+                water_share,
+                load_pa,
+            )
+        };
+        let gas = light_fraction.clamp(0.0, 1.0);
+        let [thin, deep] = BASE_PRESSURE_EXPONENTS;
+        let exponent = thin - (thin - deep) * gas.powf(1.5);
+        let mut base_pressure_pa = load_pa;
+        let mut core = own(load_pa);
+        let mut wider = 1.0;
+        let thickness = (one_bar - reference.radius_m).max(0.0);
+        if reference.radius_m > 0.0 && core.radius_m > 0.0 {
+            // The load depends on the radius it compresses: a few rounds
+            // settle it far below the table's precision.
+            for _ in 0..4 {
+                base_pressure_pa = load_pa * (reference.radius_m / core.radius_m).powf(exponent);
+                core = own(base_pressure_pa);
+            }
+            let [low, high] = THIN_FRACTIONS.map(f64::ln);
+            let t = ((gas.max(f64::MIN_POSITIVE).ln() - low) / (high - low)).clamp(0.0, 1.0);
+            let fade = 1.0 - t * t * (3.0 - 2.0 * t);
+            wider = (core.radius_m / reference.radius_m).powf(THIN_THICKNESS_EXPONENT * fade);
+        }
         Envelope {
-            core_radius_m,
-            thickness_m: (reference / compactness - reference).max(0.0),
-            approximate: approximate || filled,
+            core_radius_m: core.radius_m,
+            core_inertia_factor: core.inertia_factor,
+            thickness_m: thickness * wider,
+            gas_inertia_factor,
+            base_pressure_pa,
+            approximate: approximate || core.approximate,
         }
     }
 }

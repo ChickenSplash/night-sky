@@ -103,6 +103,9 @@ pub struct Fallback {
     pub surface_temperature_k: f64,
     pub surface_pressure_pa: f64,
     pub inertia_kg_m2: f64,
+    /// Inertia factors of the core and of the gas under a tabulated H/He
+    /// envelope, each over its own mass and outer radius squared.
+    pub envelope_inertia: Option<[f64; 2]>,
     /// Present only when the synchronous surface decision set the temperature.
     pub optical_depth: Option<f64>,
     /// Subset of `escaped` the surface decision stripped from an unbound column.
@@ -115,6 +118,20 @@ pub struct Fallback {
 impl Fallback {
     pub fn mass_kg(&self) -> f64 {
         self.retained.total_mass_kg()
+    }
+
+    /// Spin shape follows inertia, so it must not move when the layers
+    /// arrive: a tabulated envelope takes the layered solver's own, core and
+    /// gas apart, in place of the display layers' uniform one.
+    fn tabulated_envelope_inertia_kg_m2(&self) -> Option<f64> {
+        let [core, gas] = self.envelope_inertia?;
+        let one_bar = self.one_bar_radius_m?;
+        let shell = self.regions.iter().find(|r| r.kind == Kind::Envelope)?;
+        let gas_kg = shell.inventory.total_mass_kg();
+        // Gas that barely reaches one bar is tabulated against a radius it
+        // extends far beyond. No shell exceeds a thin one at its own top.
+        let gas = (gas * one_bar.powi(2)).min(2.0 / 3.0 * shell.outer_radius_m.powi(2));
+        Some(core * (self.mass_kg() - gas_kg) * self.condensed_radius_m.powi(2) + gas * gas_kg)
     }
 
     pub fn surface(&self) -> &'static str {
@@ -212,6 +229,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
     };
     let mut radius_m = condensed_radius_m;
     let mut one_bar_radius_m = None;
+    let mut envelope_inertia = None;
     if let Some(gas) = gas {
         let one_bar = tabulated_one_bar_m(
             mass_kg,
@@ -222,7 +240,8 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
             age,
             &mut clamped,
         )
-        .map(|(core, one_bar)| {
+        .map(|(core, one_bar, factors)| {
+            envelope_inertia = Some(factors);
             notes.push(REFERENCE_CORE_NOTE);
             let scale = if condensed_radius_m > 0.0 {
                 core / condensed_radius_m
@@ -308,7 +327,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
             .map_or(0.0, |r| r.inner_pressure_pa),
     };
 
-    Fallback {
+    let mut fallback = Fallback {
         reason,
         source: *budget.source(),
         retained,
@@ -321,11 +340,16 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         surface_temperature_k,
         surface_pressure_pa,
         inertia_kg_m2,
+        envelope_inertia,
         optical_depth: None,
         blowoff: Inventory::default(),
         extrapolated,
         notes,
+    };
+    if let Some(inertia) = fallback.tabulated_envelope_inertia_kg_m2() {
+        fallback.inertia_kg_m2 = inertia;
     }
+    fallback
 }
 
 /// The envelope's prescribed profile at one bar, over this floored
@@ -345,8 +369,9 @@ pub(crate) fn one_bar_temperature_k(
     .unwrap_or(equilibrium_k)
 }
 
-/// One-bar radius of the retained H/He and the condensed radius beneath it,
-/// from the layered envelope table. None when the H/He cannot hold one bar
+/// One-bar radius of the retained H/He, the condensed radius beneath it and
+/// the inertia factors of that core and of the gas, from the layered envelope
+/// table. None when the H/He cannot hold one bar
 /// above the bare condensed boundary.
 ///
 /// Under an envelope the layered solver compresses water by pressure alone, so
@@ -362,7 +387,7 @@ fn tabulated_one_bar_m(
     equilibrium_k: f64,
     age_gyr: f64,
     approximate: &mut bool,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64, [f64; 2])> {
     // A necessary thin-column supply check, not an estimate of the entire
     // giant envelope.
     let support_radius = (GRAVITATIONAL_CONSTANT * mass_kg * h_he_kg
@@ -393,6 +418,7 @@ fn tabulated_one_bar_m(
     Some((
         core,
         core + thickness / (1.0 + (thickness / capacity).powi(4)).powf(0.25),
+        [envelope.core_inertia_factor, envelope.gas_inertia_factor],
     ))
 }
 

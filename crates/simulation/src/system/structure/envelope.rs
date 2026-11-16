@@ -200,6 +200,99 @@ pub fn solve(
 
 type Density<'a> = &'a dyn Fn(f64, f64, f64) -> Result<f64, hhe::Error>;
 
+/// Metal, rock and water under an envelope: cold fits to their published
+/// limit, and water compressed by pressure alone.
+fn heavy_density(
+    m: Material,
+    p: f64,
+    side: radial::DensitySide,
+    _: &mut dry::Work,
+    _: usize,
+) -> Result<f64, SolveError> {
+    if m == Material::Water {
+        // Separate shallow and deep barotropes, never phase/thermal EOS.
+        // Honour the one-sided branch at the located model boundary.
+        let shallow = match side {
+            radial::DensitySide::Branch(i) => i > 0,
+            radial::DensitySide::Equilibrium => p < loaded::BOUNDARY_PA,
+        };
+        if shallow {
+            return loaded::density_kg_m3(p)
+                .ok_or(SolveError::InvalidInput("shallow water pressure"));
+        }
+        if !(0.0..=cold::FIT_MAX_PRESSURE_PA).contains(&p) {
+            return Err(SolveError::InvalidInput("heavy water pressure"));
+        }
+        Ok(1460.0 + 0.00311 * p.powf(0.513))
+    } else {
+        cold::fit_density_kg_m3(m, p).map_err(SolveError::Eos)
+    }
+}
+
+fn heavy_policy(outer_pressure_pa: f64) -> radial::Policy {
+    radial::Policy {
+        pressure_floor_pa: outer_pressure_pa,
+        boundary_tolerance_pa: Some(PRESSURE_TOLERANCE_PA),
+        interfaces: vec![radial::PressureInterface {
+            material: Material::Water,
+            pressure_pa: loaded::BOUNDARY_PA,
+        }],
+        ..Default::default()
+    }
+}
+
+/// Radius and inertia factor of the heavy layers alone under a prescribed
+/// surface load, for the structure table: the same core model `solve` fits a
+/// gas shell to, without the gas.
+#[cfg(test)]
+pub(crate) fn loaded_core(
+    heavy: &Inventory,
+    load_pa: f64,
+    controls: dry::Controls,
+) -> Result<(f64, f64), Error> {
+    let mut solver = radial::Solver::new(
+        heavy,
+        load_pa,
+        controls,
+        &heavy_density,
+        heavy_policy(load_pa),
+    );
+    let ceiling = cold::FIT_MAX_PRESSURE_PA;
+    let mut low = load_pa;
+    let mut high = (load_pa + solver.pressure_scale()).min(ceiling);
+    let mut found = loop {
+        if let Some(trial) = solver.trial(high).map_err(Error::Radial)? {
+            break trial;
+        }
+        if high == ceiling {
+            return Err(Error::Radial(SolveError::Unbracketed {
+                maximum_central_pressure_pa: ceiling,
+            }));
+        }
+        low = high;
+        high = (load_pa + 2.0 * (high - load_pa)).min(ceiling);
+    };
+    // Bisect to the load, or to the last representable central pressure: the
+    // radius is then exact to far below the table's precision either way.
+    let tolerance = PRESSURE_TOLERANCE_PA.max(1e-7 * load_pa);
+    for _ in 0..200 {
+        let surface = found.regions.last().unwrap().outer();
+        let mid = 0.5 * (low + high);
+        if surface.pressure_pa - load_pa <= tolerance || mid <= low || mid >= high {
+            break;
+        }
+        match solver.trial(mid).map_err(Error::Radial)? {
+            Some(trial) => (high, found) = (mid, trial),
+            None => low = mid,
+        }
+    }
+    let radius = found.regions.last().unwrap().outer().radius_m;
+    Ok((
+        radius,
+        found.inertia_kg_m2 / (heavy.total_mass_kg() * radius.powi(2)),
+    ))
+}
+
 fn solve_with_density(
     retained: &Inventory,
     protected: &Inventory,
@@ -267,26 +360,6 @@ fn solve_with_density(
     Thermal::new(equilibrium_k.max(20.0), intrinsic_k, 10.0)?;
     let heavy_parcels =
         Inventory::new(&Material::ALL.map(|m| (m, host.mass_kg(m) * scale))).unwrap();
-    let heavy_density = |m, p: f64, side, _: &mut dry::Work, _| {
-        if m == Material::Water {
-            // Separate shallow and deep barotropes, never phase/thermal EOS.
-            // Honour the one-sided branch at the located model boundary.
-            let shallow = match side {
-                radial::DensitySide::Branch(i) => i > 0,
-                radial::DensitySide::Equilibrium => p < loaded::BOUNDARY_PA,
-            };
-            if shallow {
-                return loaded::density_kg_m3(p)
-                    .ok_or(SolveError::InvalidInput("shallow water pressure"));
-            }
-            if !(0.0..=cold::FIT_MAX_PRESSURE_PA).contains(&p) {
-                return Err(SolveError::InvalidInput("heavy water pressure"));
-            }
-            Ok(1460.0 + 0.00311 * p.powf(0.513))
-        } else {
-            cold::fit_density_kg_m3(m, p).map_err(SolveError::Eos)
-        }
-    };
     let radial_controls = dry::Controls {
         max_eos_evaluations: controls
             .radial
@@ -302,15 +375,7 @@ fn solve_with_density(
         OUTER_PRESSURE_PA,
         radial_controls,
         &heavy_density,
-        radial::Policy {
-            pressure_floor_pa: OUTER_PRESSURE_PA,
-            boundary_tolerance_pa: Some(PRESSURE_TOLERANCE_PA),
-            interfaces: vec![radial::PressureInterface {
-                material: Material::Water,
-                pressure_pa: loaded::BOUNDARY_PA,
-            }],
-            ..Default::default()
-        },
+        heavy_policy(OUTER_PRESSURE_PA),
     );
     let carrier = shell::Gas {
         eos,

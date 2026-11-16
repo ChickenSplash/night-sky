@@ -102,7 +102,7 @@ retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
 prescriptions. The current generation key is
-`generation_physics_v4:structure_table_v2:surface_decision_v1:layered_adoption_v4:NSHHE002-3fe0293c8a340e38`,
+`generation_physics_v4:structure_table_v3:surface_decision_v1:layered_adoption_v4:NSHHE002-3fe0293c8a340e38`,
 covering the [structure table](#structure-table), surface decision, refinement
 adapter and checksum-pinned H/He resource.
 Its availability is process-local and fixed by the table's `OnceLock`: installing
@@ -180,8 +180,10 @@ condensed radius and one-bar level scale together, mean density and gravity
 follow, and mass, pressures and the inertia factor are the solve's own. The
 record says so in its limitations. In the 4,367-planet census none of 3,846
 layered results is installed on a different radius; the stretch is 0.03% at the
-median and at most 0.26% on condensed surfaces, 0.49% and at most 6.6% on
-envelopes. Surface pressure can still move by up to 1% and an envelope's
+median and at most 0.26% on condensed surfaces, 0.24% and at most 6.5% on
+envelopes. The inertia factor, and so the flattening, is the table's on both
+routes: it differs from the solve's by 0.17% at the median and at most 0.8% on
+condensed surfaces, 0.37% and at most 11% on envelopes. Surface pressure can still move by up to 1% and an envelope's
 one-bar temperature by a few kelvin.
 
 The update barrier runs after camera placement and before camera neighbourhood,
@@ -2250,8 +2252,8 @@ the build of the table needs.
 | Grid | Axes (knots) | Value |
 | --- | --- | --- |
 | Condensed | mass 10⁻⁴ to 20 M⊕ (41, log), metal share of the refractory (9), water share (19), water temperature 20 to 623.15 K (21) | ln radius, inertia factor |
-| Core under an envelope | the same mass, metal and water axes | ln radius |
-| Envelope | total mass 0.05 to 1,200 M⊕ (48, log), H/He share 10⁻⁷ to 0.99 (40, dense above 0.9), equilibrium temperature 20 to 2,000 K (17), intrinsic temperature 20 to 200 K (10) | reference core radius over one-bar radius |
+| Core under an envelope | mass 10⁻⁴ to 1,200 M⊕ (55, log), the same metal and water axes, load on its surface 0.01 bar to 10,000 Mbar (15, log) | ln radius, inertia factor |
+| Envelope | total mass 0.05 to 1,200 M⊕ (48, log), H/He share 10⁻⁷ to 0.99 (40, dense above 0.9), equilibrium temperature 20 to 2,000 K (17), intrinsic temperature 20 to 200 K (10) | unloaded reference core radius over one-bar radius, ln pressure where the gas meets the core, the gas's inertia factor |
 
 Lookups are multilinear, and total for any positive mass.
 
@@ -2260,22 +2262,35 @@ Lookups are multilinear, and total for any positive mass.
   through the pressure-melting range; the step from ice to liquid sits between
   the 272 and 274 K knots. Hotter condensed water takes the 623.15 K bound
   (labelled).
-- **Core cells** are the envelope solver's own heavy layers under a trace of
-  gas. They differ from the condensed grid only in water, which the envelope
-  solver compresses by pressure alone.
+- **Core cells** are the envelope solver's own heavy layers under a
+  prescribed load (`envelope::loaded_core`): the same model the gas shell is
+  fitted to, without the gas. They differ from the condensed grid in water,
+  which the envelope solver compresses by pressure alone, and in carrying the
+  weight of the gas. The first load knot is a trace.
 - **Envelope cells** are `envelope::solve` over a reference core (32.5% metal,
   67.5% rock, no water) with 25% helium, as generation draws it. The stored
-  value is the *inverse* radius: a hydrostatic column's is linear in
-  temperature and in the logarithm of its gas mass, where the radius itself
-  diverges, so it interpolates several times better. Intrinsic temperature is
-  an axis in place of age, which enters only through
-  `envelope::intrinsic_k(mass, age)`.
-- **Other cores.** The gas thickness is read for the reference core, and the
-  body's own core radius replaces that core's:
-  `R = R_core(own mix) + [R_one_bar − R_core](reference)`. A deep envelope
-  barely changes thickness with the core beneath it; on the census this
-  additive form leaves a 0.2% median error where scaling by the core radius
-  left up to 19%.
+  radius is the *inverse*: a hydrostatic column's is linear in temperature and
+  in the logarithm of its gas mass, where the radius itself diverges, so it
+  interpolates several times better. Intrinsic temperature is an axis in
+  place of age, which enters only through `envelope::intrinsic_k(mass, age)`.
+  Each cell also keeps the pressure at the base of its gas and the gas's
+  moment of inertia over its own mass and the one-bar radius squared.
+- **Other cores.** The cell is read for the reference core, and the body's
+  own core replaces that one under the same gas:
+  `R = R_one_bar(reference) + R_core(own, P) − R_core(reference, P)`.
+  - `P` is the cell's base pressure, moved to the body's own core: the same
+    gas weighs on a larger core as its radius to the minus fourth when thin,
+    easing to the minus first as the gas becomes the planet
+    (`BASE_PRESSURE_EXPONENTS`).
+  - Under thin gas (H/He share below 0.2% fading out by 5%) the thickness also
+    grows with the core radius to the power 0.86, for the lower gravity.
+  - Both are fits to the solver, not derivations. On a uniform sample of
+    metal and water shares the radius is 0.7% out at the median and 4% at the
+    95th percentile, the tail being cores of more than half water.
+- **Envelope inertia** is composed from the same parts: the core's factor at
+  that load on its mass and radius, plus the gas's on its mass and the
+  one-bar radius. `fallback::prescribed` and `partition::close` both install
+  it in place of the display layers' uniform one.
 - **Refused cells** are filled and flagged, so a lookup that touches one
   reports `approximate`. Condensed and core cells take their line's solved
   neighbours. Envelope cells take the retired closed form
@@ -2290,7 +2305,7 @@ Lookups are multilinear, and total for any positive mass.
 
 Rebuild with `./scripts/prepare-structure-table.sh` whenever structure physics,
 the H/He resource or a grid changes, and commit the resource with the change.
-It runs `prepare_structure_table` (about ten minutes on 10 threads; it uses half the machine's,
+It runs `prepare_structure_table` (nine minutes on 16 threads; it uses half the machine's unless `NS_TABLE_THREADS` says otherwise,
 writing `data/tmp/structure-table.md` and the envelope cells as a TSV) and then
 `structure_table_accuracy`, which compares lookups with fresh solves at 20,000
 points between the knots of each grid:
@@ -2299,9 +2314,17 @@ points between the knots of each grid:
 | --- | ---: | --- |
 | Condensed | 146,318 of 147,231 (99.4%) | 0.03% / 0.11% / 0.20% / 0.82% |
 | Condensed, inertia factor | | 0.15% / 0.44% / 0.73% / 1.5% |
-| Core under an envelope | 7,009 of 7,011 (100.0%) | not sampled separately |
-| Envelope, all cells solved | 212,583 of 326,400 (65.1%) | 0.03% / 0.58% / 2.1% / 9.4% |
-| Envelope, any filled cell | | 0.06% / 23% / 41% / 49% |
+| Core under an envelope | 109,982 of 141,075 (78.0%) | not sampled separately |
+| Envelope, all cells solved | 212,583 of 326,400 (65.1%) | 0.03% / 0.38% / 1.6% / 9.4% |
+| Envelope, inertia factor | | 0.08% / 0.78% / 3.7% / over 100% |
+| Envelope, own core | | 0.73% / 4.2% / 8.1% / 28% |
+| Envelope, own core, inertia factor | | 1.4% / 7.8% / 15% / 60% |
+
+The resource is 6.3 MB. Refused core cells are loads far above what the
+core's own gravity makes (a hundredth of an Earth mass under megabars), which
+no envelope in the grid produces, and a few cores above 200 M⊕. The inertia
+factor's worst case is gas that barely reaches one bar, where its mass is
+too small to matter.
 
 The uniform sample's solved tail is hot bodies of about an Earth mass with a
 trace of gas, which retention rarely leaves. Its filled tail is the unbound
@@ -2325,18 +2348,19 @@ still refuses:
 
 Limits:
 
-- **Core composition is simplified.** The additive form leaves envelope radii
-  0.49% from the layered solve at the median, 3.4% at the 95th percentile and
-  6.6% at worst on the census (70% within 1%, 85% within 2%). The census now
-  includes the giants and cold envelopes the solver used to refuse; on the
-  planets it solved before, the figures were 0.36%, 2.3% and 11%.
+- **Core composition is simplified.** Substituting the body's own core
+  leaves envelope radii 0.24% from the layered solve at the median, 2.3% at
+  the 95th percentile and 6.5% at worst on the census (79% within 1%, 92%
+  within 2%), and the inertia factor 0.37%, 4.0% and 11%. Before the core
+  was tabulated under load the radius figures were 0.49%, 3.4% and 6.6%, and
+  the untabulated inertia 6.2%, 14% and 58%.
 - **Gas composition is not an axis.** A trace of H/He under heavier secondary
   gas is tabulated as pure H/He and comes out up to 7% large.
-- **Giants and cold envelopes are now checked, and are the loosest.** On the
-  census, planets over 25 M⊕ differ by 1.8% at the median and 5.8% at worst,
-  and envelopes under 100 K by 1.3% and 5.8%; warmer envelopes up to 25 M⊕
-  stay near 0.4%. Wet cores under deep gas come out large: the core's own
-  radius is added unloaded.
+- **Wet cores under deep gas are the loosest.** On the census, planets
+  over 25 M⊕ and envelopes under 100 K both differ by 0.9% at the median (3.4%
+  and 6.5% at worst). Cores of more than about a twentieth water under more
+  than a twentieth gas come out 1.5 to 3% large: the gas thickness is still
+  the reference core's.
 - **Hot, young giants are large.** The layered model inflates them, and
   generation now shows it: a 200 M⊕ planet at 1,100 K and 14 Myr is 27 Earth
   radii, where the retired fit gave 11. Beyond the solver's hot limit the

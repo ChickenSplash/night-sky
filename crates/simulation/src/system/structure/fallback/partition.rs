@@ -190,6 +190,9 @@ pub(super) fn close(
             fallback.inertia_kg_m2 += shell.inertia_kg_m2();
         }
     }
+    if let Some(inertia) = fallback.tabulated_envelope_inertia_kg_m2() {
+        fallback.inertia_kg_m2 = inertia;
+    }
     if !fallback.inertia_kg_m2.is_finite() || fallback.inertia_kg_m2 <= 0.0 {
         return Err(invalid());
     }

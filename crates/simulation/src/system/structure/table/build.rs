@@ -39,8 +39,13 @@ const GIANT_HIGH_MASS_EXPONENT: f64 = -0.04;
 const GIANT_BLEND_FRACTION_RANGE: [f64; 2] = [0.1, 0.5];
 
 pub(super) fn parallel<T: Send>(count: usize, work: impl Fn(usize) -> T + Sync) -> Vec<T> {
-    // Half the machine: leave the rest for whoever is using it.
-    let threads = (std::thread::available_parallelism().map_or(1, |n| n.get()) / 2).max(1);
+    // Half the machine unless told otherwise: leave the rest for whoever is
+    // using it.
+    let threads = std::env::var("NS_TABLE_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()) / 2)
+        .max(1);
     let next = AtomicUsize::new(0);
     let mut results: Vec<(usize, T)> = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..threads)
@@ -109,14 +114,27 @@ pub(super) fn solve_condensed(
     })
 }
 
-/// One-bar radius of an H/He envelope on the reference core, or the loaded
-/// condensed boundary where the gas stays below one bar.
+/// What the table keeps of one envelope solve.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Solved {
+    /// One bar, or the loaded condensed boundary where the gas stays below it.
+    pub radius_m: f64,
+    pub core_radius_m: f64,
+    /// Where the gas meets the core.
+    pub base_pa: f64,
+    /// Whole-body moment of inertia over mass and `radius_m` squared.
+    pub inertia_factor: f64,
+    /// The gas's alone, over its own mass and `radius_m` squared.
+    pub gas_inertia_factor: f64,
+}
+
+/// An H/He envelope on the reference core.
 pub(super) fn solve_envelope(
     mass_earth: f64,
     light_fraction: f64,
     equilibrium_k: f64,
     intrinsic_k: f64,
-) -> Result<f64, String> {
+) -> Result<Solved, String> {
     solve_envelope_over(
         mass_earth,
         light_fraction,
@@ -125,11 +143,10 @@ pub(super) fn solve_envelope(
         REFERENCE_CORE_METAL,
         0.0,
     )
-    .map(|(radius, _)| radius)
 }
 
-/// One-bar radius and loaded core radius over a core of this metal share of
-/// its refractory mass and this water share.
+/// An H/He envelope over a core of this metal share of its refractory mass
+/// and this water share.
 pub(super) fn solve_envelope_over(
     mass_earth: f64,
     light_fraction: f64,
@@ -137,7 +154,7 @@ pub(super) fn solve_envelope_over(
     intrinsic_k: f64,
     metal_share: f64,
     water_share: f64,
-) -> Result<(f64, f64), String> {
+) -> Result<Solved, String> {
     let mass = mass_earth * EARTH_MASS_KG;
     let heavy = mass * (1.0 - light_fraction);
     let light = mass * light_fraction;
@@ -158,10 +175,15 @@ pub(super) fn solve_envelope_over(
         coupled::Controls::default(),
     )
     .map(|(interior, gas)| {
-        (
-            gas.one_bar_radius_m().unwrap_or(interior.radius_m()),
-            interior.radius_m(),
-        )
+        let radius_m = gas.one_bar_radius_m().unwrap_or(interior.radius_m());
+        Solved {
+            radius_m,
+            core_radius_m: interior.radius_m(),
+            base_pa: gas.regions()[0].inner().pressure_pa,
+            inertia_factor: gas.inertia_kg_m2 / (mass * radius_m.powi(2)),
+            gas_inertia_factor: (gas.inertia_kg_m2 - interior.inertia_kg_m2())
+                / (light * radius_m.powi(2)),
+        }
     })
     .map_err(|e| {
         let text = format!("{e:?}");
@@ -265,31 +287,17 @@ fn fill(grid: &Grid, solved: &[Option<[f64; 2]>], axes: &[usize]) -> Vec<([f64; 
         .collect()
 }
 
-/// Refused envelope cells take the surrogate, shifted by the mean offset of
-/// their already known neighbours so the table has no step at the edge of
-/// the solved region. The shift fades with distance: far from any solved
-/// cell the surrogate stands on its own calibration.
-fn fill_envelope(grid: &Grid, table: &Table, solved: &[Option<f64>]) -> Vec<EnvelopeCell> {
-    let surrogate: Vec<f64> = (0..grid.len())
-        .map(|index| {
-            let [mass, fraction, equilibrium, intrinsic] = envelope_point(grid, index);
-            let bare = reference_core_radius_m(table, mass, fraction);
-            (bare / surrogate_radius_m(mass, fraction, bare, equilibrium, intrinsic)).ln()
-        })
-        .collect();
-    let mut offset: Vec<Option<f64>> = solved
-        .iter()
-        .zip(&surrogate)
-        .map(|(s, fit)| s.map(|compactness| compactness.ln() - fit))
-        .collect();
+/// Unknown cells take the mean of their already known neighbours, ring by
+/// ring outwards, keeping `fade` of it per ring after the first.
+fn spread(grid: &Grid, mut values: Vec<Option<f64>>, fade: f64) -> Vec<f64> {
     let mut ring = 0;
-    while offset.iter().any(Option::is_none) {
+    while values.iter().any(Option::is_none) {
         ring += 1;
         // The first ring meets the solved cells exactly.
-        let fade = if ring == 1 { 1.0 } else { ANCHOR_FADE };
-        let snapshot = offset.clone();
+        let fade = if ring == 1 { 1.0 } else { fade };
+        let snapshot = values.clone();
         let mut progressed = false;
-        for (index, value) in offset.iter_mut().enumerate() {
+        for (index, value) in values.iter_mut().enumerate() {
             if value.is_some() {
                 continue;
             }
@@ -315,20 +323,79 @@ fn fill_envelope(grid: &Grid, table: &Table, solved: &[Option<f64>]) -> Vec<Enve
                 progressed = true;
             }
         }
-        assert!(
-            progressed,
-            "no solved envelope cell to anchor the surrogate"
-        );
+        assert!(progressed, "no solved envelope cell to anchor a fill");
     }
-    let mut cells: Vec<EnvelopeCell> = solved
-        .iter()
-        .zip(surrogate)
-        .zip(offset)
-        .map(|((s, fit), offset)| EnvelopeCell {
+    values.into_iter().map(Option::unwrap).collect()
+}
+
+/// Refused envelope cells take the surrogate, shifted by the mean offset of
+/// their already known neighbours so the table has no step at the edge of
+/// the solved region. The shift fades with distance: far from any solved
+/// cell the surrogate stands on its own calibration. Base pressure does the
+/// same against the weight of a thin shell, and the gas's inertia factor
+/// takes its neighbours'.
+fn fill_envelope(grid: &Grid, table: &Table, solved: &[Option<Solved>]) -> Vec<EnvelopeCell> {
+    let bare: Vec<f64> = (0..grid.len())
+        .map(|index| {
+            let [mass, fraction, ..] = envelope_point(grid, index);
+            reference_core_radius_m(table, mass, fraction)
+        })
+        .collect();
+    let surrogate: Vec<f64> = (0..grid.len())
+        .map(|index| {
+            let [mass, fraction, equilibrium, intrinsic] = envelope_point(grid, index);
+            (bare[index] / surrogate_radius_m(mass, fraction, bare[index], equilibrium, intrinsic))
+                .ln()
+        })
+        .collect();
+    let thin_shell: Vec<f64> = (0..grid.len())
+        .map(|index| {
+            let [mass, fraction, ..] = envelope_point(grid, index);
+            (crate::units::GRAVITATIONAL_CONSTANT * (mass * EARTH_MASS_KG).powi(2) * fraction
+                / (4.0 * std::f64::consts::PI * bare[index].powi(4)))
+            .ln()
+        })
+        .collect();
+    let offset = spread(
+        grid,
+        (0..grid.len())
+            .map(|i| solved[i].map(|s| (bare[i] / s.radius_m).ln() - surrogate[i]))
+            .collect(),
+        ANCHOR_FADE,
+    );
+    let base_offset = spread(
+        grid,
+        (0..grid.len())
+            .map(|i| solved[i].map(|s| s.base_pa.ln() - thin_shell[i]))
+            .collect(),
+        ANCHOR_FADE,
+    );
+    let gas_inertia = spread(
+        grid,
+        solved
+            .iter()
+            .map(|s| s.map(|s| s.gas_inertia_factor))
+            .collect(),
+        1.0,
+    );
+    let [low, high] = [CORE_LOADS_PA[0], CORE_LOADS_PA[CORE_LOADS_PA.len() - 1]].map(f64::ln);
+    let mut cells: Vec<EnvelopeCell> = (0..grid.len())
+        .map(|index| EnvelopeCell {
             // A surrogate may not claim a body smaller than its bare core, nor
             // one beyond the puffiest the solver represents.
-            compactness: (fit + offset.unwrap()).exp().clamp(MIN_COMPACTNESS, 1.0) as f32,
-            filled: s.is_none(),
+            compactness: match solved[index] {
+                Some(s) => bare[index] / s.radius_m,
+                None => (surrogate[index] + offset[index])
+                    .exp()
+                    .clamp(MIN_COMPACTNESS, 1.0),
+            } as f32,
+            ln_base_pa: match solved[index] {
+                Some(s) => s.base_pa.ln(),
+                None => thin_shell[index] + base_offset[index],
+            }
+            .clamp(low, high) as f32,
+            gas_inertia_factor: gas_inertia[index] as f32,
+            filled: solved[index].is_none(),
         })
         .collect();
     // Heating a body never shrinks it. Walking away from the solved cells
@@ -387,53 +454,44 @@ const MIN_COMPACTNESS: f64 = 0.01;
 /// Share of a neighbour's offset from the surrogate that a refused cell keeps.
 const ANCHOR_FADE: f64 = 0.5;
 
+/// The unloaded reference core: what compactness is stored against.
 pub(super) fn reference_core_radius_m(table: &Table, mass_earth: f64, light_fraction: f64) -> f64 {
     table
         .core(
             mass_earth * (1.0 - light_fraction) * EARTH_MASS_KG,
             REFERENCE_CORE_METAL,
             0.0,
+            0.0,
         )
-        .0
+        .radius_m
 }
 
-/// Loaded by a trace of gas only, at temperatures the envelope solver
-/// supports everywhere. The heavy layers do not depend on either.
+/// Radius in metres and inertia factor of the envelope solver's heavy layers
+/// under this load.
 pub(super) fn solve_core(
     mass_earth: f64,
     metal_share: f64,
     water_share: f64,
-) -> Result<f64, String> {
-    const TRACE: f64 = 1e-6;
-    solve_envelope_over(
-        mass_earth / (1.0 - TRACE),
-        TRACE,
-        300.0,
-        60.0,
-        metal_share,
-        water_share,
-    )
-    .map(|(_, core)| core)
+    load_pa: f64,
+) -> Result<(f64, f64), String> {
+    let mass = mass_earth * EARTH_MASS_KG;
+    let refractory = mass * (1.0 - water_share);
+    let heavy = Inventory::new(&[
+        (Material::Metal, refractory * metal_share),
+        (Material::Silicate, refractory * (1.0 - metal_share)),
+        (Material::Water, mass * water_share),
+    ])
+    .map_err(|e| format!("{e:?}"))?;
+    envelope::loaded_core(&heavy, load_pa, dry::Controls::default()).map_err(|e| {
+        let text = format!("{e:?}");
+        text.split(['{', '[']).next().unwrap().trim().to_owned()
+    })
 }
 
-/// Envelope-grid tuning only: the condensed half of the current resource,
-/// whatever envelope grid it was written with.
+/// The condensed half of the current resource, which no envelope or core
+/// change touches. Only a resource of the current layout and grids.
 fn embedded_condensed() -> Option<Vec<CondensedCell>> {
-    let c = Grid::condensed().len();
-    // Envelope and core cells together: both are four bytes and one flag.
-    let e =
-        (0..10_000_000).find(|e| 16 + 8 * c + 4 * e + (c + e).div_ceil(8) + 8 == BYTES.len())?;
-    let number = |at: usize| f32::from_le_bytes(BYTES[at..at + 4].try_into().unwrap());
-    let flags = 16 + 8 * c + 4 * e;
-    Some(
-        (0..c)
-            .map(|i| CondensedCell {
-                ln_radius_m: number(16 + 8 * i),
-                inertia_factor: number(20 + 8 * i),
-                filled: BYTES[flags + i / 8] >> (i % 8) & 1 == 1,
-            })
-            .collect(),
-    )
+    Table::decode(BYTES).map(|table| table.condensed)
 }
 
 fn tally(report: &mut String, title: &str, outcomes: &[Result<(), String>], seconds: f64) {
@@ -514,15 +572,13 @@ fn prepare_structure_table() {
     let grid = Grid::core();
     let start = Instant::now();
     let solved = parallel(grid.len(), |index| {
-        let at = grid.cell(index);
-        let [mass, metal, water_share, _] = grid.point(at);
-        if water_share == 1.0 && at[1] > 0 {
-            let mut first = at;
-            first[1] = 0;
-            let [mass, metal, water_share, _] = grid.point(first);
-            return solve_core(mass.exp(), metal, water_share);
+        let mut at = grid.cell(index);
+        // Pure water has no refractory mix.
+        if grid.knots[2][at[2]] == 1.0 {
+            at[1] = 0;
         }
-        solve_core(mass.exp(), metal, water_share)
+        let [mass, metal, water_share, load] = grid.point(at);
+        solve_core(mass.exp(), metal, water_share, load.exp())
     });
     let outcomes: Vec<_> = solved.iter().map(|s| s.clone().map(|_| ())).collect();
     tally(
@@ -533,12 +589,14 @@ fn prepare_structure_table() {
     );
     let values: Vec<_> = solved
         .into_iter()
-        .map(|s| s.ok().map(|radius| [radius.ln(), 0.0]))
+        .map(|s| s.ok().map(|(radius, inertia)| [radius.ln(), inertia]))
         .collect();
-    let core: Vec<_> = fill(&grid, &values, &[0, 2, 1])
+    // Load first: a refused cell is nearest its own body under another load.
+    let core: Vec<_> = fill(&grid, &values, &[3, 0, 2, 1])
         .into_iter()
         .map(|(v, filled)| CoreCell {
             ln_radius_m: v[0] as f32,
+            inertia_factor: v[1] as f32,
             filled,
         })
         .collect();
@@ -549,6 +607,8 @@ fn prepare_structure_table() {
         vec![
             EnvelopeCell {
                 compactness: 1.0,
+                ln_base_pa: 0.0,
+                gas_inertia_factor: 1.0,
                 filled: true,
             };
             grid.len()
@@ -559,7 +619,6 @@ fn prepare_structure_table() {
     let solved = parallel(grid.len(), |index| {
         let [mass, fraction, equilibrium, intrinsic] = envelope_point(&grid, index);
         solve_envelope(mass, fraction, equilibrium, intrinsic)
-            .map(|radius| reference_core_radius_m(&partial, mass, fraction) / radius)
     });
     let outcomes: Vec<_> = solved.iter().map(|s| s.clone().map(|_| ())).collect();
     tally(
@@ -569,15 +628,16 @@ fn prepare_structure_table() {
         start.elapsed().as_secs_f64(),
     );
     let mut cells =
-        "mass_earth\tlight_fraction\tequilibrium_k\tintrinsic_k\tcompactness\trefusal\n".to_owned();
+        "mass_earth\tlight_fraction\tequilibrium_k\tintrinsic_k\tradius_m\tbase_pa\tinertia_factor\trefusal\n".to_owned();
     for (index, outcome) in solved.iter().enumerate() {
         let [mass, fraction, equilibrium, intrinsic] = envelope_point(&grid, index);
         let _ = writeln!(
             cells,
             "{mass:.6e}\t{fraction:.6e}\t{equilibrium:.5e}\t{intrinsic:.5e}\t{}\t{}",
-            outcome
-                .as_ref()
-                .map_or(String::new(), |v| format!("{v:.6e}")),
+            outcome.as_ref().map_or("\t\t".to_owned(), |v| format!(
+                "{:.6e}\t{:.4e}\t{:.5}",
+                v.radius_m, v.base_pa, v.inertia_factor
+            )),
             outcome.as_ref().err().map_or("", |e| e.as_str()),
         );
     }

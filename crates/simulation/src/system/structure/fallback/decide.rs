@@ -197,6 +197,7 @@ pub fn decide(
         surface_temperature_k: state.temperature_k,
         surface_pressure_pa: 0.0,
         inertia_kg_m2: 0.0,
+        envelope_inertia: None,
         optical_depth: Some(state.optical_depth),
         blowoff: stripped.escaped,
         extrapolated,
