@@ -2,7 +2,8 @@
 
 ## Status and goal
 
-**G1 and G2 complete, 14 November 2026. G3 and G4 are proposed, not implemented.**
+**G1 and G2 complete, 14 November 2026. G3 steps 1 to 3 complete, 16 November
+2026; its steps 4 and 5 are open. G4 is proposed, not implemented.**
 Current behaviour
 is described in [planetary systems](../simulation/planetary-systems.md) and the
 [composition guide](../simulation/planet-composition.md).
@@ -330,7 +331,77 @@ as very extended trace atmospheres.
 
 Acceptance: agreement test passes with the table in place; search and the
 inspector report the same bulk facts before and after a visit and across a
-restart; fallback fit code is removed.
+restart; fallback fit code is removed. **Met for condensed surfaces. Envelopes
+miss the 1% radius target** (see the result).
+
+### G3 result, 16 November 2026
+
+Steps 1 to 3 are done. Current behaviour is in the
+[composition guide](../simulation/planet-composition.md#structure-table). Same
+399 systems and 4,367 planets; evidence in `data/tmp/g3-table/`.
+
+| Measure | After G2 | After G3 |
+| --- | ---: | ---: |
+| Radius difference, rock and water, p50 / p95 / max | 1.4% / 8.8% / 11.3% | 0.03% / 0.11% / 0.26% |
+| Radius difference, envelopes, p50 / p95 / max | 3.5% / 31% / 53% | 0.36% / 2.3% / 11% |
+| Envelopes within 1% / 2% | not measured | 79% / 93% |
+| Surface pressure, rock and water, largest factor | 1.6 | 1.01 |
+| Surface kind changed by the layered solve | 1 | 0 |
+| Inertia factor difference, rock and water, max | not measured | 0.8% |
+| Planets whose radius changes on a visit | most | 0 of 3,599 |
+| Synchronous generation, per planet | 0.20 ms | 0.22 ms |
+
+What changed:
+
+- **One embedded table** (`structure/table.rs`, 2.4 MB, built in six minutes by
+  `scripts/prepare-structure-table.sh`): condensed bodies, cores under an
+  envelope, and envelopes. It is compiled in, not a local resource, so
+  generation does not depend on who has the H/He data.
+- **The fits are gone from generation.** `fallback/fits.rs`, the Seager
+  coefficients and their parameters are removed. The envelope closed form
+  survives only in the table build, as the surrogate for refused cells.
+- **Retention** solves H/He survival on the tabulated radius, through the same
+  fallback.
+- **A visit keeps the radius.** The layered profile is stretched onto
+  generation's radius at refinement. Decision of 16 November: rescale, do not
+  leave the profile short or long of the displayed radius.
+- **Cores under envelopes are simplified**, by decision of the same day: no
+  core-composition axis. The table holds gas thickness over one reference
+  core, and the body's own core radius is added.
+
+Findings:
+
+- **Rock and water needed a temperature axis for water only.** Dry bodies
+  already agreed with the fit to 0.4%; water was the whole 11%.
+- **Inverse radius is the quantity to tabulate for envelopes.** It is linear
+  in temperature and in the logarithm of gas mass. Tabulating the logarithm of
+  the radius on the same grid left three times the error.
+- **Core composition is not a small effect.** Ignoring it, or scaling by the
+  bare core radius, left envelope radii up to 20% out. Adding the core's own
+  radius to a tabulated thickness is what reaches 0.36%. The remaining error is
+  wet cores above 20 Earth masses and traces of H/He under heavier gas.
+- **The layered model inflates hot young giants**, and the fit had hidden it:
+  one 200 Earth-mass planet at 1,100 K and 14 Myr is 27 Earth radii (11 by the
+  fit). Two population bounds in the tests were raised for this. Farther out
+  the solver stops where such gas is unbound. G4 item 1 should remove those
+  envelopes instead of leaving them large.
+- **Only a third of envelope cells solve**, most of the rest in corners no
+  planet occupies. The real gaps are gas giants (melting screen) and anything
+  colder than about 100 K. Those planets read the anchored surrogate, and
+  nothing checks it.
+
+Still open in G3:
+
+- **Solver coverage of giants and cold envelopes.** New, and the most useful
+  next step: the table is only as wide as the solver.
+- **Envelope inertia** is not tabulated (7% median difference, 58% at worst),
+  so an enveloped planet's flattening can shift on a visit.
+- **Step 4, persistence.** Proposed to drop: a re-solve costs milliseconds and
+  no longer changes any bulk fact. The client's deferral rules are unchanged
+  and can now be simplified, with interactive checking.
+- **Step 5**, whether refusals keep a separate label.
+- Carried from G1 and G2: EOS tabulation, water phase in the synchronous
+  record, and the envelope solver's 1e-5 water exposure at one bar.
 
 ## G4: formation priors and variety
 

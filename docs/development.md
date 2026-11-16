@@ -43,6 +43,7 @@ crates/client/       Bevy client and egui interface
 crates/server/       Axum demo galaxy API
 crates/shared/       Serializable models
 crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generation
+  resources/         Embedded structure table (prepared offline, committed)
   src/lib.rs         Module map and explicit exports of common operations and types
   src/galaxy/        Density model, populations, cells, streaming, neighbours and glow
     stream/index.rs  Compact star cells and Morton-grid spatial queries
@@ -51,9 +52,10 @@ crates/simulation/   Orbital mechanics, clock, galaxy and deterministic generati
     atmosphere.rs    Physical air states, validation and isothermal columns
     atmosphere/      Seeded generation, visible optics and validated wire conversion
     clearance.rs     Navigation clearance: bulge, maintenance-free air height and margins
-    composition.rs   Conserved material inventories, gas/fit adapters and reservoir budgets
+    composition.rs   Conserved material inventories, gas adapters and reservoir budgets
     materials.rs     Shared identities and bounded refractory/water/H/He/molecular density models
     structure.rs     Labelled fallback and headless dry/water/coupled/envelope solvers
+    structure/table.rs Embedded table of layered radii the fallback reads; table/build.rs prepares it
     physical.rs      Validated composition/structure wire conversion for both system paths
     generation.rs    Natural planetary formation, independent of list/task placement
     overlay.rs       Optional task slots, pages and assigned-star placement
@@ -183,6 +185,14 @@ held sources into the optional runtime envelope-density resource. No dataset is
 downloaded or bundled. Missing data leaves envelope routes explicitly
 unsupported; normal project tests still run without it. See the
 [local resource setup](simulation/planet-composition.md#local-data-not-a-redistributed-table).
+`scripts/prepare-structure-table.sh` rebuilds
+`crates/simulation/resources/structure-table.bin`, the embedded table of layered
+radii that generation reads, and then reports its interpolation error. It needs
+that local H/He resource and several minutes on half the machine's threads, and
+is not part of the standard check: rerun it when structure physics or a table
+grid changes and commit the resource with the change. A stale resource stops
+generation with a message naming the script. See the
+[structure table](simulation/planet-composition.md#structure-table).
 Likewise `scripts/audit-secondary-reference.py` checks pinned secondary-fluid
 coefficient files at supplied density/temperature states, independently checking
 pressure and same-temperature Gibbs equality without installing CoolProp. It is

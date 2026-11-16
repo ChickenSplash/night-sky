@@ -102,8 +102,9 @@ retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
 prescriptions. The current generation key is
-`generation_physics_v3:surface_decision_v1:layered_adoption_v3:NSHHE001-b4e7a79ecc35d846`,
-covering the surface decision, refinement adapter and checksum-pinned H/He resource.
+`generation_physics_v4:structure_table_v1:surface_decision_v1:layered_adoption_v4:NSHHE001-b4e7a79ecc35d846`,
+covering the [structure table](#structure-table), surface decision, refinement
+adapter and checksum-pinned H/He resource.
 Its availability is process-local and fixed by the table's `OnceLock`: installing
 or changing it requires restarting the process, not reusing an old refusal.
 Background jobs capture the original result and sequence before dispatch;
@@ -171,10 +172,21 @@ forcing must still match, and every loaded copy must pass refinement validation.
 Stale work is discarded, never renumbered. Changed input/model identities restart
 preparation with a new cancellation epoch.
 
+**The radius does not change.** Generation's radius is the planet's. The
+layered solve lands within the [structure table](#structure-table)'s
+interpolation of it, and `physical::layered::rescale` stretches the whole
+profile by that ratio before the refinement is validated: layer boundaries,
+condensed radius and one-bar level scale together, mean density and gravity
+follow, and mass, pressures and the inertia factor are the solve's own. The
+record says so in its limitations. In the 4,367-planet census none of 3,599
+layered results is installed on a different radius; the stretch is 0.03% at the
+median and at most 0.26% on condensed surfaces, 0.36% and at most 11% on
+envelopes. Surface pressure can still move by up to 1% and an envelope's
+one-bar temperature by a few kelvin.
+
 The update barrier runs after camera placement and before camera neighbourhood,
 inspection and drawing consumers. It publishes at most two planets per frame,
-replacing mass, reference radius, inertia, physical record, atmosphere and result
-as one operation. Safety checks themselves are also limited to two per frame,
+replacing inertia, physical record, atmosphere and result as one operation. Safety checks themselves are also limited to two per frame,
 rotating through the ready queue so a deferred planet cannot starve later ones.
 Identity, tasks/pages, orbital elements and spin phase/period
 stay fixed; shape is recomputed from the new facts with the existing flattening
@@ -212,7 +224,8 @@ results rather than solving them again or reporting their old base as stale.
 Voyage arrival origins/pages stay fixed and its
 gravity/clearance field is rebuilt as a unit. This session registry is not bounded
 by the candidate LRU and is not persisted to disk; a restart begins with fallback
-facts again. Turning refinement off pauses work/publication, not adopted facts.
+facts again. Those are the same mass, radius, surface kind, temperature and
+escape, so only the interior detail is solved again, in milliseconds. Turning refinement off pauses work/publication, not adopted facts.
 
 Search remains deterministic on its synchronous basis: a differing loaded or
 session-retained revision is marked **not revalidated**. It is not silently
@@ -1355,43 +1368,24 @@ Condensation must explicitly transfer the same molecular material to condensates
 
 ## Cold compressed heavy-material radius
 
-This section describes the current **generation** model, not the separate radial
-solver below.
+Generation no longer evaluates the Seager et al. (2007) modified-polytropic
+radius fits or mixes their volumes. Condensed radii come from the
+[structure table](#structure-table), which holds the radial solvers' own
+answers: the cold metal and rock equations of state
+[below](#headless-dry-body-solver) and the water models of the
+[water-shell solver](#headless-restricted-water-shell-solver). Dry bodies moved
+by at most 0.4%, since the solver and the fit share the same cold proxies;
+water-bearing ones by up to 11%, because the fit treated water as one cold ice.
 
-Pure-material radii use Seager et al. (2007), equation 23 and the **modified-
-polytropic** rows of table 4, not the separate unparameterised full-EOS rows:
+What carries over:
 
-```text
-s = M / m1
-R / r1 = 10^[k1 + log10(s)/3 - k2 s^k3]
-```
-
-| Proxy | m1 (Earth masses) | r1 (Earth radii) | k1 | k2 | k3 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Fe | 5.80 | 2.52 | -0.209490 | 0.0804 | 0.394 |
-| MgSiO₃ | 10.55 | 3.90 | -0.209594 | 0.0799 | 0.413 |
-| H₂O ice | 5.52 | 4.43 | -0.209396 | 0.0807 | 0.375 |
-
-We restrict direct fits to heavy-material mass ≤20 Earth masses. From 20 to
-1,000 Earth masses, a continuous `R(20) (M/20)^0.2` continuation is explicitly
-flagged. This is our bounded engineering extension, not the paper's EOS solution.
-Below 0.0001 or above 1,000 heavy-material Earth masses the model returns an error;
-it does not extrapolate indefinitely into asteroids or massive solid giants.
-
-Mixtures use `R³ = Σ w_i R_i(M_heavy)³`, evaluating every pure curve at the **same
-total heavy mass**, not each constituent's separate mass. This is compressed
-volume interpolation, not addition of ambient-density volumes and not a layered
-hydrostatic interior integration. Mixtures are flagged. Secondary molecular
-volatiles have no pure condensed fit; only a combined ≤1% of heavy mass may use
-an explicitly flagged water proxy. Larger supplies return an unsupported-domain
-error rather than silently treating arbitrary bulk material as water.
-
-Water-bearing results are flagged as cold-water proxies. Their radius is not
-evidence of liquid water, a particular ice phase, an exposed ocean or solid ground.
-An H/He planet's heavy-material radius starts as a cold structural proxy, not a
-located core/envelope discontinuity. The bounded environmental correction below
-can promote it to an approximate thin-atmosphere boundary. Dissolved H₂/He is
-currently unsupported.
+- The 20 Earth-mass bound, now the solvers' own, with the labelled
+  `R(20) (M/20)^0.2` continuation above it. Below 10⁻⁴ Earth masses a body is
+  taken as uncompressed (`R ∝ M^(1/3)`, labelled).
+- Secondary molecular volatiles still have no condensed model: protected ones
+  count as rock and accessible ones as water.
+- A water-bearing radius is still not evidence of an exposed ocean or of solid
+  ground. Phase follows from the decided temperature in the layered solve.
 
 ## Headless dry-body solver
 
@@ -2164,22 +2158,26 @@ launched as part of this implementation.
 `structure::prototype::resolve` returns the layered solve, or, when
 `prototype::solve` refuses, `structure::fallback::solve` with the refusal reason.
 `system::physical::outcome` converts either to `LayeredPlanet`; fallback records
-carry `model: fallback_mass_radius_v1` and `fallback_reason`, and never count as
-layered coverage. The fallback is total by construction: closed-form fits and
-fixed quadrature, no iteration, work budget, external data or error path.
+carry `model: fallback_structure_table_v1` and `fallback_reason`, and never count as
+layered coverage. The fallback is total by construction: lookups in the embedded
+[structure table](#structure-table) and fixed quadrature, no iteration, work
+budget, local data or error path.
 
 - **Condensed stack**, centre outwards: metal core, silicate mantle (holding
   the protected secondaries, as in the layered solve), water, then the
-  accessible secondary volatiles (N₂, CO₂, CH₄, O₂, Ar) at a water-density proxy.
-  Each region's volume is its mass share of the Seager et al. (2007) pure-
-  material radius at the whole condensed mass, as in the
-  [cold compressed radius](#cold-compressed-heavy-material-radius), with the
-  same power-law continuation above 20 Earth masses (labelled).
-- **H/He envelope**, when present: the one-bar radius from the envelope fit and
-  thin-column support limit
-  ([light envelopes](#light-envelopes-and-the-giant-transition)). Sub-bar gas
-  is represented as one isothermal scale height (capped at the condensed
-  radius) above a condensed reference.
+  accessible secondary volatiles (N₂, CO₂, CH₄, O₂, Ar) counted as water.
+  The outer radius is the table's for the whole stack: its mass, metal share
+  of the refractory mass, water share and the water's temperature. Inside it,
+  each region's volume is its mass share of the table's pure body of the same
+  total mass, a display split and not a solved boundary. Above 20 Earth masses
+  the radius continues as `R(20) (M/20)^0.2` (labelled).
+- **H/He envelope**, when present: the table's one-bar radius, limited by the
+  thin-column support radius
+  ([supply check](#light-envelopes-and-the-giant-transition)). The condensed
+  stack beneath it shrinks to the table's under-envelope core radius as the gas
+  at its base goes from one bar to ten, so the radius stays continuous down to
+  complete stripping. Sub-bar gas is represented as one isothermal scale height
+  (capped at the condensed radius) above a condensed reference.
 - **Profiles:** uniform density per condensed region; gas density falling
   linearly to zero at its top. Pressures integrate hydrostatically from zero at
   the top; inertia uses the same profiles. A full linear-profile sphere has
@@ -2189,21 +2187,23 @@ fixed quadrature, no iteration, work budget, external data or error path.
   limits `I=2mR²/3` and `ΔP=Gm(M_inner+m/2)/(4πR⁴)`, with a limitation note,
   instead of dividing by zero volume or inflating geometry. Nonzero-width shell
   calculations are unchanged.
-- **Inputs:** non-finite/negative irradiation and non-finite/non-positive age
-  take neutral fit values. Zero irradiation is valid and reaches the fit's
-  lower calibration bound. Flux/age repairs, non-finite temperature and fit-bound clamping mark the
-  record `extrapolated` with a limitation note; otherwise it is `approximate`.
+- **Inputs:** a non-finite or non-positive age takes a neutral value. An
+  unilluminated body is valid and takes the table's 20 K bound. Age repairs,
+  a non-finite temperature, inputs beyond the table's bounds and any cell the
+  solver refused mark the record `extrapolated` with a limitation note;
+  otherwise it is `approximate`.
   Temperature is the equilibrium estimate (at least 20 K), with no greenhouse.
   At a one-bar reference it is the envelope's prescribed profile at one bar
   (`fallback::one_bar_temperature_k`: the same closed form and mass/age
-  intrinsic trend as the layered envelope, on the fitted gravity).
+  intrinsic trend as the layered envelope, on the tabulated gravity).
 - **Surface:** `envelope` at a one-bar reference, else `rock` (nominal boundary,
   not certified solid phase or landing permission),
   `unresolved water`, `unresolved volatiles` or, on a decided surface, `frost`.
 
 Checks (`structure/fallback/tests.rs`, in `check.sh`): an Earth twin within 5%
 of Earth's radius with inertia factor 0.30–0.36; a Jupiter twin at 9–13 Earth
-radii with inertia factor 0.2–0.3; every single constituent at 10⁻⁶, 1 and
+radii with inertia factor 0.2–0.3 (a surrogate cell: the layered solver refuses
+Jupiter); every single constituent at 10⁻⁶, 1 and
 3,000 Earth masses under NaN/negative environments; 20,000 random inventories
 from 10⁻⁶ to 10⁵ Earth masses with missing constituents and hostile
 environments. Each asserts exact per-material closure, contiguous layers from
@@ -2212,9 +2212,100 @@ and monotone non-negative pressures. The coverage report also checks every
 census refusal's fallback record.
 
 Limitations: no separate secondary atmosphere (the partition below adds one),
-phase, thermal structure or greenhouse. For bodies with under 1% H/He, fallback radii exceed legacy (which
-treats that gas as a thin column) by up to 61%; layered solves of similar
-bodies exceed legacy by a median 32%, so the legacy value is the outlier.
+phase, thermal structure or greenhouse. The inertia of an enveloped body is
+still the prescribed profile's, 7% from the layered value at the median and up
+to 58%, so its flattening can shift when the layers arrive. A decided condensed
+surface takes the table's inertia and stays within 0.8%.
+
+### Structure table
+
+`structure/table.rs` holds the layered solver's own answers on three grids, so
+the synchronous stage states the radius the layered solve will reach instead of
+an independent published fit. `Table::embedded()` reads
+`crates/simulation/resources/structure-table.bin`, compiled into the binary:
+generation is identical with or without the local H/He resource, which only
+the build of the table needs.
+
+| Grid | Axes (knots) | Value |
+| --- | --- | --- |
+| Condensed | mass 10⁻⁴ to 20 M⊕ (41, log), metal share of the refractory (9), water share (19), water temperature 20 to 623.15 K (21) | ln radius, inertia factor |
+| Core under an envelope | the same mass, metal and water axes | ln radius |
+| Envelope | total mass 0.05 to 1,200 M⊕ (48, log), H/He share 10⁻⁷ to 0.99 (36), equilibrium temperature 20 to 2,000 K (17), intrinsic temperature 20 to 200 K (10) | reference core radius over one-bar radius |
+
+Lookups are multilinear, and total for any positive mass.
+
+- **Condensed cells** are `dry::solve`, or `water::solve` under no load when
+  frozen and just above saturation when liquid. Temperature knots are dense
+  through the pressure-melting range; the step from ice to liquid sits between
+  the 272 and 274 K knots. Hotter condensed water takes the 623.15 K bound
+  (labelled).
+- **Core cells** are the envelope solver's own heavy layers under a trace of
+  gas. They differ from the condensed grid only in water, which the envelope
+  solver compresses by pressure alone.
+- **Envelope cells** are `envelope::solve` over a reference core (32.5% metal,
+  67.5% rock, no water) with 25% helium, as generation draws it. The stored
+  value is the *inverse* radius: a hydrostatic column's is linear in
+  temperature and in the logarithm of its gas mass, where the radius itself
+  diverges, so it interpolates several times better. Intrinsic temperature is
+  an axis in place of age, which enters only through
+  `envelope::intrinsic_k(mass, age)`.
+- **Other cores.** The gas thickness is read for the reference core, and the
+  body's own core radius replaces that core's:
+  `R = R_core(own mix) + [R_one_bar − R_core](reference)`. A deep envelope
+  barely changes thickness with the core beneath it; on the census this
+  additive form leaves a 0.2% median error where scaling by the core radius
+  left up to 19%.
+- **Refused cells** are filled and flagged, so a lookup that touches one
+  reports `approximate`. Condensed and core cells take their line's solved
+  neighbours. Envelope cells take the retired closed form
+  ([below](#light-envelopes-and-the-giant-transition)), shifted to meet their
+  solved neighbours exactly, with the shift halving per cell beyond the first.
+  Along both temperature axes a filled cell is never more compact than its
+  cooler neighbour nor puffier than its warmer one, so heating a body cannot
+  shrink it back to the surrogate where the solver stops.
+- The file carries a hash of all three grids and a checksum. A missing, stale or
+  corrupt resource stops generation with a message naming the script; it never
+  selects another model.
+
+Rebuild with `./scripts/prepare-structure-table.sh` whenever structure physics,
+the H/He resource or a grid changes, and commit the resource with the change.
+It runs `prepare_structure_table` (about six minutes on 18 threads; it uses half the machine's,
+writing `data/tmp/structure-table.md` and the envelope cells as a TSV) and then
+`structure_table_accuracy`, which compares lookups with fresh solves at 20,000
+points between the knots of each grid:
+
+| Grid | Cells solved | Radius error, p50 / p95 / p99 / max |
+| --- | ---: | --- |
+| Condensed | 146,318 of 147,231 (99.4%) | 0.03% / 0.11% / 0.20% / 0.82% |
+| Condensed, inertia factor | | 0.15% / 0.44% / 0.73% / 1.5% |
+| Core under an envelope | 6,966 of 7,011 (99.4%) | not sampled separately |
+| Envelope, all cells solved | 95,525 of 293,760 (32.5%) | 0.03% / 0.75% / 2.6% / 9.4% |
+| Envelope, any filled cell | | 0.04% / 2.3% / 9.2% / 29% |
+
+On the planets generation actually makes, envelope interpolation is tighter:
+0.05% at the median and 0.22% at the 95th percentile against the solver on the
+same reference core. The uniform sample's tail is hot bodies of about an Earth
+mass with a trace of gas, which retention rarely leaves.
+
+Solved share is the solver's own coverage. Envelope refusals are mostly
+combinations no planet has (over 100 M⊕ of rock under a trace of gas, bodies
+under 1 M⊕ that are mostly gas), then the cold limit below about 100 K and the
+melting screen that refuses gas giants.
+
+Limits:
+
+- **Core composition is simplified.** The additive form leaves envelope radii
+  0.36% from the layered solve at the median, 2.3% at the 95th percentile and
+  11% at worst on the census (79% within 1%, 93% within 2%). The worst are wet
+  cores above the 20 M⊕ continuation.
+- **Gas composition is not an axis.** A trace of H/He under heavier secondary
+  gas is tabulated as pure H/He and comes out up to 7% large.
+- **Giants are surrogate cells**, as are envelopes colder than about 100 K: the
+  layered solver refuses both, so nothing checks those radii.
+- **Hot, young giants are large.** The layered model inflates them, and
+  generation now shows it: a 200 M⊕ planet at 1,100 K and 14 Myr is 27 Earth
+  radii, where the retired fit gave 11. Beyond the solver's hot limit the
+  radius keeps the last solved value rather than growing without bound.
 
 ### Synchronous surface decision
 
@@ -2232,11 +2323,12 @@ it.
    `synchronous_surface_decision_v1`): the coupled solve's own column rules on
    prescribed geometry. Same supply checks, partition, vapour caps,
    [greenhouse balance](#greenhouse-surface-temperature), frost deposit and
-   column validity; only the radial integration is replaced by the fitted
-   condensed radius (`fallback::condensed_radius_m`). It iterates gas, frost
-   and radius to the coupling's own tolerances.
+   column validity; only the radial integration is replaced by the
+   [tabulated](#structure-table) condensed radius
+   (`fallback::condensed_radius_m`), at the temperature being decided. It
+   iterates gas, frost and radius to the coupling's own tolerances.
 2. **Blow-off** (`escape::strip`): an unbound column loses its lightest
-   exchangeable gas entirely and step 1 repeats. The radius is refitted to
+   exchangeable gas entirely and step 1 repeats. The radius is read again for
    what is left on every pass.
 3. **Route** (`prototype::Decision`):
    - `Thin { surface_temperature_k }`: a condensed surface under a boundary
@@ -2252,7 +2344,7 @@ with the column. The `1e-5` accessible water fraction is now only the share
 exposed to long-term escape.
 
 **Dense columns.** A column beyond the layered density mask is an envelope only
-where its H/He alone holds one bar on the fitted radius. Otherwise it is a
+where its H/He alone holds one bar on the tabulated radius. Otherwise it is a
 thick secondary or steam atmosphere over a surface: the decision keeps the
 ideal column and its greenhouse balance (Venus-like and steam worlds), notes
 it, and the layered solve refuses it as `DenseGasUnsupported`. The decided
@@ -2271,20 +2363,23 @@ the layered envelope does.
 
 Limits:
 
-- The radius is still the published fit, up to about 11% from the layered
-  radius on rock and water worlds. Supply-limited pressure scales as R⁻⁴, so
-  it can differ by up to a factor 1.6 until [G3](../plans/planet-generation.md).
-  Temperature, escape, route and surface kind do not.
-- Whether a trace of frost saturates depends on that radius: 1 of 4,367 census
-  planets changes between frost and bare ice.
+- The radius is the table's, within 0.26% of the layered radius on every
+  decided surface in the census (0.03% at the median). Supply-limited pressure
+  scales as R⁻⁴ and stays within 1%. Temperature, escape, route and surface
+  kind do not differ at all.
+- Envelope radii carry the table's simplified core: see its
+  [limits](#structure-table).
 - A refused surface (runaway) is shown at its equilibrium temperature with the
   cold-trap partition, as before.
 
 Checks: `structure/coverage/agreement.rs` (`generation_agreement`, in
 `check.sh` at two systems per component; `NS_AGREEMENT_SYSTEMS=57` for the
 full probe, writing `data/tmp/generation-agreement.{md,tsv}`). It asserts that
-the layered solve changes no surface kind, escape or decided temperature and
-that no H/He envelope carries a bulk-composition label. The retention grid
+the layered solve changes no surface kind, escape or decided temperature, that
+no H/He envelope carries a bulk-composition label, that decided surfaces agree
+within 1% in radius and 5% in pressure, and that every layered result is
+installed on generation's radius. Envelope radii have regression bounds only
+(median under 1%, 95th percentile under 5%). The retention grid
 test asserts the decision is total and conserving.
 
 Cost: about 0.2 ms per planet synchronously (0.09 ms before the decision), after
@@ -2591,9 +2686,12 @@ deep water or phase seam 1.0%.
 
 ## Light envelopes and the giant transition
 
-The following describes the existing **generation approximation**, not a dense
-H/He radial solution. Checkpoint 4's opt-in coupling API above does not silently
-substitute this approximation when its supported column domain is exceeded.
+Generation no longer evaluates this closed form. It survives in
+`structure/table/build.rs` as the **surrogate** for envelope cells the layered
+solver refuses, anchored to their solved neighbours as the
+[structure table](#structure-table) describes. Gas giants and envelopes colder
+than about 100 K are such cells. Only the thin-column supply check in the last
+paragraph still runs at generation.
 
 The input is retained H₂+He mass fraction `f`, total mass `M`, current bolometric
 flux `F` and age, not class or surface pressure. Helium must be 15–35% of the
@@ -2646,8 +2744,9 @@ No giant envelope bottom, ocean bottom or atmospheric discontinuity is inferred.
 
 ## Constants, outputs and limits
 
-`structure/parameters.rs` centralises empirical coefficients, model bounds and
-engineering defaults separately from physical constants in `units.rs`. Earth
+`structure/parameters.rs` holds only the display thresholds; the surrogate's
+coefficients live with the table build and the table's bounds in
+`structure/table.rs`, all separate from physical constants in `units.rs`. Earth
 radius is 6,371,000 m and reference flux 1,361 W/m². The mass unit is derived from
 the existing orbital `SUN_GM × EARTH_SOLAR / G`, using CODATA 2022 `G=6.67430e-11`.
 This preserves the simulator's existing gravitational mass convention.
@@ -2655,8 +2754,9 @@ This preserves the simulator's existing gravitational mass convention.
 Outputs are retained kilograms, volume-equivalent metres, H/He mass fraction,
 reference semantics, model caveats, `ρ=M/(4πR³/3)` and `g=GM/R²`. Escape is never
 included in those quantities. Shape, spin and classification do not enter the
-calculation. The solve is algebraic, bounded-cost and deterministic; there is
-no iterative convergence failure or random fallback. Invalid/unsupported states
+calculation. The synchronous structure is table lookups and fixed quadrature,
+bounded-cost and deterministic; there is no iterative convergence failure or
+random fallback. Invalid/unsupported states
 return typed errors. Inclusive mass-bound checks allow 16 machine epsilons for
 summation roundoff only.
 
@@ -2915,19 +3015,20 @@ the Earth metal/silicate proportions. H₂/He is always 75%/25% by mass.
 
 | Prescribed input | Mass (Earth) | Radius (Earth) | Density (kg/m³) | Accepted radius range (Earth) |
 | --- | ---: | ---: | ---: | --- |
-| Mercury-like | 0.0553 | 0.352 | 6,996 | 0.323–0.443 |
-| Earth-like | 1 | 0.960 | 6,237 | 0.9–1.1 |
-| Water-rich | 1 | 1.222 | 3,023 | 1.1–1.6 |
-| Neptune-like | 17 | 4.758 | 870 | 3–6 |
-| Saturn-like | 95 | 10.005 | 523 | 8–12 |
-| Jupiter-like | 318 | 11.200 | 1,248 | 10–12 |
+| Mercury-like | 0.0553 | 0.353 | 6,946 | 0.323–0.443 |
+| Earth-like | 1 | 0.959 | 6,245 | 0.9–1.1 |
+| Water-rich | 1 | 1.231 | 2,957 | 1.1–1.6 |
+| Neptune-like | 17 | 4.884 | 805 | 3–6 |
+| Saturn-like | 95 | 10.259 | 485 | 8–12 |
+| Jupiter-like | 318 | 11.385 | 1,188 | 10–12 |
 
 The tolerances allow unresolved layering, thermal state, composition and radius
 reference errors, not statistical uncertainty. Tests additionally bound density
 broadly and check increasing water radius, condensed compression, stripping,
 blend continuity, thermal trends and giant-radius turnover. The dry Earth radius
-is about 4% low; the Neptune-like prescribed radius is about 23% larger than
-Neptune's nominal radius. These are substantial biases, not precision calibration.
+is about 4% low; the Neptune-like prescribed radius is about 26% larger than
+Neptune's nominal radius. The Saturn- and Jupiter-like rows read surrogate
+cells of the [structure table](#structure-table). These are substantial biases, not precision calibration.
 The last three inputs do not reconstruct actual giant compositions or formation
 histories. Do not tune mixtures to force exact Solar System matches.
 
@@ -2936,8 +3037,10 @@ histories. Do not tune mixtures to force exact Solar System matches.
 The numerical tables below are the calibration snapshot from before the
 extended-boundary correction. Low-inventory extended-atmosphere bodies now keep
 their condensed radius instead of falling back to a one-bar radius, so radius,
-density, reference and column distributions can differ. The commands above
-produce the current census; the retained inventories and description thresholds
+density, reference and column distributions can differ. Radii have since moved
+again with the [structure table](#structure-table): water-bearing bodies are up
+to 11% larger, and envelopes follow the layered model, including its inflated
+hot giants. The commands above produce the current census; the retained inventories and description thresholds
 are unchanged by that correction.
 
 | Quantity | Minimum | 5th percentile | Median | 95th percentile | Maximum |

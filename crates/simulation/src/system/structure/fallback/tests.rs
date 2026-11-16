@@ -166,6 +166,11 @@ fn prescribed_reference_worlds_keep_broad_radius_and_density_ranges() {
             &environment(flux, 255.0, 4.5),
         );
         let p = physical::fallback(&f).physical;
+        eprintln!(
+            "{mass} ME: {:.3} RE, {:.0} kg/m3",
+            f.radius_m / 6.371e6,
+            p.mean_density_kg_m3
+        );
         assert!(radii.contains(&(f.radius_m / 6.371e6)), "{mass}: {f:?}");
         assert!(densities.contains(&p.mean_density_kg_m3), "{mass}: {p:?}");
     }

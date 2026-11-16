@@ -12,6 +12,7 @@ pub mod parameters;
 mod profile;
 pub mod prototype;
 mod radial;
+pub mod table;
 pub mod water;
 
 /// Allow only floating-point summation noise at declared inclusive boundaries.

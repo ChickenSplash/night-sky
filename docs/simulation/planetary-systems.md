@@ -84,9 +84,11 @@ current irradiation are deliberately different inputs.
 ### Mass and radius are linked
 
 Radius is derived from the retained constituent inventory by the labelled
-fallback structure: compressed heavy-material fits, mixture interpolation and a
-bounded light-envelope/giant surrogate. Any H/He envelope gives a one-bar
-reference radius. There is no independent radius scatter or class-based radius lookup.
+fallback structure, which reads it from a table of the layered solver's own
+answers: mass, metal and water shares and temperature for a condensed body,
+plus gas share and heating for an H/He envelope. A visit solves the layers
+inside that radius and does not change it. Any H/He envelope that holds one bar
+gives a one-bar reference radius. There is no independent radius scatter or class-based radius lookup.
 Escaped H/He and secondary volatiles are tracked separately and excluded from gravitational mass.
 See the [composition guide](planet-composition.md) for exact formation priors,
 retention convergence bounds, reservoir partition, radius conventions and limitations.

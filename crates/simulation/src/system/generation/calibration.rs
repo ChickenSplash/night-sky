@@ -200,7 +200,14 @@ fn check(p: &Hosted) {
         .unwrap();
     let b = &p.body;
     assert!(b.mass_earth > 0.0 && b.mass_earth <= 3900.0 * (1.0 + 1e-12));
-    assert!(b.radius_km > 0.0 && b.radius_km < 20.0 * EARTH_RADIUS_KM);
+    // Young, strongly irradiated giants inflate well past Jupiter in the
+    // layered envelope model, which generation now reads directly.
+    assert!(
+        b.radius_km > 0.0 && b.radius_km < 30.0 * EARTH_RADIUS_KM,
+        "{}: {} km",
+        p.id(),
+        b.radius_km
+    );
     for m in Material::ALL {
         let original = b.budget.source().mass_kg(m);
         let accounted = b.budget.retained().mass_kg(m) + b.budget.escaped().mass_kg(m);

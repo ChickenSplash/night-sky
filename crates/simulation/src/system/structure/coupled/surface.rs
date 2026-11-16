@@ -21,14 +21,15 @@ pub(crate) struct State {
     pub surface_radius_m: f64,
 }
 
-/// `condensed_radius_m` maps a host inventory to its radius. Every other rule
+/// `condensed_radius_m` maps a host inventory and its water temperature to its
+/// radius. Every other rule
 /// is the coupled solve's own: same supply checks, partition, greenhouse
 /// balance, deposit and column validity. `dense` alone lifts the density mask,
 /// keeping the ideal column for gas the layered solve will refuse.
 pub(crate) fn state(
     request: &Request,
     protected: &Inventory,
-    condensed_radius_m: impl Fn(&Inventory) -> f64,
+    condensed_radius_m: impl Fn(&Inventory, f64) -> f64,
     dense: bool,
 ) -> Result<State, Error> {
     admit(request, protected)?;
@@ -36,9 +37,13 @@ pub(crate) fn state(
         &Material::ALL.map(|m| (m, request.retained.mass_kg(m) - protected.mass_kg(m))),
     )
     .map_err(Error::Composition)?;
+    let floor = match request.temperature {
+        Temperature::Prescribed { column_k, .. } => column_k,
+        Temperature::Greenhouse { equilibrium_k } => equilibrium_k,
+    };
     let mut base = (
         request.retained.total_mass_kg(),
-        condensed_radius_m(&request.retained),
+        condensed_radius_m(&request.retained, floor),
     );
     let mut temperature = warming::temperatures(request, base, dense)?.0;
     let mut gas = column::partition(request, temperature, base.0, base.1)?;
@@ -47,7 +52,7 @@ pub(crate) fn state(
         let host = inventory
             .checked_add(protected)
             .map_err(Error::Composition)?;
-        let radius = condensed_radius_m(&host);
+        let radius = condensed_radius_m(&host, temperature);
         let top = deposit.top_radius_m(radius);
         if !radius.is_finite() || radius <= 0.0 {
             return Err(Error::InvalidInput("condensed radius"));

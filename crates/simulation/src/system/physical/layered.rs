@@ -295,6 +295,45 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
     }
 }
 
+pub const RESCALED_NOTE: &str = "Layer radii are scaled as one onto generation's radius; pressures and densities are the solve's own";
+
+/// Generation's radius is the planet's. The layered solve lands within the
+/// structure table's interpolation of it, and its whole profile is stretched
+/// by that ratio so the layers sit inside the radius everything else uses.
+/// Mass, pressures and the inertia factor are unchanged.
+pub(super) fn rescale(record: &mut LayeredPlanet, reference_radius_m: f64) {
+    let scale = reference_radius_m / record.physical.reference_radius_m;
+    if scale == 1.0 || !scale.is_finite() || scale <= 0.0 {
+        return;
+    }
+    for layer in &mut record.layers {
+        layer.inner_radius_m *= scale;
+        layer.outer_radius_m *= scale;
+    }
+    // Shared boundaries stay bit-identical after the multiplication.
+    for index in 1..record.layers.len() {
+        record.layers[index].outer_radius_m = record.layers[index - 1].inner_radius_m;
+    }
+    let p = &mut record.physical;
+    let one_bar = record.one_bar_radius_m.map(|r| {
+        if r == p.reference_radius_m {
+            reference_radius_m
+        } else {
+            r * scale
+        }
+    });
+    p.condensed_radius_m = if p.condensed_radius_m == p.reference_radius_m {
+        reference_radius_m
+    } else {
+        p.condensed_radius_m * scale
+    };
+    p.reference_radius_m = reference_radius_m;
+    p.mean_density_kg_m3 /= scale.powi(3);
+    p.reference_gravity_m_s2 /= scale.powi(2);
+    record.one_bar_radius_m = one_bar;
+    record.model_limitations.push(RESCALED_NOTE.into());
+}
+
 pub fn outcome(outcome: &Outcome) -> LayeredPlanet {
     match outcome {
         Outcome::Layered(solved) => layered(solved),
@@ -327,9 +366,9 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
                     } else if r.kind == fallback::Kind::Frost {
                         "Even global frost layer of fixed solid density; phase unresolved"
                     } else if envelope {
-                        "H/He envelope mass-radius fit; prescribed thinning density profile"
+                        "H/He envelope to the tabulated one-bar radius; prescribed thinning density profile"
                     } else {
-                        "Seager-fit compressed density; phase and temperature unresolved"
+                        "Uniform layer inside the tabulated radius; phase and temperature unresolved"
                     }
                     .into(),
                 ],

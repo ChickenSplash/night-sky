@@ -5,7 +5,7 @@
 mod catalogue;
 mod reservoirs;
 pub use super::materials::Material;
-pub use catalogue::{CondensedFit, MaterialProperties};
+pub use catalogue::MaterialProperties;
 pub use reservoirs::{Budget, Reservoir};
 
 use super::atmosphere::{Composition as GasComposition, Gas};

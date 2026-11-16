@@ -25,7 +25,7 @@ seed helpers, object identities and photometry stay at the crate root; see
 - [Stars and multiple systems](simulation/stars.md): spectral labels, mass/age
   generation, evolved stars, companions, barycentres and stability zones.
 - [Planetary systems](simulation/planetary-systems.md): generation sequence,
-  snow line, mass–radius fits, Hill spacing, resonances, spins and stable body IDs.
+  snow line, tabulated radii, Hill spacing, resonances, spins and stable body IDs.
 - [Physical atmospheres](simulation/atmospheres.md): initial retention/generation,
   gas mixtures, reference pressure levels, isothermal columns and their limits.
 - [Material inventories and structure](simulation/planet-composition.md): conserved

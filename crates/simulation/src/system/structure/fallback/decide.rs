@@ -11,9 +11,9 @@ use crate::system::{
 };
 
 pub const NOTES: &[&str] = &[
-    "Fallback: published mass-radius fits, not a hydrostatic EOS solve",
-    "Uniform condensed layers and a finite isothermal boundary column",
-    "Surface decision: the layered column's partition, grey greenhouse balance, frost and blow-off rules on the fitted radius",
+    "Fallback: radius read from the layered solver's table, not a hydrostatic solve of this body",
+    "Uniform condensed layers and a finite isothermal boundary column; the condensed body's inertia is the layered solver's tabulated value",
+    "Surface decision: the layered column's partition, grey greenhouse balance, frost and blow-off rules on the tabulated radius",
     "All water and unprotected secondaries exchange with the column; protected secondaries stay in the rock",
     "Water phase is not decided here: it follows from the decided temperature in the layered solve",
     "Greenhouse: grey Eddington fit to Earth, Mars and Venus; the coolest balance warming up from equilibrium",
@@ -143,7 +143,12 @@ pub fn decide(
     )
     .map_err(|_| invalid())?;
 
-    let mut regions = condensed_regions(decided_stack(&state.host));
+    let mut extrapolated = false;
+    let mut regions = condensed_regions(
+        decided_stack(&state.host),
+        state.temperature_k,
+        &mut extrapolated,
+    );
     let condensed_radius_m = regions.last().ok_or_else(invalid)?.outer_radius_m;
     let solid = regions
         .last()
@@ -194,13 +199,20 @@ pub fn decide(
         inertia_kg_m2: 0.0,
         optical_depth: Some(state.optical_depth),
         blowoff: stripped.escaped,
-        extrapolated: false,
+        extrapolated,
         notes: NOTES.to_vec(),
     };
+    if extrapolated {
+        fallback.notes.push(CLAMPED_NOTE);
+    }
     if dense {
         fallback.notes.push(DENSE_NOTE);
     }
     partition::close(&mut fallback, state.atmosphere.as_ref(), gm, radius_m)?;
+    // Spin shape follows inertia, so it must not move when the layers arrive.
+    let (tabulated, uniform) =
+        tabulated_condensed_inertia_kg_m2(&fallback.regions, state.temperature_k);
+    fallback.inertia_kg_m2 += tabulated - uniform;
     Ok(Decided {
         fallback,
         budget,

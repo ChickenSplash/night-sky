@@ -19,7 +19,7 @@ mod shell;
 mod thermal;
 pub use thermal::MODEL_ID as THERMAL_MODEL_ID;
 pub use thermal::Thermal;
-pub use thermal::intrinsic_k;
+pub use thermal::{INTRINSIC_RANGE_K, intrinsic_k};
 #[cfg(test)]
 mod tests;
 

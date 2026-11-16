@@ -79,6 +79,10 @@ pub fn prepare_refinement(
             // The layered solve keeps generation's decisions; carry their
             // audit facts forward instead of dropping them at adoption.
             let mut result = resolved_result(outcome, revision)?;
+            layered::rescale(
+                &mut result.record,
+                initial.record.physical.reference_radius_m,
+            );
             result.record.blowoff_kg = initial.record.blowoff_kg;
             if result.record.surface != "envelope" {
                 result.record.greenhouse_optical_depth = initial

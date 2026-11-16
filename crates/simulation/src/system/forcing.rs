@@ -38,9 +38,10 @@ impl Forcing {
         }
         PhysicalRevision {
             inputs,
-            // The lineage covers both the initial fallback and its refinement
-            // prescription, including the checksum-pinned NSHHE001 resource.
-            model: "generation_physics_v3:surface_decision_v1:layered_adoption_v3:NSHHE001-b4e7a79ecc35d846"
+            // The lineage covers both the initial fallback, with the structure
+            // table it reads, and its refinement prescription, including the
+            // checksum-pinned NSHHE001 resource.
+            model: "generation_physics_v4:structure_table_v1:surface_decision_v1:layered_adoption_v4:NSHHE001-b4e7a79ecc35d846"
                 .into(),
             sequence: 0,
         }

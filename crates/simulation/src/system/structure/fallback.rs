@@ -1,10 +1,10 @@
-//! Total, closed-form structure for every body the layered solver refuses.
-//! Published mass-radius fits and prescribed layer density profiles: no
-//! iteration, external data or error path. Never counted as a layered solve.
-//! See docs/simulation/planet-composition.md#fallback-structure.
+//! Total, closed-form structure for every body before and without a layered
+//! solve. Radii are read from the layered solver's own table and layers take
+//! prescribed density profiles: no iteration or error path. Never counted as
+//! a layered solve. See docs/simulation/planet-composition.md#fallback-structure.
 use super::{
     coupled::Error,
-    parameters::{CONDENSED_FIT_LIMIT_EARTH, EARTH_REFERENCE_FLUX_W_M2, EARTH_REFERENCE_RADIUS_M},
+    table::{CONDENSED_MASS_EARTH, Table},
 };
 use crate::{
     system::{
@@ -17,20 +17,20 @@ use space_shared::{PlanetEnvironment, RadiusReference};
 use std::f64::consts::PI;
 
 pub mod decide;
-mod fits;
 pub mod partition;
 pub use decide::{Decided, decide};
 
-pub const MODEL_ID: &str = "fallback_mass_radius_v1";
+pub const MODEL_ID: &str = "fallback_structure_table_v1";
 pub const NOTES: &[&str] = &[
-    "Fallback: published mass-radius fits, not a hydrostatic EOS solve",
+    "Fallback: radius read from the layered solver's table, not a hydrostatic solve of this body",
     "Uniform condensed layers and a linearly thinning gas layer; pressures follow these prescribed profiles",
     "Temperature is the equilibrium estimate, or at a one-bar reference the envelope's prescribed intrinsic-heat profile; no greenhouse or phase",
 ];
 pub const VOLATILE_PROXY_NOTE: &str = "Accessible secondary volatiles use a condensed water-density proxy; protected ones stay in the rock";
-pub const CLAMPED_NOTE: &str = "Inputs outside the fits' calibration were clamped to their bounds";
+pub const CLAMPED_NOTE: &str = "Outside the layered solver's domain: inputs beyond the table take its bounds, and cells it refuses hold a surrogate anchored to their solved neighbours";
 pub const CONTINUATION_NOTE: &str =
-    "Condensed mass above 20 Earth masses uses a power-law continuation of the fit";
+    "Condensed mass above 20 Earth masses uses a power-law continuation of the table";
+pub const REFERENCE_CORE_NOTE: &str = "Envelope thickness is tabulated over a reference rock and metal core; this body's own core radius replaces that core's";
 
 const SECONDARIES: [Material; 5] = [
     Material::Nitrogen,
@@ -107,7 +107,7 @@ pub struct Fallback {
     pub optical_depth: Option<f64>,
     /// Subset of `escaped` the surface decision stripped from an unbound column.
     pub blowoff: Inventory,
-    /// Fit inputs were clamped or continued beyond calibration.
+    /// Table inputs were clamped, continued or read from surrogate cells.
     pub extrapolated: bool,
     pub notes: Vec<&'static str>,
 }
@@ -187,25 +187,19 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
     let gas = (h_he > 0.0).then(|| only(&[Material::Hydrogen, Material::Helium]));
 
     let condensed_kg: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
-    if condensed_kg / EARTH_MASS_KG > CONDENSED_FIT_LIMIT_EARTH {
+    if condensed_kg / EARTH_MASS_KG > CONDENSED_MASS_EARTH[1] {
         extrapolated = true;
         notes.push(CONTINUATION_NOTE);
     }
-    let mut regions = condensed_regions(stack);
-    let condensed_radius_m = regions.last().map_or(0.0, |r| r.outer_radius_m);
+    // An unilluminated body takes the table's cold bound, never Earth's.
     let surface_temperature_k =
         sanitised(environment.equilibrium_temperature_k, MIN_TEMPERATURE_K).max(MIN_TEMPERATURE_K);
-    // Zero irradiation is valid. Let the fit apply its documented lower bound,
-    // rather than silently substituting Earth's flux for an unilluminated body.
-    let flux = if environment.irradiation_w_m2 == 0.0 {
-        0.0
-    } else {
-        sanitised(environment.irradiation_w_m2, EARTH_REFERENCE_FLUX_W_M2)
-    };
     let age = sanitised(environment.age_gyr, 5.0);
-    let mut clamped = flux != environment.irradiation_w_m2
-        || age != environment.age_gyr
-        || !environment.equilibrium_temperature_k.is_finite();
+    let mut clamped =
+        age != environment.age_gyr || !environment.equilibrium_temperature_k.is_finite();
+    let shares = condensed_shares(&stack);
+    let mut regions = condensed_regions(stack, surface_temperature_k, &mut clamped);
+    let mut condensed_radius_m = regions.last().map_or(0.0, |r| r.outer_radius_m);
 
     let mass_kg = retained.total_mass_kg();
     let mut reference = if regions
@@ -219,7 +213,29 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
     let mut radius_m = condensed_radius_m;
     let mut one_bar_radius_m = None;
     if let Some(gas) = gas {
-        let one_bar = fits::one_bar(mass_kg, h_he, condensed_radius_m, flux, age, &mut clamped);
+        let one_bar = tabulated_one_bar_m(
+            mass_kg,
+            h_he,
+            shares,
+            condensed_radius_m,
+            surface_temperature_k,
+            age,
+            &mut clamped,
+        )
+        .map(|(core, one_bar)| {
+            notes.push(REFERENCE_CORE_NOTE);
+            let scale = if condensed_radius_m > 0.0 {
+                core / condensed_radius_m
+            } else {
+                1.0
+            };
+            for region in &mut regions {
+                region.inner_radius_m *= scale;
+                region.outer_radius_m *= scale;
+            }
+            condensed_radius_m = regions.last().map_or(core, |r| r.outer_radius_m);
+            one_bar
+        });
         let mut top = condensed_radius_m;
         if let Some(r) = one_bar {
             (radius_m, reference, one_bar_radius_m) = (r, RadiusReference::OneBar, Some(r));
@@ -278,7 +294,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
     }
     // The layered envelope reports its prescribed profile's temperature at
     // one bar, warmer than equilibrium by the intrinsic heat. Same closed form
-    // here, on the fitted gravity. Outside its domain the estimate is kept.
+    // here, on the tabulated gravity. Outside its domain the estimate is kept.
     let surface_temperature_k = if reference == RadiusReference::OneBar {
         one_bar_temperature_k(surface_temperature_k, mass_kg, age, radius_m)
     } else {
@@ -329,29 +345,129 @@ pub(crate) fn one_bar_temperature_k(
     .unwrap_or(equilibrium_k)
 }
 
-/// Seager-fit volumes at the whole condensed mass, as compressed volume
-/// mixing. Innermost first; pressures are filled in by the caller.
-fn condensed_regions(stack: Vec<(Kind, Inventory)>) -> Vec<Region> {
+/// One-bar radius of the retained H/He and the condensed radius beneath it,
+/// from the layered envelope table. None when the H/He cannot hold one bar
+/// above the bare condensed boundary.
+///
+/// Under an envelope the layered solver compresses water by pressure alone, so
+/// a wet core is smaller than the same body bare. The core moves from the
+/// bare radius to the enveloped one as the gas at its base goes from one bar
+/// to ten, and the gas thickness is limited by the thin-column support
+/// radius: both keep the radius continuous down to complete stripping.
+fn tabulated_one_bar_m(
+    mass_kg: f64,
+    h_he_kg: f64,
+    [metal_share, water_share]: [f64; 2],
+    condensed_radius_m: f64,
+    equilibrium_k: f64,
+    age_gyr: f64,
+    approximate: &mut bool,
+) -> Option<(f64, f64)> {
+    // A necessary thin-column supply check, not an estimate of the entire
+    // giant envelope.
+    let support_radius = (GRAVITATIONAL_CONSTANT * mass_kg * h_he_kg
+        / (4.0 * PI * crate::system::atmosphere::ONE_BAR_PA))
+        .sqrt()
+        .sqrt();
+    if support_radius <= condensed_radius_m {
+        return None;
+    }
+    let envelope = Table::embedded().envelope(
+        mass_kg,
+        h_he_kg / mass_kg,
+        metal_share,
+        water_share,
+        equilibrium_k,
+        super::envelope::intrinsic_k(mass_kg, age_gyr),
+    );
+    *approximate |= envelope.approximate;
+    let base_bar = (support_radius / condensed_radius_m).powi(4);
+    let enveloped = ((base_bar - 1.0) / 9.0).clamp(0.0, 1.0);
+    let core = if condensed_radius_m > 0.0 {
+        condensed_radius_m * (envelope.core_radius_m / condensed_radius_m).powf(enveloped)
+    } else {
+        0.0
+    };
+    let capacity = support_radius - condensed_radius_m;
+    let thickness = envelope.thickness_m;
+    Some((
+        core,
+        core + thickness / (1.0 + (thickness / capacity).powi(4)).powf(0.25),
+    ))
+}
+
+/// Metal share of the refractory mass and water share of the whole stack.
+/// Condensed volatiles count as water, as their density proxy does.
+fn condensed_shares(stack: &[(Kind, Inventory)]) -> [f64; 2] {
+    let mass_of = |kinds: &[Kind]| -> f64 {
+        stack
+            .iter()
+            .filter(|(kind, _)| kinds.contains(kind))
+            .map(|(_, inventory)| inventory.total_mass_kg())
+            .sum()
+    };
+    let total: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
+    let metal = mass_of(&[Kind::Core]);
+    let refractory = metal + mass_of(&[Kind::Mantle]);
+    [
+        if refractory > 0.0 {
+            metal / refractory
+        } else {
+            0.0
+        },
+        if total > 0.0 {
+            1.0 - refractory / total
+        } else {
+            0.0
+        },
+    ]
+}
+
+/// The layered solver's tabulated radius for the whole stack, at this water
+/// temperature. Layer boundaries inside it divide the volume as the table's
+/// pure bodies of the same total mass would. Innermost first; pressures are
+/// filled in by the caller.
+fn condensed_regions(
+    stack: Vec<(Kind, Inventory)>,
+    temperature_k: f64,
+    approximate: &mut bool,
+) -> Vec<Region> {
+    let table = Table::embedded();
     let condensed_kg: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
-    let condensed_earth = condensed_kg / EARTH_MASS_KG;
+    if condensed_kg <= 0.0 {
+        return Vec::new();
+    }
+    let [metal_share, water_share] = condensed_shares(&stack);
+    let body = table.condensed(condensed_kg, metal_share, water_share, temperature_k);
+    *approximate |= body.approximate;
+    let pure = |metal_share: f64, water_share: f64| {
+        table
+            .condensed(condensed_kg, metal_share, water_share, temperature_k)
+            .radius_m
+            .powi(3)
+    };
+    let volumes: Vec<f64> = stack
+        .iter()
+        .map(|(kind, inventory)| {
+            inventory.total_mass_kg() / condensed_kg
+                * match kind {
+                    Kind::Core => pure(1.0, 0.0),
+                    Kind::Mantle => pure(0.0, 0.0),
+                    _ => pure(0.0, 1.0),
+                }
+        })
+        .collect();
+    let total: f64 = volumes.iter().sum();
     let mut regions = Vec::new();
     let mut volume = 0.0;
-    for (kind, inventory) in stack {
-        let proxy = match kind {
-            Kind::Core => Material::Metal,
-            Kind::Mantle => Material::Silicate,
-            _ => Material::Water,
-        };
-        let inner = EARTH_REFERENCE_RADIUS_M * f64::cbrt(volume);
-        volume += inventory.total_mass_kg() / condensed_kg
-            * fits::pure_radius_earth(proxy, condensed_earth)
-                .expect("refractory and water fits exist")
-                .powi(3);
+    for ((kind, inventory), part) in stack.into_iter().zip(volumes) {
+        let inner = body.radius_m * f64::cbrt(volume / total);
+        volume += part;
         regions.push(Region {
             kind,
             inventory,
             inner_radius_m: inner,
-            outer_radius_m: EARTH_REFERENCE_RADIUS_M * f64::cbrt(volume),
+            outer_radius_m: body.radius_m * f64::cbrt(volume / total),
             inner_pressure_pa: 0.0,
             outer_pressure_pa: 0.0,
         });
@@ -382,16 +498,36 @@ fn decided_stack(host: &Inventory) -> Vec<(Kind, Inventory)> {
     stack
 }
 
-/// The radius the synchronous surface decision stands on. G3 replaces this
-/// fit with a table computed from the layered solver.
-pub(crate) fn condensed_radius_m(host: &Inventory) -> f64 {
-    condensed_regions(decided_stack(host))
+/// Inertia of a decided host as the layered solver finds it, replacing the
+/// uniform display layers' own. The table's inertia factor times the host's
+/// mass and tabulated radius.
+fn tabulated_condensed_inertia_kg_m2(regions: &[Region], temperature_k: f64) -> (f64, f64) {
+    let mut enclosed = 0.0;
+    let mut uniform = 0.0;
+    let mut stack = Vec::new();
+    for region in regions {
+        if matches!(region.kind, Kind::Core | Kind::Mantle | Kind::Water) {
+            uniform += Shell::new(region, enclosed).inertia_kg_m2();
+            stack.push((region.kind, region.inventory));
+        }
+        enclosed += region.inventory.total_mass_kg();
+    }
+    let mass: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
+    let [metal_share, water_share] = condensed_shares(&stack);
+    let body = Table::embedded().condensed(mass, metal_share, water_share, temperature_k);
+    (body.inertia_factor * mass * body.radius_m.powi(2), uniform)
+}
+
+/// The radius the synchronous surface decision stands on: the layered
+/// solver's, for this host at the decided water temperature.
+pub(crate) fn condensed_radius_m(host: &Inventory, temperature_k: f64) -> f64 {
+    condensed_regions(decided_stack(host), temperature_k, &mut false)
         .last()
         .map_or(0.0, |r| r.outer_radius_m)
 }
 
-/// Non-finite or negative environment values take a neutral fit input instead
-/// of propagating NaN; the result is then labelled as clamped.
+/// Non-finite or negative environment values take a neutral table input
+/// instead of propagating NaN; the result is then labelled as clamped.
 fn sanitised(value: f64, neutral: f64) -> f64 {
     if value.is_finite() && value > 0.0 {
         value

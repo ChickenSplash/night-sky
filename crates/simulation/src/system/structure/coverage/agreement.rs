@@ -22,6 +22,8 @@ struct Row {
     equilibrium_k: f64,
     sync: LayeredPlanet,
     layered: Option<LayeredPlanet>,
+    /// The record a visit installs: the layered profile on generation's radius.
+    adopted: Option<Result<LayeredPlanet, &'static str>>,
     refusal: String,
 }
 
@@ -49,7 +51,12 @@ fn row(p: &Hosted) -> Row {
         initial_result: p.body.initial_result.clone(),
         decision: p.body.decision,
     };
-    let (layered, refusal) = match job.resolve() {
+    let outcome = job.resolve();
+    let adopted = matches!(outcome, Outcome::Layered(_)).then(|| {
+        physical::prepare_refinement(&job.initial_result, &job.environment, &outcome)
+            .map(|refinement| refinement.result.record)
+    });
+    let (layered, refusal) = match outcome {
         Outcome::Layered(solved) => (Some(physical::layered(&solved)), String::new()),
         Outcome::Fallback(f) => (None, format!("{:?}", f.reason.unwrap())),
     };
@@ -70,6 +77,7 @@ fn row(p: &Hosted) -> Row {
         equilibrium_k: job.environment.equilibrium_temperature_k,
         sync: p.body.initial_result.record.clone(),
         layered,
+        adopted,
         refusal,
     }
 }
@@ -84,6 +92,11 @@ struct Summary {
     /// Worst relative radius and ln pressure ratio on those surfaces.
     thin_radius: f64,
     thin_pressure: f64,
+    /// Relative radius on envelope surfaces: median, 95th percentile, worst.
+    envelope_radius: [f64; 3],
+    /// Layered results a visit could not install, or installed on another radius.
+    adoption_failures: usize,
+    radius_changes: usize,
 }
 
 fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
@@ -159,6 +172,7 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
                 .abs()
         }
     });
+    let mut envelope_radius = [0.0; 3];
     for (route, envelope) in [("thin", false), ("envelope", true)] {
         let of = |value: &dyn Fn(&Row, &LayeredPlanet) -> f64| -> Vec<f64> {
             pairs
@@ -174,6 +188,14 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
                 l.physical.reference_radius_m,
             )
         });
+        if envelope && !radius.is_empty() {
+            let mut sorted = radius.clone();
+            sorted.sort_by(f64::total_cmp);
+            let at = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize];
+            envelope_radius = [at(0.5), at(0.95), at(1.0)];
+        }
+        let inertia =
+            of(&|r, l| relative(r.sync.physical.inertia_factor, l.physical.inertia_factor));
         let temperature =
             of(&|r, l| (r.sync.surface_temperature_k - l.surface_temperature_k).abs());
         let pressure = of(&|r, l| {
@@ -187,11 +209,36 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
         });
         let _ = writeln!(
             text,
-            "| Radius, relative | {route} | {} |\n| Surface temperature, K | {route} | {} |\n| Surface pressure, ln ratio | {route} | {} |",
+            "| Radius, relative | {route} | {} |\n| Inertia factor, relative | {route} | {} |\n| Surface temperature, K | {route} | {} |\n| Surface pressure, ln ratio | {route} | {} |",
             scientific_quantiles(radius),
+            scientific_quantiles(inertia),
             quantiles(temperature),
             quantiles(pressure),
         );
+    }
+    let adoption_failures = rows
+        .iter()
+        .filter(|r| matches!(r.adopted, Some(Err(_))))
+        .count();
+    let radius_changes = rows
+        .iter()
+        .filter(|r| {
+            matches!(&r.adopted, Some(Ok(adopted))
+                if adopted.physical.reference_radius_m != r.sync.physical.reference_radius_m)
+        })
+        .count();
+    let _ = writeln!(
+        text,
+        "\n- Layered results a visit cannot install: {adoption_failures}\n- Installed on a radius other than generation's: {radius_changes}"
+    );
+    let mut reasons = std::collections::BTreeMap::<&str, usize>::new();
+    for r in rows {
+        if let Some(Err(reason)) = &r.adopted {
+            *reasons.entry(reason).or_default() += 1;
+        }
+    }
+    for (reason, count) in reasons {
+        let _ = writeln!(text, "  - {count}: {reason}");
     }
     let _ = writeln!(text, "\n## Refusals\n");
     let mut reasons = std::collections::BTreeMap::<&str, usize>::new();
@@ -223,6 +270,9 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
         decided_temperature_k,
         thin_radius,
         thin_pressure,
+        envelope_radius,
+        adoption_failures,
+        radius_changes,
     }
 }
 
@@ -280,7 +330,8 @@ fn generation_agreement() {
         })
         .collect();
     let sync_seconds = start.elapsed().as_secs_f64();
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    // Half the machine: leave the rest for whoever is using it.
+    let threads = (std::thread::available_parallelism().map_or(1, |n| n.get()) / 2).max(1);
     let next = std::sync::atomic::AtomicUsize::new(0);
     let (mut rows, layered_seconds) = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..threads)
@@ -318,17 +369,27 @@ fn generation_agreement() {
     }
     assert!(!rows.is_empty());
     // What generation decides, the layered solve keeps.
-    // One allowance until G3: whether a trace of frost saturates depends on
-    // the radius, which the two stages still take from different models.
-    assert!(
-        summary.surface_flips * 2000 <= rows.len(),
-        "surface kind changed: {}",
-        summary.surface_flips
-    );
+    assert_eq!(summary.surface_flips, 0, "surface kind changed");
     assert_eq!(summary.escape_changes, 0, "escape changed");
     assert_eq!(summary.mislabelled, 0, "bulk label on an H/He envelope");
     assert_eq!(summary.decided_temperature_k, 0.0, "decided temperature");
-    // Radius is still the fast fit until G3's table: regression bounds only.
-    assert!(summary.thin_radius < 0.2, "{}", summary.thin_radius);
-    assert!(summary.thin_pressure < 1.0, "{}", summary.thin_pressure);
+    // Generation reads the layered solver's table: condensed surfaces agree
+    // to its interpolation, and supply-limited pressure follows the radius.
+    assert!(summary.thin_radius < 0.01, "{}", summary.thin_radius);
+    assert!(summary.thin_pressure < 0.05, "{}", summary.thin_pressure);
+    // Envelopes are tabulated over a reference core and gas mix. Regression
+    // bounds on what that simplification costs, not the 1% target.
+    let [median, p95, worst] = summary.envelope_radius;
+    assert!(median < 0.01, "envelope median {median}");
+    assert!(p95 < 0.05, "envelope p95 {p95}");
+    assert!(worst < 0.25, "envelope worst {worst}");
+    // A visit installs the layered profile on generation's radius.
+    assert_eq!(summary.radius_changes, 0, "adoption changed a radius");
+    // Some layered columns leave the optical model's domain and stay on the
+    // synchronous record: rare, and never a different radius.
+    assert!(
+        summary.adoption_failures * 200 <= rows.len(),
+        "adoption failures: {}",
+        summary.adoption_failures
+    );
 }

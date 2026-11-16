@@ -14,7 +14,6 @@ fn catalogue_ids_and_gas_mapping_are_unique_and_round_trip() {
     for gas in Gas::ALL {
         assert_eq!(Material::from_gas(gas).properties().gas, Some(gas));
     }
-    assert!(Material::Nitrogen.properties().condensed_fit.is_none());
 }
 
 #[test]
