@@ -3,7 +3,9 @@
 ## Status and goal
 
 **G1 and G2 complete, 14 November 2026. G3 steps 1 to 3 and 4.1 to 4.3
-complete, 16 November 2026; steps 4.4, 4.5, 5 and 6 are open. G4 is proposed, not implemented.**
+complete, 16 November 2026. Steps 4.4 and 4.5 are replaced by "Layers from
+the table" (decision of 16 November 2026), which is open. G4 is proposed, not
+implemented.**
 Current behaviour
 is described in [planetary systems](../simulation/planetary-systems.md) and the
 [composition guide](../simulation/planet-composition.md).
@@ -340,29 +342,16 @@ as very extended trace atmospheres.
       temperature, escape and surface kind already are since G2. Discarding
       a second, slightly different answer would hide the disagreement; this
        removes it. Detail under "Step 4.3" below.
-   4. The layered result becomes an attachment to the planet's record, read
-      by the inspector alone. Attaching it needs no barrier.
-   5. Delete the adoption machinery: the update barrier, the deferral rules
-      (craft fields, active routes, camera state and distance), the adopted
-      projection replay and the ready, deferred and applied states. Checked
-      interactively in the client.
-5. Decide whether refusals still need a separate label once the surrogate
-   cells exist.
-6. **Decide whether the client runs the layered solver at all** (raised 16
-   November 2026). If the inspector's interior view can be read from tables
-   (layer boundary radii, central pressure and temperature, a few values per
-   cell), the solver becomes an offline tool that builds the tables and the
-   reference the tests compare against, and nothing is solved in the client.
-   - For: no background workers or candidate cache; the client no longer
-     needs the local H/He resource; refused planets lose nothing, since the
-     solver refuses them at run time too.
-   - Against: a profile is a curve, not a number, so the interior view
-     becomes a few boundaries, not a full pressure and temperature run;
-     envelope cells are built over one reference core, so a body's own
-     core layers would be approximate; each tabulated value adds about
-     2 MB.
-   - Decide after step 4.1 shows what the inspector really needs. Step 4 is
-     required either way and is not blocked by this.
+   4. Superseded, 16 November 2026: the inspector-only attachment is not
+      built. See "Layers from the table".
+   5. Delete the adoption machinery: now the last task of "Layers from the
+      table".
+5. Superseded: the refusal label becomes the cell's reason code, see "Layers
+   from the table".
+6. **Decided, 16 November 2026: the client does not run the layered
+   solver.** Layers are read from the table at generation, and the solver
+   becomes the offline table builder and the tests' reference. See "Layers
+   from the table".
 
 Acceptance: agreement test passes with the table in place; search and the
 inspector report the same bulk facts before and after a visit and across a
@@ -463,10 +452,8 @@ Still open in G3:
 
 In this order, towards deleting the swap (step 4):
 
-- **Steps 4.4 and 4.5**, the layered result as an inspector-only attachment,
-  then deleting the adoption machinery.
-- **Step 6**, whether the client still runs the solver.
-- **Step 5**, whether refusals keep a separate label.
+- **Layers from the table** (replaces steps 4.4, 4.5, 5 and 6), see the
+  section of that name below.
 - Carried from G1 and G2: EOS tabulation, water phase in the synchronous
   record, and the envelope solver's 1e-5 water exposure at one bar.
 
@@ -657,9 +644,88 @@ issue alongside the wet-core radius limitation.
 - Client behaviour (steps 4.4 and 4.5) is checked with the user, in the
   running game.
 
-Then step 4.4: `Refinement::project` writes nothing a consumer draws from
-or simulates with, so the layered record becomes an attachment the inspector
-reads, and step 4.5 deletes the barrier, deferral rules and replay.
+### Layers from the table (replaces steps 4.4, 4.5, 5 and 6)
+
+Decision of 16 November 2026. Open, nothing implemented.
+
+**Why.** After step 4.3 the background solve changes only the layer list,
+the model notes and the provenance. Its layers are still a second answer:
+solved on the solver's own radius, then fitted to generation's (thin route
+0.03% / 0.11% / 0.26%, envelope route 0.23% / 2.1% / 6.3%, p50 / p95 / max).
+Reading the layers from the same cells as the radius removes that, shows
+them at generation, gives refused planets layers too, and leaves nothing for
+the client to solve. So the inspector-only attachment (old step 4.4) is not
+built: it would be deleted again by old step 6.
+
+**What changes.**
+
+| | Now | After |
+| --- | --- | --- |
+| Layers | Background solve, fitted to generation's radii | Built at generation from table values |
+| Refused planets (about 12%) | No layers | Layers from filled cells, labelled |
+| Client solver, workers, candidate cache | Run per visited system | Removed from the client |
+| Solver | Client and offline | Offline only: builds the table, reference for tests |
+| Local H/He resource | Needed by the client | Needed by the table build only |
+| Refusal reason | Per planet, at run time | Per cell, recorded at build |
+
+**Order of work.**
+
+1. **Inventory the inspector.** List every layer and interior field it shows
+   (`client/src/ui/inspector/layered.rs`, `window.rs`) and which of them the
+   table must carry. This decides the cell contents.
+2. **Extend the cells**, one format bump and one rebuild (about nine minutes,
+   `NS_TABLE_THREADS=16`). Expected per condensed and per core cell: the
+   metal and rock boundary, the rock and water boundary, central pressure
+   and central temperature. Each value costs about 0.6 MB per grid; the table
+   goes from 6.3 MB to roughly 9 to 11 MB.
+   - Water phase layers appear and vanish between cells, so they are not
+     stored. Generation derives them from the tabulated pressure and
+     temperature at the water boundaries.
+   - Envelope planets take core layers from the core-under-load grid, which
+     already has the body's own metal and water axes.
+3. **Reason codes.** Replace each cell's `filled` bit with a one-byte reason
+   (the build already knows it and only counts it in the report). A lookup
+   reports the reasons of the corners it used and the share of approximate
+   corners, for example 3 of 16. The build report charts reasons over the
+   axes, which shows where the model is weak. This settles old step 5: the
+   label is the cell's reason, not a separate refusal state.
+4. **Outside the table.** Today every axis clamps to its edge and flags the
+   result. In order of preference:
+   - Below the mass range: scale from the edge cell of the same metal share,
+     water share and temperature at constant density, radius as mass^(1/3).
+     Composition is kept, so an ice body stays about 1.5 times the radius of
+     a rock body of equal mass. Label it. Not modelled: porosity and
+     irregular shape, which matter below roughly 200 to 400 km radius.
+   - Elsewhere, widen the axis where the solver works (log-spaced knots are
+     cheap), guided by the reason chart.
+   - Above a few Jupiter masses the solver is the wrong model: brown dwarfs
+     and stars come from published tracks in their own grid. Not planned
+     here.
+   - Clamp and flag only where none of the above applies.
+5. **Generation builds the layer list** from the table and labels it. The
+   agreement census compares it with the solver: boundary radii, central
+   pressure and temperature, per route.
+6. **Delete**, in one change, checked with the user in the running game:
+   the swap (`Refinement::project`, the barrier, deferral rules and replay
+   in `planet_loading.rs`, `planet_loading/adoption.rs`, `craft/travel.rs`,
+   `craft/voyage/atlas.rs`), the client's background solve and its slot in
+   the shared CPU budget, `layered::rescale` and `receive_boundary`, and
+   `validate_refinement`. The solver stays in the simulation crate for the
+   table build and the tests.
+
+**Acceptance.** A visited planet's inspector shows its layers immediately and
+they never change. No planet record is written after generation. The census
+reports table layers against the solver per route, with the figures recorded
+here. Every planet carries either solved-cell layers or a reason. The client
+starts no layered solve. `./scripts/check.sh` passes.
+
+**Costs accepted.** A planet between solved and filled cells gets a blended
+answer and a partial label, not a clean yes or no. Per-planet solver
+diagnostics are gone from the client. No continuous profile is lost, since
+none exists today.
+
+**Still open beside this:** the radius jump across the 1% H/He route line
+(above), and wet cores under deep gas 1.5 to 3% large.
 
 ## G4: formation priors and variety
 
