@@ -2,8 +2,8 @@
 
 ## Status and goal
 
-**G1 and G2 complete, 14 November 2026. G3 steps 1 to 3 complete, 16 November
-2026; its steps 4 and 5 are open. G4 is proposed, not implemented.**
+**G1 and G2 complete, 14 November 2026. G3 steps 1 to 3, 4.1 and 4.2
+complete, 16 November 2026; steps 4.3 to 4.5, 5 and 6 are open. G4 is proposed, not implemented.**
 Current behaviour
 is described in [planetary systems](../simulation/planetary-systems.md) and the
 [composition guide](../simulation/planet-composition.md).
@@ -14,6 +14,11 @@ Two goals, in this order:
    temperature, surface type and escaped material are decided once by one
    physical model. The layered solve may add detail to that answer; it may not
    change it.
+   - **A visit shows the final planet** (goal extended 16 November 2026).
+     Nothing drawn or simulated changes after generation: not shape,
+     atmosphere, surface or mass field. Anything that arrives later is
+     interior detail for the inspector only, so the client's swap of one
+     result for another, and every rule guarding it, can be deleted.
 2. **A realistic and highly varied population.** Formation priors follow
    physical causes (disc mass, metallicity, snow and ice lines, core mass,
    stellar activity), and every change is judged on whether it keeps or widens
@@ -322,17 +327,49 @@ as very extended trace atmospheres.
    flagged, so the result stays total.
 3. Retention and search use the table. Their answers match the layered model
    to interpolation error.
-4. Persist layered results to `data/` keyed by `PhysicalRevision`, so a
-   restart does not revert adopted planets. Because G2 fixes the bulk facts,
-   adoption no longer moves mass or radius and most deferral rules become
-   unnecessary; simplify them in the same step.
+4. **Remove the swap** (replaces persistence, decision of 16 November 2026).
+   Originally: persist layered results to `data/` so a restart does not
+   revert adopted planets. Dropped: a re-solve costs milliseconds and once
+   nothing visible changes there is nothing to revert. Instead, in order:
+   1. Inventory every field adoption replaces and who reads it (drawing,
+      shape, atmosphere, gravity, navigation clearance, inspector).
+   2. Tabulate envelope inertia, so flattening is final at generation.
+   3. The layered solve receives the atmosphere, it does not solve one
+      (decision of 16 November 2026). Generation's pressure, temperature,
+      gas mix, frost and sea are its boundary conditions, as the surface
+      temperature, escape and surface kind already are since G2. Discarding
+      a second, slightly different answer would hide the disagreement; this
+      removes it. Detail under "Next: step 4.3" below.
+   4. The layered result becomes an attachment to the planet's record, read
+      by the inspector alone. Attaching it needs no barrier.
+   5. Delete the adoption machinery: the update barrier, the deferral rules
+      (craft fields, active routes, camera state and distance), the adopted
+      projection replay and the ready, deferred and applied states. Checked
+      interactively in the client.
 5. Decide whether refusals still need a separate label once the surrogate
    cells exist.
+6. **Decide whether the client runs the layered solver at all** (raised 16
+   November 2026). If the inspector's interior view can be read from tables
+   (layer boundary radii, central pressure and temperature, a few values per
+   cell), the solver becomes an offline tool that builds the tables and the
+   reference the tests compare against, and nothing is solved in the client.
+   - For: no background workers or candidate cache; the client no longer
+     needs the local H/He resource; refused planets lose nothing, since the
+     solver refuses them at run time too.
+   - Against: a profile is a curve, not a number, so the interior view
+     becomes a few boundaries, not a full pressure and temperature run;
+     envelope cells are built over one reference core, so a body's own
+     core layers would be approximate; each tabulated value adds about
+     2 MB.
+   - Decide after step 4.1 shows what the inspector really needs. Step 4 is
+     required either way and is not blocked by this.
 
 Acceptance: agreement test passes with the table in place; search and the
 inspector report the same bulk facts before and after a visit and across a
-restart; fallback fit code is removed. **Met for condensed surfaces. Envelopes
-miss the 1% radius target** (see the result).
+restart; fallback fit code is removed; no drawn or simulated value changes
+after generation and the adoption machinery is gone. **Met for condensed
+surfaces up to the swap. Envelopes miss the 1% radius target** (see the
+result).
 
 ### G3 result, 16 November 2026
 
@@ -353,7 +390,7 @@ Steps 1 to 3 are done. Current behaviour is in the
 
 What changed:
 
-- **One embedded table** (`structure/table.rs`, 2.6 MB, built in ten minutes by
+- **One embedded table** (`structure/table.rs`, 2.6 MB then, built in ten minutes by
   `scripts/prepare-structure-table.sh`): condensed bodies, cores under an
   envelope, and envelopes. It is compiled in, not a local resource, so
   generation does not depend on who has the H/He data.
@@ -424,16 +461,153 @@ it could not check before. Still refused: the secondary-gas condensate limits
 
 Still open in G3:
 
-- **Giant and cold envelope accuracy.** Coverage is done (below); these
-  planets now miss the 1% target by the most.
-- **Envelope inertia** is not tabulated (7% median difference, 58% at worst),
-  so an enveloped planet's flattening can shift on a visit.
-- **Step 4, persistence.** Proposed to drop: a re-solve costs milliseconds and
-  no longer changes any bulk fact. The client's deferral rules are unchanged
-  and can now be simplified, with interactive checking.
+In this order, towards deleting the swap (step 4):
+
+- **Step 4.3**, the layered solve receives the atmosphere (next, below).
+- **Steps 4.4 and 4.5**, the layered result as an inspector-only attachment,
+  then deleting the adoption machinery.
+- **Step 6**, whether the client still runs the solver.
 - **Step 5**, whether refusals keep a separate label.
 - Carried from G1 and G2: EOS tabulation, water phase in the synchronous
   record, and the envelope solver's 1e-5 water exposure at one bar.
+
+### Swap inventory, envelope inertia and cores under load, 16 November 2026
+
+Steps 4.1 and 4.2, and the giant accuracy item. Evidence in
+`data/tmp/g3-inertia/`.
+
+| Measure (envelope route, census) | Before | After |
+| --- | ---: | ---: |
+| Radius difference, p50 / p95 / max | 0.49% / 3.4% / 6.6% | 0.24% / 2.3% / 6.5% |
+| Within 1% / 2% | 70% / 85% | 79% / 92% |
+| Inertia factor difference, p50 / p95 / max | 6.2% / 14% / 58% | 0.37% / 4.0% / 11% |
+| Over 25 Earth masses, radius, p50 / max | 1.8% / 5.8% | 0.9% / 3.4% |
+| Under 100 K, radius, p50 / max | 1.3% / 5.8% | 0.9% / 6.5% |
+| Table resource | 2.6 MB | 6.3 MB |
+
+What changed:
+
+- **Cores are tabulated under load**, to 1,200 Earth masses, with their
+  inertia factor. Envelope cells keep the pressure at the base of the gas and
+  the gas's own inertia factor.
+- **A body's own core replaces the reference core at that pressure**, moved
+  for the core's size. Two fitted exponents; see the composition guide.
+- **Envelope inertia is composed** from the tabulated core and gas, so an
+  enveloped planet's flattening is the layered solver's at generation.
+
+Tried and rejected: conserving the gas's volume, or its depth in inverse
+radius, around the body's own core. Both were several times worse than
+adding the core difference.
+
+Still loose: cores of more than a twentieth water under deep gas come out
+1.5 to 3% large, since the gas thickness is the reference core's. A water
+axis on the envelope grid would fix it at about three times the table.
+
+**What the swap still changes** (step 4.1; `Refinement::project` replaces
+mass, radius, inertia factor, the physical record, the result and the
+atmosphere):
+
+| Value | Thin route | Envelope route | Read by |
+| --- | --- | --- | --- |
+| Radius, mass, density, class, material totals | same | same | everything |
+| Inertia factor | 0.2% | 0.4% (11% at worst) | flattening: drawing, clearance |
+| Reference gravity | same | differs: enclosed mass at one bar | atmosphere column, clearance |
+| Condensed radius and layer radii | differs | differs | ground shape, descent, clearance |
+| Surface pressure | up to 1% | same | atmosphere, optics |
+| Surface temperature | same | about 1 K | atmosphere scale height |
+| Gas reservoir split and mole fractions | differs | differs | atmosphere, optics |
+| Surface knowledge, layers, models, notes | differs | differs | inspector only |
+| Provenance and sequence | always | always | inspector, ground chunk key |
+
+- Nothing shown is a continuous profile: each layer has radii, pressures,
+  one temperature and masses. Step 6 would lose nothing the inspector shows.
+- The sequence bump rebuilds ground chunks even when nothing visible moved.
+- The machinery to delete is about 830 lines of client code and 1,000 of
+  tests, plus `refinement.rs`, `rescale` and the replay in the voyage cache.
+
+### Next: step 4.3, the layered solve receives the atmosphere
+
+Not started. Written as a handover.
+
+**Why.** Generation decides the atmosphere with the layered solver's own
+rules on the tabulated radius. The layered solve then reruns those rules on
+its solved radius, a fraction of a percent different, so pressure, gas split
+and gravity come out slightly different, and `prepare_refinement` rebuilds
+`environment.atmosphere` from them. Two calculations of one thing cannot
+agree exactly. One must decide and the other receive.
+
+**Where the routes split** (`fallback/decide.rs`, `prototype::Decision`).
+Thin is tried first. It becomes `Envelope` when the thin column refuses and
+any H/He is present:
+
+- H/He, or all gas together, above 1% of the planet's mass
+  (`coupled::MAX_GAS_MASS_FRACTION`);
+- a column beyond the ideal-gas density mask whose H/He alone holds one bar
+  (`light_gas_holds_one_bar`); without that it stays a thin, dense column;
+- condensed mass outside 0.0001 to 20 Earth masses.
+
+Not checked: whether radius and pressure are continuous across the 1% line.
+
+**Work, in order.**
+
+1. **Measure first.** `coverage/agreement.rs` compares radius, inertia,
+   surface temperature and pressure. Add, per route: gas mole fractions (the
+   largest absolute difference), condensed radius, reference gravity, and
+   the atmosphere record's scale height and extent. Run
+   `NS_AGREEMENT_SYSTEMS=57 cargo test --release -p space-simulation generation_agreement -- --nocapture`
+   and keep the report in `data/tmp/`. This says where generation's rule is
+   visibly simpler than the solve. The expected case is the envelope gas
+   mix: generation uses the reference partition at the equilibrium
+   temperature (`partition::resolve`), the solve allocates suspended
+   condensate by solved region (`physical/layered.rs`, the reservoir split).
+2. **Thin route.** `Decision::Thin` already carries the surface temperature.
+   Extend it, or the request built in `prototype::thin_request`, with the
+   decided gas inventory, frost and surface pressure, and have the coupled
+   solve integrate the interior under that load without repartitioning
+   (`coupled.rs`, `coupled/column.rs`, `coupled/surface.rs`). The solved
+   radius still differs from the table's by interpolation, and
+   `layered::rescale` still stretches the profile onto generation's.
+3. **Envelope route.** The gas shell is part of the structure, so it stays
+   solved. Give it generation's gas mix as fixed, or move generation to the
+   solve's rule if step 1 shows generation's is the poorer one. The one-bar
+   temperature is the same closed form on both sides already
+   (`fallback::one_bar_temperature_k`). Reference gravity differs only
+   because `rescale` divides it by the stretch squared: use `GM/R²` on
+   generation's radius.
+4. **Stop rebuilding.** `prepare_refinement`
+   (`physical/refinement.rs`, the block that builds `GasAtmosphere` from
+   `gas_kg`) keeps the initial `environment` unchanged, and the refined
+   record carries generation's surface pressure, temperature, gravity,
+   condensed radius and reservoir split. `validate_refinement`
+   (`physical/result.rs`) should then require them equal, as it does mass.
+   The five census planets whose refined optics are unsupported
+   ("refined cloud/optical inputs unsupported") then install normally.
+5. **Stop the needless rebuild.** `ground_key` (`client/src/scene/draw.rs`)
+   hashes the result's sequence, so ground chunks rebuild on every swap.
+   Once nothing it draws from can change, drop the sequence from the key.
+
+**Acceptance.** On the census, a refined planet's atmosphere record,
+reference gravity, condensed radius and gas split are bit-identical to
+generation's, on both routes; the agreement test asserts it. Bump the
+`layered_adoption` part of the generation key in `system/forcing.rs`.
+
+**Working notes.**
+
+- Run `./scripts/check.sh` after code changes. Cap CPU use at 16 threads:
+  `CARGO_BUILD_JOBS=16 RUST_TEST_THREADS=16`, and `NS_TABLE_THREADS=16` for
+  a table build.
+- Step 4.3 needs no table rebuild and no new cell values. If the envelope
+  gas mix must be tabulated after all, it is one more value per envelope
+  cell (see `table/build.rs`, `Solved`), nine minutes to rebuild.
+- The table build and the envelope tests need the local, git-ignored
+  `data/composition-sources/hhe-density.bin` (`NSHHE002`), from
+  `scripts/prepare-hhe-density.py`.
+- Client behaviour (steps 4.4 and 4.5) is checked with the user, in the
+  running game.
+
+Then step 4.4: `Refinement::project` writes nothing a consumer draws from
+or simulates with, so the layered record becomes an attachment the inspector
+reads, and step 4.5 deletes the barrier, deferral rules and replay.
 
 ## G4: formation priors and variety
 
