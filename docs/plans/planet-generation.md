@@ -194,9 +194,25 @@ Same 399 systems, 20 threads, default tolerance. Evidence:
   are unchanged.
 - **22 more solve**: 12 that ran out of work budget, 2 at the old floating-point
   limit, the rest at domain edges the old shooting path could not reach.
-- **Looser tolerance is now safe to consider**, measured but not adopted: at
-  1e-8 no solution is lost, radii stay within 1.5e-10 of the refined run and the
-  median solve is 9 ms. G1 lost over half the envelope solutions at 1e-6.
+- **Default tolerance is now 1e-8** (was 1e-10), for every route. Against a
+  2e-11 run no solution is lost and radii stay within 1.5e-10 (envelope) and
+  7e-11 (rock and water). G1 lost over half the envelope solutions at 1e-6.
+
+  | 399 systems, 20 threads | 1e-10 | 1e-8 |
+  | --- | --- | --- |
+  | Solved envelope, median / p95 | 22 / 48 ms | 9 / 20 ms |
+  | Rock and water, median / p95 | 8 / 24 ms | 4 / 14 ms |
+  | Refused envelope attempt, median | 25 ms | 11 ms |
+  | Total solver CPU | 91 s | 52 s |
+  | Report wall time | 5.6 s | 3.5 s |
+
+  - **Cost.** The tests' independent quadrature of stored profiles closes region
+    mass and inertia to 8e-8 at worst, not 1e-8, so those bounds are now 1e-7.
+    Suspended trace condensate mass moves by 0.2% against the refined run (bound
+    now 0.5%); it is a few millionths of the gas.
+  - **One planet changes outcome**: `Bulge:52#B/4` solves at 1e-8 and 1e-6 but is
+    refused (near-critical suspended range) at 1e-10 and tighter. Its radius
+    agrees between 1e-8 and 1e-6 to 3e-9.
 
 Still open from G1: tabulating the EOS calls. Whether visits still need the
 envelope table at these costs is for G3 to decide; search does.

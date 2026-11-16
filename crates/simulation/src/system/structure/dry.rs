@@ -29,7 +29,7 @@ pub struct Controls {
 impl Default for Controls {
     fn default() -> Self {
         Self {
-            relative_tolerance: 1e-10,
+            relative_tolerance: 1e-8,
             max_step: 1.0 / 128.0,
             max_bracket_expansions: 64,
             max_shooting_iterations: 128,

@@ -105,7 +105,7 @@ fn check_profile(
         let (mass, inertia, dp) =
             super::super::tests::quadrature_with_volume_factor(region, volume_factor);
         let drop = region.inner().pressure_pa - region.outer().pressure_pa;
-        close(mass, region.inventory().total_mass_kg(), 1e-8);
+        close(mass, region.inventory().total_mass_kg(), 1e-7);
         close(dp, drop, 2e-4);
         residuals[0] = residuals[0].max(error(mass, region.inventory().total_mass_kg()));
         residuals[1] = residuals[1].max(error(dp, drop));
@@ -113,18 +113,18 @@ fn check_profile(
             close(
                 mass * region.inventory().mass_fraction(origin).unwrap(),
                 region.inventory().mass_kg(origin),
-                1e-8,
+                1e-7,
             );
         }
         total_mass += mass;
         total_inertia += inertia;
     }
-    close(total_mass, requested.total_mass_kg(), 1e-8);
-    close(total_inertia, body.inertia_kg_m2(), 1e-8);
+    close(total_mass, requested.total_mass_kg(), 1e-7);
+    close(total_inertia, body.inertia_kg_m2(), 1e-7);
     close(
         body.reference_gravity_m_s2(),
         GRAVITATIONAL_CONSTANT * total_mass / body.radius_m().powi(2),
-        1e-8,
+        1e-7,
     );
     residuals[2] = error(total_inertia, body.inertia_kg_m2());
     for pair in body.regions().windows(2) {

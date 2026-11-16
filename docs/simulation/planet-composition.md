@@ -540,8 +540,9 @@ reference. The selected condensed surface keeps its existing phase knowledge:
 unresolved compressed water is not labelled as solid ground. The existing
 10 mbar shell endpoint and all EOS/closure gates remain unchanged.
 
-Integration remains at relative
-10⁻¹⁰ by default, with bounded 32 gravity passes per shell, 128 core trials,
+Integration runs at relative
+10⁻⁸ by default (10⁻¹⁰ until November 2026; radii agree with a 2×10⁻¹¹ run to
+1.5×10⁻¹⁰), with bounded 32 gravity passes per shell, 128 core trials,
 2 million EOS evaluations per radial solve and 16 million across the request.
 An independent sample quadrature checks total inertia within 0.1%; it is not
 the delivered inertia and does not relax integration tolerances.
@@ -857,7 +858,7 @@ refusal. Source-backed coupled tests use a one-Earth-mass dry heavy body,
 `1e-5` Earth masses of H/He and 2% secondary envelope mass. Its one-bar radius is
 about **6,499 km**, with an interface near **12.30 bar**; radius and inertia
 refine within relative 10⁻⁷. The pure-density approximation tolerance does not
-relax the radial solver's relative 10⁻¹⁰ integration tolerance.
+relax the radial solver's relative 10⁻⁸ integration tolerance.
 
 ```sh
 cargo test --release -p space-simulation materials::
@@ -1461,7 +1462,7 @@ cargo test -p space-simulation prescribed_dry_reference_profiles -- --nocapture
 ```
 
 Tests cover uniform and two-layer constant-density analytic solutions to relative
-10⁻⁶, independent radial quadrature of EOS density/inertia to relative 10⁻⁸,
+10⁻⁶, independent radial quadrature of EOS density/inertia to relative 10⁻⁷,
 hydrostatic pressure-drop quadrature to relative 2×10⁻⁴, interface continuity,
 pure endpoints and 10⁻⁶-mass-fraction trace core/mantle fixtures. The grid spans
 0.0001, 0.0553, 1, 5 and 20 Earth masses, with ceiling failures asserted rather
@@ -1598,7 +1599,7 @@ shares and trace-mass conversion are the same as the dry-host fixture above.
 At nominal density, the profiles and event coordinates exactly match an ordinary
 water solve with all host masses scaled by total/host mass, while returned origins
 remain unchanged. Independent Gaussian radial integration closes region/per-origin
-mass and total inertia to relative 1e-8 and hydrostatic drops to 2e-4. Across the
+mass and total inertia to relative 1e-7 and hydrostatic drops to 2e-4. Across the
 15 single-origin and three mixed endpoints, measured maxima are 4.66e-10 region
 mass, 4.47e-10 hydrostatic drop and 5.77e-11 total inertia.
 
@@ -1701,7 +1702,7 @@ call still refuses a coexistence density; explicit named one-sided limits use
 Shooting requires an unshifted outer pressure residual between zero and
 **0.01 Pa**, independent of central pressure. Integration pressure-error scaling
 is also independent of central pressure: `relative_tolerance × 100 MPa`
-(0.01 Pa at default tolerance), including within the refractory interior.
+(1 Pa at the default tolerance of 10⁻⁸), including within the refractory interior.
 This is an embedded local error target, not a global error bound or a physical
 uncertainty. Defaults and work ceilings are shared with the dry solver. Unsupported
 high-pressure/phase trials constrain the upper shooting bracket but never become
@@ -1719,7 +1720,7 @@ shells and pure-water endpoints, deterministic repeats, imposed loading,
 refinement, one-sided interfaces, EOS/phase/domain refusals and exact EOS-budget
 exhaustion. Fixtures include 0.0001-Earth-mass bodies with 1% and 100% water and
 one-Earth-mass bodies with 10⁻⁶ water mass fraction, each at 250/300 K.
-Independent quadrature closes region mass and total inertia to relative 10⁻⁸
+Independent quadrature closes region mass and total inertia to relative 10⁻⁷
 and hydrostatic drops to relative 2×10⁻⁴. Tightening integration tolerance and
 maximum step by four changes radius, inertia factor and central pressure by
 less than relative 10⁻⁷, and water-shell thickness/pressure drop by less than
@@ -1772,7 +1773,7 @@ It uses 938,500 charged EOS evaluations, below the unchanged 2,000,000 ceiling.
 These numbers describe the prescribed approximation, not an observed planet.
 
 Twenty radial tests retain all shallow-water checks and add independent deep
-mass/inertia closure (relative 10⁻⁸), hydrostatic closure (2×10⁻⁴), deterministic
+mass/inertia closure (relative 10⁻⁷), hydrostatic closure (2×10⁻⁴), deterministic
 repeats, fourfold refinement (radius/inertia/central pressure 10⁻⁷, region mass
 and thickness 10⁻⁵), loading through 2 GPa, water-fraction and compression trends,
 and exact-budget success/failure. No tolerances or work ceilings were relaxed.
@@ -2347,7 +2348,7 @@ cargo test --release -p space-simulation composition_coverage -- --ignored --noc
 census keys `composition-calibration:{component:?}:{index}`).
 `NS_COVERAGE_THREADS=1` gives uncontended per-planet timings.
 `NS_COVERAGE_TOLERANCE` overrides the radial relative tolerance (10⁻¹³ to
-10⁻⁶) for sensitivity runs; generation always uses 10⁻¹⁰. The summary ends
+10⁻⁶) for sensitivity runs; generation always uses the default, 10⁻⁸. The summary ends
 with a stage profile: inclusive time and calls per planet for coupled
 attempts, coupling iterations, radial trials, greenhouse searches, column
 partitions and envelope solves, by route. That timing is compiled only into

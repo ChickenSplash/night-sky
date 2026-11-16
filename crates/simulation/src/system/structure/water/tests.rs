@@ -16,7 +16,7 @@ fn warm_deep_and_hot_water_have_labelled_conserved_profiles() {
         let mut inertia = 0.0;
         for region in body.regions() {
             let (mass, i, dp) = quadrature(region);
-            close(mass, region.inventory().total_mass_kg(), 1e-8);
+            close(mass, region.inventory().total_mass_kg(), 1e-7);
             close(
                 dp,
                 region.inner().pressure_pa - region.outer().pressure_pa,
@@ -27,7 +27,7 @@ fn warm_deep_and_hot_water_have_labelled_conserved_profiles() {
                 assert!(region.samples().iter().all(|s| s.density_kg_m3 > 0.0));
             }
         }
-        close(inertia, body.inertia_kg_m2(), 1e-8);
+        close(inertia, body.inertia_kg_m2(), 1e-7);
         assert!(
             body.regions()
                 .iter()
@@ -120,11 +120,11 @@ fn warm_water_rich_acceptance_conserves_interfaces_and_independent_closure() {
     let mut inertia = 0.0;
     for r in body.regions() {
         let (m, i, dp) = quadrature(r);
-        close(m, r.inventory().total_mass_kg(), 1e-8);
+        close(m, r.inventory().total_mass_kg(), 1e-7);
         close(dp, r.inner().pressure_pa - r.outer().pressure_pa, 2e-4);
         inertia += i;
     }
-    close(inertia, body.inertia_kg_m2(), 1e-8);
+    close(inertia, body.inertia_kg_m2(), 1e-7);
     assert_eq!(body, solve(&inv, 300.0, 1e5, Controls::default()).unwrap());
 }
 
@@ -290,11 +290,11 @@ fn cold_water_rich_acceptance_has_labelled_approximations_and_independent_closur
     let mut inertia = 0.0;
     for r in body.regions() {
         let (m, i, dp) = quadrature(r);
-        close(m, r.inventory().total_mass_kg(), 1e-8);
+        close(m, r.inventory().total_mass_kg(), 1e-7);
         close(dp, r.inner().pressure_pa - r.outer().pressure_pa, 2e-4);
         inertia += i;
     }
-    close(inertia, body.inertia_kg_m2(), 1e-8);
+    close(inertia, body.inertia_kg_m2(), 1e-7);
     assert_eq!(body, solve(&inv, 250.0, 1e5, Controls::default()).unwrap());
     // Original local IAPWS domains remain unchanged.
     assert!(eos::state(220e6, 250.0).is_err());
@@ -413,7 +413,7 @@ fn cold_to_warm_coverage_includes_pressure_melted_liquid_and_model_seams() {
         let mut inertia = 0.0;
         for r in body.regions() {
             let (m, i, dp) = quadrature(r);
-            close(m, r.inventory().total_mass_kg(), 1e-8);
+            close(m, r.inventory().total_mass_kg(), 1e-7);
             close(dp, r.inner().pressure_pa - r.outer().pressure_pa, 2e-4);
             inertia += i;
             if r.density_model_id() == eos::subfreezing_liquid::MODEL_ID {
@@ -421,7 +421,7 @@ fn cold_to_warm_coverage_includes_pressure_melted_liquid_and_model_seams() {
                 assert_eq!(r.phase(), PhaseKnowledge::Water(eos::Phase::Liquid));
             }
         }
-        close(inertia, body.inertia_kg_m2(), 1e-8);
+        close(inertia, body.inertia_kg_m2(), 1e-7);
         assert_eq!(
             body.regions()
                 .iter()
@@ -729,7 +729,7 @@ fn independent_radial_integrals_close_shell_mass_inertia_and_hydrostatics() {
             let mut inertia = 0.0;
             for region in body.regions() {
                 let (m, i, dp) = quadrature(region);
-                close(m, region.inventory().total_mass_kg(), 1e-8);
+                close(m, region.inventory().total_mass_kg(), 1e-7);
                 close(
                     dp,
                     region.inner().pressure_pa - region.outer().pressure_pa,
@@ -737,7 +737,7 @@ fn independent_radial_integrals_close_shell_mass_inertia_and_hydrostatics() {
                 );
                 inertia += i;
             }
-            close(inertia, body.inertia_kg_m2(), 1e-8);
+            close(inertia, body.inertia_kg_m2(), 1e-7);
         }
     }
 }
@@ -940,7 +940,7 @@ fn located_ice_liquid_interfaces_conserve_and_close_independent_integrals() {
                 close(dp, r.inner().pressure_pa - r.outer().pressure_pa, 2e-4);
                 inertia += i;
             }
-            close(inertia, body.inertia_kg_m2(), 1e-8);
+            close(inertia, body.inertia_kg_m2(), 1e-7);
             assert_eq!(
                 body,
                 solve(&inv, temperature, 1000.0, Controls::default()).unwrap()
@@ -1170,11 +1170,11 @@ fn compressed_liquid_regions_preserve_models_conservation_and_independent_closur
         let mut inertia = 0.0;
         for r in body.regions() {
             let (m, i, dp) = quadrature(r);
-            close(m, r.inventory().total_mass_kg(), 1e-8);
+            close(m, r.inventory().total_mass_kg(), 1e-7);
             close(dp, r.inner().pressure_pa - r.outer().pressure_pa, 2e-4);
             inertia += i;
         }
-        close(inertia, body.inertia_kg_m2(), 1e-8);
+        close(inertia, body.inertia_kg_m2(), 1e-7);
     }
 }
 

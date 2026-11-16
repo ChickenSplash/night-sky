@@ -174,7 +174,7 @@ fn cold_profiles_close_inventory_interfaces_and_independent_radial_integrals() {
             let mut total_i = 0.0;
             for region in &body.regions {
                 let (m, i, dp) = quadrature(region, cold::density_kg_m3);
-                close(m, region.inventory.total_mass_kg(), 1e-8);
+                close(m, region.inventory.total_mass_kg(), 1e-7);
                 close(
                     dp,
                     region.inner().pressure_pa - region.outer().pressure_pa,
@@ -184,7 +184,7 @@ fn cold_profiles_close_inventory_interfaces_and_independent_radial_integrals() {
                 assert_eq!(region.phase(), PhaseKnowledge::Unresolved);
                 assert_eq!(region.temperature_k(), None);
             }
-            close(total_i, body.inertia_kg_m2, 1e-8);
+            close(total_i, body.inertia_kg_m2, 1e-7);
             if body.regions.len() == 2 {
                 let a = body.regions[0].outer();
                 let b = body.regions[1].inner();
@@ -241,7 +241,7 @@ fn external_load_compresses_without_adding_material_and_runs_are_deterministic()
     assert!(metal.radius_m() < bare.radius_m() && bare.radius_m() < rock.radius_m());
     for region in loaded.regions() {
         let (mass, _, _) = quadrature(region, cold::density_kg_m3);
-        close(mass, region.inventory().total_mass_kg(), 1e-8);
+        close(mass, region.inventory().total_mass_kg(), 1e-7);
     }
 }
 

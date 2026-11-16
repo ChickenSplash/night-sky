@@ -73,7 +73,7 @@ fn check(source: bool) {
             ),
             Err(Error::WorkBudget)
         ));
-        assert!((fine_condensate / condensate - 1.0).abs() < 1e-3);
+        assert!((fine_condensate / condensate - 1.0).abs() < 5e-3);
         let restored = interior
             .retained_inventory()
             .checked_add(&e.inventory)
