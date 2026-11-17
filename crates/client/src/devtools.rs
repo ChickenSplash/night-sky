@@ -152,10 +152,7 @@ pub fn draw(
     rendering: Rendering,
     mut bindings: ResMut<crate::input::Bindings>,
     mut tools: ResMut<DevTools>,
-    (mut planets, window): (
-        ResMut<crate::planet_loading::PlanetLoading>,
-        Query<&Window, With<bevy::window::PrimaryWindow>>,
-    ),
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let (mut contexts, mut writer, mut typed, mut commands) = interaction;
     let (universe, nav, clock, time) = scene;
@@ -221,7 +218,6 @@ pub fn draw(
                                 &searches,
                                 &mut out,
                             );
-                            tabs::planets::planets(ui, &mut planets);
                         }
                         Tab::Settings => settings(
                             ui,

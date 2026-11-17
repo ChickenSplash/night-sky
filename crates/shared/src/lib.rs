@@ -10,9 +10,7 @@ pub use composition::{
     Layer, LayerMaterial, LayeredPlanet, MaterialBudget, ModelFidelity, PhaseAllocation,
     PlanetPhysical, RadiusReference,
 };
-pub use planet_result::{
-    PhysicalRevision, PlanetResult, RefinementStatus, ResultProvenance, SurfaceKnowledge,
-};
+pub use planet_result::{PhysicalRevision, PlanetResult, ResultProvenance, SurfaceKnowledge};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Galaxy {

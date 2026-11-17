@@ -46,14 +46,11 @@ measurements and future ideas, not the current UI specification.
 - `kind=star` returns individual matching members of multiple systems;
   `kind=system` gives system-level results. Results carry `objects::ObjectRef`,
   display facts, distance and `SearchResult::position_pc`, not UI types.
-- Planet results also carry `physical_basis`: synchronous result provenance and
-  input/model/sequence revision. Physical predicates and relationship generation
-  use the fast fallback, never background EOS work or worker-completion order.
-  This is not a promise of a match after layered refinement. The browser compares
-  the loaded or session-adopted basis and warns when it differs: that hit is not revalidated against
-  new physics. Background adoption does not certify a new match or silently
-  rewrite the original deterministic result set. Exact layered query
-  reconciliation remains separate work.
+- Planet results also carry `physical_basis`: result provenance and
+  input/model revision. Physical predicates use the same generated facts every
+  consumer shows, so a match stays a match on a visit. The browser warns only
+  when a loaded basis (a backend snapshot) differs: that hit is not
+  revalidated against it.
 - A `SearchRequest` adds a fixed origin in parsecs and a work cap. The origin
   is not part of the reusable query and does not follow the camera afterwards.
 
@@ -109,8 +106,7 @@ measurements and future ideas, not the current UI specification.
   use the [shared CPU budget](../client/streaming.md#shared-background-cpu-budget),
   not a separate thread allowance. Active search reserves one slot; visible
   stars take priority for extra capacity, and search borrows otherwise spare
-  slots while keeping star headroom. Planet refinement starts only while both
-  are idle. Idle search services reserve nothing. Results still use fixed work
+  slots while keeping star headroom. Idle search services reserve nothing. Results still use fixed work
   limits and deterministic ordering, not scheduling or elapsed time.
 
 ## Live objects

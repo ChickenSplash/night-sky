@@ -230,7 +230,7 @@ impl Fleet {
     /// first world step at or after `seconds`. Returns its ID.
     pub fn spawn(
         &mut self,
-        mut system: StarSystem,
+        system: StarSystem,
         page: u32,
         body: &str,
         altitude: f64,
@@ -238,7 +238,6 @@ impl Fleet {
         seconds: f64,
     ) -> Result<String, String> {
         let tick = tick_at(seconds);
-        self.charts.restore_system(&mut system);
         let seconds = tick_seconds(tick);
         let star = objects::star_id(&system, page);
         let mass = body_mass(&system, page, body).ok_or_else(|| format!("No body `{body}`"))?;

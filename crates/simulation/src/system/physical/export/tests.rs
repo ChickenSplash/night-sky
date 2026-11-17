@@ -1,6 +1,6 @@
 use super::*;
 use crate::system::{composition::Material, physical};
-use space_shared::{RefinementStatus, ResultProvenance};
+use space_shared::ResultProvenance;
 
 #[test]
 fn every_export_projects_one_validated_result() {
@@ -24,9 +24,7 @@ fn every_export_projects_one_validated_result() {
                 );
                 assert!((saved.escaped_kg - budget.escaped().mass_kg(material)).abs() <= tolerance);
             }
-            assert_eq!(expected.revision.sequence, 0);
             assert_eq!(expected.provenance, ResultProvenance::Fallback);
-            assert_eq!(expected.refinement, RefinementStatus::Pending);
             assert_eq!(expected.record.fallback_reason, None);
             let planet = export_planet(hosted, 7, "Test designation".into(), None);
             assert_eq!(planet.initial_result.as_ref(), Some(&expected));

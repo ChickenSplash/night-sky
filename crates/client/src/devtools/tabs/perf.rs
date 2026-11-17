@@ -124,7 +124,7 @@ pub fn perf(
                     "shared budget",
                     budget.limit().to_string(),
                     Some(
-                        "Three quarters of available CPU threads shared by visible stars, object search and planet refinement. Active search keeps one slot; stars get priority for extra capacity. Search borrows spare slots while leaving star headroom, and refinement starts only while stars and search are idle. Single-slot budgets alternate stars and search. This is not CPU affinity or a frame-time guarantee.",
+                        "Three quarters of available CPU threads shared by visible stars and object search. Active search keeps one slot; stars get priority for extra capacity. Search borrows spare slots while leaving star headroom. Single-slot budgets alternate stars and search. This is not CPU affinity or a frame-time guarantee.",
                     ),
                 ),
                 (
@@ -139,13 +139,6 @@ pub fn perf(
                     format!("{} active", activity.search),
                     Some(
                         "Currently admitted search-worker slots, including its coordinator. Allocations are reconsidered between bounded work slices; idle service threads do not count. Not measured CPU utilisation.",
-                    ),
-                ),
-                (
-                    "planet refinement",
-                    format!("{} active", activity.planets),
-                    Some(
-                        "Currently admitted planet preparation/refinement slots. Already-running solves finish before releasing their slots; queued jobs do not count. Not measured CPU utilisation.",
                     ),
                 ),
             ],
@@ -628,7 +621,7 @@ fn search(ui: &mut egui::Ui, searches: &crate::search::Searches, out: &mut Vec<U
             "runs on",
             searches.mode().to_owned(),
             Some(
-                "A background service sharing the CPU budget with visible-star streaming and planet refinement. See CPU threads for current allocations.",
+                "A background service sharing the CPU budget with visible-star streaming. See CPU threads for current allocations.",
             ),
         ),
         (

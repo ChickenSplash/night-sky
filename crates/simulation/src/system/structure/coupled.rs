@@ -7,6 +7,8 @@ mod column;
 pub(crate) use column::cap_pa;
 mod deposit;
 pub mod escape;
+/// The census reference: the layered solve handed generation's boundary.
+#[cfg(test)]
 pub(crate) mod prescribed;
 pub(crate) mod surface;
 #[cfg(test)]

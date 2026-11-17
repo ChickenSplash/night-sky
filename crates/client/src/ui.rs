@@ -57,7 +57,7 @@ pub fn draw_ui(
         ResMut<browser::Browser>,
         Res<crate::search::Searches>,
     ),
-    (universe, loading): (Res<Universe>, Res<crate::planet_loading::PlanetLoading>),
+    universe: Res<Universe>,
     mut nav: ResMut<Navigation>,
     clock: Res<Clock>,
     overlay: Overlay,
@@ -146,7 +146,6 @@ pub fn draw_ui(
             galaxy: &universe.0,
             field: &starfield,
             now,
-            loading: &loading,
         },
     );
 
@@ -206,7 +205,7 @@ pub fn draw_ui(
         &universe.0,
         &starfield,
         &mut hud.inspector,
-        (now, &loading),
+        now,
         &mut out,
     );
     writer.write_batch(out);

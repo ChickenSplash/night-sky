@@ -4,7 +4,8 @@
 
 **G1 and G2 complete, 14 November 2026. G3 steps 1 to 3 and 4.1 to 4.3
 complete, 16 November 2026. Steps 4.4 and 4.5 are replaced by "Layers from
-the table" (decision of 16 November 2026), which is open. G4 is proposed, not
+the table" (decision of 16 November 2026), implemented 17 November 2026 with
+the swap deleted and checked in the game. G4 is proposed, not
 implemented.**
 Current behaviour
 is described in [planetary systems](../simulation/planetary-systems.md) and the
@@ -646,9 +647,9 @@ issue alongside the wet-core radius limitation.
 
 ### Layers from the table (replaces steps 4.4, 4.5, 5 and 6)
 
-Decision of 16 November 2026. Tasks 1 to 5 complete, 17 November 2026:
-generation builds its layers from the table. Task 6 (delete the swap) is
-open.
+Decision of 16 November 2026. Tasks 1 to 6 complete, 17 November 2026:
+generation builds its layers from the table and the swap is deleted, checked
+in the running game by the user.
 
 **Why.** After step 4.3 the background solve changes only the layer list,
 the model notes and the provenance. Its layers are still a second answer:
@@ -817,6 +818,29 @@ before in `g3-layers-boundaries-before.jsonl`.
   the reference-core simplification already listed below.
 - Generation key `surface_decision_v2`. Synchronous cost unchanged at 0.22 ms
   per planet. `./scripts/check.sh` passes (441 client, 484 simulation tests).
+
+**Task 6, result, 17 November 2026.** The swap is deleted in one change:
+about 3,400 lines removed (2,350 client, 1,130 simulation and shared).
+
+- **Client:** `planet_loading.rs` and `adoption.rs` (queue, workers,
+  candidate cache, camera/craft/route barrier, replay), the session
+  refinement registry in the craft charts, the inspector's "Background
+  refinement" section, the devtools planet tab, `set_layered_planets` and
+  `ns planets`. The planet slot is gone from the shared CPU budget.
+- **Simulation:** `Refinement`, `prepare_refinement`, `validate_refinement`,
+  `layered::rescale` and `receive_boundary`, the voyage cache's
+  `refine_planets`, `Mode::PrepareRefinement` and `PlanetJob`. The prescribed
+  boundary solve (`resolve_generated`) is now test-only: the census hands it
+  generation's boundary and checks it comes back unchanged.
+- **Shared:** `RefinementStatus`, `PlanetResult::refinement` and
+  `PhysicalRevision::sequence`. Generation key now
+  `generation_physics_v4:structure_table_v4:surface_decision_v2`.
+- **Inspector:** generation's record shows the surface, layers, greenhouse
+  depth, blow-off and models directly under Composition and Model details.
+- **Census:** unchanged figures (4,367 planets, 3,863 solved), all 3,863
+  keep generation's boundary, 0.22 ms per planet. `./scripts/check.sh`
+  passes (421 client, 479 simulation tests; the drops are deleted swap
+  tests). Evidence `data/tmp/g3-task6-{check,census}.log`, `g3-task6-agreement.md`.
 
 **Acceptance.** A visited planet's inspector shows its layers immediately and
 they never change. No planet record is written after generation. The census

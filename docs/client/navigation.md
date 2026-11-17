@@ -81,10 +81,8 @@ Client paths below are relative to `crates/client/src/` unless prefixed with `cr
 
 The camera's neighbourhood field follows the complete active system record,
 including physical revisions with the same system ID. It is rebuilt when those
-facts change, not just on page/list changes. [Background adoption](../simulation/planet-composition.md#safe-background-adoption)
-defers while craft use the system or any active route retains geometry, and while
-the camera is near the old/new atmosphere or clearance bounds. Adopted facts
-survive revisits through the session registry. Model gas references, optical
+facts change, not just on page/list changes, such as a backend snapshot.
+Generated planets never change after generation. Model gas references, optical
 proxies and even known solid phases never grant landing permission.
 
 ## Moving with objects

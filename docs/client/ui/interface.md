@@ -42,8 +42,7 @@ follows ordinary selection only, without travelling or falling back to location.
 The existing borderless breadcrumb readout is unchanged. Non-planet selections
 reuse shared object facts; no selection shows a prompt.
 
-Planets show the validated active result's ordered regions, not pending refinement
-candidates. An interactive annular cross-section preserves inner and outer radii
+Planets show the validated active result's ordered regions. An interactive annular cross-section preserves inner and outer radii
 relative to the outermost modelled region, including atmosphere extent. Colours
 identify regions, not physical appearance. Thin layers are never exaggerated:
 the exterior-to-centre overview keeps every region selectable even when its ring
@@ -83,7 +82,7 @@ show no invented layers.
   follows the normal selection rules.
 - The inspector keeps its borderless halo text. Planet readouts show only type,
   mass, radius, gravity, and orbit/rotation facts, plus navigation actions. Layer,
-  composition, atmosphere, boundary and refinement/model details are omitted from
+  composition, atmosphere, boundary and model details are omitted from
   this scene overlay; the Object Inspector owns detailed interior inspection.
   A shared-kit vertical
   scroll area bounds long content to the viewport, reserving the bottom HUD
@@ -117,11 +116,10 @@ radius meaning and model caveats. Missing legacy composition and invalid new
 records are visibly unknown, never zero-filled. Water-rich boundaries make no
 ocean/phase claim; a one-bar radius is not ground or a measured cloud deck.
 
-The full shared record retains Overview, Background refinement, Composition,
-Atmosphere, Orbit and rotation, and Model details sections for browser/developer
-consumers. The top-left readout filters this data for presentation only, without
-deleting facts or changing API exports. Refinement facts distinguish unapplied
-candidates, safety deferrals and applied active results; see
+The full shared record retains Overview, Composition, Atmosphere, Orbit and
+rotation, and Model details sections for browser/developer consumers. The
+top-left readout filters this data for presentation only, without deleting
+facts or changing API exports. See
 [the layered record](../../simulation/planet-composition.md#layered-transport-record).
 Composition includes ordered regions and bulk gas inventories; these are
 whole-planet mass fractions, not atmospheric molecular percentages. Atmosphere

@@ -4,7 +4,7 @@ use super::{env_usize, quantiles, scientific_quantiles};
 use crate::{
     galaxy::Component,
     star::multiple::Hosted,
-    system::{galactic_bodies, generated::PlanetJob, physical, structure::prototype::Outcome},
+    system::{galactic_bodies, physical, structure::prototype::Outcome},
 };
 use space_shared::{AtmosphereData, LayeredPlanet};
 use std::{fmt::Write as _, time::Instant};
@@ -108,10 +108,9 @@ struct Row {
     equilibrium_k: f64,
     sync: LayeredPlanet,
     layered: Option<LayeredPlanet>,
-    /// The record a visit installs: the layered profile on generation's radius.
-    adopted: Option<Result<LayeredPlanet, &'static str>>,
+    /// Whether the layered solve kept generation's boundary, for solved rows.
+    received: Option<Result<(), &'static str>>,
     atmosphere: Option<AtmosphereData>,
-    adopted_atmosphere: Option<AtmosphereData>,
     refusal: String,
 }
 
@@ -130,21 +129,46 @@ fn escaped_kg(record: &LayeredPlanet) -> f64 {
     record.physical.materials.iter().map(|m| m.escaped_kg).sum()
 }
 
+/// The layered solve is handed generation's pressure, temperature and gas.
+/// It must return them, and the source and escape, unchanged.
+fn received(initial: &LayeredPlanet, solved: &LayeredPlanet) -> Result<(), &'static str> {
+    if solved.surface_pressure_pa != initial.surface_pressure_pa
+        || solved.surface_temperature_k != initial.surface_temperature_k
+    {
+        return Err("did not receive the decided pressure and temperature");
+    }
+    for decided in &initial.physical.materials {
+        let solved = solved
+            .physical
+            .materials
+            .iter()
+            .find(|m| m.material == decided.material)
+            .ok_or("missing solved material")?;
+        if solved.gas_kg != decided.gas_kg {
+            return Err("did not receive the decided gas inventory");
+        }
+        if solved.source_kg != decided.source_kg || solved.escaped_kg != decided.escaped_kg {
+            return Err("changed source or escape");
+        }
+    }
+    Ok(())
+}
+
 fn row(p: &Hosted) -> Row {
-    let job = PlanetJob {
-        id: p.id(),
-        designation: String::new(),
-        budget: p.body.budget,
-        environment: p.environment.clone().unwrap(),
-        initial_result: p.body.initial_result.clone(),
-        decision: p.body.decision,
-    };
-    let outcome = job.resolve();
+    let environment = p.environment.clone().unwrap();
+    let initial = &p.body.initial_result;
+    let outcome = crate::system::structure::prototype::resolve_generated(
+        &p.body.budget,
+        &environment,
+        p.body.decision,
+        &initial.record,
+        Default::default(),
+    );
     if std::env::var_os("NS_AGREEMENT_HEADLESS_COMPARISON").is_some() {
         let previous = crate::system::structure::prototype::resolve(
-            &job.budget,
-            &job.environment,
-            job.decision,
+            &p.body.budget,
+            &environment,
+            p.body.decision,
             Default::default(),
         );
         if let Outcome::Layered(solved) = previous {
@@ -156,7 +180,7 @@ fn row(p: &Hosted) -> Row {
             {
                 eprintln!(
                     "Headless suspended column {}: generated route {}",
-                    job.id,
+                    p.id(),
                     match &outcome {
                         Outcome::Layered(_) => "solved".to_owned(),
                         Outcome::Fallback(f) => format!("{:?}", f.reason),
@@ -165,31 +189,11 @@ fn row(p: &Hosted) -> Row {
             }
         }
     }
-    let refinement = matches!(outcome, Outcome::Layered(_))
-        .then(|| physical::prepare_refinement(&job.initial_result, &job.environment, &outcome));
-    if let Some(Ok(refined)) = &refinement {
-        use crate::system::atmosphere::{GasAtmosphere, optics::boundary::OpticalColumn};
-        let planet = physical::export_planet(p.clone(), 0, String::new(), None);
-        refined
-            .project(&planet)
-            .unwrap_or_else(|e| panic!("{}: {e}", job.id));
-        if let Some(air) = &job.environment.atmosphere {
-            let gas = GasAtmosphere::try_from(air).unwrap();
-            let before = OpticalColumn::from_result(&job.initial_result, &gas).unwrap();
-            let after = OpticalColumn::from_result(&refined.result, &gas)
-                .unwrap_or_else(|e| panic!("{}: {e}", job.id));
-            assert_eq!(before, after, "{} optical column", job.id);
-        }
-    }
-    let adopted_atmosphere = refinement
-        .as_ref()
-        .and_then(|r| r.as_ref().ok())
-        .and_then(|r| r.environment.atmosphere.clone());
-    let adopted = refinement.map(|r| r.map(|r| r.result.record));
     let (layered, refusal) = match outcome {
         Outcome::Layered(solved) => (Some(physical::layered(&solved)), String::new()),
         Outcome::Fallback(f) => (None, format!("{:?}", f.reason.unwrap())),
     };
+    let received = layered.as_ref().map(|l| received(&initial.record, l));
     let retained = p.body.budget.retained();
     let mass = retained.total_mass_kg();
     use crate::system::composition::Material as M;
@@ -204,12 +208,11 @@ fn row(p: &Hosted) -> Row {
         mass_earth: mass / crate::units::EARTH_MASS_KG,
         light_fraction: (retained.mass_kg(M::Hydrogen) + retained.mass_kg(M::Helium)) / mass,
         water_fraction: retained.mass_kg(M::Water) / mass,
-        equilibrium_k: job.environment.equilibrium_temperature_k,
-        sync: p.body.initial_result.record.clone(),
+        equilibrium_k: environment.equilibrium_temperature_k,
+        sync: initial.record.clone(),
         layered,
-        adopted,
-        atmosphere: job.environment.atmosphere.clone(),
-        adopted_atmosphere,
+        received,
+        atmosphere: environment.atmosphere.clone(),
         refusal,
     }
 }
@@ -249,9 +252,8 @@ struct Summary {
     thin_pressure: f64,
     /// Relative radius on envelope surfaces: median, 95th percentile, worst.
     envelope_radius: [f64; 3],
-    /// Layered results a visit could not install, or installed on another radius.
-    adoption_failures: usize,
-    radius_changes: usize,
+    /// Layered solves that did not keep generation's boundary.
+    unreceived: usize,
     layers: Layers,
 }
 
@@ -396,65 +398,22 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
         ] {
             let _ = writeln!(
                 text,
-                "| {name}, raw solve | {route} | {} |",
+                "| {name} | {route} | {} |",
                 scientific_quantiles(of(&|r, l| metric(&r.sync, l)))
-            );
-            let values = pairs
-                .iter()
-                .filter(|(r, _)| (r.decision == "Envelope") == envelope)
-                .filter_map(|(r, _)| Some(metric(&r.sync, r.adopted.as_ref()?.as_ref().ok()?)))
-                .collect();
-            let _ = writeln!(
-                text,
-                "| {name}, installed | {route} | {} |",
-                scientific_quantiles(values)
-            );
-        }
-        for (name, metric) in [
-            (
-                "Atmosphere scale height, relative",
-                (|a: &AtmosphereData| a.scale_height_m) as fn(&AtmosphereData) -> f64,
-            ),
-            ("Atmosphere extent, relative", |a: &AtmosphereData| {
-                a.extent_m
-            }),
-        ] {
-            let values: Vec<_> = pairs
-                .iter()
-                .filter(|(r, _)| (r.decision == "Envelope") == envelope)
-                .filter_map(|(r, _)| {
-                    Some(relative(
-                        metric(r.atmosphere.as_ref()?),
-                        metric(r.adopted_atmosphere.as_ref()?),
-                    ))
-                })
-                .collect();
-            let _ = writeln!(
-                text,
-                "| {name}, installed ({} pairs) | {route} | {} |",
-                values.len(),
-                scientific_quantiles(values)
             );
         }
     }
-    let adoption_failures = rows
+    let unreceived = rows
         .iter()
-        .filter(|r| matches!(r.adopted, Some(Err(_))))
-        .count();
-    let radius_changes = rows
-        .iter()
-        .filter(|r| {
-            matches!(&r.adopted, Some(Ok(adopted))
-                if adopted.physical.reference_radius_m != r.sync.physical.reference_radius_m)
-        })
+        .filter(|r| matches!(r.received, Some(Err(_))))
         .count();
     let _ = writeln!(
         text,
-        "\n- Layered results a visit cannot install: {adoption_failures}\n- Installed on a radius other than generation's: {radius_changes}"
+        "\n- Layered solves that did not keep generation's boundary: {unreceived}"
     );
     let mut reasons = std::collections::BTreeMap::<&str, usize>::new();
     for r in rows {
-        if let Some(Err(reason)) = &r.adopted {
+        if let Some(Err(reason)) = &r.received {
             *reasons.entry(reason).or_default() += 1;
         }
     }
@@ -493,8 +452,7 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
         thin_radius,
         thin_pressure,
         envelope_radius,
-        adoption_failures,
-        radius_changes,
+        unreceived,
         layers,
     }
 }
@@ -763,9 +721,8 @@ fn boundaries(rows: &[Row]) -> String {
         let value = serde_json::json!({
             "id": r.id, "route": r.decision,
             "initial": facts(&r.sync), "raw": r.layered.as_ref().map(facts),
-            "adopted": r.adopted.as_ref().and_then(|r| r.as_ref().ok()).map(facts),
-            "adoption_error": r.adopted.as_ref().and_then(|r| r.as_ref().err()),
-            "initial_atmosphere": r.atmosphere, "adopted_atmosphere": r.adopted_atmosphere,
+            "receive_error": r.received.as_ref().and_then(|r| r.as_ref().err()),
+            "initial_atmosphere": r.atmosphere,
             "surface": [&r.sync.surface, r.layered.as_ref().map_or("", |l| &l.surface)],
             "initial_layers": r.sync.layers, "raw_layers": r.layered.as_ref().map(|l| &l.layers),
         });
@@ -897,45 +854,6 @@ fn generation_agreement() {
     assert!(median < 0.01, "envelope median {median}");
     assert!(p95 < 0.05, "envelope p95 {p95}");
     assert!(worst < 0.25, "envelope worst {worst}");
-    // A visit installs the layered profile on generation's radius.
-    assert_eq!(summary.radius_changes, 0, "adoption changed a radius");
-    assert_eq!(
-        summary.adoption_failures, 0,
-        "layered installation failures"
-    );
-    for r in &rows {
-        let Some(Ok(adopted)) = &r.adopted else {
-            continue;
-        };
-        assert_eq!(
-            serde_json::to_vec(&r.atmosphere).unwrap(),
-            serde_json::to_vec(&r.adopted_atmosphere).unwrap(),
-            "{} atmosphere record",
-            r.id
-        );
-        for (a, b) in [
-            (r.sync.surface_pressure_pa, adopted.surface_pressure_pa),
-            (r.sync.surface_temperature_k, adopted.surface_temperature_k),
-            (
-                r.sync.physical.condensed_radius_m,
-                adopted.physical.condensed_radius_m,
-            ),
-            (
-                r.sync.physical.reference_gravity_m_s2,
-                adopted.physical.reference_gravity_m_s2,
-            ),
-            (
-                r.sync.physical.inertia_factor,
-                adopted.physical.inertia_factor,
-            ),
-        ] {
-            assert_eq!(a.to_bits(), b.to_bits(), "{} decided boundary", r.id);
-        }
-        assert_eq!(
-            r.sync.physical.materials, adopted.physical.materials,
-            "{} reservoir split",
-            r.id
-        );
-        assert_eq!(gas_difference(&r.sync, adopted), 0.0, "{} gas mix", r.id);
-    }
+    // The layered solve is the reference, handed generation's boundary.
+    assert_eq!(summary.unreceived, 0, "layered solves off the boundary");
 }

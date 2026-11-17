@@ -6,8 +6,6 @@ use serde::Serialize;
 pub enum Section {
     #[default]
     Overview,
-    /// Unapplied refinement candidate, beside the active authoritative result.
-    Layered,
     Composition,
     Atmosphere,
     Orbit,
@@ -15,9 +13,8 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::Overview,
-        Self::Layered,
         Self::Composition,
         Self::Atmosphere,
         Self::Orbit,
@@ -26,7 +23,6 @@ impl Section {
     pub fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
-            Self::Layered => "Background refinement",
             Self::Composition => "Composition",
             Self::Orbit => "Orbit and rotation",
             Self::ModelDetails => "Model details",

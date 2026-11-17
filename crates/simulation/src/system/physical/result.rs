@@ -6,14 +6,13 @@ use crate::{
 };
 use space_shared::{
     LayeredPlanet, PhysicalRevision, PlanetEnvironment, PlanetResult, RadiusReference,
-    RefinementStatus, ResultProvenance, SurfaceKnowledge,
+    ResultProvenance, SurfaceKnowledge,
 };
 use std::{collections::BTreeSet, f64::consts::PI};
 
 type Check = Result<(), &'static str>;
 
-/// These constructors produce candidates, not live geometry updates. Revision
-/// identities are caller supplied; validation cannot prove a hash or adoption order.
+/// Revision identities are caller supplied; validation cannot prove a hash.
 pub fn initial_result(
     budget: &Budget,
     environment: &PlanetEnvironment,
@@ -27,12 +26,10 @@ pub(crate) fn initial_from_fallback(
     fallback: &structure::fallback::Fallback,
     revision: PhysicalRevision,
 ) -> Result<PlanetResult, &'static str> {
-    let record = super::fallback(fallback);
     result(
-        record,
+        super::fallback(fallback),
         revision,
         ResultProvenance::Fallback,
-        RefinementStatus::Pending,
     )
 }
 
@@ -41,31 +38,25 @@ pub fn resolved_result(
     revision: PhysicalRevision,
 ) -> Result<PlanetResult, &'static str> {
     let record = super::outcome(outcome);
-    let (provenance, refinement) = match outcome {
-        structure::prototype::Outcome::Layered(_) => {
-            (ResultProvenance::Layered, RefinementStatus::Complete)
+    let provenance = match outcome {
+        structure::prototype::Outcome::Layered(_) => ResultProvenance::Layered,
+        structure::prototype::Outcome::Fallback(_) => {
+            record.fallback_reason.as_ref().ok_or("missing refusal")?;
+            ResultProvenance::Fallback
         }
-        structure::prototype::Outcome::Fallback(_) => (
-            ResultProvenance::Fallback,
-            RefinementStatus::Refused {
-                reason: record.fallback_reason.clone().ok_or("missing refusal")?,
-            },
-        ),
     };
-    result(record, revision, provenance, refinement)
+    result(record, revision, provenance)
 }
 
 fn result(
     record: LayeredPlanet,
     revision: PhysicalRevision,
     provenance: ResultProvenance,
-    refinement: RefinementStatus,
 ) -> Result<PlanetResult, &'static str> {
     let surface_knowledge = knowledge(&record);
     let result = PlanetResult {
         revision,
         provenance,
-        refinement,
         surface_knowledge,
         record,
     };
@@ -96,25 +87,9 @@ pub fn validate_result(result: &PlanetResult) -> Check {
     if fallback != (result.provenance == ResultProvenance::Fallback) {
         return Err("inconsistent result provenance");
     }
-    match (
-        &result.provenance,
-        &result.refinement,
-        &result.record.fallback_reason,
-    ) {
-        (ResultProvenance::Layered, RefinementStatus::Complete, None) => {}
-        (ResultProvenance::Fallback, RefinementStatus::Refused { reason }, Some(saved))
-            if text(reason) && reason == saved => {}
-        (
-            ResultProvenance::Fallback,
-            RefinementStatus::Pending | RefinementStatus::Running,
-            None,
-        ) => {}
-        (
-            ResultProvenance::Fallback,
-            RefinementStatus::Unavailable { reason } | RefinementStatus::Failed { reason },
-            None,
-        ) if text(reason) => {}
-        _ => return Err("inconsistent refinement status"),
+    // Generation's result has no refusal; a standalone refused solve names one.
+    if result.provenance == ResultProvenance::Layered && result.record.fallback_reason.is_some() {
+        return Err("inconsistent refusal");
     }
     if result.surface_knowledge != knowledge(&result.record) {
         return Err("unsupported surface knowledge");
@@ -133,98 +108,6 @@ fn nonnegative(value: f64) -> bool {
 }
 fn close(a: f64, b: f64) -> bool {
     a.is_finite() && b.is_finite() && (a - b).abs() <= 1e-9 * a.abs().max(b.abs())
-}
-
-/// Check a refinement's lineage, not whether live geometry can safely adopt it.
-/// The caller must still check camera/craft/routes and replace every projection
-/// atomically. No state is mutated, and stale work is never renumbered here.
-pub fn validate_refinement(active: &PlanetResult, candidate: &PlanetResult) -> Check {
-    validate_result(active)?;
-    validate_result(candidate)?;
-    if active.provenance != ResultProvenance::Fallback
-        || !matches!(
-            active.refinement,
-            RefinementStatus::Pending
-                | RefinementStatus::Running
-                | RefinementStatus::Failed { .. }
-                | RefinementStatus::Unavailable { .. }
-        )
-        || !matches!(
-            candidate.refinement,
-            RefinementStatus::Complete | RefinementStatus::Refused { .. }
-        )
-        || active.revision.inputs != candidate.revision.inputs
-        || active.revision.model != candidate.revision.model
-        || active.revision.sequence.checked_add(1) != Some(candidate.revision.sequence)
-    {
-        return Err("stale or unrelated refinement");
-    }
-    let mut additional_loss = 0.0;
-    for previous in &active.record.physical.materials {
-        let next = candidate
-            .record
-            .physical
-            .materials
-            .iter()
-            .find(|m| m.material == previous.material)
-            .ok_or("missing refinement material")?;
-        let tolerance = 8.0 * f64::EPSILON * previous.source_kg;
-        if !close(previous.source_kg, next.source_kg)
-            || next.escaped_kg + tolerance < previous.escaped_kg
-        {
-            return Err("refinement changed source or restored escaped mass");
-        }
-        additional_loss += next.escaped_kg - previous.escaped_kg;
-        for (a, b) in [
-            (previous.source_kg, next.source_kg),
-            (previous.retained_kg, next.retained_kg),
-            (previous.escaped_kg, next.escaped_kg),
-            (previous.interior_kg, next.interior_kg),
-            (previous.condensed_kg, next.condensed_kg),
-            (previous.gas_kg, next.gas_kg),
-        ] {
-            if a.to_bits() != b.to_bits() {
-                return Err("refinement changed a decided material allocation");
-            }
-        }
-    }
-    let tolerance = 8.0
-        * f64::EPSILON
-        * active
-            .record
-            .physical
-            .materials
-            .iter()
-            .map(|m| m.source_kg)
-            .sum::<f64>();
-    // Escape is generation's decision. A refinement adds none, and reports
-    // the same blow-off its base did.
-    if additional_loss.abs() > tolerance || candidate.record.blowoff_kg != active.record.blowoff_kg
-    {
-        return Err("refinement changed escape");
-    }
-    let a = &active.record;
-    let b = &candidate.record;
-    for (a, b) in [
-        (a.surface_pressure_pa, b.surface_pressure_pa),
-        (a.surface_temperature_k, b.surface_temperature_k),
-        (a.physical.reference_radius_m, b.physical.reference_radius_m),
-        (a.physical.condensed_radius_m, b.physical.condensed_radius_m),
-        (
-            a.physical.reference_gravity_m_s2,
-            b.physical.reference_gravity_m_s2,
-        ),
-        (a.physical.retained_mass_kg, b.physical.retained_mass_kg),
-        (a.physical.inertia_factor, b.physical.inertia_factor),
-    ] {
-        if a.to_bits() != b.to_bits() {
-            return Err("refinement changed a decided boundary");
-        }
-    }
-    if a.physical.materials != b.physical.materials || a.one_bar_radius_m != b.one_bar_radius_m {
-        return Err("refinement changed a decided allocation or pressure level");
-    }
-    Ok(())
 }
 
 /// Accept supported records on their transported facts, not agreement with a

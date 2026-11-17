@@ -8,9 +8,8 @@ pub(super) fn organise(info: &mut Info, planet: &Planet) {
         field.section = match field.id.as_str() {
             "composition.gravity" | "atmosphere.pressure" => Section::Overview,
             "result.status" | "result.surface" | "result.condensed_radius" => Section::Overview,
-            "result.inputs" | "result.sequence" | "result.limitations" | "result.fidelity" => {
-                Section::ModelDetails
-            }
+            "result.inputs" | "result.revision" | "result.limitations" | "result.fidelity"
+            | "result.models" => Section::ModelDetails,
             id if id.starts_with("result.assessment.") => Section::ModelDetails,
             "composition.materials" | "composition.density" => Section::Composition,
             id if id.starts_with("composition.material.") => Section::Composition,

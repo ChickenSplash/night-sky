@@ -89,22 +89,6 @@ pub struct CameraRig {
 }
 
 impl CameraRig {
-    pub fn frame_origin_ly(&self) -> DVec3 {
-        self.frame_ly
-    }
-    #[cfg(test)]
-    pub(crate) fn placed_for_test(frame_ly: DVec3) -> Self {
-        Self {
-            frame_ly,
-            shown: Some(Pose {
-                target: DVec3::ZERO,
-                distance: 1.0,
-                rotation: Quat::IDENTITY,
-                layout: 0.0,
-            }),
-            ..Default::default()
-        }
-    }
     /// Ends any flight, so the next placement jumps straight to `Navigation`.
     pub fn land(&mut self) {
         self.flight = None;

@@ -585,7 +585,6 @@ fn changed_loss_history_preserves_orbits_and_source_but_reconciles_structure() {
             before.body.initial_result.revision.inputs,
             after.body.initial_result.revision.inputs
         );
-        assert_eq!(after.body.initial_result.revision.sequence, 0);
         assert_eq!(after.environment.as_ref().unwrap().age_gyr, 0.01);
     }
     let once = changed.clone();

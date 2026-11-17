@@ -5,7 +5,6 @@ mod format;
 mod input;
 mod navigation;
 mod network;
-mod planet_loading;
 mod render;
 mod scene;
 mod search;
@@ -90,7 +89,6 @@ fn main() {
     // After the logger, so the poller's first messages are recorded.
     .insert_resource(Inbox(Mutex::new(network::start())))
     .init_resource::<Clock>()
-    .init_resource::<planet_loading::PlanetLoading>()
     .init_resource::<craft::Fleet>()
     .init_resource::<input::Bindings>()
     .init_resource::<input::Actions>()
@@ -112,7 +110,6 @@ fn main() {
         Update,
         (
             receive_galaxy,
-            planet_loading::restore,
             actions::apply,
             input::read,
             input::pilot::steer,
@@ -125,9 +122,7 @@ fn main() {
             devtools::gpu_test::run,
             devtools::atmosphere_test::run,
             scene::locate,
-            planet_loading::restore_visit,
             scene::place_camera,
-            planet_loading::update,
             scene::locate_body,
             scene::locate_anchor,
             scene::measure_velocity,

@@ -1,160 +1,7 @@
-//! Active result detail and a separately labelled, unapplied refinement candidate.
+//! Generation's result: the planet's layers, read from the structure table.
 use super::{Info, Section, atmosphere::pressure_display, composition::material_label};
 use crate::format::number;
-use crate::planet_loading::{Layered, PlanetState};
-use space_shared::{AtmosphereReference, Layer, LayeredPlanet, ModelFidelity, Planet};
-
-pub(super) fn facts(info: &mut Info, planet: &Planet, status: Layered) {
-    info.section = Section::Layered;
-    let state = match status {
-        Layered::Off => return,
-        Layered::Waiting => {
-            info.field(
-                "layered.status",
-                "Status",
-                None,
-                "Waiting · active result unchanged",
-            );
-            return;
-        }
-        Layered::State(state) => state,
-    };
-    let solved = match state {
-        PlanetState::Solved(solved) | PlanetState::Fallback(solved) => solved,
-        PlanetState::Queued | PlanetState::Running => {
-            let text = format!("{} · active result unchanged", state.label());
-            info.field("layered.status", "Status", None, text);
-            return;
-        }
-        PlanetState::Failed(e) => {
-            let text = format!("Active result retained (calculation failed: {e})");
-            info.field("layered.status", "Status", None, text);
-            return;
-        }
-    };
-    if planet
-        .initial_result
-        .as_ref()
-        .is_some_and(|r| r.revision.sequence > 0 && r.record == **solved)
-    {
-        info.field("layered.status", "Status", None, "Applied · active result");
-        return;
-    }
-    info.field(
-        "layered.status",
-        "Status",
-        None,
-        format!("{} · candidate, not applied", state.label()),
-    );
-    info.field(
-        "layered.surface",
-        if solved.surface == "envelope" {
-            "Reference level"
-        } else {
-            "Surface"
-        },
-        None,
-        surface_label(&solved.surface),
-    );
-    solved_facts(info, planet, solved);
-}
-
-fn solved_facts(info: &mut Info, planet: &Planet, l: &LayeredPlanet) {
-    info.field(
-        "layered.fidelity",
-        "Model fidelity",
-        None,
-        fidelity_label(l.model_fidelity),
-    );
-    info.field(
-        "layered.limitations",
-        "Model limitations",
-        None,
-        l.model_limitations.join(" · "),
-    );
-    let envelope = l.surface == "envelope";
-    let radius_km = l.physical.reference_radius_m / 1000.0;
-    info.field(
-        "layered.radius",
-        "Radius (candidate vs active)",
-        Some("km"),
-        format!(
-            "{} km vs {} km ({:+.2}%) · active radius drawn",
-            number(radius_km, 0),
-            number(planet.radius_km, 0),
-            (radius_km / planet.radius_km - 1.0) * 100.0
-        ),
-    );
-    let active_air = planet
-        .environment
-        .as_ref()
-        .and_then(|e| e.atmosphere.as_ref());
-    let active_temperature = active_air.map_or("no active gas estimate".into(), |air| {
-        format!("{} K", number(air.temperature_k, 0))
-    });
-    info.field(
-        "layered.temperature",
-        if envelope {
-            "1 bar temperature (candidate vs active)"
-        } else {
-            "Surface temperature (candidate vs active)"
-        },
-        Some("K"),
-        format!(
-            "{} K vs {active_temperature}",
-            number(l.surface_temperature_k, 0)
-        ),
-    );
-    let active_pressure = match active_air {
-        None => "no active gas column".into(),
-        Some(air) if air.reference_level == AtmosphereReference::OneBar => "1 bar reference".into(),
-        Some(air) => pressure_display(air.pressure_pa).1,
-    };
-    info.field(
-        "layered.pressure",
-        if envelope {
-            "Reference pressure (candidate vs active)"
-        } else {
-            "Surface pressure (candidate vs active)"
-        },
-        None,
-        format!(
-            "{} vs {active_pressure}",
-            if l.surface_pressure_pa > 0.0 {
-                pressure_display(l.surface_pressure_pa).1
-            } else {
-                "no gas".into()
-            }
-        ),
-    );
-    if let Some(tau) = l.greenhouse_optical_depth {
-        info.field(
-            "layered.greenhouse",
-            "Greenhouse optical depth",
-            None,
-            format!("{tau:.3} (grey estimate)"),
-        );
-    }
-    if l.blowoff_kg > 0.0 {
-        info.field(
-            "layered.blowoff",
-            "Lost to blow-off",
-            Some("kg"),
-            format!(
-                "{:.3e} kg ({} of retained mass)",
-                l.blowoff_kg,
-                super::composition::percent(l.blowoff_kg / l.physical.retained_mass_kg)
-            ),
-        );
-    }
-    regions(info, "layered", l);
-    info.field(
-        "layered.models",
-        "Models",
-        None,
-        l.physical.approximations.join(", "),
-    );
-}
+use space_shared::{Layer, LayeredPlanet, ModelFidelity, Planet, ResultProvenance};
 
 pub(super) fn active(info: &mut Info, planet: &Planet) {
     let Some(result) = &planet.initial_result else {
@@ -173,22 +20,33 @@ pub(super) fn active(info: &mut Info, planet: &Planet) {
         "result.status",
         "Active result",
         None,
-        format!("{:?} · {:?}", result.provenance, result.refinement),
+        match (&result.provenance, &result.record.fallback_reason) {
+            (ResultProvenance::Layered, _) => "Layered solve".to_owned(),
+            (ResultProvenance::Fallback, None) => "Generation, from the structure table".to_owned(),
+            (ResultProvenance::Fallback, Some(reason)) => format!("Fallback: {reason}"),
+        },
     );
     info.field(
-        "result.sequence",
+        "result.revision",
         "Physical revision",
         None,
-        format!(
-            "{} · sequence {}",
-            result.revision.model, result.revision.sequence
-        ),
+        result.revision.model.clone(),
     );
     info.field(
         "result.inputs",
         "Input identity",
         None,
         result.revision.inputs.clone(),
+    );
+    info.field(
+        "result.surface_kind",
+        if result.record.surface == "envelope" {
+            "Reference level"
+        } else {
+            "Surface"
+        },
+        None,
+        surface_label(&result.record.surface),
     );
     info.field(
         "result.surface",
@@ -220,7 +78,34 @@ pub(super) fn active(info: &mut Info, planet: &Planet) {
             ),
         );
     }
-    regions(info, "result", &result.record);
+    let l = &result.record;
+    if let Some(tau) = l.greenhouse_optical_depth {
+        info.field(
+            "result.greenhouse",
+            "Greenhouse optical depth",
+            None,
+            format!("{tau:.3} (grey estimate)"),
+        );
+    }
+    if l.blowoff_kg > 0.0 {
+        info.field(
+            "result.blowoff",
+            "Lost to blow-off",
+            Some("kg"),
+            format!(
+                "{:.3e} kg ({} of retained mass)",
+                l.blowoff_kg,
+                super::composition::percent(l.blowoff_kg / l.physical.retained_mass_kg)
+            ),
+        );
+    }
+    regions(info, "result", l);
+    info.field(
+        "result.models",
+        "Models",
+        None,
+        l.physical.approximations.join(", "),
+    );
 }
 
 fn regions(info: &mut Info, prefix: &str, l: &LayeredPlanet) {

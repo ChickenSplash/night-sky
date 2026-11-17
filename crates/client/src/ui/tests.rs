@@ -479,10 +479,7 @@ fn text_huds_share_edge_padding_and_bottom_baseline() {
                         &galaxy,
                         &crate::stars::stream::Starfield::default(),
                         &mut inspector,
-                        (
-                            crate::craft::Now::none(),
-                            &crate::planet_loading::PlanetLoading::default(),
-                        ),
+                        crate::craft::Now::none(),
                         &mut commands,
                     );
                     time_controls(ctx, rect, &clock, false, &mut drag, &mut commands);
@@ -561,10 +558,7 @@ fn floating_inspector_stays_compact_after_selection_changes_and_wraps_in_a_narro
                         &galaxy,
                         &crate::stars::stream::Starfield::default(),
                         &mut inspector,
-                        (
-                            crate::craft::Now::none(),
-                            &crate::planet_loading::PlanetLoading::default(),
-                        ),
+                        crate::craft::Now::none(),
                         &mut commands,
                     );
                 },
@@ -600,7 +594,6 @@ fn floating_inspector_stays_compact_after_selection_changes_and_wraps_in_a_narro
                 "Atmospheric pressure",
                 "Mean density",
                 "Model details",
-                "Background refinement",
                 "Condensed top",
                 "Surface / radius",
                 "Active result",
@@ -653,10 +646,7 @@ fn floating_inspector_bounds_basic_facts_with_scrolling() {
                     &galaxy,
                     &crate::stars::stream::Starfield::default(),
                     &mut inspector,
-                    (
-                        crate::craft::Now::none(),
-                        &crate::planet_loading::PlanetLoading::default(),
-                    ),
+                    crate::craft::Now::none(),
                     &mut commands,
                 )
             },
@@ -708,10 +698,7 @@ fn floating_inspector_bounds_basic_facts_with_scrolling() {
                     &galaxy,
                     &crate::stars::stream::Starfield::default(),
                     &mut inspector,
-                    (
-                        crate::craft::Now::none(),
-                        &crate::planet_loading::PlanetLoading::default(),
-                    ),
+                    crate::craft::Now::none(),
                     &mut commands,
                 )
             },

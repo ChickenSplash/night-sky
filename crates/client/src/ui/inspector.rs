@@ -12,7 +12,6 @@ use crate::{
     craft::Now,
     navigation::objects::{self, ObjectRef},
     navigation::presentation::PresentationMode,
-    planet_loading::{Layered, PlanetLoading},
     stars::stream::Starfield,
     ui::kit::halo::{CURRENT, HOVER, HUD_LINE_GAP, LINK, halo_text, halo_wrapped_text},
 };
@@ -27,12 +26,8 @@ use space_simulation::{
 
 #[derive(Default)]
 pub struct Cache {
-    adoption: Option<String>,
-    key: Option<(ObjectRef, Option<DVec3>, u8)>,
-    physical_revision: Option<(
-        space_shared::PhysicalRevision,
-        space_shared::RefinementStatus,
-    )>,
+    key: Option<(ObjectRef, Option<DVec3>)>,
+    physical_revision: Option<space_shared::PhysicalRevision>,
     info: Info,
 }
 
@@ -43,22 +38,17 @@ impl Cache {
 
     /// A star's facts include its motion once its position is known. A
     /// craft's change every frame, so are never kept. A planet's change with
-    /// its active revision and background refinement status.
+    /// its loaded revision.
     pub(crate) fn get(
         &mut self,
         object: &ObjectRef,
         galaxy: &Galaxy,
         position_ly: Option<DVec3>,
         now: Now,
-        loading: Option<&PlanetLoading>,
         active: Option<&space_shared::StarSystem>,
     ) -> &Info {
-        let revision = match (object, loading) {
-            (ObjectRef::Planet { id }, Some(loading)) => loading.status(id).key(),
-            _ => 0,
-        };
-        // Loaded records may change without changing the object ID or worker
-        // status. Remote inspection remains on deterministic synchronous facts.
+        // Loaded records may change without changing the object ID, as when a
+        // backend snapshot arrives. Remote inspection stays on generated facts.
         let physical_revision = match object {
             ObjectRef::Planet { id } => active
                 .into_iter()
@@ -66,23 +56,16 @@ impl Cache {
                 .flat_map(|s| &s.planets)
                 .find(|p| p.id == *id)
                 .and_then(|p| p.initial_result.as_ref())
-                .or_else(|| now.fleet.charts.refinement(id).map(|r| &r.result))
-                .map(|r| (r.revision.clone(), r.refinement.clone())),
+                .map(|r| r.revision.clone()),
             _ => None,
         };
-        let adoption = match (object, loading) {
-            (ObjectRef::Planet { id }, Some(loading)) => loading.adoption(id).map(str::to_owned),
-            _ => None,
-        };
-        if self.key.as_ref() != Some(&(object.clone(), position_ly, revision))
-            || self.adoption != adoption
+        if self.key.as_ref() != Some(&(object.clone(), position_ly))
             || self.physical_revision != physical_revision
             || matches!(object, ObjectRef::Craft { .. })
         {
-            self.info = describe_with(object, galaxy, position_ly, now, loading, active);
-            self.key = Some((object.clone(), position_ly, revision));
+            self.info = describe_with(object, galaxy, position_ly, now, active);
+            self.key = Some((object.clone(), position_ly));
             self.physical_revision = physical_revision;
-            self.adoption = adoption;
         }
         &self.info
     }
@@ -155,10 +138,9 @@ pub(crate) fn position_ly(
 }
 
 /// `position_ly` is the system's, from home, when known.
-/// Without background refinement diagnostics.
 #[cfg(test)]
 pub fn describe(object: &ObjectRef, galaxy: &Galaxy, position_ly: Option<DVec3>, now: Now) -> Info {
-    describe_with(object, galaxy, position_ly, now, None, None)
+    describe_with(object, galaxy, position_ly, now, None)
 }
 
 fn describe_with(
@@ -166,7 +148,6 @@ fn describe_with(
     galaxy: &Galaxy,
     position_ly: Option<DVec3>,
     now: Now,
-    loading: Option<&PlanetLoading>,
     active: Option<&space_shared::StarSystem>,
 ) -> Info {
     use crate::format::{luminosity_text, mass_text, period_text, rotation_text, star_radius_text};
@@ -264,16 +245,6 @@ fn describe_with(
                     .filter(|s| s.planets.iter().any(|p| p.id == *id))
                     .map(|s| (std::borrow::Cow::Borrowed(s), 0))
                     .or_else(|| objects::system(galaxy, star))
-                    .map(|(mut system, page)| {
-                        if system
-                            .planets
-                            .iter()
-                            .any(|p| now.fleet.charts.refinement(&p.id).is_some())
-                        {
-                            now.fleet.charts.restore_system(system.to_mut());
-                        }
-                        (system, page)
-                    })
                 && let Some(planet) = system.planets.iter().find(|planet| planet.id == *id)
             {
                 let days = space_simulation::planet_period(&system, planet) / 86400.0;
@@ -384,11 +355,6 @@ fn describe_with(
                 }
                 atmosphere::facts(&mut info, planet.environment.as_ref());
                 planet_layout::organise(&mut info, planet);
-                let status = loading.map_or(Layered::Off, |l| l.status(&planet.id));
-                layered::facts(&mut info, planet, status);
-                if let Some(reason) = loading.and_then(|l| l.adoption(id)) {
-                    info.field("layered.adoption", "Adoption", None, reason);
-                }
                 info.section = Section::Overview;
                 if let Some(task) = &planet.task {
                     info.field("task.name", "Task", None, task.name.clone());
@@ -671,18 +637,10 @@ pub fn readout(
     field: &Starfield,
     cache: &mut Cache,
     now: Now,
-    loading: &PlanetLoading,
 ) -> serde_json::Value {
     use serde_json::json;
     let position = position_ly(object, nav, galaxy, field);
-    let info = cache.get(
-        object,
-        galaxy,
-        position,
-        now,
-        Some(loading),
-        nav.system(galaxy),
-    );
+    let info = cache.get(object, galaxy, position, now, nav.system(galaxy));
     let export = |action: Action, group: &str| {
         json!({
             "label": action.label, "current": action.current, "available": true,
@@ -751,18 +709,11 @@ pub fn show(
     galaxy: &Galaxy,
     field: &Starfield,
     cache: &mut Cache,
-    (now, loading): (Now, &PlanetLoading),
+    now: Now,
     out: &mut Vec<UiCommand>,
 ) {
     let position = position_ly(object, nav, galaxy, field);
-    cache.get(
-        object,
-        galaxy,
-        position,
-        now,
-        Some(loading),
-        nav.system(galaxy),
-    );
+    cache.get(object, galaxy, position, now, nav.system(galaxy));
     let width = ui.available_width().min(480.0);
     halo_wrapped_text(ui, &cache.info.title, width, CURRENT);
     ui.scope(|ui| {
@@ -883,12 +834,6 @@ mod tests {
         }
     }
 
-    fn paused_loading() -> PlanetLoading {
-        let mut loading = PlanetLoading::default();
-        loading.enabled = false;
-        loading
-    }
-
     #[test]
     fn typed_planet_fields_share_ids_sections_units_values_and_unknowns() {
         let mut galaxy = space_simulation::demo_galaxy();
@@ -902,10 +847,11 @@ mod tests {
             assert!(ids.insert(&field.id), "duplicate field {}", field.id);
             assert!(!field.value.text().is_empty());
         }
-        // Candidate diagnostics appear only while background refinement is on.
         for section in Section::ALL {
-            let shown = info.fields.iter().any(|f| f.section == section);
-            assert_eq!(shown, section != Section::Layered, "{section:?}");
+            assert!(
+                info.fields.iter().any(|f| f.section == section),
+                "{section:?}"
+            );
         }
         let density = info
             .fields
@@ -921,7 +867,6 @@ mod tests {
             &Starfield::default(),
             &mut Cache::default(),
             Now::none(),
-            &paused_loading(),
         );
         assert_eq!(
             exported["fields"],
@@ -970,15 +915,7 @@ mod tests {
         }
         let mut cache = Cache::default();
         for object in objects {
-            let exported = readout(
-                &object,
-                &nav,
-                &galaxy,
-                &field,
-                &mut cache,
-                now,
-                &paused_loading(),
-            );
+            let exported = readout(&object, &nav, &galaxy, &field, &mut cache, now);
             let info = describe(
                 &object,
                 &galaxy,
@@ -1043,15 +980,7 @@ mod tests {
             id: galaxy.systems[0].id.clone(),
         };
         let mut cache = Cache::default();
-        let exported = readout(
-            &inspection,
-            &nav,
-            &galaxy,
-            &field,
-            &mut cache,
-            now,
-            &PlanetLoading::default(),
-        );
+        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
         let systems: Vec<_> = exported["actions"]
             .as_array()
             .unwrap()
@@ -1067,28 +996,12 @@ mod tests {
         }
         galaxy.systems[0].name = "Updated list".into();
         assert_eq!(
-            readout(
-                &inspection,
-                &nav,
-                &galaxy,
-                &field,
-                &mut cache,
-                now,
-                &PlanetLoading::default()
-            )["title"],
+            readout(&inspection, &nav, &galaxy, &field, &mut cache, now,)["title"],
             exported["title"]
         );
         cache.invalidate();
         assert_eq!(
-            readout(
-                &inspection,
-                &nav,
-                &galaxy,
-                &field,
-                &mut cache,
-                now,
-                &PlanetLoading::default()
-            )["title"],
+            readout(&inspection, &nav, &galaxy, &field, &mut cache, now,)["title"],
             "Updated list"
         );
     }
@@ -1113,129 +1026,14 @@ mod tests {
             id: planet.id.clone(),
         };
         let mut cache = Cache::default();
-        let exported = readout(
-            &inspection,
-            &nav,
-            &galaxy,
-            &field,
-            &mut cache,
-            now,
-            &PlanetLoading::default(),
-        );
+        let exported = readout(&inspection, &nav, &galaxy, &field, &mut cache, now);
         let link = &exported["actions"][0];
         assert_eq!(link["kind"], "link");
         assert_eq!(link["url"], "https://example.com/task");
         assert_eq!(link["commands"], serde_json::json!([]));
         let unreachable = inspection_for_unreachable();
-        let exported = readout(
-            &unreachable,
-            &nav,
-            &galaxy,
-            &field,
-            &mut cache,
-            now,
-            &PlanetLoading::default(),
-        );
+        let exported = readout(&unreachable, &nav, &galaxy, &field, &mut cache, now);
         assert_eq!(exported["actions"], serde_json::json!([]));
-    }
-
-    #[test]
-    fn layered_section_shows_only_when_enabled_and_labels_unapplied_candidates() {
-        use crate::planet_loading::PlanetState;
-        use space_simulation::system::{
-            generated::{Mode, generated_system_with_mode},
-            physical,
-            structure::{coupled, fallback, prototype},
-        };
-        let galaxy = space_simulation::demo_galaxy();
-        let system = "g13b6ffffcfeba.2.1";
-        let prepared =
-            generated_system_with_mode(system, [0.0; 3], Mode::PrepareRefinement).unwrap();
-        let (job, solved) = prepared
-            .jobs
-            .iter()
-            .find_map(|j| {
-                Some((
-                    j,
-                    prototype::solve_decided(
-                        &j.budget,
-                        &j.environment,
-                        j.decision,
-                        Default::default(),
-                    )
-                    .ok()?,
-                ))
-            })
-            .unwrap();
-        let object = ObjectRef::Planet { id: job.id.clone() };
-        let layered = |loading: &PlanetLoading| {
-            describe_with(&object, &galaxy, None, Now::none(), Some(loading), None)
-                .fields
-                .into_iter()
-                .filter(|f| f.section == Section::Layered)
-                .map(|f| (f.id, f.value.text().to_owned()))
-                .collect::<Vec<_>>()
-        };
-        let mut loading = PlanetLoading::default();
-        loading.enabled = false;
-        assert!(layered(&loading).is_empty());
-        let mut cache = Cache::default();
-        let off = cache
-            .get(&object, &galaxy, None, Now::none(), Some(&loading), None)
-            .fields
-            .len();
-        loading.enabled = true;
-        // The cached facts follow the planet's status.
-        let waiting = cache.get(&object, &galaxy, None, Now::none(), Some(&loading), None);
-        assert_eq!(waiting.fields.len(), off + 1);
-        assert_eq!(layered(&loading)[0].1, "Waiting · active result unchanged");
-        let planets = &mut loading.cache.entry(system.into()).or_default().planets;
-        let fallback = physical::fallback(&fallback::solve(
-            &job.budget,
-            &job.environment,
-            coupled::Error::DenseGasUnsupported,
-        ));
-        planets.insert(job.id.clone(), PlanetState::Fallback(Box::new(fallback)));
-        let facts = layered(&loading);
-        assert!(facts[0].1.starts_with("Fallback (layered unsupported: "));
-        assert!(facts.iter().any(|(f, _)| f == "layered.radius"));
-        let planets = &mut loading.cache.get_mut(system).unwrap().planets;
-        planets.insert(
-            job.id.clone(),
-            PlanetState::Solved(Box::new(physical::layered(&solved))),
-        );
-        let facts = layered(&loading);
-        assert_eq!(facts[0].1, "Solved · candidate, not applied");
-        for id in [
-            "layered.radius",
-            "layered.temperature",
-            "layered.pressure",
-            "layered.models",
-            "layered.fidelity",
-            "layered.limitations",
-        ] {
-            assert!(facts.iter().any(|(f, _)| f == id), "{id}");
-        }
-        let layers = facts
-            .iter()
-            .filter(|(f, _)| f.starts_with("layered.layer."))
-            .count();
-        assert_eq!(layers, physical::layered(&solved).layers.len());
-        assert_eq!(
-            facts
-                .iter()
-                .filter(|(f, _)| f.starts_with("layered.assessment."))
-                .count(),
-            layers
-        );
-        assert!(
-            facts
-                .iter()
-                .any(|(f, text)| f == "layered.fidelity" && text.contains("Approximate"))
-        );
-        // The plain readout and the browser never include candidate diagnostics.
-        let plain = describe(&object, &galaxy, None, Now::none());
-        assert!(!plain.fields.iter().any(|f| f.section == Section::Layered));
     }
 
     #[test]
@@ -1246,7 +1044,7 @@ mod tests {
         let object = ObjectRef::Planet { id };
         active.planets[0].designation = "Loaded revision".into();
         let mut cache = Cache::default();
-        let first = cache.get(&object, &galaxy, None, Now::none(), None, Some(&active));
+        let first = cache.get(&object, &galaxy, None, Now::none(), Some(&active));
         assert_eq!(first.title, "Loaded revision");
         assert!(first.fields.iter().any(|f| f.id == "result.status"));
         active.planets[0].designation = "Next revision".into();
@@ -1255,13 +1053,13 @@ mod tests {
             .as_mut()
             .unwrap()
             .revision
-            .sequence += 1;
-        let next = cache.get(&object, &galaxy, None, Now::none(), None, Some(&active));
+            .model = "next model".into();
+        let next = cache.get(&object, &galaxy, None, Now::none(), Some(&active));
         assert_eq!(next.title, "Next revision");
         assert!(
             next.fields
                 .iter()
-                .any(|f| f.id == "result.sequence" && f.value.text().contains("sequence 1"))
+                .any(|f| f.id == "result.revision" && f.value.text() == "next model")
         );
     }
 

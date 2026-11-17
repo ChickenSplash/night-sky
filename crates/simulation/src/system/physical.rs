@@ -9,16 +9,12 @@ use space_shared::{Planet, PlanetPhysical};
 mod export;
 mod layered;
 pub(crate) use export::export_planet;
-mod refinement;
 mod result;
 mod synchronous;
 pub(crate) use layered::PRESCRIBED_BOUNDARY_MODEL_ID;
 pub use layered::{fallback, layered, outcome};
-pub use refinement::{Refinement, prepare_refinement};
 pub(crate) use result::initial_from_fallback;
-pub use result::{
-    initial_result, resolved_result, validate_record, validate_refinement, validate_result,
-};
+pub use result::{initial_result, resolved_result, validate_record, validate_result};
 pub use synchronous::{PreparedInitial, initial_with_atmosphere};
 
 /// The live physical record is the authoritative result's record, verbatim.
@@ -262,6 +258,71 @@ mod tests {
                 _ => d.h_he_mass_fraction = 1.0,
             }
             assert!(validate(&bad).is_err(), "corruption {corrupt}");
+        }
+    }
+
+    #[test]
+    fn a_cold_water_planet_shows_its_ice_under_its_column_at_generation() {
+        let system =
+            crate::system::generated::generated_system("g3c0200000.2.128", [0.0; 3]).unwrap();
+        let planet = system
+            .planets
+            .iter()
+            .find(|p| p.id == "g3c0200000.2.128#A/6")
+            .unwrap();
+        let result = planet.initial_result.as_ref().unwrap();
+        assert_eq!(
+            result.surface_knowledge,
+            space_shared::SurfaceKnowledge::SolidPhase
+        );
+        assert_eq!(result.record.surface, "ice");
+        assert!(result.record.surface_pressure_pa > 1e5);
+        let env = planet.environment.as_ref().unwrap();
+        assert!(result.record.surface_temperature_k > env.equilibrium_temperature_k);
+        let air = env.atmosphere.as_ref().unwrap();
+        assert_eq!(air.pressure_pa, result.record.surface_pressure_pa);
+        assert_eq!(
+            air.reference_level,
+            space_shared::AtmosphereReference::Surface
+        );
+        validate(planet).unwrap().unwrap();
+    }
+
+    /// The five columns the layered solve once refused for their clouds:
+    /// generation now carries the clouds itself, and optics accepts them.
+    #[test]
+    fn generation_carries_suspended_clouds_its_optics_accept() {
+        use crate::{
+            galaxy::Component,
+            system::{atmosphere::GasAtmosphere, galactic_bodies},
+        };
+        for (component, index, suffix) in [
+            (Component::Nucleus, 34, "/9"),
+            (Component::Bulge, 14, "/5"),
+            (Component::Arms, 11, "#A/10"),
+            (Component::Arms, 32, "/4"),
+            (Component::Halo, 44, "/6"),
+        ] {
+            let key = format!("composition-calibration:{component:?}:{index}");
+            let hosted = galactic_bodies(&key, component)
+                .planets
+                .into_iter()
+                .find(|p| p.id().ends_with(suffix))
+                .unwrap();
+            let result = &hosted.body.initial_result;
+            assert!(
+                result
+                    .record
+                    .layers
+                    .iter()
+                    .any(|l| l.phase_allocations.iter().any(|p| p.condensate_kg > 0.0)),
+                "{} clouds",
+                hosted.id()
+            );
+            let air = hosted.environment.as_ref().unwrap().atmosphere.as_ref();
+            let gas = GasAtmosphere::try_from(air.unwrap()).unwrap();
+            OpticalColumn::from_result(result, &gas)
+                .unwrap_or_else(|e| panic!("{}: {e}", hosted.id()));
         }
     }
 }

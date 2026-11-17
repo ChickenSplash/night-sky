@@ -213,6 +213,7 @@ struct Boundary {
     gravity_m_s2: f64,
 }
 
+#[cfg(test)]
 pub(crate) fn solve_prescribed(
     budget: &crate::system::composition::Budget,
     equilibrium_k: f64,

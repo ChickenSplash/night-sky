@@ -83,7 +83,7 @@ pub enum Outcome {
 }
 
 /// Headless route diagnostic: layered when supported, else the explicitly
-/// labelled fallback. Generated jobs use `resolve_generated` with their boundary.
+/// labelled fallback. The census uses `resolve_generated` with generation's boundary.
 pub fn resolve(
     budget: &Budget,
     environment: &PlanetEnvironment,
@@ -100,8 +100,9 @@ pub fn resolve(
     }
 }
 
-/// Runtime elaboration receives the complete generated boundary, including
-/// positive columns below the environment's presentation threshold.
+/// The census reference: the layered solve receives the complete generated
+/// boundary, including positive columns below the presentation threshold.
+#[cfg(test)]
 pub(crate) fn resolve_generated(
     budget: &Budget,
     environment: &PlanetEnvironment,

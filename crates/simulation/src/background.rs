@@ -1,4 +1,4 @@
-//! Shared CPU budget for visible stars, object search and planet refinement.
+//! Shared CPU budget for visible stars and object search.
 //! Permits limit active work, not idle OS threads. No main-thread waits.
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
@@ -34,7 +34,6 @@ pub struct Budget {
 pub struct Activity {
     pub stars: usize,
     pub search: usize,
-    pub planets: usize,
 }
 
 impl Budget {
@@ -55,7 +54,6 @@ impl Budget {
         Activity {
             stars: s.stars,
             search: s.searches,
-            planets: s.used - s.stars - s.searches,
         }
     }
 
@@ -139,26 +137,6 @@ impl Budget {
             kind: Kind::Search,
         })
     }
-
-    /// Stars win at admission. Reserve one slot for new star work on multi-core
-    /// machines: running numerical solves are bounded but not preemptible.
-    pub fn try_planet(self: &Arc<Self>) -> Option<Permit> {
-        let mut s = self.state.lock().unwrap();
-        let ceiling = self.limit.saturating_sub(1).max(1);
-        if s.used >= ceiling
-            || s.stars > 0
-            || s.waiting > 0
-            || s.search_demand > 0
-            || s.searches > 0
-        {
-            return None;
-        }
-        s.used += 1;
-        Some(Permit {
-            budget: self.clone(),
-            kind: Kind::Planet,
-        })
-    }
 }
 
 pub struct Permit {
@@ -169,7 +147,6 @@ pub struct Permit {
 enum Kind {
     Star,
     Search,
-    Planet,
 }
 
 pub struct SearchDemand {
@@ -190,7 +167,6 @@ impl Drop for Permit {
         match self.kind {
             Kind::Star => s.stars -= 1,
             Kind::Search => s.searches -= 1,
-            Kind::Planet => {}
         }
         self.budget.changed.notify_all();
     }
@@ -211,11 +187,9 @@ mod tests {
             Activity {
                 stars: 3,
                 search: 1,
-                planets: 0
             }
         );
         assert!(b.try_search_extra().is_none());
-        assert!(b.try_planet().is_none());
         drop(search);
         assert!(b.try_star().is_none());
         let search = b.try_search().unwrap();
@@ -228,41 +202,26 @@ mod tests {
             Activity {
                 stars: 1,
                 search: 3,
-                planets: 0
             }
         );
         drop((star, search, extras, demand));
-        let planet = b.try_planet().unwrap();
         assert_eq!(
             b.activity(),
             Activity {
                 stars: 0,
                 search: 0,
-                planets: 1
-            }
-        );
-        drop(planet);
-        assert_eq!(
-            b.activity(),
-            Activity {
-                stars: 0,
-                search: 0,
-                planets: 0
             }
         );
     }
 
     #[test]
-    fn search_demand_releases_reservation_and_blocks_new_refinement() {
+    fn search_demand_releases_its_reservation() {
         let b = Arc::new(Budget::new(2));
         let demand = b.search_demand();
-        assert!(b.try_planet().is_none());
-        let star = b.try_star().unwrap();
+        let _star = b.try_star().unwrap();
         assert!(b.try_star().is_none());
         drop(demand);
         assert!(b.try_star().is_some());
-        drop(star);
-        assert!(b.try_planet().is_some());
     }
 
     #[test]
@@ -294,30 +253,13 @@ mod tests {
         b.state.lock().unwrap().waiting = 0;
         assert!(b.try_search_extra().is_some());
     }
-    #[test]
-    fn shares_the_cap_and_reserves_star_headroom() {
-        let b = Arc::new(Budget::new(4));
-        let p: Vec<_> = (0..3).map(|_| b.try_planet().unwrap()).collect();
-        assert!(b.try_planet().is_none());
-        let star = b.star();
-        assert!(b.try_star().is_none());
-        drop(p);
-        assert!(b.try_planet().is_none());
-        let extra = b.try_star().unwrap();
-        drop(star);
-        assert!(b.try_planet().is_none());
-        drop(extra);
-        assert!(b.try_planet().is_some());
-    }
+
     #[test]
     fn single_thread_still_progresses() {
         let b = Arc::new(Budget::new(1));
-        let p = b.try_planet().unwrap();
-        assert!(b.try_star().is_none());
-        drop(p);
         let s = b.star();
-        assert!(b.try_planet().is_none());
+        assert!(b.try_star().is_none());
         drop(s);
-        assert!(b.try_planet().is_some());
+        assert!(b.try_star().is_some());
     }
 }

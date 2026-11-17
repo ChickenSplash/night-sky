@@ -13,8 +13,6 @@ use space_simulation::{
 };
 
 pub struct Charts {
-    /// Authoritative session facts survive both loader and voyage LRU eviction.
-    refinements: std::collections::BTreeMap<String, space_simulation::system::physical::Refinement>,
     loader: Loader<Transport>,
     /// Frames polled, each one cache round.
     frames: i64,
@@ -27,7 +25,6 @@ pub struct Charts {
 impl Default for Charts {
     fn default() -> Self {
         Self {
-            refinements: Default::default(),
             loader: Loader::default(),
             frames: 0,
             sky: None,
@@ -51,46 +48,16 @@ impl Atlas for Charts {
 }
 
 impl Charts {
-    pub fn refinement(&self, id: &str) -> Option<&space_simulation::system::physical::Refinement> {
-        self.refinements.get(id)
-    }
-    pub fn retain_refinement(
-        &mut self,
-        id: String,
-        refinement: space_simulation::system::physical::Refinement,
-    ) {
-        self.refinements.insert(id, refinement);
-        self.loader.cache.refine_planets(&self.refinements);
-    }
-
-    pub fn restore_system(&self, system: &mut space_shared::StarSystem) -> bool {
-        let mut changed = false;
-        for planet in &mut system.planets {
-            if let Some(refinement) = self.refinements.get(&planet.id)
-                && planet
-                    .initial_result
-                    .as_ref()
-                    .is_some_and(|r| r.revision == refinement.base)
-                && let Ok(next) = refinement.project(planet)
-            {
-                *planet = next;
-                changed = true;
-            }
-        }
-        changed
-    }
     /// Start a frame's cache round and collect finished background work.
     pub fn poll(&mut self, galaxy: &Galaxy) {
         self.frames += 1;
         self.loader.begin_round(self.frames, galaxy);
-        self.loader.cache.refine_planets(&self.refinements);
     }
 
     /// Start working out what a craft waits for. Returns whether it is
     /// already known, so the craft can step again at once.
     pub fn offer(&mut self, wait: &Wait, galaxy: &Galaxy) -> bool {
         if self.loader.request(wait, true, galaxy) {
-            self.loader.cache.refine_planets(&self.refinements);
             return true;
         }
         if self.background {
@@ -100,7 +67,6 @@ impl Charts {
         let reply =
             Request::of(wait).answer(self.sky(), space_simulation::craft::voyage::threads());
         self.loader.cache.accept(wait, reply, galaxy);
-        self.loader.cache.refine_planets(&self.refinements);
         true
     }
 

@@ -31,10 +31,9 @@ seed helpers, object identities and photometry stay at the crate root; see
 - [Material inventories and structure](simulation/planet-composition.md): conserved
   formation/retained budgets, approximate generated radii, bounded H/He retention
   and separate headless dry/water radial solvers, protected traces in dry and
-   water-bearing hosts, atmosphere coupling and default-on background refinement.
-   Live planets start on one synchronous fallback each, which decides surface
-   temperature, gas, frost, blow-off and route; complete layered results keep
-   those and are adopted when camera/craft/route safety permits.
+   water-bearing hosts and atmosphere coupling. Each live planet carries one
+   synchronous result for its lifetime, which decides surface temperature,
+   gas, frost, blow-off and route, with layers read from the structure table.
 - [Pure-water physics](simulation/water-physics.md): headless liquid/ice-Ih EOS,
   compressed-liquid extension, prescribed 300 K ice-VII compression, melting
   curves, reference audits and deep-ice gates.
@@ -144,11 +143,9 @@ The Bevy/egui client in `crates/client`:
    See [physical assumptions](simulation/atmospheres.md)
   and [rendering limits](client/rendering.md#atmospheres).
 - Bodies are smooth spheroids flattened by their spin, with no terrain yet.
-  Layered results are calculated/cached through the
-   [background refinement](simulation/planet-composition.md#experimental-background-loading),
-  and adopted as whole physical revisions when safe. Existing craft system
-  snapshots, active routes and close cameras defer publication. Adopted facts
-  survive revisits and voyage-cache eviction for the session. The dry solver's
+  Layers come from the [structure table](simulation/planet-composition.md#structure-table)
+  at generation; the layered solver runs offline only
+  ([one result per planet](simulation/planet-composition.md#one-result-per-planet)). The dry solver's
   protected-trace extension conserves
   CO₂/N₂/CH₄/O₂/Ar in dry hosts without resolving their chemistry or phase.
   Local water physics, including compressed liquid,
@@ -163,7 +160,7 @@ The Bevy/egui client in `crates/client`:
   Exact deep-ice polymorphs, precise supercooled-liquid physics and complete
   giant-envelope coverage remain unresolved. An optional locally prepared
    [H/He density resource and coupled envelope solve](simulation/planet-composition.md#self-gravitating-envelope-and-loaded-interior)
-    supports a bounded subset of envelopes; validated, safely adopted results drive live rendering.
+    supports a bounded subset of envelopes; the structure table is built from it.
    Cold mixed envelopes include approximate [locally suspended condensates](simulation/planet-composition.md#suspended-secondary-condensates),
    with conserved vapour/condensate splits but no settling or latent-heat closure.
   Thin atmosphere coupling matches supported dilute gas inventories to radial

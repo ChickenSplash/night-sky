@@ -279,10 +279,6 @@ fn search_takes_the_rest_of_the_line_and_explains_refusals() {
             .unwrap_err()
             .contains("Give work_cap_millions")
     );
-    assert_eq!(
-        parse("set_layered_planets true").unwrap(),
-        UiCommand::SetLayeredPlanets { on: true }
-    );
     assert!(
         parse("set_search threads=0")
             .unwrap_err()

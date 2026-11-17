@@ -1,5 +1,5 @@
-//! Authoritative-result contract. Simulation validates it; adoption is a separate
-//! operation. An active result remains usable while refinement runs or fails.
+//! Authoritative-result contract. Simulation validates it. Generation's result
+//! is the planet's for its whole lifetime: no later solve replaces it.
 use crate::LayeredPlanet;
 use serde::{Deserialize, Serialize};
 
@@ -9,9 +9,6 @@ pub struct PhysicalRevision {
     pub inputs: String,
     /// Caller-owned prescription/resource revision, including data availability.
     pub model: String,
-    /// Monotone adoption sequence within one planet's lifetime. Zero is initial.
-    /// Equal sequences must never identify different adopted facts.
-    pub sequence: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,17 +16,6 @@ pub struct PhysicalRevision {
 pub enum ResultProvenance {
     Layered,
     Fallback,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum RefinementStatus {
-    Pending,
-    Running,
-    Complete,
-    Refused { reason: String },
-    Unavailable { reason: String },
-    Failed { reason: String },
 }
 
 /// Knowledge, not landing permission. Even a resolved solid phase says nothing
@@ -48,9 +34,8 @@ pub enum SurfaceKnowledge {
 pub struct PlanetResult {
     pub revision: PhysicalRevision,
     pub provenance: ResultProvenance,
-    pub refinement: RefinementStatus,
     pub surface_knowledge: SurfaceKnowledge,
-    /// Sole source for physical projections. No atmosphere appearance, craft
-    /// state or adoption permission is inferred from this record.
+    /// Sole source for physical projections. No atmosphere appearance or craft
+    /// state is inferred from this record.
     pub record: LayeredPlanet,
 }

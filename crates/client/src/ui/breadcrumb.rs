@@ -300,7 +300,7 @@ pub fn show(
     galaxy: &Galaxy,
     field: &crate::stars::stream::Starfield,
     inspector: &mut crate::ui::inspector::Cache,
-    (now, loading): (crate::craft::Now, &crate::planet_loading::PlanetLoading),
+    now: crate::craft::Now,
     out: &mut Vec<crate::actions::UiCommand>,
 ) {
     egui::Area::new(egui::Id::new("breadcrumb"))
@@ -357,14 +357,7 @@ pub fn show(
                 .min_scrolled_height(1.0)
                 .show(ui, |ui| {
                     crate::ui::inspector::show(
-                        ui,
-                        &active,
-                        nav,
-                        galaxy,
-                        field,
-                        inspector,
-                        (now, loading),
-                        out,
+                        ui, &active, nav, galaxy, field, inspector, now, out,
                     );
                 });
         });

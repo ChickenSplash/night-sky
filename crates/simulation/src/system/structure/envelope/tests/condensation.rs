@@ -180,7 +180,6 @@ fn check(source: bool) {
             space_shared::PhysicalRevision {
                 inputs: "suspended-consumer".into(),
                 model: "fixture".into(),
-                sequence: 1,
             },
         )
         .unwrap();

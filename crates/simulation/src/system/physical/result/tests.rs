@@ -1,11 +1,10 @@
 use super::*;
 use crate::{system::composition::Inventory, units::EARTH_MASS_KG};
 
-fn revision(sequence: u64) -> PhysicalRevision {
+fn revision() -> PhysicalRevision {
     PhysicalRevision {
         inputs: "fixture:supply-and-forcing:v1".into(),
         model: "fixture:physics:v1".into(),
-        sequence,
     }
 }
 
@@ -47,7 +46,7 @@ fn round_trip(result: &PlanetResult) {
 #[test]
 fn layer_breakdowns_preserve_each_material_and_survive_serialisation() {
     for (water, gas) in [(0.0, 0.0), (0.3, 0.0), (0.0, 0.1)] {
-        let result = initial_result(&budget(water, gas), &environment(250.0), revision(0)).unwrap();
+        let result = initial_result(&budget(water, gas), &environment(250.0), revision()).unwrap();
         for layer in &result.record.layers {
             assert!(!layer.materials.is_empty());
             assert!(close(
@@ -72,7 +71,7 @@ fn layer_breakdowns_preserve_each_material_and_survive_serialisation() {
 
 #[test]
 fn layer_breakdowns_reject_invalid_entries_but_accept_legacy_absence() {
-    let result = initial_result(&budget(0.3, 0.0), &environment(250.0), revision(0)).unwrap();
+    let result = initial_result(&budget(0.3, 0.0), &environment(250.0), revision()).unwrap();
     for case in 0..5 {
         let mut bad = result.clone();
         let layer = &mut bad.record.layers[0];
@@ -95,13 +94,12 @@ fn layer_breakdowns_reject_invalid_entries_but_accept_legacy_absence() {
 }
 
 #[test]
-fn startup_fallback_has_honest_provenance_and_keeps_usable_facts_during_failure() {
+fn generation_has_honest_provenance_and_a_refused_solve_names_its_reason() {
     for (water, gas) in [(0.0, 0.0), (0.3, 0.0), (0.0, 0.1)] {
         let b = budget(water, gas);
         let env = environment(250.0);
-        let initial = initial_result(&b, &env, revision(0)).unwrap();
+        let initial = initial_result(&b, &env, revision()).unwrap();
         assert_eq!(initial.provenance, ResultProvenance::Fallback);
-        assert_eq!(initial.refinement, RefinementStatus::Pending);
         assert_eq!(initial.record.fallback_reason, None);
         assert_eq!(
             initial.surface_knowledge,
@@ -112,30 +110,15 @@ fn startup_fallback_has_honest_provenance_and_keeps_usable_facts_during_failure(
             }
         );
         round_trip(&initial);
-        for status in [
-            RefinementStatus::Running,
-            RefinementStatus::Unavailable {
-                reason: "H/He resource absent".into(),
-            },
-            RefinementStatus::Failed {
-                reason: "worker panicked".into(),
-            },
-        ] {
-            let mut active = initial.clone();
-            active.refinement = status;
-            round_trip(&active);
-            assert_eq!(active.record, initial.record);
-        }
         let refused =
             structure::fallback::solve(&b, &env, structure::coupled::Error::DenseGasUnsupported);
         let candidate = resolved_result(
             &structure::prototype::Outcome::Fallback(Box::new(refused)),
-            revision(1),
+            revision(),
         )
         .unwrap();
-        validate_refinement(&initial, &candidate).unwrap();
-        assert_eq!(candidate.record.physical, initial.record.physical);
-        assert_eq!(candidate.record.layers, initial.record.layers);
+        assert_eq!(candidate.provenance, ResultProvenance::Fallback);
+        assert!(candidate.record.fallback_reason.is_some());
         round_trip(&candidate);
     }
 }
@@ -153,14 +136,10 @@ fn layered_phases_and_hot_rock_are_not_inferred_from_legacy_ground_labels() {
         let solved = structure::prototype::solve(&b, &env, Default::default()).unwrap();
         let candidate = resolved_result(
             &structure::prototype::Outcome::Layered(Box::new(solved)),
-            revision(1),
+            revision(),
         )
         .unwrap();
         assert_eq!(candidate.surface_knowledge, expected);
-        let initial = initial_result(&b, &env, revision(0)).unwrap();
-        // A valid standalone structure is not yet a generated refinement:
-        // its radius/inertia have not received the decided boundary.
-        assert!(validate_refinement(&initial, &candidate).is_err());
         round_trip(&candidate);
         let mut invented = candidate.clone();
         invented.surface_knowledge = SurfaceKnowledge::GasReference;
@@ -175,7 +154,7 @@ fn live_layered_temperature_is_not_replaced_by_equilibrium_forcing() {
     let solved = structure::prototype::solve(&b, &forcing, Default::default()).unwrap();
     let result = resolved_result(
         &structure::prototype::Outcome::Layered(Box::new(solved)),
-        revision(1),
+        revision(),
     )
     .unwrap();
     let facts = &result.record.physical;
@@ -195,55 +174,24 @@ fn live_layered_temperature_is_not_replaced_by_equilibrium_forcing() {
 }
 
 #[test]
-fn stale_revisions_and_inconsistent_lifecycle_are_rejected() {
+fn missing_identity_and_inconsistent_provenance_are_rejected() {
     let b = budget(0.0, 0.0);
     let env = environment(250.0);
-    let active = initial_result(&b, &env, revision(0)).unwrap();
-    let candidate = super::super::prepare_refinement(
-        &active,
-        &env,
-        &structure::prototype::resolve(
-            &b,
-            &env,
-            structure::prototype::Decision::Undecided,
-            Default::default(),
-        ),
-    )
-    .unwrap()
-    .result;
-    validate_refinement(&active, &candidate).unwrap();
-    for corruption in 0..6 {
-        let mut bad = candidate.clone();
-        match corruption {
-            0 => bad.revision.inputs.push_str(":changed"),
-            1 => bad.revision.model.push_str(":changed"),
-            2 => bad.revision.sequence = 0,
-            3 => bad.revision.sequence = 2,
-            4 => bad.refinement = RefinementStatus::Running,
-            _ => bad.provenance = ResultProvenance::Fallback,
-        }
-        assert!(
-            validate_refinement(&active, &bad).is_err(),
-            "corruption {corruption}"
-        );
-    }
+    let active = initial_result(&b, &env, revision()).unwrap();
     let mut bad = active.clone();
-    bad.refinement = RefinementStatus::Complete;
-    assert!(validate_result(&bad).is_err());
-    bad.refinement = RefinementStatus::Failed { reason: " ".into() };
-    assert!(validate_result(&bad).is_err());
-    bad.refinement = RefinementStatus::Refused {
-        reason: "no invented refusal".into(),
-    };
+    bad.provenance = ResultProvenance::Layered;
     assert!(validate_result(&bad).is_err());
     bad = active.clone();
     bad.revision.inputs.clear();
+    assert!(validate_result(&bad).is_err());
+    bad = active.clone();
+    bad.revision.model = " ".into();
     assert!(validate_result(&bad).is_err());
 }
 
 #[test]
 fn transport_validation_accepts_nonlegacy_radius_and_small_inertia_without_solving() {
-    let mut result = initial_result(&budget(0.0, 0.0), &environment(250.0), revision(0)).unwrap();
+    let mut result = initial_result(&budget(0.0, 0.0), &environment(250.0), revision()).unwrap();
     // A coherent differently-sized prescription need not reproduce a Seager or
     // legacy solve. Scale geometry, update its algebraic density/gravity only.
     let record = &mut result.record;
@@ -261,7 +209,7 @@ fn transport_validation_accepts_nonlegacy_radius_and_small_inertia_without_solvi
 
 #[test]
 fn corrupt_transport_is_rejected_species_locally_and_at_layer_boundaries() {
-    let result = initial_result(&budget(0.3, 0.0), &environment(250.0), revision(0)).unwrap();
+    let result = initial_result(&budget(0.3, 0.0), &environment(250.0), revision()).unwrap();
     for corruption in 0..19 {
         let mut bad = result.clone();
         let r = &mut bad.record;
@@ -307,7 +255,7 @@ fn corrupt_transport_is_rejected_species_locally_and_at_layer_boundaries() {
 
 #[test]
 fn one_bar_is_a_gas_reference_not_solid_ground() {
-    let result = initial_result(&budget(0.0, 0.1), &environment(250.0), revision(0)).unwrap();
+    let result = initial_result(&budget(0.0, 0.1), &environment(250.0), revision()).unwrap();
     assert_eq!(result.surface_knowledge, SurfaceKnowledge::GasReference);
     for corruption in 0..4 {
         let mut bad = result.clone();
@@ -337,7 +285,7 @@ fn frost_boundary_is_separate_from_condensed_interior_and_has_unresolved_phase()
     let solved = structure::prototype::solve(&b, &environment(50.0), Default::default()).unwrap();
     let candidate = resolved_result(
         &structure::prototype::Outcome::Layered(Box::new(solved)),
-        revision(1),
+        revision(),
     )
     .unwrap();
     assert_eq!(candidate.record.surface, "frost");
@@ -349,7 +297,7 @@ fn frost_boundary_is_separate_from_condensed_interior_and_has_unresolved_phase()
 }
 
 #[test]
-fn per_species_escape_and_blowoff_survive_refinement_without_replaying_history() {
+fn per_species_escape_and_blowoff_are_generation_s_and_the_solve_keeps_the_budget() {
     let retained = budget(0.0, 0.0)
         .retained()
         .checked_add(&Inventory::new(&[(Material::Nitrogen, 1e-6 * EARTH_MASS_KG)]).unwrap())
@@ -362,63 +310,41 @@ fn per_species_escape_and_blowoff_survive_refinement_without_replaying_history()
     let b = Budget::new(source, retained, Inventory::default(), Inventory::default()).unwrap();
     let env = environment(1000.0);
     // Generation's synchronous decision strips the unbound column; the layered
-    // solve keeps that budget and the refinement carries the amount forward.
+    // solve keeps that budget.
     let prepared = crate::system::physical::initial_with_atmosphere(
         &structure::fallback::initial(&b, &env),
         &env,
-        revision(0),
+        revision(),
     )
     .unwrap();
     let active = prepared.result;
     assert!(active.record.blowoff_kg > 0.0);
+    round_trip(&active);
     let outcome = structure::prototype::resolve(
         &prepared.budget,
         &env,
         prepared.decision,
         Default::default(),
     );
-    assert!(matches!(outcome, structure::prototype::Outcome::Layered(_)));
-    let candidate = crate::system::physical::prepare_refinement(&active, &env, &outcome)
-        .unwrap()
-        .result;
-    assert_eq!(candidate.record.blowoff_kg, active.record.blowoff_kg);
-    validate_refinement(&active, &candidate).unwrap();
-    // A layered solve that removed more would not be this base's refinement.
-    let mut leaking = candidate.clone();
-    leaking.record.blowoff_kg *= 2.0;
-    assert!(validate_refinement(&active, &leaking).is_err());
-    round_trip(&candidate);
-    assert!(validate_refinement(&candidate, &candidate).is_err());
-    let mut unrelated = active.clone();
-    unrelated.revision.sequence = 1;
-    unrelated.refinement = RefinementStatus::Refused {
-        reason: "test refusal".into(),
+    let structure::prototype::Outcome::Layered(_) = &outcome else {
+        panic!("layered fixture")
     };
-    unrelated.record.fallback_reason = Some("test refusal".into());
-    // Internally consistent, but not the same immutable formation supply.
-    unrelated
+    let solved = resolved_result(&outcome, revision()).unwrap();
+    for (a, b) in active
         .record
         .physical
         .materials
-        .iter_mut()
-        .find(|m| m.material == "hydrogen")
-        .unwrap()
-        .source_kg *= 2.0;
-    unrelated
-        .record
-        .physical
-        .materials
-        .iter_mut()
-        .find(|m| m.material == "hydrogen")
-        .unwrap()
-        .escaped_kg *= 2.0;
-    validate_result(&unrelated).unwrap();
-    assert!(validate_refinement(&active, &unrelated).is_err());
+        .iter()
+        .zip(&solved.record.physical.materials)
+    {
+        assert_eq!(a.source_kg, b.source_kg, "{}", a.material);
+        assert_eq!(a.escaped_kg, b.escaped_kg, "{}", a.material);
+    }
 }
 
 #[test]
 fn exact_one_bar_at_gas_base_is_valid_and_sub_bar_cannot_claim_that_level() {
-    let mut result = initial_result(&budget(0.0, 0.1), &environment(250.0), revision(0)).unwrap();
+    let mut result = initial_result(&budget(0.0, 0.1), &environment(250.0), revision()).unwrap();
     let r = &mut result.record;
     // Transport fixture for the event at the very base of an envelope. No EOS
     // inference: retain positive contiguous regions and algebraic bulk facts.

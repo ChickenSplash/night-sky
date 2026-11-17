@@ -2,9 +2,7 @@
 use super::{Cache, atmosphere::pressure_display, composition::material_label};
 use crate::format::number;
 use crate::navigation::objects::ObjectRef;
-use crate::{
-    Navigation, craft::Now, planet_loading::PlanetLoading, stars::stream::Starfield, ui::kit,
-};
+use crate::{Navigation, craft::Now, stars::stream::Starfield, ui::kit};
 use bevy_egui::egui::{self, Color32};
 use space_shared::{Galaxy, Layer, LayeredPlanet};
 
@@ -41,7 +39,6 @@ pub struct View<'a> {
     pub galaxy: &'a Galaxy,
     pub field: &'a Starfield,
     pub now: Now<'a>,
-    pub loading: &'a PlanetLoading,
 }
 
 pub fn show(ctx: &egui::Context, state: &mut Inspector, view: View<'_>) {
@@ -55,7 +52,6 @@ pub fn show(ctx: &egui::Context, state: &mut Inspector, view: View<'_>) {
             view.galaxy,
             super::position_ly(object, view.nav, view.galaxy, view.field),
             view.now,
-            Some(view.loading),
             view.nav.system(view.galaxy),
         )
     });

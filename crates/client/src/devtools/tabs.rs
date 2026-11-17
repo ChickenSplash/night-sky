@@ -4,7 +4,6 @@ pub mod atmosphere;
 pub mod controls;
 pub mod log;
 pub mod perf;
-pub mod planets;
 pub mod settings;
 pub mod state;
 pub mod terminal;

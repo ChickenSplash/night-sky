@@ -110,7 +110,13 @@ fn planet_search_discloses_its_synchronous_basis_and_detects_a_changed_loaded_re
         let encoded = serde_json::to_string(&result).unwrap();
         let decoded: SearchResult = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, result);
-        planet.initial_result.as_mut().unwrap().revision.sequence += 1;
+        planet
+            .initial_result
+            .as_mut()
+            .unwrap()
+            .revision
+            .model
+            .push_str(":changed");
         assert!(!result.matches_physical_basis(&planet));
     }
 }

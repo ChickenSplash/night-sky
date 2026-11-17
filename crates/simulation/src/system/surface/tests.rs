@@ -32,7 +32,6 @@ fn result(water: f64, gas: f64, temperature: f64, layered: bool) -> PlanetResult
     let revision = PhysicalRevision {
         inputs: "surface-test".into(),
         model: "test".into(),
-        sequence: 0,
     };
     if layered {
         let solved = prototype::solve(&budget, &environment, Default::default()).unwrap();

@@ -566,11 +566,8 @@ Planet records are checked against their active result first. Column gravity
 comes from enclosed mass at the selected reference, while orbital speed uses
 retained total mass. The bound encloses the condensed top as well as the gas
 reference. Suspended-condensate drag is explicitly unsupported, not ignored.
-Craft retain their coherent field/route snapshot; [background adoption](planet-composition.md#safe-background-adoption)
-defers for systems held by a craft, and globally while any active route exists.
-New spawns and voyage arrivals use session-adopted facts, including after cache
-eviction or a late seeded worker reply. Their origin/page is not rebased by this
-projection. Spawn altitude and the `around.radius_basis` readout refer to the
+Craft retain their coherent field/route snapshot; generated planets never
+change under it. Spawn altitude and the `around.radius_basis` readout refer to the
 selected model radius, never certified ground or landing permission.
 
 - **Exclusion:** equatorial radius + atmosphere clearance height + hull

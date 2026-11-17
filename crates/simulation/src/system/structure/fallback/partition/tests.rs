@@ -53,7 +53,6 @@ fn check(initial: &Fallback, env: &PlanetEnvironment) -> Partitioned {
         PhysicalRevision {
             inputs: "partition-fixture".into(),
             model: MODEL_ID.into(),
-            sequence: 0,
         },
     )
     .unwrap();
@@ -240,7 +239,6 @@ fn prepared_candidate_refuses_mixed_temperature_or_repartitioned_structure() {
     let revision = PhysicalRevision {
         inputs: "thermal-isolation".into(),
         model: MODEL_ID.into(),
-        sequence: 0,
     };
     let mut other = env.clone();
     other.equilibrium_temperature_k += 10.0;

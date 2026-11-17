@@ -350,7 +350,6 @@ fn detail(
         galaxy,
         position,
         view.craft,
-        None,
         view.nav.system(galaxy),
     );
     kit::eyebrow(ui, theme, "Selected");
@@ -373,7 +372,7 @@ fn detail(
         .font(theme.small.id())
         .color(theme.dim),
     );
-    if let Some(basis) = &result.physical_basis {
+    if result.physical_basis.is_some() {
         let loaded = match &result.object {
             space_simulation::objects::ObjectRef::Planet { id } => view
                 .nav
@@ -384,28 +383,14 @@ fn detail(
                 .find(|p| p.id == *id),
             _ => None,
         };
-        let retained = match &result.object {
-            space_simulation::objects::ObjectRef::Planet { id } => {
-                view.craft.fleet.charts.refinement(id)
-            }
-            _ => None,
-        };
-        let changed = loaded.is_some_and(|p| !result.matches_physical_basis(p))
-            || retained.is_some_and(|r| {
-                r.result.revision != basis.revision || r.result.provenance != basis.provenance
-            });
-        ui.label(
-            egui::RichText::new(if changed {
-                "Active physics differs: this search match is not revalidated".to_owned()
-            } else {
-                format!(
-                    "Search basis: synchronous {:?} · not a layered-match guarantee",
-                    basis.provenance
-                )
-            })
-            .font(theme.small.id())
-            .color(theme.dim),
-        );
+        // Search matched generated physics; only a loaded snapshot can differ.
+        if loaded.is_some_and(|p| !result.matches_physical_basis(p)) {
+            ui.label(
+                egui::RichText::new("Loaded physics differs: this search match is not revalidated")
+                    .font(theme.small.id())
+                    .color(theme.dim),
+            );
+        }
     }
     let actions =
         crate::ui::inspector::actions(&result.object, view.nav, galaxy, view.field, view.craft);
@@ -440,7 +425,6 @@ fn detail(
         galaxy,
         position,
         view.craft,
-        None,
         view.nav.system(galaxy),
     );
     let rows: Vec<(&str, String)> = info

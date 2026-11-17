@@ -303,103 +303,14 @@ pub fn layered(solved: &Solved) -> LayeredPlanet {
         surface_pressure_pa,
         greenhouse_optical_depth: s.greenhouse_optical_depth(),
         one_bar_radius_m: s.one_bar_radius_m().ok().flatten(),
-        // Generation's decision; refinement carries its amount forward.
+        // Generation decides escape; a standalone solve reports none.
         blowoff_kg: 0.0,
         layers,
     }
 }
 
-pub const RESCALED_NOTE: &str = "Layer radii are scaled as one onto generation's radius; pressures and densities are the solve's own";
 pub(crate) const PRESCRIBED_BOUNDARY_MODEL_ID: &str =
     "generated_prescribed_atmospheric_boundary_v1";
-
-/// Fit interior detail between the already-decided condensed and reference
-/// boundaries. The atmosphere was supplied to the solve, not re-solved here.
-pub(super) fn receive_boundary(record: &mut LayeredPlanet, initial: &LayeredPlanet) {
-    rescale(record, initial.physical.reference_radius_m);
-    let old_core = record.physical.condensed_radius_m;
-    let new_core = initial.physical.condensed_radius_m;
-    let reference = initial.physical.reference_radius_m;
-    let map = |r: f64| {
-        if r == old_core {
-            new_core
-        } else if r < old_core {
-            r * (new_core / old_core)
-        } else if r < reference && reference > old_core {
-            new_core + (r - old_core) * (reference - new_core) / (reference - old_core)
-        } else {
-            r
-        }
-    };
-    for layer in &mut record.layers {
-        layer.inner_radius_m = map(layer.inner_radius_m);
-        layer.outer_radius_m = map(layer.outer_radius_m);
-    }
-    for index in 1..record.layers.len() {
-        record.layers[index].outer_radius_m = record.layers[index - 1].inner_radius_m;
-    }
-    // Preserve exact decided bits, including sub-presentation-threshold gas.
-    let p = &mut record.physical;
-    p.materials.clone_from(&initial.physical.materials);
-    p.retained_mass_kg = initial.physical.retained_mass_kg;
-    p.reference_radius_m = initial.physical.reference_radius_m;
-    p.condensed_radius_m = new_core;
-    p.mean_density_kg_m3 = initial.physical.mean_density_kg_m3;
-    p.reference_gravity_m_s2 = initial.physical.reference_gravity_m_s2;
-    p.inertia_factor = initial.physical.inertia_factor;
-    p.h_he_mass_fraction = initial.physical.h_he_mass_fraction;
-    if !p
-        .approximations
-        .iter()
-        .any(|m| m == PRESCRIBED_BOUNDARY_MODEL_ID)
-    {
-        p.approximations.push(PRESCRIBED_BOUNDARY_MODEL_ID.into());
-    }
-    record.surface_pressure_pa = initial.surface_pressure_pa;
-    record.surface_temperature_k = initial.surface_temperature_k;
-    record.one_bar_radius_m = initial.one_bar_radius_m;
-    record.greenhouse_optical_depth = initial.greenhouse_optical_depth;
-    record.blowoff_kg = initial.blowoff_kg;
-    record.model_limitations.retain(|n| n != RESCALED_NOTE);
-    record.model_limitations.push("Interior radii fitted between generation's fixed condensed and reference boundaries; gas, frost, surface state, gravity and inertia are prescribed by generation".into());
-}
-
-/// Generation's radius is the planet's. The layered solve lands within the
-/// structure table's interpolation of it, and its whole profile is stretched
-/// by that ratio so the layers sit inside the radius everything else uses.
-/// Mass, pressures and the inertia factor are unchanged.
-pub(super) fn rescale(record: &mut LayeredPlanet, reference_radius_m: f64) {
-    let scale = reference_radius_m / record.physical.reference_radius_m;
-    if scale == 1.0 || !scale.is_finite() || scale <= 0.0 {
-        return;
-    }
-    for layer in &mut record.layers {
-        layer.inner_radius_m *= scale;
-        layer.outer_radius_m *= scale;
-    }
-    // Shared boundaries stay bit-identical after the multiplication.
-    for index in 1..record.layers.len() {
-        record.layers[index].outer_radius_m = record.layers[index - 1].inner_radius_m;
-    }
-    let p = &mut record.physical;
-    let one_bar = record.one_bar_radius_m.map(|r| {
-        if r == p.reference_radius_m {
-            reference_radius_m
-        } else {
-            r * scale
-        }
-    });
-    p.condensed_radius_m = if p.condensed_radius_m == p.reference_radius_m {
-        reference_radius_m
-    } else {
-        p.condensed_radius_m * scale
-    };
-    p.reference_radius_m = reference_radius_m;
-    p.mean_density_kg_m3 /= scale.powi(3);
-    p.reference_gravity_m_s2 /= scale.powi(2);
-    record.one_bar_radius_m = one_bar;
-    record.model_limitations.push(RESCALED_NOTE.into());
-}
 
 pub fn outcome(outcome: &Outcome) -> LayeredPlanet {
     match outcome {

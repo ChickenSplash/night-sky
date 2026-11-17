@@ -187,42 +187,51 @@ pub struct PredictedEvent {
 
 /// The craft's developer readout, as `ns ship state` shows it.
 pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
-    let craft =
-        fleet
-            .craft
-            .iter()
-            .map(|live| {
-                let (state, reference) = live.surroundings(seconds);
-                let target_direction = match &live.craft.autopilot {
-                    space_simulation::craft::AttitudePilot::Point { target, .. } => target
-                        .direction(
-                            live.craft.state(),
-                            live.craft.seconds(),
-                            &live.field,
-                            live.craft.reference.as_deref(),
-                        )
-                        .map(|v| v.to_array()),
-                    _ => None,
-                };
-                let attitude = bevy::math::DQuat::from_array(live.craft.orientation);
-                let forward = attitude * -bevy::math::DVec3::Z;
-                let pointing_error_deg = target_direction.map(|v| {
-                    forward
-                        .angle_between(bevy::math::DVec3::from_array(v))
-                        .to_degrees()
-                });
-                let around =
-                    reference.map(|body| {
-                        let relative = relative(state, body.state);
-                        let orbit = space_simulation::craft::Elements::of(relative, body.gm);
-                        Around {
-                    radius_basis: live.field.system().planets.iter().find(|p| p.id == body.id)
+    let craft = fleet
+        .craft
+        .iter()
+        .map(|live| {
+            let (state, reference) = live.surroundings(seconds);
+            let target_direction = match &live.craft.autopilot {
+                space_simulation::craft::AttitudePilot::Point { target, .. } => target
+                    .direction(
+                        live.craft.state(),
+                        live.craft.seconds(),
+                        &live.field,
+                        live.craft.reference.as_deref(),
+                    )
+                    .map(|v| v.to_array()),
+                _ => None,
+            };
+            let attitude = bevy::math::DQuat::from_array(live.craft.orientation);
+            let forward = attitude * -bevy::math::DVec3::Z;
+            let pointing_error_deg = target_direction.map(|v| {
+                forward
+                    .angle_between(bevy::math::DVec3::from_array(v))
+                    .to_degrees()
+            });
+            let around = reference.map(|body| {
+                let relative = relative(state, body.state);
+                let orbit = space_simulation::craft::Elements::of(relative, body.gm);
+                Around {
+                    radius_basis: live
+                        .field
+                        .system()
+                        .planets
+                        .iter()
+                        .find(|p| p.id == body.id)
                         .and_then(|p| p.initial_result.as_ref())
-                        .map_or_else(|| "Model reference boundary".into(), |r| {
-                            format!("{:?} · {:?} · {} · revision {} · not landing permission",
-                                r.record.physical.radius_reference, r.provenance,
-                                r.revision.model, r.revision.sequence)
-                        }),
+                        .map_or_else(
+                            || "Model reference boundary".into(),
+                            |r| {
+                                format!(
+                                    "{:?} · {:?} · {} · not landing permission",
+                                    r.record.physical.radius_reference,
+                                    r.provenance,
+                                    r.revision.model
+                                )
+                            },
+                        ),
                     altitude_km: (distance(relative.position, [0.0; 3]) - body.radius_m) / 1_000.0,
                     speed_kms: distance(relative.velocity, [0.0; 3]) / 1_000.0,
                     two_body_orbit: TwoBodyOrbit {
@@ -235,44 +244,44 @@ pub fn readout(fleet: &Fleet, seconds: f64) -> serde_json::Value {
                     id: body.id,
                     kind: body.kind,
                 }
-                    });
-                CraftReadout {
-                    id: live.craft.id.clone(),
-                    name: live.craft.name.clone(),
-                    kind: live.craft.kind,
-                    frame: live.craft.frame.clone(),
-                    seconds: live.craft.seconds(),
-                    tick: live.craft.tick,
-                    position_m: state.position,
-                    velocity_ms: state.velocity,
-                    speed_kms: distance(state.velocity, [0.0; 3]) / 1_000.0,
-                    input: live.craft.input,
-                    around,
-                    orientation_xyzw: live.craft.orientation,
-                    forward: forward.to_array(),
-                    target_direction,
-                    pointing_error_deg,
-                    up: (attitude * bevy::math::DVec3::Y).to_array(),
-                    spin_rads: live.craft.spin,
-                    thrusters: live.craft.thrusters,
-                    autopilot: live.craft.autopilot.clone(),
-                    prediction: prediction_readout(live, seconds),
-                    warp: live.craft.warp.clone(),
-                    route: live.craft.route.clone(),
-                    pending_orders: live
-                        .pending_orders()
-                        .into_iter()
-                        .map(|scheduled| PendingOrder {
-                            in_s: (scheduled.tick - live.craft.tick) as f64 * STEP_SECONDS,
-                            scheduled,
-                        })
-                        .collect(),
-                    warp_mode: "unsafe_manual",
-                    arrival: live.arrival_status(),
-                    position_pc: live.position_pc(seconds),
-                }
-            })
-            .collect();
+            });
+            CraftReadout {
+                id: live.craft.id.clone(),
+                name: live.craft.name.clone(),
+                kind: live.craft.kind,
+                frame: live.craft.frame.clone(),
+                seconds: live.craft.seconds(),
+                tick: live.craft.tick,
+                position_m: state.position,
+                velocity_ms: state.velocity,
+                speed_kms: distance(state.velocity, [0.0; 3]) / 1_000.0,
+                input: live.craft.input,
+                around,
+                orientation_xyzw: live.craft.orientation,
+                forward: forward.to_array(),
+                target_direction,
+                pointing_error_deg,
+                up: (attitude * bevy::math::DVec3::Y).to_array(),
+                spin_rads: live.craft.spin,
+                thrusters: live.craft.thrusters,
+                autopilot: live.craft.autopilot.clone(),
+                prediction: prediction_readout(live, seconds),
+                warp: live.craft.warp.clone(),
+                route: live.craft.route.clone(),
+                pending_orders: live
+                    .pending_orders()
+                    .into_iter()
+                    .map(|scheduled| PendingOrder {
+                        in_s: (scheduled.tick - live.craft.tick) as f64 * STEP_SECONDS,
+                        scheduled,
+                    })
+                    .collect(),
+                warp_mode: "unsafe_manual",
+                arrival: live.arrival_status(),
+                position_pc: live.position_pc(seconds),
+            }
+        })
+        .collect();
     serde_json::to_value(FleetReadout {
         craft,
         held_clock: fleet.held,

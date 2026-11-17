@@ -15,7 +15,7 @@ New debug readouts/switches belong here, not in separate windows or the canvas.
 | --- | --- |
 | `log` | Last 2,000 tracing events from `devtools::log_layers`, level filter and grep; marks errors/warnings logged while hidden |
 | `terminal` | Command line and output |
-| `perf` | Frame graph, CPU work, star generation/stream/draw metrics, cells/blocks/grid boxes, GPU passes, search and planet refinement |
+| `perf` | Frame graph, CPU work, star generation/stream/draw metrics, cells/blocks/grid boxes, GPU passes and search |
 | `settings` | Display, quality, rendering and a collapsed-by-default debug section, with all global visual switches |
 | `atmosphere` | Optional selected-planet override, presets and sliders for debug air, global shader steps, override top/optical depths, GPU frame and transparent-pass times |
 | `controls` | Shortcut help |
@@ -67,24 +67,15 @@ Visual switches use `Navigation` display options or `render::debug::RenderDebug`
 The latter reset on restart and remain accessible through `set_debug <switch> <on>`;
 moving their controls does not change rendering defaults or command names.
 
-## Background planet refinement
+## CPU threads
 
-The `perf` tab's **planet refinement** section controls
-background layered calculations, on by default and not persisted
-(`set_layered_planets <on>` or `ns planets on|off` also switch it). It shows
-per-planet queue/running/solved/refusal states by designation, in orbit order.
-The separate **CPU threads** section shows the shared star/search/planet budget,
-with **star activity**, **search** and **planet refinement** rows. These are
-instantaneous admitted worker-slot counts, not CPU-utilisation measurements;
-idle threads and queued work do not count. Search has no separate thread row
-or thread-count controls. Ready candidates publish complete physical revisions when safe;
-close cameras, craft snapshots and active routes defer publication. Refusals
-and failures retain the usable synchronous fallback. Turning refinement off
-pauses work/publication, not already adopted facts. The inspector and
-`/state/planet_loading` distinguish candidates, deferrals and applied results;
-`/state/planet_results` exports active facts. See
-[composition](../simulation/planet-composition.md#experimental-background-loading)
-for target selection, caching, cancellation, the transport record and limits.
+The `perf` tab's **CPU threads** section shows the shared star/search budget,
+with **star activity** and **search** rows. These are instantaneous admitted
+worker-slot counts, not CPU-utilisation measurements; idle threads and queued
+work do not count. Search has no separate thread row or thread-count controls.
+Planets need no background work: each carries its final result from
+generation (see [one result per planet](../simulation/planet-composition.md#one-result-per-planet)).
+`/state/planet_results` exports those facts.
 
 ## Terminal interaction
 

@@ -117,21 +117,8 @@ enables the override; `ns atmosphere enabled=false` restores generated air.
 Quality-only changes do not enable it. These settings are not the generated
 physical atmosphere shown in the inspector.
 
-`ns planets` reads `/state/planet_loading` and lists the target system's planets
-by designation with their [layered result](../simulation/planet-composition.md#experimental-background-loading)
-(surface, temperature, pressure, radius, layer count) or status (queued,
-calculating, unsupported with its reason, failed), plus ready/deferred/applied
-adoption status. Background refinement defaults on. `ns planets on|off` sends
-`set_layered_planets true|false` and prints the state from a later snapshot.
-`--json` prints the whole entry: switch, shared CPU threads, cached systems and,
-per planet, the full `LayeredPlanet` record once solved. `ns inspect` includes
-the inspector's background-refinement section while the mode is on. Turning it
-off pauses work/adoption without reverting already adopted facts.
-
 `/state/planet_results` exposes the displayed page's authoritative records,
-revision/provenance/refinement, validated boundary geometry and validity. These
-are the active facts, distinct from `/state/planet_loading` candidates. Inspector
-fields likewise distinguish active facts from unapplied candidate comparisons.
+revision/provenance, validated boundary geometry and validity.
 
 `cmd` takes one quoted text/JSON string; refusals exit 1 with the reason.
 `--wait` polls `/state` until a snapshot sampled after the reply has no flight,
@@ -426,7 +413,7 @@ or galactic flight, prediction reports unavailable rather than an old orbit.
 - Typed `search <query text>` becomes `UiCommand::Search`, opening/updating
   the browser and cancelling its prior shown request. `clear_search` clears
   it; `set_search work_cap_millions=<m>` adjusts the work cap. Search shares
-  the background CPU budget with visible-star streaming and planet refinement.
+  the background CPU budget with visible-star streaming.
 
 ```sh
 ./scripts/ns catalogue

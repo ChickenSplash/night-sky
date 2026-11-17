@@ -160,11 +160,6 @@ pub enum UiCommand {
         #[serde(default)]
         work_cap_millions: Option<f64>,
     },
-    /// Experimental layered planet calculations (`planet_loading.rs`), shown in
-    /// the inspector beside the legacy facts.
-    SetLayeredPlanets {
-        on: bool,
-    },
     /// Borderless fullscreen on the window's monitor, or a window.
     SetFullscreen {
         on: bool,
@@ -616,17 +611,11 @@ pub fn apply(
                             &mut nav, galaxy, &field, star,
                         ))
                 {
-                    if let Some(crate::Visit::Generated(system)) = &mut nav.visit {
-                        fleet.charts.restore_system(system);
-                    }
                     nav.select(Some(Selection::Planet(planet.clone())));
                     nav.focus_selected(galaxy);
                 }
             }
             UiCommand::Follow => {
-                if let Some(crate::Visit::Generated(system)) = &mut nav.visit {
-                    fleet.charts.restore_system(system);
-                }
                 if crate::craft::followed(&nav, galaxy, &fleet, clock.0.seconds).is_some() {
                     nav.follow_craft();
                 } else {
@@ -756,8 +745,6 @@ pub fn apply(
             UiCommand::SetAtmosphere(change) => tuning.apply(change),
             // `search::apply` runs these.
             UiCommand::Search { .. } | UiCommand::ClearSearch | UiCommand::SetSearch { .. } => {}
-            // `planet_loading::update` runs this.
-            UiCommand::SetLayeredPlanets { .. } => {}
             // `window::fullscreen` runs this.
             UiCommand::SetFullscreen { .. } => {}
         }

@@ -38,12 +38,9 @@ impl Forcing {
         }
         PhysicalRevision {
             inputs,
-            // The lineage covers both the initial fallback, with the structure
-            // table it reads, and its refinement prescription, including the
-            // checksum-pinned NSHHE002 resource.
-            model: "generation_physics_v4:structure_table_v4:surface_decision_v2:layered_adoption_v5:NSHHE002-3fe0293c8a340e38"
-                .into(),
-            sequence: 0,
+            // Generation's physics and the structure table it reads. The
+            // table's version covers the H/He resource it was built from.
+            model: "generation_physics_v4:structure_table_v4:surface_decision_v2".into(),
         }
     }
 

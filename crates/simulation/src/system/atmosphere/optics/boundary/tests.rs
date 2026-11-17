@@ -37,7 +37,6 @@ fn candidate() -> PlanetResult {
         PhysicalRevision {
             inputs: "optics-test".into(),
             model: "test".into(),
-            sequence: 0,
         },
     )
     .unwrap()
@@ -248,7 +247,6 @@ fn condensed_secondary_proxy_cannot_borrow_a_legacy_atmosphere() {
         PhysicalRevision {
             inputs: "secondary-proxy".into(),
             model: "test".into(),
-            sequence: 0,
         },
     )
     .unwrap();
