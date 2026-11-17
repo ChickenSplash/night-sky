@@ -11,13 +11,13 @@ mod build;
 #[cfg(test)]
 mod tests;
 
-pub const MODEL_ID: &str = "layered_structure_table_v3";
+pub const MODEL_ID: &str = "layered_structure_table_v4";
 
 static BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/resources/structure-table.bin"
 ));
-const MAGIC: &[u8; 8] = b"NSSTR002";
+const MAGIC: &[u8; 8] = b"NSSTR003";
 
 /// Condensed bodies: the dry and water solvers' mass domain.
 pub(crate) const CONDENSED_MASS_EARTH: [f64; 2] = [1e-4, 20.0];
@@ -238,22 +238,206 @@ fn grid_hash() -> u64 {
         .chain(Grid::core().bytes()))
 }
 
-/// One condensed cell: the solved body, or a labelled fill from its solved
-/// neighbours where the solver refuses.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct CondensedCell {
-    pub ln_radius_m: f32,
-    pub inertia_factor: f32,
-    pub filled: bool,
+/// Why a cell is not the solver's own answer. Stored per cell, so a lookup
+/// can say which weakness of the model its corners crossed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Reason {
+    Solved,
+    /// No central pressure brackets the surface condition.
+    Unbracketed,
+    NonConvergence,
+    /// The integration budget ran out.
+    WorkBudget,
+    /// Gas hotter or colder than the envelope's thermal model.
+    ThermalDomain,
+    /// Cold dense gas outside the H/He density resource.
+    ColdDenseGas,
+    /// Ionised or quantum-screened gas outside the H/He density resource.
+    IonisedGas,
+    MassDomain,
+    /// A layer or boundary too thin to resolve.
+    Resolution,
+    DensityInversion,
+    Other,
 }
 
-/// One core under an envelope, where water takes the envelope solver's
-/// pressure-only compression instead of the thin route's phases.
+impl Reason {
+    pub const ALL: [Self; 11] = [
+        Self::Solved,
+        Self::Unbracketed,
+        Self::NonConvergence,
+        Self::WorkBudget,
+        Self::ThermalDomain,
+        Self::ColdDenseGas,
+        Self::IonisedGas,
+        Self::MassDomain,
+        Self::Resolution,
+        Self::DensityInversion,
+        Self::Other,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Solved => "solved",
+            Self::Unbracketed => "no central pressure found",
+            Self::NonConvergence => "solver did not converge",
+            Self::WorkBudget => "integration budget exhausted",
+            Self::ThermalDomain => "outside the envelope thermal model",
+            Self::ColdDenseGas => "cold dense gas outside the H/He data",
+            Self::IonisedGas => "ionised gas outside the H/He data",
+            Self::MassDomain => "outside the solver's mass domain",
+            Self::Resolution => "layer too thin to resolve",
+            Self::DensityInversion => "density inversion",
+            Self::Other => "other refusal",
+        }
+    }
+
+    /// The solver's refusal, as the build reports it.
+    #[cfg(test)]
+    pub(crate) fn of(refusal: &str) -> Self {
+        let has = |text: &str| refusal.contains(text);
+        if has("Unbracketed") {
+            Self::Unbracketed
+        } else if has("WorkBudget") {
+            Self::WorkBudget
+        } else if has("NonConvergence") {
+            Self::NonConvergence
+        } else if has("thermal") {
+            Self::ThermalDomain
+        } else if has("ColdDense") {
+            Self::ColdDenseGas
+        } else if has("IonQuantum") {
+            Self::IonisedGas
+        } else if has("mass domain") {
+            Self::MassDomain
+        } else if has("Resolution") || has("resolution") {
+            Self::Resolution
+        } else if has("DensityInversion") {
+            Self::DensityInversion
+        } else {
+            Self::Other
+        }
+    }
+}
+
+/// What a lookup stood on: how many of the knots it read were filled, why,
+/// and whether it left the grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Quality {
+    pub corners: u8,
+    pub filled: u8,
+    /// One bit per `Reason`, of the filled corners.
+    reasons: u16,
+    /// Past an axis: its edge, or a continuation law, stands in.
+    pub outside: bool,
+}
+
+impl Quality {
+    fn read(&mut self, reason: Reason) {
+        self.corners += 1;
+        if reason != Reason::Solved {
+            self.filled += 1;
+            self.reasons |= 1 << reason as u8;
+        }
+    }
+
+    pub fn approximate(&self) -> bool {
+        self.outside || self.filled > 0
+    }
+
+    pub fn reasons(&self) -> impl Iterator<Item = Reason> + '_ {
+        Reason::ALL
+            .into_iter()
+            .filter(|r| self.reasons >> *r as u8 & 1 == 1)
+    }
+
+    pub(crate) fn with(self, other: Self) -> Self {
+        Self {
+            corners: self.corners.saturating_add(other.corners),
+            filled: self.filled.saturating_add(other.filled),
+            reasons: self.reasons | other.reasons,
+            outside: self.outside || other.outside,
+        }
+    }
+}
+
+/// Where a solid body's layers meet. Volumes are shares of the body's own,
+/// which follow the mass shares almost linearly where a radius would not.
+/// Pressures are the body's own weight, above whatever load its surface
+/// carries, as shares of the central one. Stored in sixteen bits each.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct CoreCell {
+pub(crate) struct Interior {
+    /// Inside the top of the metal.
+    pub core_volume: f32,
+    /// Inside the top of the rock: all but the water.
+    pub refractory_volume: f32,
+    pub ln_central_pa: f32,
+    /// At the top of the metal.
+    pub core_pressure: f32,
+    /// At the top of the rock.
+    pub refractory_pressure: f32,
+}
+
+#[cfg(test)]
+fn pack(share: f32) -> u16 {
+    (share.clamp(0.0, 1.0) * 65535.0).round() as u16
+}
+
+fn unpack(stored: u16) -> f32 {
+    f32::from(stored) / 65535.0
+}
+
+impl Interior {
+    /// Pressures keep their square root: a thin water layer's base is a small
+    /// share of the centre's.
+    #[cfg(test)]
+    fn bytes(&self) -> [u8; 12] {
+        let mut out = [0; 12];
+        out[..4].copy_from_slice(&self.ln_central_pa.to_le_bytes());
+        for (i, stored) in [
+            pack(self.core_volume),
+            pack(self.refractory_volume),
+            pack(self.core_pressure.sqrt()),
+            pack(self.refractory_pressure.sqrt()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            out[4 + 2 * i..6 + 2 * i].copy_from_slice(&stored.to_le_bytes());
+        }
+        out
+    }
+
+    fn from_bytes(data: &[u8]) -> Self {
+        let share = |i: usize| unpack(u16::from_le_bytes([data[4 + 2 * i], data[5 + 2 * i]]));
+        Self {
+            core_volume: share(0),
+            refractory_volume: share(1),
+            ln_central_pa: f32::from_le_bytes(data[..4].try_into().unwrap()),
+            core_pressure: share(2).powi(2),
+            refractory_pressure: share(3).powi(2),
+        }
+    }
+
+    /// As the resource will hold it.
+    #[cfg(test)]
+    pub(crate) fn stored(&self) -> Self {
+        Self::from_bytes(&self.bytes())
+    }
+}
+
+/// One solid body: the solved one, or a labelled fill from its solved
+/// neighbours where the solver refuses. Condensed cells are whole bodies
+/// under at most thin gas; core cells sit under an envelope's load, where
+/// water takes the envelope solver's pressure-only compression instead of
+/// the thin route's phases.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SolidCell {
     pub ln_radius_m: f32,
     pub inertia_factor: f32,
-    pub filled: bool,
+    pub interior: Interior,
+    pub reason: Reason,
 }
 
 /// One envelope cell: the radius of the reference core over the one-bar
@@ -268,32 +452,44 @@ pub(crate) struct EnvelopeCell {
     /// The gas's moment of inertia over its mass and the reference radius
     /// squared.
     pub gas_inertia_factor: f32,
-    pub filled: bool,
+    pub reason: Reason,
 }
+
+const SOLID_BYTES: usize = 20;
+const ENVELOPE_BYTES: usize = 12;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Table {
     condensed_grid: Grid,
     envelope_grid: Grid,
     core_grid: Grid,
-    pub condensed: Vec<CondensedCell>,
+    pub condensed: Vec<SolidCell>,
     pub envelope: Vec<EnvelopeCell>,
-    pub core: Vec<CoreCell>,
+    pub core: Vec<SolidCell>,
+}
+
+/// Layer boundaries of a solid body, from its centre outwards.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Boundaries {
+    /// Top of the metal. Zero without any.
+    pub core_radius_m: f64,
+    /// Top of the rock: the body's radius without water.
+    pub refractory_radius_m: f64,
+    /// Pressures include the load a core lookup was given. A condensed
+    /// lookup's are above whatever presses on its surface.
+    pub central_pressure_pa: f64,
+    pub core_pressure_pa: f64,
+    pub refractory_pressure_pa: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Condensed {
+pub struct Solid {
     pub radius_m: f64,
     pub inertia_factor: f64,
+    pub boundaries: Boundaries,
     /// Outside the tabulated domain, or read from a filled cell.
     pub approximate: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Core {
-    pub radius_m: f64,
-    pub inertia_factor: f64,
-    pub approximate: bool,
+    pub quality: Quality,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -309,15 +505,18 @@ pub struct Envelope {
     pub gas_inertia_factor: f64,
     /// Pressure where the gas meets the core.
     pub base_pressure_pa: f64,
+    /// The body's own core under that pressure.
+    pub core_boundaries: Boundaries,
     pub approximate: bool,
+    pub quality: Quality,
 }
 
 impl Table {
     #[cfg(test)]
     pub(crate) fn new(
-        condensed: Vec<CondensedCell>,
+        condensed: Vec<SolidCell>,
         envelope: Vec<EnvelopeCell>,
-        core: Vec<CoreCell>,
+        core: Vec<SolidCell>,
     ) -> Self {
         let table = Self {
             condensed_grid: Grid::condensed(),
@@ -347,31 +546,28 @@ impl Table {
     pub(crate) fn encode(&self) -> Vec<u8> {
         let mut out = MAGIC.to_vec();
         out.extend(grid_hash().to_le_bytes());
-        for cell in &self.condensed {
-            out.extend(cell.ln_radius_m.to_le_bytes());
-            out.extend(cell.inertia_factor.to_le_bytes());
-        }
+        let solid = |out: &mut Vec<u8>, cells: &[SolidCell]| {
+            for cell in cells {
+                out.extend(cell.ln_radius_m.to_le_bytes());
+                out.extend(cell.inertia_factor.to_le_bytes());
+                out.extend(cell.interior.bytes());
+            }
+        };
+        solid(&mut out, &self.condensed);
         for cell in &self.envelope {
             out.extend(cell.compactness.to_le_bytes());
             out.extend(cell.ln_base_pa.to_le_bytes());
             out.extend(cell.gas_inertia_factor.to_le_bytes());
         }
-        for cell in &self.core {
-            out.extend(cell.ln_radius_m.to_le_bytes());
-            out.extend(cell.inertia_factor.to_le_bytes());
-        }
-        let flags = self
-            .condensed
-            .iter()
-            .map(|c| c.filled)
-            .chain(self.envelope.iter().map(|c| c.filled))
-            .chain(self.core.iter().map(|c| c.filled))
-            .collect::<Vec<_>>();
-        out.extend(flags.chunks(8).map(|bits| {
-            bits.iter()
-                .enumerate()
-                .fold(0_u8, |byte, (i, set)| byte | u8::from(*set) << i)
-        }));
+        solid(&mut out, &self.core);
+        out.extend(
+            self.condensed
+                .iter()
+                .map(|c| c.reason)
+                .chain(self.envelope.iter().map(|c| c.reason))
+                .chain(self.core.iter().map(|c| c.reason))
+                .map(|reason| reason as u8),
+        );
         out.extend(fnv(out.iter().copied()).to_le_bytes());
         out
     }
@@ -380,8 +576,10 @@ impl Table {
         let (condensed_grid, envelope_grid, core_grid) =
             (Grid::condensed(), Grid::envelope(), Grid::core());
         let (c, e, k) = (condensed_grid.len(), envelope_grid.len(), core_grid.len());
-        let flags = 16 + 8 * c + 12 * e + 8 * k;
-        if data.len() != flags + (c + e + k).div_ceil(8) + 8
+        let envelopes = 16 + SOLID_BYTES * c;
+        let cores = envelopes + ENVELOPE_BYTES * e;
+        let reasons = cores + SOLID_BYTES * k;
+        if data.len() != reasons + c + e + k + 8
             || &data[..8] != MAGIC
             || data[8..16] != grid_hash().to_le_bytes()
             || data[data.len() - 8..] != fnv(data[..data.len() - 8].iter().copied()).to_le_bytes()
@@ -389,41 +587,48 @@ impl Table {
             return None;
         }
         let number = |at: usize| f32::from_le_bytes(data[at..at + 4].try_into().unwrap());
-        let filled = |index: usize| data[flags + index / 8] >> (index % 8) & 1 == 1;
-        let condensed: Vec<_> = (0..c)
-            .map(|i| CondensedCell {
-                ln_radius_m: number(16 + 8 * i),
-                inertia_factor: number(20 + 8 * i),
-                filled: filled(i),
-            })
-            .collect();
+        let reason = |index: usize| Reason::ALL.get(usize::from(data[reasons + index])).copied();
+        let solid = |start: usize, first: usize, count: usize| -> Option<Vec<SolidCell>> {
+            (0..count)
+                .map(|i| {
+                    let at = start + SOLID_BYTES * i;
+                    Some(SolidCell {
+                        ln_radius_m: number(at),
+                        inertia_factor: number(at + 4),
+                        interior: Interior::from_bytes(&data[at + 8..at + SOLID_BYTES]),
+                        reason: reason(first + i)?,
+                    })
+                })
+                .collect()
+        };
+        let condensed = solid(16, 0, c)?;
         let envelope: Vec<_> = (0..e)
-            .map(|i| EnvelopeCell {
-                compactness: number(16 + 8 * c + 12 * i),
-                ln_base_pa: number(20 + 8 * c + 12 * i),
-                gas_inertia_factor: number(24 + 8 * c + 12 * i),
-                filled: filled(c + i),
+            .map(|i| {
+                let at = envelopes + ENVELOPE_BYTES * i;
+                Some(EnvelopeCell {
+                    compactness: number(at),
+                    ln_base_pa: number(at + 4),
+                    gas_inertia_factor: number(at + 8),
+                    reason: reason(c + i)?,
+                })
             })
-            .collect();
-        let core: Vec<_> = (0..k)
-            .map(|i| CoreCell {
-                ln_radius_m: number(16 + 8 * c + 12 * e + 8 * i),
-                inertia_factor: number(20 + 8 * c + 12 * e + 8 * i),
-                filled: filled(c + e + i),
-            })
-            .collect();
-        (condensed
-            .iter()
-            .all(|c| c.ln_radius_m.is_finite() && c.inertia_factor > 0.0)
+            .collect::<Option<_>>()?;
+        let core = solid(cores, c + e, k)?;
+        let sound = |cell: &SolidCell| {
+            cell.ln_radius_m.is_finite()
+                && cell.inertia_factor > 0.0
+                && cell.interior.ln_central_pa.is_finite()
+                && cell.interior.core_volume <= cell.interior.refractory_volume
+                && cell.interior.refractory_pressure <= cell.interior.core_pressure
+        };
+        (condensed.iter().all(sound)
             && envelope.iter().all(|c| {
                 c.compactness.is_finite()
                     && c.compactness > 0.0
                     && c.ln_base_pa.is_finite()
                     && c.gas_inertia_factor > 0.0
             })
-            && core
-                .iter()
-                .all(|c| c.ln_radius_m.is_finite() && c.inertia_factor > 0.0))
+            && core.iter().all(sound))
         .then_some(Self {
             condensed_grid,
             envelope_grid,
@@ -432,6 +637,100 @@ impl Table {
             envelope,
             core,
         })
+    }
+
+    /// One solid body from its grid. Past the mass bounds the layers keep
+    /// their shares of the volume and the pressure above `load_pa` follows
+    /// the body's own weight: mass squared over radius to the fourth.
+    fn solid(
+        grid: &Grid,
+        cells: &[SolidCell],
+        point: [f64; 4],
+        mass_beyond: f64,
+        load_pa: f64,
+        outside: bool,
+    ) -> Solid {
+        let mut quality = Quality {
+            outside,
+            ..Quality::default()
+        };
+        let mut read = |point: [f64; 4], count: bool| {
+            let mut sum = [0.0; 7];
+            for (index, weight) in grid.corners(point) {
+                if weight == 0.0 {
+                    continue;
+                }
+                let cell = &cells[index];
+                let interior = &cell.interior;
+                for (total, value) in sum.iter_mut().zip([
+                    cell.ln_radius_m,
+                    cell.inertia_factor,
+                    interior.core_volume,
+                    interior.refractory_volume,
+                    interior.ln_central_pa,
+                    interior.core_pressure,
+                    interior.refractory_pressure,
+                ]) {
+                    *total += weight * f64::from(value);
+                }
+                if count {
+                    quality.read(cell.reason);
+                }
+            }
+            sum
+        };
+        let sum = read(point, true);
+        // Pressure across a sphere goes as its radius squared, so where the
+        // innermost layer vanishes the pressure beneath its top bends as its
+        // share to the two thirds: beneath the rock towards all water, and
+        // at the centre towards no metal too. The pressure at a vanishing
+        // layer's own top does not.
+        let bend = |x: f64, from: f64, to: f64| {
+            let t = ((x - from) / (to - from)).clamp(0.0, 1.0);
+            from + (to - from) * t.powf(2.0 / 3.0)
+        };
+        let [metal, water] = [&grid.knots[1], &grid.knots[2]];
+        let [all_water, wet] = [water[water.len() - 1], water[water.len() - 2]];
+        let mut bent = point;
+        if point[2] > wet {
+            bent[2] = bend(point[2], all_water, wet);
+        }
+        let beneath_rock = if bent == point {
+            sum
+        } else {
+            read(bent, false)
+        };
+        if point[1] < metal[1] {
+            bent[1] = bend(point[1], metal[0], metal[1]);
+        }
+        let centre = if bent[1] == point[1] {
+            beneath_rock
+        } else {
+            read(bent, false)
+        };
+        // Below the domain bodies are uncompressed; above it the radius
+        // continues as the fallback always has.
+        let exponent = if mass_beyond < 1.0 {
+            1.0 / 3.0
+        } else {
+            CONTINUATION_EXPONENT
+        };
+        let radius_m = sum[0].exp() * mass_beyond.powf(exponent);
+        let weight = mass_beyond.powf(2.0 - 4.0 * exponent);
+        let pressure = |from: &[f64; 7], share: f64| load_pa + share * from[4].exp() * weight;
+        Solid {
+            radius_m,
+            inertia_factor: sum[1],
+            boundaries: Boundaries {
+                core_radius_m: radius_m * sum[2].cbrt(),
+                refractory_radius_m: radius_m * sum[3].cbrt(),
+                central_pressure_pa: pressure(&centre, 1.0),
+                core_pressure_pa: pressure(&beneath_rock, beneath_rock[5]),
+                refractory_pressure_pa: pressure(&sum, sum[6]),
+            },
+            approximate: quality.approximate(),
+            quality,
+        }
     }
 
     /// Radius and inertia factor of a bare condensed body. `metal_share` is of
@@ -443,87 +742,64 @@ impl Table {
         metal_share: f64,
         water_share: f64,
         temperature_k: f64,
-    ) -> Condensed {
+    ) -> Solid {
         let mass = mass_kg / EARTH_MASS_KG;
         let [low, high] = CONDENSED_MASS_EARTH;
         let bounded = mass.clamp(low, high);
         let water = water_share.clamp(0.0, 1.0);
-        let point = [
-            bounded.ln(),
-            metal_share.clamp(0.0, 1.0),
-            water,
-            temperature_k,
-        ];
-        let mut ln_radius = 0.0;
-        let mut inertia_factor = 0.0;
-        let mut approximate = bounded != mass
-            || (water > 0.0
-                && !(WATER_TEMPERATURES_K[0]..=MAX_WATER_TEMPERATURE_K).contains(&temperature_k));
-        for (index, weight) in self.condensed_grid.corners(point) {
-            if weight == 0.0 {
-                continue;
-            }
-            let cell = &self.condensed[index];
-            ln_radius += weight * f64::from(cell.ln_radius_m);
-            inertia_factor += weight * f64::from(cell.inertia_factor);
-            approximate |= cell.filled;
-        }
-        // Below the domain bodies are uncompressed; above it the radius
-        // continues as the fallback always has.
-        let exponent = if mass < low {
-            1.0 / 3.0
-        } else {
-            CONTINUATION_EXPONENT
-        };
-        Condensed {
-            radius_m: ln_radius.exp() * (mass / bounded).powf(exponent),
-            inertia_factor,
-            approximate,
-        }
+        Self::solid(
+            &self.condensed_grid,
+            &self.condensed,
+            [
+                bounded.ln(),
+                metal_share.clamp(0.0, 1.0),
+                water,
+                temperature_k,
+            ],
+            mass / bounded,
+            0.0,
+            bounded != mass
+                || (water > 0.0
+                    && !(WATER_TEMPERATURES_K[0]..=MAX_WATER_TEMPERATURE_K)
+                        .contains(&temperature_k)),
+        )
     }
 
     /// A condensed body under an H/He envelope whose gas presses on it with
     /// `load_pa`. Same mass continuations as `condensed`, past this grid's
     /// own bounds.
-    pub fn core(&self, mass_kg: f64, metal_share: f64, water_share: f64, load_pa: f64) -> Core {
+    pub fn core(&self, mass_kg: f64, metal_share: f64, water_share: f64, load_pa: f64) -> Solid {
         if mass_kg <= 0.0 {
-            return Core {
+            return Solid {
                 radius_m: 0.0,
                 inertia_factor: 0.4,
+                boundaries: Boundaries {
+                    core_radius_m: 0.0,
+                    refractory_radius_m: 0.0,
+                    central_pressure_pa: load_pa,
+                    core_pressure_pa: load_pa,
+                    refractory_pressure_pa: load_pa,
+                },
                 approximate: false,
+                quality: Quality::default(),
             };
         }
         let mass = mass_kg / EARTH_MASS_KG;
         let [low, high] = CORE_MASS_EARTH;
         let bounded = mass.clamp(low, high);
-        let point = [
-            bounded.ln(),
-            metal_share.clamp(0.0, 1.0),
-            water_share.clamp(0.0, 1.0),
-            load_pa.max(CORE_LOADS_PA[0]).ln(),
-        ];
-        let mut ln_radius = 0.0;
-        let mut inertia_factor = 0.0;
-        let mut approximate = bounded != mass || load_pa > CORE_LOADS_PA[CORE_LOADS_PA.len() - 1];
-        for (index, weight) in self.core_grid.corners(point) {
-            if weight == 0.0 {
-                continue;
-            }
-            let cell = &self.core[index];
-            ln_radius += weight * f64::from(cell.ln_radius_m);
-            inertia_factor += weight * f64::from(cell.inertia_factor);
-            approximate |= cell.filled;
-        }
-        let exponent = if mass < low {
-            1.0 / 3.0
-        } else {
-            CONTINUATION_EXPONENT
-        };
-        Core {
-            radius_m: ln_radius.exp() * (mass / bounded).powf(exponent),
-            inertia_factor,
-            approximate,
-        }
+        Self::solid(
+            &self.core_grid,
+            &self.core,
+            [
+                bounded.ln(),
+                metal_share.clamp(0.0, 1.0),
+                water_share.clamp(0.0, 1.0),
+                load_pa.max(CORE_LOADS_PA[0]).ln(),
+            ],
+            mass / bounded,
+            load_pa,
+            bounded != mass || load_pa > CORE_LOADS_PA[CORE_LOADS_PA.len() - 1],
+        )
     }
 
     /// An H/He envelope's core and the gas above it up to one bar. The cell
@@ -548,10 +824,13 @@ impl Table {
         let mut compactness = 0.0;
         let mut ln_base = 0.0;
         let mut gas_inertia_factor = 0.0;
-        let mut approximate = point
-            .iter()
-            .zip(&self.envelope_grid.knots)
-            .any(|(x, knots)| !(knots[0]..=knots[knots.len() - 1]).contains(x));
+        let mut quality = Quality {
+            outside: point
+                .iter()
+                .zip(&self.envelope_grid.knots)
+                .any(|(x, knots)| !(knots[0]..=knots[knots.len() - 1]).contains(x)),
+            ..Quality::default()
+        };
         for (index, weight) in self.envelope_grid.corners(point) {
             if weight == 0.0 {
                 continue;
@@ -560,7 +839,7 @@ impl Table {
             compactness += weight * f64::from(cell.compactness);
             ln_base += weight * f64::from(cell.ln_base_pa);
             gas_inertia_factor += weight * f64::from(cell.gas_inertia_factor);
-            approximate |= cell.filled;
+            quality.read(cell.reason);
         }
         // The reference core is the one the cell was solved over, so it takes
         // the table's bounds with the cell. The body's own core does not.
@@ -609,7 +888,9 @@ impl Table {
             thickness_m: thickness * wider,
             gas_inertia_factor,
             base_pressure_pa,
-            approximate: approximate || core.approximate,
+            core_boundaries: core.boundaries,
+            approximate: quality.approximate() || core.approximate,
+            quality: quality.with(core.quality),
         }
     }
 }

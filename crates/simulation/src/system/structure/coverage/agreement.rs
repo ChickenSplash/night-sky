@@ -115,8 +115,8 @@ struct Row {
     refusal: String,
 }
 
-/// Water phase and frost detail follow from the decided temperature; the
-/// synchronous record leaves them unresolved, so compare what it does decide.
+/// The broad kind of surface. The exact text, water phase included, is
+/// compared with the layers.
 fn surface_kind(surface: &str) -> &'static str {
     match surface {
         "envelope" => "envelope",
@@ -252,6 +252,7 @@ struct Summary {
     /// Layered results a visit could not install, or installed on another radius.
     adoption_failures: usize,
     radius_changes: usize,
+    layers: Layers,
 }
 
 fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
@@ -460,6 +461,7 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
     for (reason, count) in reasons {
         let _ = writeln!(text, "  - {count}: {reason}");
     }
+    let layers = layers(rows, &mut text);
     let _ = writeln!(text, "\n## Refusals\n");
     let mut reasons = std::collections::BTreeMap::<&str, usize>::new();
     for r in rows.iter().filter(|r| r.layered.is_none()) {
@@ -493,6 +495,257 @@ fn summarise(rows: &[Row], sync_seconds: f64, layered_seconds: f64) -> Summary {
         envelope_radius,
         adoption_failures,
         radius_changes,
+        layers,
+    }
+}
+
+const WATER_KINDS: [&str; 6] = [
+    "ocean",
+    "ice",
+    "deep_ice",
+    "hot_water",
+    "water_coexistence",
+    "water_compression",
+];
+
+/// One entry a kind, outermost first. The solver changes model inside a
+/// phase and inside its gas; generation states one layer for each. Gas above
+/// one bar is the solver's top envelope region and generation's atmosphere.
+fn merged(record: &LayeredPlanet) -> Vec<space_shared::Layer> {
+    let envelope = record.surface == "envelope";
+    let mut out: Vec<space_shared::Layer> = Vec::new();
+    for layer in &record.layers {
+        let mut layer = layer.clone();
+        if envelope && layer.kind == "atmosphere" {
+            layer.kind = "envelope".into();
+        }
+        match out.last_mut() {
+            Some(above)
+                if above.kind == layer.kind
+                    && !(layer.kind == "envelope" && above.inner_pressure_pa == 1e5) =>
+            {
+                above.inner_radius_m = layer.inner_radius_m;
+                above.inner_pressure_pa = layer.inner_pressure_pa;
+                above.mass_kg += layer.mass_kg;
+            }
+            _ => out.push(layer),
+        }
+    }
+    out
+}
+
+struct Layers {
+    surface_changes: usize,
+    /// Thin-route planets whose layer kinds differ from the solver's.
+    thin_sequence_changes: usize,
+    /// Worst boundary radius difference on the thin route, over the radius.
+    thin_boundary: f64,
+}
+
+/// Generation's layer list against the layered solve's, per route.
+fn layers(rows: &[Row], text: &mut String) -> Layers {
+    let pairs: Vec<(&Row, &LayeredPlanet)> = rows
+        .iter()
+        .filter_map(|r| Some((r, r.layered.as_ref()?)))
+        .collect();
+    let surface_changes = pairs
+        .iter()
+        .filter(|(r, l)| r.sync.surface != l.surface)
+        .count();
+    let _ = writeln!(
+        text,
+        "\n## Layers\n\nGeneration's layers against the layered solve's, where it solves. Adjacent solver regions of one kind count as one layer.\n\n- Surface text changed by the layered solve: {surface_changes}"
+    );
+    let relative = |a: f64, b: f64| (a / b - 1.0).abs();
+    let mut thin_sequence_changes = 0;
+    let mut thin_boundary = 0.0_f64;
+    let mut table = String::new();
+    for (route, envelope) in [("thin", false), ("envelope", true)] {
+        let mut stats = std::collections::BTreeMap::<(u8, String), Vec<f64>>::new();
+        let mut note = |order: u8, name: &str, value: f64| {
+            if value.is_finite() {
+                stats
+                    .entry((order, name.to_owned()))
+                    .or_default()
+                    .push(value);
+            }
+        };
+        let mut differing = std::collections::BTreeMap::<String, usize>::new();
+        let mut count = 0;
+        for (r, l) in pairs
+            .iter()
+            .filter(|(r, _)| (r.decision == "Envelope") == envelope)
+        {
+            count += 1;
+            let (ours, theirs) = (merged(&r.sync), merged(l));
+            let kinds = |layers: &[space_shared::Layer]| {
+                layers
+                    .iter()
+                    .map(|l| l.kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let same = kinds(&ours) == kinds(&theirs);
+            if !same {
+                *differing
+                    .entry(format!("{} | {}", kinds(&ours), kinds(&theirs)))
+                    .or_default() += 1;
+            }
+            let condensed = theirs
+                .iter()
+                .filter(|l| !["atmosphere", "envelope"].contains(&l.kind.as_str()))
+                .map(|l| l.outer_radius_m)
+                .fold(0.0, f64::max);
+            let find = |layers: &[space_shared::Layer], kind: &str| {
+                layers.iter().find(|l| l.kind == kind).cloned()
+            };
+            for (order, kind, name) in [(0, "core", "metal"), (1, "mantle", "rock")] {
+                let (Some(a), Some(b)) = (find(&ours, kind), find(&theirs, kind)) else {
+                    continue;
+                };
+                let radius = (a.outer_radius_m - b.outer_radius_m).abs() / condensed;
+                note(order, &format!("Top of the {name}, radius over R"), radius);
+                if !envelope {
+                    thin_boundary = thin_boundary.max(radius);
+                }
+                if let (Some(p), Some(q)) = (a.outer_pressure_pa, b.outer_pressure_pa)
+                    && q > 1e3
+                {
+                    note(
+                        order + 3,
+                        &format!("Top of the {name}, pressure"),
+                        relative(p, q),
+                    );
+                }
+            }
+            if let (Some(a), Some(b)) = (ours.last(), theirs.last()) {
+                note(
+                    2,
+                    "Central pressure",
+                    relative(a.inner_pressure_pa, b.inner_pressure_pa),
+                );
+            }
+            let water = |layers: &[space_shared::Layer]| {
+                let mut water = layers
+                    .iter()
+                    .filter(|l| WATER_KINDS.contains(&l.kind.as_str()));
+                let top = water.next()?;
+                let base = water.next_back().unwrap_or(top);
+                Some(top.outer_radius_m - base.inner_radius_m)
+            };
+            if let (Some(a), Some(b)) = (water(&ours), water(&theirs))
+                && b > 0.0
+            {
+                note(5, "Water, whole thickness", relative(a, b));
+            }
+            if same {
+                for (a, b) in ours.iter().zip(&theirs) {
+                    let thickness = b.outer_radius_m - b.inner_radius_m;
+                    if WATER_KINDS.contains(&a.kind.as_str()) && thickness > 0.0 {
+                        note(
+                            6,
+                            &format!("Layer `{}`, thickness", a.kind),
+                            relative(a.outer_radius_m - a.inner_radius_m, thickness),
+                        );
+                    }
+                }
+            }
+            if envelope {
+                let gas = |layers: &[space_shared::Layer]| {
+                    layers.iter().rfind(|l| l.kind == "envelope").cloned()
+                };
+                if let (Some(a), Some(b)) = (gas(&ours), gas(&theirs)) {
+                    note(
+                        7,
+                        "Gas, pressure at its base",
+                        relative(a.inner_pressure_pa, b.inner_pressure_pa),
+                    );
+                }
+                let condensate = |record: &LayeredPlanet| -> f64 {
+                    record
+                        .layers
+                        .iter()
+                        .flat_map(|l| &l.phase_allocations)
+                        .map(|p| p.condensate_kg)
+                        .sum()
+                };
+                let (a, b) = (condensate(&r.sync), condensate(l));
+                if a > 0.0 || b > 0.0 {
+                    note(
+                        8,
+                        "Suspended condensate, mass",
+                        if a > 0.0 && b > 0.0 {
+                            relative(a, b)
+                        } else {
+                            1.0
+                        },
+                    );
+                }
+            }
+        }
+        let changed: usize = differing.values().sum();
+        if !envelope {
+            thin_sequence_changes = changed;
+        }
+        let _ = writeln!(text, "- Layer kinds differ, {route}: {changed} of {count}");
+        for (kinds, n) in &differing {
+            let _ = writeln!(text, "  - {n}: generation `{kinds}` solver");
+        }
+        for ((_, name), values) in stats {
+            let _ = writeln!(
+                table,
+                "| {name} | {route} | {} | {} |",
+                values.len(),
+                scientific_quantiles(values)
+            );
+        }
+    }
+    let _ = writeln!(
+        text,
+        "\n| Quantity, relative | Route | Planets | p50 / p95 / max |\n| --- | --- | --- | --- |\n{table}"
+    );
+    // What every planet carries in place of a per-planet refusal.
+    let mut surfaces = std::collections::BTreeMap::<&str, usize>::new();
+    let mut labels = std::collections::BTreeMap::<String, usize>::new();
+    let mut labelled = 0;
+    for r in rows {
+        *surfaces.entry(&r.sync.surface).or_default() += 1;
+        let mut any = false;
+        for line in r
+            .sync
+            .model_limitations
+            .iter()
+            .filter(|l| l.starts_with("Structure table:"))
+        {
+            any = true;
+            let reasons = line
+                .split_once('(')
+                .map_or("outside the tabulated range", |(_, rest)| {
+                    rest.trim_end_matches(')')
+                });
+            for reason in reasons.split(", ") {
+                *labels.entry(reason.to_owned()).or_default() += 1;
+            }
+        }
+        labelled += usize::from(any);
+    }
+    let _ = writeln!(
+        text,
+        "- Generated surfaces: {}\n- Planets whose layers stand on filled or out-of-range table knots: {labelled} of {}",
+        surfaces
+            .iter()
+            .map(|(surface, n)| format!("{surface} {n}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        rows.len()
+    );
+    for (reason, n) in labels {
+        let _ = writeln!(text, "  - {n}: {reason}");
+    }
+    Layers {
+        surface_changes,
+        thin_sequence_changes,
+        thin_boundary,
     }
 }
 
@@ -513,6 +766,8 @@ fn boundaries(rows: &[Row]) -> String {
             "adopted": r.adopted.as_ref().and_then(|r| r.as_ref().ok()).map(facts),
             "adoption_error": r.adopted.as_ref().and_then(|r| r.as_ref().err()),
             "initial_atmosphere": r.atmosphere, "adopted_atmosphere": r.adopted_atmosphere,
+            "surface": [&r.sync.surface, r.layered.as_ref().map_or("", |l| &l.surface)],
+            "initial_layers": r.sync.layers, "raw_layers": r.layered.as_ref().map(|l| &l.layers),
         });
         let _ = writeln!(out, "{value}");
     }
@@ -618,6 +873,17 @@ fn generation_agreement() {
     assert!(!rows.is_empty());
     // What generation decides, the layered solve keeps.
     assert_eq!(summary.surface_flips, 0, "surface kind changed");
+    // Generation walks the solver's own water models and reads its layer
+    // boundaries from the table: same surface, same layers, within the
+    // table's interpolation. A phase that barely exists may appear in one only.
+    let layers = &summary.layers;
+    assert_eq!(layers.surface_changes, 0, "surface text changed");
+    assert!(
+        layers.thin_sequence_changes * 100 <= rows.len(),
+        "{} thin layer lists differ",
+        layers.thin_sequence_changes
+    );
+    assert!(layers.thin_boundary < 0.01, "{}", layers.thin_boundary);
     assert_eq!(summary.escape_changes, 0, "escape changed");
     assert_eq!(summary.mislabelled, 0, "bulk label on an H/He envelope");
     assert_eq!(summary.decided_temperature_k, 0.0, "decided temperature");

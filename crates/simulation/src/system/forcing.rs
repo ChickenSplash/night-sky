@@ -41,7 +41,7 @@ impl Forcing {
             // The lineage covers both the initial fallback, with the structure
             // table it reads, and its refinement prescription, including the
             // checksum-pinned NSHHE002 resource.
-            model: "generation_physics_v4:structure_table_v3:surface_decision_v1:layered_adoption_v5:NSHHE002-3fe0293c8a340e38"
+            model: "generation_physics_v4:structure_table_v4:surface_decision_v2:layered_adoption_v5:NSHHE002-3fe0293c8a340e38"
                 .into(),
             sequence: 0,
         }

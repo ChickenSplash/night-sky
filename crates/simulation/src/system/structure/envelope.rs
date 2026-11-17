@@ -287,15 +287,15 @@ fn heavy_policy(outer_pressure_pa: f64) -> radial::Policy {
     }
 }
 
-/// Radius and inertia factor of the heavy layers alone under a prescribed
-/// surface load, for the structure table: the same core model `solve` fits a
-/// gas shell to, without the gas.
+/// The heavy layers alone under a prescribed surface load, innermost first,
+/// and their moment of inertia, for the structure table: the same core model
+/// `solve` fits a gas shell to, without the gas.
 #[cfg(test)]
 pub(crate) fn loaded_core(
     heavy: &Inventory,
     load_pa: f64,
     controls: dry::Controls,
-) -> Result<(f64, f64), Error> {
+) -> Result<(Vec<dry::Region>, f64), Error> {
     let mut solver = radial::Solver::new(
         heavy,
         load_pa,
@@ -332,11 +332,7 @@ pub(crate) fn loaded_core(
             None => low = mid,
         }
     }
-    let radius = found.regions.last().unwrap().outer().radius_m;
-    Ok((
-        radius,
-        found.inertia_kg_m2 / (heavy.total_mass_kg() * radius.powi(2)),
-    ))
+    Ok((found.regions, found.inertia_kg_m2))
 }
 
 fn solve_with_density(

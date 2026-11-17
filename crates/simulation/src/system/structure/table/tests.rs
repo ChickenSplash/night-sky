@@ -2,6 +2,10 @@ use super::{build::*, *};
 use crate::seed::Rng;
 
 fn quantiles(mut values: Vec<f64>) -> String {
+    values.retain(|v| !v.is_nan());
+    if values.is_empty() {
+        return "no samples".to_owned();
+    }
     values.sort_by(f64::total_cmp);
     let at = |q: f64| values[((values.len() - 1) as f64 * q) as usize];
     format!(
@@ -75,6 +79,104 @@ fn embedded_table_decodes_round_trips_and_keeps_physical_order() {
         envelope(0.05, 500.0, 0.0).thickness_m,
         envelope(0.05, 500.0, 0.5).thickness_m
     );
+    // Layers nest and their pressures rise inwards, on and past the grids.
+    let nested = |body: &Solid, load: f64| {
+        let b = body.boundaries;
+        assert!(0.0 <= b.core_radius_m && b.core_radius_m <= b.refractory_radius_m);
+        assert!(b.refractory_radius_m <= body.radius_m * (1.0 + 1e-12));
+        assert!(b.central_pressure_pa >= b.core_pressure_pa);
+        assert!(b.core_pressure_pa >= b.refractory_pressure_pa);
+        assert!(b.refractory_pressure_pa >= load * (1.0 - 1e-12));
+    };
+    for mass in [1e-6, 1e-3, 1.0, 20.0, 100.0] {
+        for (metal, water) in [(0.3, 0.0), (0.3, 0.3), (0.0, 0.5), (1.0, 0.0), (0.3, 1.0)] {
+            nested(
+                &table.condensed(mass * EARTH_MASS_KG, metal, water, 300.0),
+                0.0,
+            );
+            for load in [0.0, 1e9, 1e12] {
+                nested(&table.core(mass * EARTH_MASS_KG, metal, water, load), load);
+            }
+        }
+    }
+    let earth = table.condensed(EARTH_MASS_KG, 0.325, 0.0, 300.0);
+    assert_eq!(earth.boundaries.refractory_radius_m, earth.radius_m);
+    // Earth's core is 3,480 km under 1.36 Mbar, its centre at 3.64 Mbar.
+    assert!((earth.boundaries.core_radius_m / 3.48e6 - 1.0).abs() < 0.1);
+    assert!((earth.boundaries.core_pressure_pa / 1.36e11 - 1.0).abs() < 0.2);
+    assert!((earth.boundaries.central_pressure_pa / 3.64e11 - 1.0).abs() < 0.2);
+    let rock = table.condensed(EARTH_MASS_KG, 0.0, 0.0, 300.0).boundaries;
+    assert_eq!(rock.core_radius_m, 0.0);
+    assert_eq!(rock.core_pressure_pa, rock.central_pressure_pa);
+    // Below the grid a body keeps its density and its layers' shares, and
+    // its pressures fall with its own weight. Ice stays larger than rock.
+    let edge = table.condensed(1e-4 * EARTH_MASS_KG, 0.3, 0.3, 200.0);
+    let small = table.condensed(1e-7 * EARTH_MASS_KG, 0.3, 0.3, 200.0);
+    assert!(small.quality.outside && !edge.quality.outside);
+    for ratio in [
+        small.radius_m / edge.radius_m,
+        small.boundaries.core_radius_m / edge.boundaries.core_radius_m,
+        small.boundaries.refractory_radius_m / edge.boundaries.refractory_radius_m,
+        (small.boundaries.central_pressure_pa / edge.boundaries.central_pressure_pa).sqrt(),
+        (small.boundaries.refractory_pressure_pa / edge.boundaries.refractory_pressure_pa).sqrt(),
+    ] {
+        assert!((ratio / 0.1 - 1.0).abs() < 1e-9, "{ratio}");
+    }
+    assert!(radius(1e-7, 0.0, 1.0) > 1.4 * radius(1e-7, 0.0, 0.0));
+    // A lookup names why the cells it read were filled.
+    let (index, cell) = table
+        .core
+        .iter()
+        .enumerate()
+        .find(|(_, c)| c.reason != Reason::Solved)
+        .unwrap();
+    let [mass, metal, water, load] = table.core_grid.point(table.core_grid.cell(index));
+    let looked = table.core(mass.exp() * EARTH_MASS_KG, metal, water, load.exp());
+    assert!(looked.approximate && looked.quality.filled > 0);
+    assert!(looked.quality.reasons().any(|r| r == cell.reason));
+    assert!(!earth.approximate && earth.quality.reasons().next().is_none());
+}
+
+/// Boundary errors of a lookup against its solve: both radii over the body's
+/// radius, then the three pressures. Absent layers and unloaded surfaces
+/// have nothing to compare.
+fn boundary_errors(looked: &Solid, solved: &Body, load_pa: f64) -> [f64; 5] {
+    let mut b = looked.boundaries;
+    b.central_pressure_pa -= load_pa;
+    b.core_pressure_pa -= load_pa;
+    b.refractory_pressure_pa -= load_pa;
+    let relative = |a: f64, b: f64| {
+        if b > 0.0 {
+            (a / b - 1.0).abs()
+        } else {
+            f64::NAN
+        }
+    };
+    [
+        (b.core_radius_m - solved.core_radius_m).abs() / solved.radius_m,
+        (b.refractory_radius_m - solved.refractory_radius_m).abs() / solved.radius_m,
+        relative(b.central_pressure_pa, solved.central_pa),
+        relative(b.core_pressure_pa, solved.core_pa),
+        relative(b.refractory_pressure_pa, solved.refractory_pa),
+    ]
+}
+
+fn report_boundaries(title: &str, errors: &[[f64; 5]]) {
+    for (i, name) in [
+        "core radius / R",
+        "rock top radius / R",
+        "central pressure",
+        "core top pressure",
+        "rock top pressure",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        eprintln!(
+            "{title} {name:<20} {}",
+            quantiles(errors.iter().map(|e| e[i]).collect())
+        );
+    }
 }
 
 /// `cargo test --release -p space-simulation structure_table_accuracy -- --ignored --nocapture`.
@@ -107,10 +209,11 @@ fn structure_table_accuracy() {
         let looked = table.condensed(mass * EARTH_MASS_KG, b, water, temperature);
         let solved = solve_condensed(mass, b, water, temperature).ok()?;
         Some((
-            (looked.radius_m / solved.0 - 1.0).abs(),
-            (looked.inertia_factor / solved.1 - 1.0).abs(),
+            (looked.radius_m / solved.radius_m - 1.0).abs(),
+            (looked.inertia_factor / solved.inertia_factor - 1.0).abs(),
             looked.approximate,
             format!("M={mass:.4} metal={b:.3} water={water:.5} T={temperature:.1}"),
+            boundary_errors(&looked, &solved, 0.0),
         ))
     });
     let rows: Vec<_> = rows.into_iter().flatten().collect();
@@ -130,6 +233,66 @@ fn structure_table_accuracy() {
     worst.sort_by(|a, b| b.0.total_cmp(&a.0));
     for row in worst.iter().take(12) {
         eprintln!("  {:.3e} filled={} {}", row.0, row.2, row.3);
+    }
+    report_boundaries(
+        "condensed, cells all solved:",
+        &rows
+            .iter()
+            .filter(|r| !r.2)
+            .map(|r| r.4)
+            .collect::<Vec<_>>(),
+    );
+    let mut worst: Vec<_> = rows.iter().filter(|r| !r.2).collect();
+    worst.sort_by(|a, b| b.4[1].total_cmp(&a.4[1]));
+    for row in worst.iter().take(8) {
+        eprintln!("  rock top {:.3e} {}", row.4[1], row.3);
+    }
+    for column in [2, 4] {
+        let mut worst: Vec<_> = rows
+            .iter()
+            .filter(|r| !r.2 && !r.4[column].is_nan())
+            .collect();
+        worst.sort_by(|a, b| b.4[column].total_cmp(&a.4[column]));
+        for row in worst.iter().take(8) {
+            eprintln!("  pressure {column} {:.3e} {}", row.4[column], row.3);
+        }
+    }
+
+    // Cores under a load, over the masses and loads envelope planets reach.
+    let rows = parallel(samples, |i| {
+        let [a, b, c, d] = draws[i];
+        let mass = span([1e-2_f64.ln(), CORE_MASS_EARTH[1].ln()], a).exp();
+        let water = if c < 0.4 { 0.0 } else { (c - 0.4) / 0.6 };
+        let load = 10_f64.powf(span([3.0, 13.0], d));
+        let looked = table.core(mass * EARTH_MASS_KG, b, water, load);
+        let solved = solve_core(mass, b, water, load).ok()?;
+        Some((
+            (looked.radius_m / solved.radius_m - 1.0).abs(),
+            (looked.inertia_factor / solved.inertia_factor - 1.0).abs(),
+            looked.approximate,
+            format!("M={mass:.4} metal={b:.3} water={water:.5} load={load:.2e}"),
+            boundary_errors(&looked, &solved, load),
+        ))
+    });
+    let rows: Vec<_> = rows.into_iter().flatten().filter(|r| !r.2).collect();
+    eprintln!(
+        "core radius, cells all solved:           {}",
+        quantiles(rows.iter().map(|r| r.0).collect())
+    );
+    eprintln!(
+        "core inertia factor, cells all solved:   {}",
+        quantiles(rows.iter().map(|r| r.1).collect())
+    );
+    report_boundaries(
+        "core, cells all solved:",
+        &rows.iter().map(|r| r.4).collect::<Vec<_>>(),
+    );
+    for column in [2, 4] {
+        let mut worst: Vec<_> = rows.iter().filter(|r| !r.4[column].is_nan()).collect();
+        worst.sort_by(|a, b| b.4[column].total_cmp(&a.4[column]));
+        for row in worst.iter().take(8) {
+            eprintln!("  pressure {column} {:.3e} {}", row.4[column], row.3);
+        }
     }
 
     let grid = Grid::envelope();
@@ -264,7 +427,9 @@ fn giants_and_cold_envelopes_solve() {
     // the same weight of gas, wet or dry.
     for (mass, fraction, water) in [(5.0, 1e-6, 0.2), (10.0, 0.05, 0.0), (30.0, 0.3, 0.5)] {
         let whole = solve_envelope_over(mass, fraction, 300.0, 60.0, 0.3, water).unwrap();
-        let (core, _) = solve_core(mass * (1.0 - fraction), 0.3, water, whole.base_pa).unwrap();
+        let core = solve_core(mass * (1.0 - fraction), 0.3, water, whole.base_pa)
+            .unwrap()
+            .radius_m;
         assert!(
             (core / whole.core_radius_m - 1.0).abs() < 1e-5,
             "{mass} {fraction} {water}: {core} against {}",

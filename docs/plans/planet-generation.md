@@ -646,7 +646,9 @@ issue alongside the wet-core radius limitation.
 
 ### Layers from the table (replaces steps 4.4, 4.5, 5 and 6)
 
-Decision of 16 November 2026. Open, nothing implemented.
+Decision of 16 November 2026. Tasks 1 to 5 complete, 17 November 2026:
+generation builds its layers from the table. Task 6 (delete the swap) is
+open.
 
 **Why.** After step 4.3 the background solve changes only the layer list,
 the model notes and the provenance. Its layers are still a second answer:
@@ -712,6 +714,109 @@ built: it would be deleted again by old step 6.
    the shared CPU budget, `layered::rescale` and `receive_boundary`, and
    `validate_refinement`. The solver stays in the simulation crate for the
    table build and the tests.
+
+**Tasks 1 to 4, result, 17 November 2026.**
+
+- **Inventory.** The inspector shows, per layer: kind and material, mass,
+  thickness, pressure from top to base, temperature, and model text. Mass
+  and kind come from generation's inventory, temperature from the decided
+  surface (water is one temperature; rock and metal show none), model text
+  is fixed per kind. Only boundary radii and pressures need the table.
+- **Generation already builds a layer list**, from a simple split. Against
+  the solver on the census (3,863 planets, p50 / p95 / max):
+
+  | Quantity | Thin route | Envelope route |
+  | --- | --- | --- |
+  | Core radius | 0.85% / 2.4% / 4.4% | 2.9% / 5.9% / 22% |
+  | Rock top radius | 0.36% / 1.5% / 2.8% | 0.42% / 4.0% / 14% |
+  | Central pressure | 5.1% / 13% / 26% | 17% / 28% / 46% |
+  | Water thickness | 4.2% / 31% / 46% | 22% / 56% / 92% |
+  | Water phases | none | none |
+
+  Task 5 replaces these numbers, it does not add a record. Evidence:
+  `data/tmp/g3-layers-inventory.txt`; the census now writes both layer
+  lists to `generation-agreement-boundaries.jsonl`.
+- **Cells** (`NSSTR003`, `layered_structure_table_v4`, 10,297,650 bytes,
+  was 6,300,111). Condensed and core cells gain five values in 12 bytes:
+  volume inside the top of the metal and of the rock, logarithm of the
+  central pressure, and the pressure at each top as a share of it. The
+  envelope grid gains nothing: gas splits at one bar, which generation
+  knows. No central temperature: the solver has none to show.
+- **Table accuracy**, cells all solved (p50 / p95 / p99 / max):
+
+  | Boundary | Condensed | Core under an envelope |
+  | --- | --- | --- |
+  | Top of the metal, over R | 0.11% / 0.27% / 0.38% / 0.74% | 0.09% / 0.30% / 0.97% / 3.9% |
+  | Top of the rock, over R | 0.04% / 0.19% / 0.32% / 0.44% | 0.07% / 0.33% / 0.54% / 1.8% |
+  | Central pressure | 0.27% / 4.3% / 17% / 35% | 0.33% / 3.2% / 9.5% / 23% |
+  | Pressure, top of the metal | 0.20% / 2.2% / 5.1% / 16% | 0.43% / 2.6% / 4.5% / 24% |
+  | Pressure, top of the rock | 0.17% / 2.0% / 6.8% / 20% | 0.58% / 2.9% / 4.9% / 7.0% |
+
+  These are on a uniform sample, not the census: generation does not read
+  them yet, so the census comparison belongs to task 5.
+- **Two things tried and changed.** Pressures stored as shares of the total
+  central pressure broke where the surface load jumps between knots (rock
+  top p95 21%, and 16,000% on loaded cores): they are now stored above the
+  load. Linear interpolation left a central-pressure p95 of 11% where a
+  layer almost vanishes: the lookup now bends that interval as the share to
+  the two thirds. What is left is bodies of over nine tenths water around a
+  small dense centre.
+- **Reason codes.** One byte a cell on all three grids, in place of the
+  filled bit (which cost 0.5 MB, not nothing as first estimated). Lookups
+  return `Quality`: knots read, knots filled, reasons, outside. The build
+  report tabulates reasons against the axes (`data/tmp/structure-table.md`).
+  Largest: envelopes outside the thermal model 17.1%, cores out of
+  integration budget 16.7% (loads of 1,000 bar and up on small cores),
+  cold dense gas 5.4%, non-convergence 5.5% and 4.0%.
+- **Outside the table.** Radius below the mass range already scaled as mass
+  to the one third. Layers now keep their volume shares there and pressures
+  scale as mass to the two thirds, tested from 10⁻⁴ down to 10⁻⁷ Earth
+  masses. No axis was widened.
+- **Unchanged:** the census is identical to step 4.3's, since radius and
+  inertia cells are the same solves. Generation key: `structure_table_v4`.
+- **Dropped or deferred to task 5:** the third gas layer on 74 of 903 gas
+  planets is a model handoff at 100 to 300 bar, not a boundary, and is
+  dropped. The suspended cloud split (136 layers) depends on the trace gas
+  mix, not a table axis: compute it at one bar in generation, or drop it.
+- Evidence: `data/tmp/g3-layers-{build,accuracy,check,census}.log`,
+  `data/tmp/structure-table.md` (and `-v3`, `-first-try` for comparison).
+  `./scripts/check.sh` passes (441 client, 481 simulation tests).
+
+**Task 5, result, 17 November 2026.** Generation's layer list is now built
+from the table and the solver's water models. Census: 4,367 planets, 3,863
+solved; evidence `data/tmp/g3-task5-{agreement.md,census.log,check.log,boundaries.jsonl}`,
+before in `g3-layers-boundaries-before.jsonl`.
+
+| Against the solver (p50 / p95 / max) | Thin, before | Thin, now | Envelope, before | Envelope, now |
+| --- | --- | --- | --- | --- |
+| Top of the metal, over R | 0.85% / 2.4% / 4.4% (radius) | 0.07% / 0.16% / 0.29% | 2.9% / 5.9% / 22% (radius) | 0.09% / 0.18% / 3.3% |
+| Top of the rock, over R | 0.36% / 1.5% / 2.8% | 0.03% / 0.18% / 0.39% | 0.42% / 4.0% / 14% | 0.05% / 0.27% / 4.9% |
+| Central pressure | 5.1% / 13% / 26% | 0.24% / 1.1% / 1.2% | 17% / 28% / 46% | 0.25% / 1.2% / 30% |
+| Water thickness | 4.2% / 31% / 46% | 0.08% / 0.28% / 0.65% | 22% / 56% / 92% | 0.73% / 6.2% / 23% |
+| Surface text equal | no phases | 2,960 of 2,960 | | 903 of 903 |
+| Layer kinds equal | | 2,957 of 2,960 | | 730 of 903 |
+
+- **Water phases** come from one inward walk of the solver's own water models
+  on the decided isotherm (`fallback/phases.rs`, `water::Isotherm`). Ice and
+  ocean thickness within 0.27% and 0.22% at p95. Three planets show a thin
+  `deep_ice` sliver the solver does not have.
+- **Gas splits at one bar**: the atmosphere record's column above, the
+  envelope below. The third solver gas region (a model handoff) is not
+  reproduced, as decided.
+- **Base of thin gas.** The table knows H/He alone; below 1% gas the base
+  pressure blends to the gas's own shell weight (secondaries included). Gas
+  base pressure p95 went from 24% to 13%.
+- **Clouds** computed at generation, as decided: the local saturation split
+  averaged over each gas layer. 6 of 6 solver cloud planets, condensate mass
+  within 2%.
+- **Labels.** 260 planets stand on filled or out-of-range knots and say so in
+  one `Structure table:` line with the reasons; refused planets get layers.
+- **Still different:** 173 enveloped planets keep a separate condensed
+  `volatiles` layer where the solver mixes those secondaries into rock and
+  water; rock-top pressure there is up to 79% out. Envelope worst cases are
+  the reference-core simplification already listed below.
+- Generation key `surface_decision_v2`. Synchronous cost unchanged at 0.22 ms
+  per planet. `./scripts/check.sh` passes (441 client, 484 simulation tests).
 
 **Acceptance.** A visited planet's inspector shows its layers immediately and
 they never change. No planet record is written after generation. The census

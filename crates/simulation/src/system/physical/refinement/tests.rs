@@ -192,16 +192,13 @@ fn inspected_cold_water_candidate_replaces_the_gas_coordinate_with_its_ice_bound
         prepare_refinement(&job.initial_result, &job.environment, &job.resolve()).unwrap();
     let next = refinement.project(old).unwrap();
     let result = next.initial_result.as_ref().unwrap();
-    // Generation already decided a condensed surface under its column: the
-    // layered solve adds the phase, never a change of reference.
+    // Generation already decided a condensed surface under its column and
+    // its phase: the layered solve changes neither.
     assert_eq!(
         old.initial_result.as_ref().unwrap().surface_knowledge,
-        space_shared::SurfaceKnowledge::Unresolved
+        space_shared::SurfaceKnowledge::SolidPhase
     );
-    assert_eq!(
-        old.initial_result.as_ref().unwrap().record.surface,
-        "unresolved water"
-    );
+    assert_eq!(old.initial_result.as_ref().unwrap().record.surface, "ice");
     assert_eq!(
         result.record.surface_temperature_k,
         old.initial_result

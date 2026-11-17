@@ -5,7 +5,7 @@ use crate::{
     system::{
         composition::{Inventory, Material},
         materials::water as eos,
-        structure::{coupled, dry, envelope, water},
+        structure::{coupled, dry, dry::Sample, envelope, water},
     },
     units::EARTH_MASS_KG,
 };
@@ -81,13 +81,97 @@ pub(super) fn water_load_pa(temperature_k: f64) -> f64 {
     }
 }
 
-/// Radius in metres and inertia factor of one bare condensed body.
+/// What the table keeps of one solid body.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Body {
+    pub radius_m: f64,
+    pub inertia_factor: f64,
+    /// Top of the metal and of the rock.
+    pub core_radius_m: f64,
+    pub refractory_radius_m: f64,
+    /// Pressures above the load on the surface: the body's own weight.
+    pub central_pa: f64,
+    pub core_pa: f64,
+    pub refractory_pa: f64,
+}
+
+impl Body {
+    /// Regions innermost first, each with its inner and outer sample. A
+    /// region is water, metal or rock by whichever it mostly holds.
+    fn new<'a>(
+        mass_kg: f64,
+        inertia_kg_m2: f64,
+        regions: impl Iterator<Item = (&'a Inventory, Sample, Sample)>,
+    ) -> Self {
+        let regions: Vec<_> = regions.collect();
+        let centre = regions[0].1;
+        let surface = regions[regions.len() - 1].2;
+        // A layer that is absent ends where the one beneath it does.
+        let mut core = centre;
+        let mut refractory = centre;
+        for (inventory, _, outer) in &regions {
+            let [metal, rock, water] = [Material::Metal, Material::Silicate, Material::Water]
+                .map(|m| inventory.mass_kg(m));
+            if water > metal.max(rock) {
+                continue;
+            }
+            refractory = *outer;
+            if metal > rock {
+                core = *outer;
+            }
+        }
+        Self {
+            radius_m: surface.radius_m,
+            inertia_factor: inertia_kg_m2 / (mass_kg * surface.radius_m.powi(2)),
+            core_radius_m: core.radius_m,
+            refractory_radius_m: refractory.radius_m,
+            central_pa: centre.pressure_pa - surface.pressure_pa,
+            core_pa: core.pressure_pa - surface.pressure_pa,
+            refractory_pa: refractory.pressure_pa - surface.pressure_pa,
+        }
+    }
+
+    /// The seven numbers a cell interpolates, as `Table::solid` reads them.
+    fn values(&self) -> [f64; 7] {
+        [
+            self.radius_m.ln(),
+            self.inertia_factor,
+            (self.core_radius_m / self.radius_m).powi(3),
+            (self.refractory_radius_m / self.radius_m).powi(3),
+            self.central_pa.ln(),
+            self.core_pa / self.central_pa,
+            self.refractory_pa / self.central_pa,
+        ]
+    }
+}
+
+/// A cell from its seven numbers, kept inside what a body can be: a fill
+/// continued along a slope may leave it.
+fn solid_cell(v: [f64; 7], reason: Reason) -> SolidCell {
+    let refractory_volume = v[3].clamp(0.0, 1.0);
+    let core_pressure = v[5].clamp(0.0, 1.0);
+    SolidCell {
+        ln_radius_m: v[0] as f32,
+        inertia_factor: v[1] as f32,
+        interior: Interior {
+            core_volume: v[2].clamp(0.0, refractory_volume) as f32,
+            refractory_volume: refractory_volume as f32,
+            ln_central_pa: v[4] as f32,
+            core_pressure: core_pressure as f32,
+            refractory_pressure: v[6].clamp(0.0, core_pressure) as f32,
+        }
+        .stored(),
+        reason,
+    }
+}
+
+/// One bare condensed body.
 pub(super) fn solve_condensed(
     mass_earth: f64,
     metal_share: f64,
     water_share: f64,
     temperature_k: f64,
-) -> Result<(f64, f64), String> {
+) -> Result<Body, String> {
     let mass = mass_earth * EARTH_MASS_KG;
     let refractory = mass * (1.0 - water_share);
     let inventory = Inventory::new(&[
@@ -98,7 +182,15 @@ pub(super) fn solve_condensed(
     .map_err(|e| format!("{e:?}"))?;
     let controls = dry::Controls::default();
     if water_share == 0.0 {
-        dry::solve(&inventory, 0.0, controls).map(|s| (s.radius_m(), s.inertia_factor()))
+        dry::solve(&inventory, 0.0, controls).map(|s| {
+            Body::new(
+                mass,
+                s.inertia_kg_m2(),
+                s.regions()
+                    .iter()
+                    .map(|r| (r.inventory(), r.inner(), r.outer())),
+            )
+        })
     } else {
         water::solve(
             &inventory,
@@ -106,7 +198,15 @@ pub(super) fn solve_condensed(
             water_load_pa(temperature_k),
             controls,
         )
-        .map(|s| (s.radius_m(), s.inertia_factor()))
+        .map(|s| {
+            Body::new(
+                mass,
+                s.inertia_kg_m2(),
+                s.regions()
+                    .iter()
+                    .map(|r| (r.inventory(), r.inner(), r.outer())),
+            )
+        })
     }
     .map_err(|e| {
         let text = format!("{e:?}");
@@ -238,8 +338,12 @@ fn surrogate_radius_m(
 /// Refused cells take their line's solved neighbours, one axis at a time in
 /// the given order: interpolated between two, else continued along the slope
 /// of the nearest pair. Each value is returned with whether it was filled.
-fn fill(grid: &Grid, solved: &[Option<[f64; 2]>], axes: &[usize]) -> Vec<([f64; 2], bool)> {
-    let mut cells: Vec<Option<([f64; 2], bool)>> =
+fn fill<const N: usize>(
+    grid: &Grid,
+    solved: &[Option<[f64; N]>],
+    axes: &[usize],
+) -> Vec<([f64; N], bool)> {
+    let mut cells: Vec<Option<([f64; N], bool)>> =
         solved.iter().map(|s| s.map(|v| (v, false))).collect();
     for &axis in axes {
         let snapshot = cells.clone();
@@ -248,7 +352,7 @@ fn fill(grid: &Grid, solved: &[Option<[f64; 2]>], axes: &[usize]) -> Vec<([f64; 
                 continue;
             }
             let at = grid.cell(index);
-            let along = |offset: isize| -> Option<(f64, [f64; 2])> {
+            let along = |offset: isize| -> Option<(f64, [f64; N])> {
                 let i = at[axis] as isize + offset;
                 if i < 0 || i >= grid.knots[axis].len() as isize {
                     return None;
@@ -266,9 +370,9 @@ fn fill(grid: &Grid, solved: &[Option<[f64; 2]>], axes: &[usize]) -> Vec<([f64; 
                     (first + 1..reach).find_map(|d| along(step * d)),
                 ))
             };
-            let line = |(x0, a): (f64, [f64; 2]), (x1, b): (f64, [f64; 2])| {
+            let line = |(x0, a): (f64, [f64; N]), (x1, b): (f64, [f64; N])| {
                 let u = (x - x0) / (x1 - x0);
-                [a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1])]
+                std::array::from_fn(|i| a[i] + u * (b[i] - a[i]))
             };
             *cell = match (side(-1), side(1)) {
                 (Some((below, _)), Some((above, _))) => Some(line(below, above)),
@@ -334,7 +438,12 @@ fn spread(grid: &Grid, mut values: Vec<Option<f64>>, fade: f64) -> Vec<f64> {
 /// cell the surrogate stands on its own calibration. Base pressure does the
 /// same against the weight of a thin shell, and the gas's inertia factor
 /// takes its neighbours'.
-fn fill_envelope(grid: &Grid, table: &Table, solved: &[Option<Solved>]) -> Vec<EnvelopeCell> {
+fn fill_envelope(
+    grid: &Grid,
+    table: &Table,
+    solved: &[Option<Solved>],
+    reasons: &[Reason],
+) -> Vec<EnvelopeCell> {
     let bare: Vec<f64> = (0..grid.len())
         .map(|index| {
             let [mass, fraction, ..] = envelope_point(grid, index);
@@ -395,7 +504,7 @@ fn fill_envelope(grid: &Grid, table: &Table, solved: &[Option<Solved>]) -> Vec<E
             }
             .clamp(low, high) as f32,
             gas_inertia_factor: gas_inertia[index] as f32,
-            filled: solved[index].is_none(),
+            reason: reasons[index],
         })
         .collect();
     // Heating a body never shrinks it. Walking away from the solved cells
@@ -428,7 +537,7 @@ fn fill_envelope(grid: &Grid, table: &Table, solved: &[Option<Solved>]) -> Vec<E
                     bound[index] = bound[grid.index(previous)];
                 }
                 let cell = &mut cells[index];
-                if !cell.filled {
+                if cell.reason == Reason::Solved {
                     bound[index] = Some(cell.compactness);
                 } else if let Some(limit) = bound[index] {
                     cell.compactness = if hotter {
@@ -466,14 +575,13 @@ pub(super) fn reference_core_radius_m(table: &Table, mass_earth: f64, light_frac
         .radius_m
 }
 
-/// Radius in metres and inertia factor of the envelope solver's heavy layers
-/// under this load.
+/// The envelope solver's heavy layers under this load.
 pub(super) fn solve_core(
     mass_earth: f64,
     metal_share: f64,
     water_share: f64,
     load_pa: f64,
-) -> Result<(f64, f64), String> {
+) -> Result<Body, String> {
     let mass = mass_earth * EARTH_MASS_KG;
     let refractory = mass * (1.0 - water_share);
     let heavy = Inventory::new(&[
@@ -482,15 +590,43 @@ pub(super) fn solve_core(
         (Material::Water, mass * water_share),
     ])
     .map_err(|e| format!("{e:?}"))?;
-    envelope::loaded_core(&heavy, load_pa, dry::Controls::default()).map_err(|e| {
-        let text = format!("{e:?}");
-        text.split(['{', '[']).next().unwrap().trim().to_owned()
-    })
+    envelope::loaded_core(&heavy, load_pa, dry::Controls::default())
+        .map(|(regions, inertia_kg_m2)| {
+            Body::new(
+                mass,
+                inertia_kg_m2,
+                regions
+                    .iter()
+                    .map(|r| (r.inventory(), r.inner(), r.outer())),
+            )
+        })
+        .map_err(|e| {
+            let text = format!("{e:?}");
+            text.split(['{', '[']).next().unwrap().trim().to_owned()
+        })
+}
+
+/// Cells from their solves: refused ones are filled along `axes` and keep
+/// the solver's reason.
+fn solid_cells(grid: &Grid, solved: Vec<Result<Body, String>>, axes: &[usize]) -> Vec<SolidCell> {
+    let reasons: Vec<Reason> = solved
+        .iter()
+        .map(|s| s.as_ref().err().map_or(Reason::Solved, |e| Reason::of(e)))
+        .collect();
+    let values: Vec<_> = solved
+        .into_iter()
+        .map(|s| s.ok().map(|body| body.values()))
+        .collect();
+    fill(grid, &values, axes)
+        .into_iter()
+        .zip(reasons)
+        .map(|((v, _), reason)| solid_cell(v, reason))
+        .collect()
 }
 
 /// The condensed half of the current resource, which no envelope or core
 /// change touches. Only a resource of the current layout and grids.
-fn embedded_condensed() -> Option<Vec<CondensedCell>> {
+fn embedded_condensed() -> Option<Vec<SolidCell>> {
     Table::decode(BYTES).map(|table| table.condensed)
 }
 
@@ -511,6 +647,48 @@ fn tally(report: &mut String, title: &str, outcomes: &[Result<(), String>], seco
     reasons.sort_by_key(|r| std::cmp::Reverse(r.1));
     for (reason, count) in reasons {
         let _ = writeln!(report, "- {count}: {reason}");
+    }
+    report.push('\n');
+}
+
+/// Where each refusal sits: its share of the cells and the span of every
+/// axis it touches, as the knots are stored (masses and gas shares back in
+/// plain units).
+fn chart(report: &mut String, grid: &Grid, cells: &[Reason], axes: [(&str, bool); 4]) {
+    let _ = writeln!(
+        report,
+        "| Reason | Cells | {} |\n| --- | --- | --- | --- | --- | --- |",
+        axes.map(|a| a.0).join(" | ")
+    );
+    for reason in Reason::ALL {
+        let at: Vec<[usize; 4]> = (0..cells.len())
+            .filter(|i| cells[*i] == reason)
+            .map(|i| grid.cell(i))
+            .collect();
+        if at.is_empty() || reason == Reason::Solved {
+            continue;
+        }
+        let spans: Vec<String> = (0..4)
+            .map(|axis| {
+                let value = |i: usize| {
+                    let knot = grid.knots[axis][i];
+                    if axes[axis].1 { knot.exp() } else { knot }
+                };
+                format!(
+                    "{:.3e} to {:.3e}",
+                    value(at.iter().map(|c| c[axis]).min().unwrap()),
+                    value(at.iter().map(|c| c[axis]).max().unwrap())
+                )
+            })
+            .collect();
+        let _ = writeln!(
+            report,
+            "| {} | {} ({:.1}%) | {} |",
+            reason.label(),
+            at.len(),
+            100.0 * at.len() as f64 / cells.len() as f64,
+            spans.join(" | ")
+        );
     }
     report.push('\n');
 }
@@ -536,7 +714,7 @@ fn prepare_structure_table() {
         }
         solve_condensed(mass.exp(), metal, water_share, temperature)
     });
-    let mut solved: Vec<Result<(f64, f64), String>> = solved;
+    let mut solved: Vec<Result<Body, String>> = solved;
     for index in 0..solved.len() {
         let mut at = grid.cell(index);
         if grid.knots[2][at[2]] == 0.0 {
@@ -553,21 +731,19 @@ fn prepare_structure_table() {
         &outcomes,
         start.elapsed().as_secs_f64(),
     );
-    let values: Vec<_> = solved
-        .into_iter()
-        .map(|s| s.ok().map(|(radius, inertia)| [radius.ln(), inertia]))
-        .collect();
     // Temperature first: radius barely moves along it.
-    let condensed = reuse.unwrap_or_else(|| {
-        fill(&grid, &values, &[3, 0, 2, 1])
-            .into_iter()
-            .map(|(v, filled)| CondensedCell {
-                ln_radius_m: v[0] as f32,
-                inertia_factor: v[1] as f32,
-                filled,
-            })
-            .collect()
-    });
+    let condensed = reuse.unwrap_or_else(|| solid_cells(&grid, solved, &[3, 0, 2, 1]));
+    chart(
+        &mut report,
+        &grid,
+        &condensed.iter().map(|c| c.reason).collect::<Vec<_>>(),
+        [
+            ("Mass (Earth)", true),
+            ("Metal share", false),
+            ("Water share", false),
+            ("Temperature (K)", false),
+        ],
+    );
 
     let grid = Grid::core();
     let start = Instant::now();
@@ -587,19 +763,19 @@ fn prepare_structure_table() {
         &outcomes,
         start.elapsed().as_secs_f64(),
     );
-    let values: Vec<_> = solved
-        .into_iter()
-        .map(|s| s.ok().map(|(radius, inertia)| [radius.ln(), inertia]))
-        .collect();
     // Load first: a refused cell is nearest its own body under another load.
-    let core: Vec<_> = fill(&grid, &values, &[3, 0, 2, 1])
-        .into_iter()
-        .map(|(v, filled)| CoreCell {
-            ln_radius_m: v[0] as f32,
-            inertia_factor: v[1] as f32,
-            filled,
-        })
-        .collect();
+    let core = solid_cells(&grid, solved, &[3, 0, 2, 1]);
+    chart(
+        &mut report,
+        &grid,
+        &core.iter().map(|c| c.reason).collect::<Vec<_>>(),
+        [
+            ("Mass (Earth)", true),
+            ("Metal share", false),
+            ("Water share", false),
+            ("Load (Pa)", true),
+        ],
+    );
 
     let grid = Grid::envelope();
     let partial = Table::new(
@@ -609,7 +785,7 @@ fn prepare_structure_table() {
                 compactness: 1.0,
                 ln_base_pa: 0.0,
                 gas_inertia_factor: 1.0,
-                filled: true,
+                reason: Reason::Other,
             };
             grid.len()
         ],
@@ -641,8 +817,23 @@ fn prepare_structure_table() {
             outcome.as_ref().err().map_or("", |e| e.as_str()),
         );
     }
+    let reasons: Vec<Reason> = solved
+        .iter()
+        .map(|s| s.as_ref().err().map_or(Reason::Solved, |e| Reason::of(e)))
+        .collect();
     let values: Vec<_> = solved.into_iter().map(Result::ok).collect();
-    let envelope = fill_envelope(&grid, &partial, &values);
+    let envelope = fill_envelope(&grid, &partial, &values, &reasons);
+    chart(
+        &mut report,
+        &grid,
+        &reasons,
+        [
+            ("Mass (Earth)", true),
+            ("H/He share", true),
+            ("Equilibrium (K)", false),
+            ("Intrinsic (K)", false),
+        ],
+    );
 
     let table = Table::new(condensed, envelope, core);
     let bytes = table.encode();

@@ -262,3 +262,155 @@ fn randomised_extreme_inventories_always_resolve() {
         assert!(f.is_ok(), "case {case}: {parts:?} {env:?}");
     }
 }
+
+fn wet(earth: f64, water_share: f64) -> Inventory {
+    let mass = earth * EARTH_MASS_KG;
+    Inventory::new(&[
+        (Material::Metal, mass * (1.0 - water_share) * 0.3),
+        (Material::Silicate, mass * (1.0 - water_share) * 0.7),
+        (Material::Water, mass * water_share),
+    ])
+    .unwrap()
+}
+
+/// The walk is the solver's own water integration, started from the radius
+/// the solver ends on: it must find the same phases and the same rock.
+#[test]
+fn phase_walk_from_the_solved_radius_finds_the_solver_s_layers() {
+    use crate::system::structure::water;
+    for (earth, water_share, temperature_k, load_pa) in [
+        (0.02, 0.5, 122.0, 141.0),
+        (0.16, 0.26, 260.3, 7.96e5),
+        (0.8, 0.035, 302.9, 64.1e5),
+        (1.0, 0.0003, 288.0, 1e5),
+    ] {
+        let inventory = wet(earth, water_share);
+        let solved = water::solve(&inventory, temperature_k, load_pa, Default::default())
+            .unwrap_or_else(|e| panic!("{earth} {water_share} {temperature_k}: {e:?}"));
+        let water_regions: Vec<_> = solved
+            .regions()
+            .iter()
+            .filter(|r| r.inventory().mass_kg(Material::Water) > 0.0)
+            .collect();
+        let rock = water_regions[0].inner();
+        let mut kinds: Vec<Kind> = water_regions.iter().map(|r| Kind::of(r.phase())).collect();
+        kinds.dedup();
+        // The estimate only sizes the steps: a poor one must not matter.
+        for estimate in [0.5, 1.0, 3.0] {
+            let walk = phases::walk(
+                temperature_k,
+                load_pa,
+                inventory.total_mass_kg(),
+                solved.radius_m(),
+                inventory.mass_kg(Material::Water),
+                estimate * (rock.pressure_pa - load_pa),
+            )
+            .unwrap();
+            let case = format!("{earth} {water_share} {temperature_k} {estimate}");
+            assert_eq!(
+                walk.layers.iter().map(|l| l.kind).collect::<Vec<_>>(),
+                kinds,
+                "{case}"
+            );
+            let thickness = solved.radius_m() - rock.radius_m;
+            assert!(
+                (walk.rock_radius_m - rock.radius_m).abs() < 2e-3 * thickness,
+                "{case}: {} against {}",
+                walk.rock_radius_m,
+                rock.radius_m
+            );
+            assert!(
+                (walk.rock_pa + load_pa - rock.pressure_pa).abs() < 2e-3 * rock.pressure_pa,
+                "{case}"
+            );
+            assert_eq!(
+                walk.layers.iter().map(|l| l.mass_kg).sum::<f64>(),
+                inventory.mass_kg(Material::Water),
+                "{case}"
+            );
+            assert_eq!(
+                walk.layers.last().unwrap().outer_radius_m,
+                solved.radius_m()
+            );
+            assert_eq!(walk.layers.last().unwrap().outer_pa, 0.0);
+        }
+    }
+}
+
+#[test]
+fn a_decided_surface_states_its_water_phases_and_tabulated_pressures() {
+    let retained = wet(0.02, 0.5);
+    let budget = Budget::new(
+        retained,
+        retained,
+        Inventory::default(),
+        Inventory::default(),
+    )
+    .unwrap();
+    let env = environment(20.0, 110.0, 4.5);
+    let decided = decide(&initial(&budget, &env), &env).unwrap();
+    let f = &decided.fallback;
+    assert_eq!(f.surface(), "ice");
+    assert_eq!(f.reference, RadiusReference::SolidSurface);
+    assert!(f.notes.contains(&decide::PHASES_NOTE));
+    let kinds: Vec<Kind> = f.regions.iter().map(|r| r.kind).collect();
+    assert_eq!(
+        kinds[..4],
+        [Kind::Core, Kind::Mantle, Kind::DeepIce, Kind::Ice]
+    );
+    // Every condensed pressure is the table's or the walk's, and they join.
+    for pair in f.regions.windows(2) {
+        assert_eq!(pair[0].outer_radius_m, pair[1].inner_radius_m);
+        if pair[1].kind != Kind::Atmosphere {
+            assert_eq!(pair[0].outer_pressure_pa, pair[1].inner_pressure_pa);
+        }
+    }
+    for region in &f.regions[..4] {
+        assert!(region.tabulated_pa.is_some());
+        assert!(region.inner_pressure_pa > region.outer_pressure_pa);
+    }
+    let water: f64 = f
+        .regions
+        .iter()
+        .filter(|r| r.kind.is_water())
+        .map(|r| r.inventory.mass_kg(Material::Water))
+        .sum();
+    assert!((water / decided.budget.retained().mass_kg(Material::Water) - 1.0).abs() < 1e-12);
+    let record = physical::fallback(f);
+    physical::validate_record(&record).unwrap();
+    assert_eq!(record.surface, "ice");
+    for layer in &record.layers {
+        let phase = ["ice", "deep_ice"].contains(&layer.kind.as_str());
+        if phase {
+            assert_eq!(layer.temperature_k, Some(f.surface_temperature_k));
+        }
+        assert_eq!(
+            layer.temperature_k.is_none(),
+            ["core", "mantle"].contains(&layer.kind.as_str())
+        );
+    }
+}
+
+#[test]
+fn layers_off_the_table_say_so() {
+    let inside = physical::fallback(&initial(
+        &budget(&[(Material::Silicate, 1.0)]),
+        &environment(1361.0, 255.0, 4.5),
+    ));
+    let outside = physical::fallback(&initial(
+        &budget(&[(Material::Silicate, 30.0)]),
+        &environment(1361.0, 255.0, 4.5),
+    ));
+    let labelled = |record: &space_shared::LayeredPlanet| {
+        record
+            .model_limitations
+            .iter()
+            .any(|l| l.starts_with("Structure table:"))
+    };
+    assert!(!labelled(&inside));
+    assert!(labelled(&outside));
+    assert_eq!(
+        outside.model_fidelity,
+        space_shared::ModelFidelity::Extrapolated
+    );
+}

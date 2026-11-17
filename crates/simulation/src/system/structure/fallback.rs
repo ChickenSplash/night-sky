@@ -1,11 +1,14 @@
-//! Total, closed-form structure for every body before and without a layered
-//! solve. Radii are read from the layered solver's own table and layers take
-//! prescribed density profiles: no iteration or error path. Never counted as
-//! a layered solve. See docs/simulation/planet-composition.md#fallback-structure.
+//! Total structure for every body without a layered solve. Radii, layer
+//! boundaries and their pressures are read from the layered solver's own
+//! table, and water phases from its water models along the decided isotherm.
+//! No shooting and no error path. Never counted as a layered solve. See
+//! docs/simulation/planet-composition.md#fallback-structure.
 use super::{
     coupled::Error,
-    table::{CONDENSED_MASS_EARTH, Table},
+    table::{Boundaries, CONDENSED_MASS_EARTH, Quality, Solid, Table},
+    water::PhaseKnowledge,
 };
+use crate::system::atmosphere::ONE_BAR_PA;
 use crate::{
     system::{
         composition::{Budget, Inventory, Material},
@@ -18,12 +21,13 @@ use std::f64::consts::PI;
 
 pub mod decide;
 pub mod partition;
+mod phases;
 pub use decide::{Decided, decide};
 
 pub const MODEL_ID: &str = "fallback_structure_table_v1";
 pub const NOTES: &[&str] = &[
     "Fallback: radius read from the layered solver's table, not a hydrostatic solve of this body",
-    "Uniform condensed layers and a linearly thinning gas layer; pressures follow these prescribed profiles",
+    "Condensed layer boundaries and pressures are interpolated from the same table; gas follows a linearly thinning profile",
     "Temperature is the equilibrium estimate, or at a one-bar reference the envelope's prescribed intrinsic-heat profile; no greenhouse or phase",
 ];
 pub const VOLATILE_PROXY_NOTE: &str = "Accessible secondary volatiles use a condensed water-density proxy; protected ones stay in the rock";
@@ -42,6 +46,9 @@ const SECONDARIES: [Material; 5] = [
 const MIN_TEMPERATURE_K: f64 = 20.0;
 /// Keeps the gas layer's density finite when the fit leaves it no thickness.
 const MIN_GAS_THICKNESS: f64 = 1e-6;
+/// H/He mass fractions between which the pressure at the base of the gas
+/// passes from the gas's own thin-shell weight to the envelope table's.
+const THIN_GAS_FRACTIONS: [f64; 2] = [1e-3, 1e-2];
 const PANELS: usize = 32;
 const GAUSS: [(f64, f64); 5] = [
     (0.046_910_077_030_668, 0.118_463_442_528_095),
@@ -55,7 +62,14 @@ const GAUSS: [(f64, f64); 5] = [
 pub enum Kind {
     Core,
     Mantle,
+    /// Water of undecided phase: under an envelope, before the surface is
+    /// decided, or where the phase walk has no answer.
     Water,
+    Ocean,
+    Ice,
+    DeepIce,
+    HotWater,
+    Coexistence,
     Volatiles,
     /// Cold-trapped secondaries on a decided surface.
     Frost,
@@ -69,10 +83,40 @@ impl Kind {
             Self::Core => "core",
             Self::Mantle => "mantle",
             Self::Water => "water_compression",
+            Self::Ocean => "ocean",
+            Self::Ice => "ice",
+            Self::DeepIce => "deep_ice",
+            Self::HotWater => "hot_water",
+            Self::Coexistence => "water_coexistence",
             Self::Volatiles => "volatiles",
             Self::Frost => "frost",
             Self::Envelope => "envelope",
             Self::Atmosphere => "atmosphere",
+        }
+    }
+
+    pub fn is_water(self) -> bool {
+        matches!(
+            self,
+            Self::Water
+                | Self::Ocean
+                | Self::Ice
+                | Self::DeepIce
+                | Self::HotWater
+                | Self::Coexistence
+        )
+    }
+
+    /// Same names as the layered record gives the solver's water regions.
+    fn of(phase: PhaseKnowledge) -> Self {
+        use crate::system::materials::water::Phase;
+        match phase {
+            PhaseKnowledge::Water(Phase::Liquid) => Self::Ocean,
+            PhaseKnowledge::Water(Phase::IceIh) => Self::Ice,
+            PhaseKnowledge::Water(_) => Self::Coexistence,
+            PhaseKnowledge::EffectiveHighPressureIce => Self::DeepIce,
+            PhaseKnowledge::UnresolvedHotWater => Self::HotWater,
+            PhaseKnowledge::Unresolved | PhaseKnowledge::UnresolvedCompression => Self::Water,
         }
     }
 }
@@ -85,6 +129,26 @@ pub struct Region {
     pub outer_radius_m: f64,
     pub inner_pressure_pa: f64,
     pub outer_pressure_pa: f64,
+    /// Inner and outer pressure read from the table, above whatever presses
+    /// on the outermost such region. None: the prescribed density decides.
+    pub tabulated_pa: Option<[f64; 2]>,
+    /// Suspended condensate within a gas region's inventory.
+    pub condensate: Inventory,
+}
+
+impl Region {
+    fn new(kind: Kind, inventory: Inventory, inner_radius_m: f64, outer_radius_m: f64) -> Self {
+        Self {
+            kind,
+            inventory,
+            inner_radius_m,
+            outer_radius_m,
+            inner_pressure_pa: 0.0,
+            outer_pressure_pa: 0.0,
+            tabulated_pa: None,
+            condensate: Inventory::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -112,6 +176,8 @@ pub struct Fallback {
     pub blowoff: Inventory,
     /// Table inputs were clamped, continued or read from surrogate cells.
     pub extrapolated: bool,
+    /// What the table lookups stood on: filled knots and why.
+    pub quality: Quality,
     pub notes: Vec<&'static str>,
 }
 
@@ -127,7 +193,13 @@ impl Fallback {
         let [core, gas] = self.envelope_inertia?;
         let one_bar = self.one_bar_radius_m?;
         let shell = self.regions.iter().find(|r| r.kind == Kind::Envelope)?;
-        let gas_kg = shell.inventory.total_mass_kg();
+        // With the part above one bar, where that has been split off.
+        let gas_kg: f64 = self
+            .regions
+            .iter()
+            .filter(|r| matches!(r.kind, Kind::Envelope | Kind::Atmosphere))
+            .map(|r| r.inventory.total_mass_kg())
+            .sum();
         // Gas that barely reaches one bar is tabulated against a radius it
         // extends far beyond. No shell exceeds a thin one at its own top.
         let gas = (gas * one_bar.powi(2)).min(2.0 / 3.0 * shell.outer_radius_m.powi(2));
@@ -145,9 +217,24 @@ impl Fallback {
             .find(|r| !matches!(r.kind, Kind::Envelope | Kind::Atmosphere))
         {
             Some(r) if r.kind == Kind::Water => "unresolved water",
+            Some(r) if r.kind == Kind::Ocean => "ocean",
+            Some(r) if r.kind == Kind::Ice => "ice",
+            Some(r) if r.kind == Kind::DeepIce => "deep ice",
+            Some(r) if r.kind == Kind::HotWater => "unresolved hot water",
+            Some(r) if r.kind == Kind::Coexistence => "water coexistence",
             Some(r) if r.kind == Kind::Volatiles => "unresolved volatiles",
             Some(r) if r.kind == Kind::Frost => "frost",
             _ => "rock",
+        }
+    }
+
+    /// Bare rock and bare ice Ih are ground. Liquid, frost and water of
+    /// undecided phase are not.
+    fn condensed_reference(&self) -> RadiusReference {
+        if matches!(self.surface(), "rock" | "ice") {
+            RadiusReference::SolidSurface
+        } else {
+            RadiusReference::UnresolvedVolatileBoundary
         }
     }
 }
@@ -212,10 +299,11 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
     let surface_temperature_k =
         sanitised(environment.equilibrium_temperature_k, MIN_TEMPERATURE_K).max(MIN_TEMPERATURE_K);
     let age = sanitised(environment.age_gyr, 5.0);
-    let mut clamped =
-        age != environment.age_gyr || !environment.equilibrium_temperature_k.is_finite();
+    let clamped = age != environment.age_gyr || !environment.equilibrium_temperature_k.is_finite();
     let shares = condensed_shares(&stack);
-    let mut regions = condensed_regions(stack, surface_temperature_k, &mut clamped);
+    let mut quality = Quality::default();
+    let mut regions = Interior::bare(&stack, surface_temperature_k, &mut quality)
+        .map_or_else(Vec::new, |interior| lay(stack.clone(), &interior, None));
     let mut condensed_radius_m = regions.last().map_or(0.0, |r| r.outer_radius_m);
 
     let mass_kg = retained.total_mass_kg();
@@ -231,6 +319,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
     let mut one_bar_radius_m = None;
     let mut envelope_inertia = None;
     if let Some(gas) = gas {
+        let mut base = None;
         let one_bar = tabulated_one_bar_m(
             mass_kg,
             h_he,
@@ -238,22 +327,19 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
             condensed_radius_m,
             surface_temperature_k,
             age,
-            &mut clamped,
         )
-        .map(|(core, one_bar, factors)| {
-            envelope_inertia = Some(factors);
+        .map(|enveloped| {
+            envelope_inertia = Some(enveloped.inertia_factors);
+            quality = quality.with(enveloped.quality);
             notes.push(REFERENCE_CORE_NOTE);
-            let scale = if condensed_radius_m > 0.0 {
-                core / condensed_radius_m
-            } else {
-                1.0
-            };
-            for region in &mut regions {
-                region.inner_radius_m *= scale;
-                region.outer_radius_m *= scale;
-            }
-            condensed_radius_m = regions.last().map_or(core, |r| r.outer_radius_m);
-            one_bar
+            // The gas presses on the layers under it, from one bar down.
+            let over = (enveloped.base_pressure_pa - ONE_BAR_PA).max(0.0);
+            base = Some([over, 0.0]);
+            regions = lay(stack.clone(), &enveloped.interior(over), None);
+            condensed_radius_m = regions
+                .last()
+                .map_or(enveloped.core_radius_m, |r| r.outer_radius_m);
+            enveloped.one_bar_radius_m
         });
         let mut top = condensed_radius_m;
         if let Some(r) = one_bar {
@@ -274,43 +360,28 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
                 .max(condensed_radius_m + scale_height.min(condensed_radius_m))
                 .max(condensed_radius_m * (1.0 + MIN_GAS_THICKNESS));
         }
-        regions.push(Region {
-            kind: Kind::Envelope,
-            inventory: gas,
-            inner_radius_m: condensed_radius_m,
-            outer_radius_m: top,
-            inner_pressure_pa: 0.0,
-            outer_pressure_pa: 0.0,
-        });
+        let mut shell = Region::new(Kind::Envelope, gas, condensed_radius_m, top);
+        shell.tabulated_pa = base;
+        regions.push(shell);
     }
 
-    if clamped {
+    if clamped || quality.approximate() {
         extrapolated = true;
         notes.push(CLAMPED_NOTE);
     }
 
-    // Hydrostatic pressures, outermost first, and inertia from the same profiles.
-    let mut enclosed: Vec<f64> = regions
-        .iter()
-        .scan(0.0, |m, r| {
-            let inner = *m;
-            *m += r.inventory.total_mass_kg();
-            Some(inner)
-        })
-        .collect();
-    let mut pressure = 0.0;
-    let mut inertia_kg_m2 = 0.0;
     if regions.iter().any(|r| r.inner_radius_m == r.outer_radius_m) {
         notes
             .push("Sub-resolution condensed shells use zero-thickness pressure and inertia limits");
     }
-    for (region, inner_mass) in regions.iter_mut().zip(enclosed.drain(..)).rev() {
-        let shell = Shell::new(region, inner_mass);
-        region.outer_pressure_pa = pressure;
-        pressure += shell.pressure_drop_pa();
-        region.inner_pressure_pa = pressure;
-        inertia_kg_m2 += shell.inertia_kg_m2();
-    }
+    let inertia_kg_m2 = settle(
+        &mut regions,
+        if reference == RadiusReference::OneBar {
+            ONE_BAR_PA
+        } else {
+            0.0
+        },
+    );
     // The layered envelope reports its prescribed profile's temperature at
     // one bar, warmer than equilibrium by the intrinsic heat. Same closed form
     // here, on the tabulated gravity. Outside its domain the estimate is kept.
@@ -320,7 +391,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         surface_temperature_k
     };
     let surface_pressure_pa = match reference {
-        RadiusReference::OneBar => crate::system::atmosphere::ONE_BAR_PA,
+        RadiusReference::OneBar => ONE_BAR_PA,
         _ => regions
             .iter()
             .find(|r| r.kind == Kind::Envelope)
@@ -344,6 +415,7 @@ fn prescribed(budget: &Budget, environment: &PlanetEnvironment, reason: Option<E
         optical_depth: None,
         blowoff: Inventory::default(),
         extrapolated,
+        quality,
         notes,
     };
     if let Some(inertia) = fallback.tabulated_envelope_inertia_kg_m2() {
@@ -369,10 +441,47 @@ pub(crate) fn one_bar_temperature_k(
     .unwrap_or(equilibrium_k)
 }
 
-/// One-bar radius of the retained H/He, the condensed radius beneath it and
-/// the inertia factors of that core and of the gas, from the layered envelope
-/// table. None when the H/He cannot hold one bar
-/// above the bare condensed boundary.
+/// A tabulated H/He envelope and the body's own core under it.
+struct Enveloped {
+    core_radius_m: f64,
+    one_bar_radius_m: f64,
+    /// Of the core and of the gas.
+    inertia_factors: [f64; 2],
+    /// Where the gas meets the core.
+    base_pressure_pa: f64,
+    /// The table's core, whose radius this body's own may differ from while
+    /// the gas is thin. Pressures include the base pressure.
+    tabulated_core_radius_m: f64,
+    boundaries: Boundaries,
+    quality: Quality,
+}
+
+impl Enveloped {
+    /// The core's layers, with pressures above the one-bar level: `over_pa`
+    /// of gas, then the core's own weight.
+    fn interior(&self, over_pa: f64) -> Interior {
+        let scale = if self.tabulated_core_radius_m > 0.0 {
+            self.core_radius_m / self.tabulated_core_radius_m
+        } else {
+            1.0
+        };
+        let b = &self.boundaries;
+        let own = |pressure_pa: f64| over_pa + (pressure_pa - self.base_pressure_pa).max(0.0);
+        Interior {
+            radius_m: self.core_radius_m,
+            core_radius_m: b.core_radius_m * scale,
+            refractory_radius_m: b.refractory_radius_m * scale,
+            top_pa: over_pa,
+            central_pa: own(b.central_pressure_pa),
+            core_pa: own(b.core_pressure_pa),
+            refractory_pa: own(b.refractory_pressure_pa),
+        }
+    }
+}
+
+/// The retained H/He's one-bar radius and the core beneath it, from the
+/// layered envelope table. None when the H/He cannot hold one bar above the
+/// bare condensed boundary.
 ///
 /// Under an envelope the layered solver compresses water by pressure alone, so
 /// a wet core is smaller than the same body bare. The core moves from the
@@ -386,12 +495,10 @@ fn tabulated_one_bar_m(
     condensed_radius_m: f64,
     equilibrium_k: f64,
     age_gyr: f64,
-    approximate: &mut bool,
-) -> Option<(f64, f64, [f64; 2])> {
+) -> Option<Enveloped> {
     // A necessary thin-column supply check, not an estimate of the entire
     // giant envelope.
-    let support_radius = (GRAVITATIONAL_CONSTANT * mass_kg * h_he_kg
-        / (4.0 * PI * crate::system::atmosphere::ONE_BAR_PA))
+    let support_radius = (GRAVITATIONAL_CONSTANT * mass_kg * h_he_kg / (4.0 * PI * ONE_BAR_PA))
         .sqrt()
         .sqrt();
     if support_radius <= condensed_radius_m {
@@ -405,7 +512,6 @@ fn tabulated_one_bar_m(
         equilibrium_k,
         super::envelope::intrinsic_k(mass_kg, age_gyr),
     );
-    *approximate |= envelope.approximate;
     let base_bar = (support_radius / condensed_radius_m).powi(4);
     let enveloped = ((base_bar - 1.0) / 9.0).clamp(0.0, 1.0);
     let core = if condensed_radius_m > 0.0 {
@@ -415,11 +521,16 @@ fn tabulated_one_bar_m(
     };
     let capacity = support_radius - condensed_radius_m;
     let thickness = envelope.thickness_m;
-    Some((
-        core,
-        core + thickness / (1.0 + (thickness / capacity).powi(4)).powf(0.25),
-        [envelope.core_inertia_factor, envelope.gas_inertia_factor],
-    ))
+    let one_bar = core + thickness / (1.0 + (thickness / capacity).powi(4)).powf(0.25);
+    Some(Enveloped {
+        core_radius_m: core,
+        one_bar_radius_m: one_bar,
+        inertia_factors: [envelope.core_inertia_factor, envelope.gas_inertia_factor],
+        base_pressure_pa: envelope.base_pressure_pa,
+        tabulated_core_radius_m: envelope.core_radius_m,
+        boundaries: envelope.core_boundaries,
+        quality: envelope.quality,
+    })
 }
 
 /// Metal share of the refractory mass and water share of the whole stack.
@@ -449,56 +560,256 @@ fn condensed_shares(stack: &[(Kind, Inventory)]) -> [f64; 2] {
     ]
 }
 
-/// The layered solver's tabulated radius for the whole stack, at this water
-/// temperature. Layer boundaries inside it divide the volume as the table's
-/// pure bodies of the same total mass would. Innermost first; pressures are
-/// filled in by the caller.
-fn condensed_regions(
-    stack: Vec<(Kind, Inventory)>,
-    temperature_k: f64,
-    approximate: &mut bool,
-) -> Vec<Region> {
-    let table = Table::embedded();
+/// Where the table puts a condensed body's layers. Pressures are above
+/// whatever presses on the outermost tabulated region.
+#[derive(Clone, Copy, Debug)]
+struct Interior {
+    radius_m: f64,
+    /// Top of the metal.
+    core_radius_m: f64,
+    /// Top of the rock.
+    refractory_radius_m: f64,
+    /// At the body's own surface: the gas above it, where that is tabulated.
+    top_pa: f64,
+    central_pa: f64,
+    core_pa: f64,
+    refractory_pa: f64,
+}
+
+impl Interior {
+    /// A body under at most thin gas, at this water temperature. None for
+    /// an empty stack.
+    fn bare(
+        stack: &[(Kind, Inventory)],
+        temperature_k: f64,
+        quality: &mut Quality,
+    ) -> Option<Self> {
+        let body = bare_body(stack, temperature_k)?;
+        *quality = quality.with(body.quality);
+        let b = &body.boundaries;
+        Some(Self {
+            radius_m: body.radius_m,
+            core_radius_m: b.core_radius_m,
+            refractory_radius_m: b.refractory_radius_m,
+            top_pa: 0.0,
+            central_pa: b.central_pressure_pa,
+            core_pa: b.core_pressure_pa,
+            refractory_pa: b.refractory_pressure_pa,
+        })
+    }
+}
+
+fn bare_body(stack: &[(Kind, Inventory)], temperature_k: f64) -> Option<Solid> {
     let condensed_kg: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
     if condensed_kg <= 0.0 {
-        return Vec::new();
+        return None;
     }
-    let [metal_share, water_share] = condensed_shares(&stack);
-    let body = table.condensed(condensed_kg, metal_share, water_share, temperature_k);
-    *approximate |= body.approximate;
-    let pure = |metal_share: f64, water_share: f64| {
-        table
-            .condensed(condensed_kg, metal_share, water_share, temperature_k)
-            .radius_m
-            .powi(3)
-    };
-    let volumes: Vec<f64> = stack
+    let [metal_share, water_share] = condensed_shares(stack);
+    Some(Table::embedded().condensed(condensed_kg, metal_share, water_share, temperature_k))
+}
+
+/// The stack laid inside the table's boundaries, innermost first: metal to
+/// the top of the metal, rock to the top of the rock, water and condensed
+/// volatiles above. `phases` replaces the water with its phase layers and
+/// moves the top of the rock to where that walk ends; the table's metal
+/// boundary and deeper pressures follow it.
+fn lay(
+    stack: Vec<(Kind, Inventory)>,
+    interior: &Interior,
+    phases: Option<phases::Phases>,
+) -> Vec<Region> {
+    let has = |kind: Kind| stack.iter().any(|(k, _)| *k == kind);
+    let wet = stack
         .iter()
-        .map(|(kind, inventory)| {
-            inventory.total_mass_kg() / condensed_kg
-                * match kind {
-                    Kind::Core => pure(1.0, 0.0),
-                    Kind::Mantle => pure(0.0, 0.0),
-                    _ => pure(0.0, 1.0),
+        .any(|(k, _)| !matches!(k, Kind::Core | Kind::Mantle));
+    let dry = has(Kind::Core) || has(Kind::Mantle);
+    let i = interior;
+    let (mut rock_radius, mut rock_pa) = match (wet, dry) {
+        (false, _) => (i.radius_m, i.top_pa),
+        (true, false) => (0.0, i.central_pa),
+        (true, true) => (
+            i.refractory_radius_m.min(i.radius_m),
+            i.refractory_pa.max(i.top_pa),
+        ),
+    };
+    let beneath = |pressure_pa: f64| (pressure_pa - i.refractory_pa).max(0.0);
+    let mut core_radius = i.core_radius_m;
+    let (mut central_pa, mut core_pa) = (i.central_pa, i.core_pa);
+    if let Some(walk) = &phases {
+        if i.refractory_radius_m > 0.0 {
+            core_radius *= walk.rock_radius_m / i.refractory_radius_m;
+        }
+        central_pa = walk.rock_pa + beneath(i.central_pa);
+        core_pa = walk.rock_pa + beneath(i.core_pa);
+        (rock_radius, rock_pa) = (walk.rock_radius_m, walk.rock_pa);
+    }
+    let (core_radius, core_pa) = if has(Kind::Mantle) {
+        (core_radius.min(rock_radius), core_pa.max(rock_pa))
+    } else {
+        (rock_radius, rock_pa)
+    };
+    let central_pa = central_pa.max(core_pa);
+
+    let mut regions = Vec::new();
+    let fluid_kg: f64 = stack
+        .iter()
+        .filter(|(k, _)| !matches!(k, Kind::Core | Kind::Mantle))
+        .map(|(_, inventory)| inventory.total_mass_kg())
+        .sum();
+    let mut below_kg = 0.0;
+    for (kind, inventory) in stack {
+        let mass_kg = inventory.total_mass_kg();
+        match kind {
+            Kind::Core => {
+                let mut region = Region::new(kind, inventory, 0.0, core_radius);
+                region.tabulated_pa = Some([central_pa, core_pa]);
+                regions.push(region);
+            }
+            Kind::Mantle => {
+                let (inner, pressure) = regions
+                    .last()
+                    .map_or((0.0, central_pa), |_| (core_radius, core_pa));
+                let mut region = Region::new(kind, inventory, inner, rock_radius);
+                region.tabulated_pa = Some([pressure, rock_pa]);
+                regions.push(region);
+            }
+            _ if kind.is_water() && phases.is_some() => {
+                let mut inner = rock_radius;
+                let mut pressure = rock_pa;
+                for layer in &phases.as_ref().expect("checked").layers {
+                    let water = Inventory::new(&[(Material::Water, layer.mass_kg)])
+                        .expect("positive phase layer");
+                    let mut region = Region::new(layer.kind, water, inner, layer.outer_radius_m);
+                    region.tabulated_pa = Some([pressure, layer.outer_pa]);
+                    (inner, pressure) = (layer.outer_radius_m, layer.outer_pa);
+                    regions.push(region);
                 }
+            }
+            _ => {
+                // Water and condensed volatiles share the shell above the
+                // rock by mass, as one density proxy.
+                let shell = |kg: f64| {
+                    f64::cbrt(
+                        rock_radius.powi(3)
+                            + kg / fluid_kg * (i.radius_m.powi(3) - rock_radius.powi(3)),
+                    )
+                };
+                let inner = regions.last().map_or(rock_radius, |r| r.outer_radius_m);
+                below_kg += mass_kg;
+                regions.push(Region::new(kind, inventory, inner, shell(below_kg)));
+            }
+        }
+    }
+    // Pressure through the proxy shell follows its uniform density, scaled
+    // onto the table's value at the top of the rock.
+    let first = regions
+        .iter()
+        .position(|r| r.tabulated_pa.is_none())
+        .unwrap_or(regions.len());
+    let mut inner_kg: f64 = regions[..first]
+        .iter()
+        .map(|r| r.inventory.total_mass_kg())
+        .sum();
+    let drops: Vec<f64> = regions[first..]
+        .iter()
+        .map(|region| {
+            let drop = Shell::new(region, inner_kg).pressure_drop_pa();
+            inner_kg += region.inventory.total_mass_kg();
+            drop
         })
         .collect();
-    let total: f64 = volumes.iter().sum();
-    let mut regions = Vec::new();
-    let mut volume = 0.0;
-    for ((kind, inventory), part) in stack.into_iter().zip(volumes) {
-        let inner = body.radius_m * f64::cbrt(volume / total);
-        volume += part;
-        regions.push(Region {
-            kind,
-            inventory,
-            inner_radius_m: inner,
-            outer_radius_m: body.radius_m * f64::cbrt(volume / total),
-            inner_pressure_pa: 0.0,
-            outer_pressure_pa: 0.0,
-        });
+    let total: f64 = drops.iter().sum();
+    let mut pressure = rock_pa;
+    for (region, drop) in regions[first..].iter_mut().zip(drops) {
+        let outer = if total > 0.0 {
+            (pressure - (rock_pa - i.top_pa) * drop / total).max(i.top_pa)
+        } else {
+            i.top_pa
+        };
+        region.tabulated_pa = Some([pressure, outer]);
+        pressure = outer;
+    }
+    // The body's surface is the table's radius and carries its load, exactly.
+    if let Some(top) = regions.last_mut() {
+        top.outer_radius_m = i.radius_m;
+        if let Some(tabulated) = &mut top.tabulated_pa {
+            tabulated[1] = i.top_pa;
+        }
     }
     regions
+}
+
+/// The pressure under a one-bar envelope once its gas is decided. The table
+/// knows the H/He alone, so thin gas takes its own weight in its place:
+/// what one bar does not hold up, spread over the shell between the body and
+/// that level. The table takes over as the gas thickens and its self-gravity
+/// and compression matter. Everything beneath moves with it.
+fn weigh_thin_gas(regions: &mut [Region], mass_kg: f64) {
+    let Some(index) = regions
+        .iter()
+        .position(|r| r.kind == Kind::Envelope && r.tabulated_pa.is_some())
+    else {
+        return;
+    };
+    let shell = &regions[index];
+    let gas_kg: f64 = regions[index..]
+        .iter()
+        .map(|r| r.inventory.total_mass_kg())
+        .sum();
+    let Some([over, _]) = shell.tabulated_pa else {
+        return;
+    };
+    let (inner, outer) = (shell.inner_radius_m, shell.outer_radius_m);
+    let weight = GRAVITATIONAL_CONSTANT * (mass_kg - gas_kg) * shell.inventory.total_mass_kg()
+        / (4.0 * PI * inner.powi(3) * outer);
+    let [thin, thick] = THIN_GAS_FRACTIONS.map(f64::ln);
+    let t = (((gas_kg / mass_kg).ln() - thin) / (thick - thin)).clamp(0.0, 1.0);
+    let t = t * t * (3.0 - 2.0 * t);
+    let blended =
+        ((ONE_BAR_PA + weight).ln() * (1.0 - t) + (ONE_BAR_PA + over).ln() * t).exp() - ONE_BAR_PA;
+    if !(blended.is_finite() && blended >= 0.0) {
+        return;
+    }
+    let change = blended - over;
+    for region in &mut regions[..=index] {
+        if let Some(tabulated) = &mut region.tabulated_pa {
+            tabulated[0] += change;
+            if region.kind != Kind::Envelope {
+                tabulated[1] += change;
+            }
+        }
+    }
+}
+
+/// Pressures from the outside in under `pressure_pa`, and the regions' own
+/// moment of inertia. Tabulated regions take the table's pressures above
+/// the load on the outermost of them; the rest follow their prescribed
+/// density.
+fn settle(regions: &mut [Region], mut pressure_pa: f64) -> f64 {
+    let mut enclosed: Vec<f64> = regions
+        .iter()
+        .scan(0.0, |m, r| {
+            let inner = *m;
+            *m += r.inventory.total_mass_kg();
+            Some(inner)
+        })
+        .collect();
+    let mut inertia_kg_m2 = 0.0;
+    let mut load = None;
+    for (region, inner_mass) in regions.iter_mut().zip(enclosed.drain(..)).rev() {
+        let shell = Shell::new(region, inner_mass);
+        if let Some([inner, outer]) = region.tabulated_pa {
+            let load = *load.get_or_insert(pressure_pa);
+            region.outer_pressure_pa = load + outer;
+            region.inner_pressure_pa = load + inner;
+        } else {
+            region.outer_pressure_pa = pressure_pa;
+            region.inner_pressure_pa = pressure_pa + shell.pressure_drop_pa();
+        }
+        pressure_pa = region.inner_pressure_pa;
+        inertia_kg_m2 += shell.inertia_kg_m2();
+    }
+    inertia_kg_m2
 }
 
 /// Layers under a decided surface: metal, then rock holding the protected
@@ -532,7 +843,7 @@ fn tabulated_condensed_inertia_kg_m2(regions: &[Region], temperature_k: f64) -> 
     let mut uniform = 0.0;
     let mut stack = Vec::new();
     for region in regions {
-        if matches!(region.kind, Kind::Core | Kind::Mantle | Kind::Water) {
+        if matches!(region.kind, Kind::Core | Kind::Mantle) || region.kind.is_water() {
             uniform += Shell::new(region, enclosed).inertia_kg_m2();
             stack.push((region.kind, region.inventory));
         }
@@ -547,9 +858,7 @@ fn tabulated_condensed_inertia_kg_m2(regions: &[Region], temperature_k: f64) -> 
 /// The radius the synchronous surface decision stands on: the layered
 /// solver's, for this host at the decided water temperature.
 pub(crate) fn condensed_radius_m(host: &Inventory, temperature_k: f64) -> f64 {
-    condensed_regions(decided_stack(host), temperature_k, &mut false)
-        .last()
-        .map_or(0.0, |r| r.outer_radius_m)
+    bare_body(&decided_stack(host), temperature_k).map_or(0.0, |body| body.radius_m)
 }
 
 /// Non-finite or negative environment values take a neutral table input

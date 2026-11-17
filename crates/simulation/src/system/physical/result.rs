@@ -61,7 +61,7 @@ fn result(
     provenance: ResultProvenance,
     refinement: RefinementStatus,
 ) -> Result<PlanetResult, &'static str> {
-    let surface_knowledge = knowledge(&record, provenance);
+    let surface_knowledge = knowledge(&record);
     let result = PlanetResult {
         revision,
         provenance,
@@ -73,17 +73,17 @@ fn result(
     Ok(result)
 }
 
-fn knowledge(record: &LayeredPlanet, provenance: ResultProvenance) -> SurfaceKnowledge {
+fn knowledge(record: &LayeredPlanet) -> SurfaceKnowledge {
     if record.physical.radius_reference == RadiusReference::OneBar {
         SurfaceKnowledge::GasReference
-    } else if provenance == ResultProvenance::Layered {
+    } else {
+        // Generation walks the solver's own water models, so its phase at
+        // the surface is as much knowledge as the layered solve's.
         match record.surface.as_str() {
             "ice" => SurfaceKnowledge::SolidPhase,
             "ocean" => SurfaceKnowledge::Liquid,
             _ => SurfaceKnowledge::Unresolved,
         }
-    } else {
-        SurfaceKnowledge::Unresolved
     }
 }
 
@@ -116,7 +116,7 @@ pub fn validate_result(result: &PlanetResult) -> Check {
         ) if text(reason) => {}
         _ => return Err("inconsistent refinement status"),
     }
-    if result.surface_knowledge != knowledge(&result.record, result.provenance) {
+    if result.surface_knowledge != knowledge(&result.record) {
         return Err("unsupported surface knowledge");
     }
     Ok(())

@@ -104,7 +104,7 @@ retained and escaped inventories, bolometric/loss forcing, albedo and age. They
 exclude task/page metadata and the mutable atmosphere reservoir split. The model
 key is caller-maintained and must change with generation/retention/fallback
 prescriptions. The current generation key is
-`generation_physics_v4:structure_table_v3:surface_decision_v1:layered_adoption_v5:NSHHE002-3fe0293c8a340e38`,
+`generation_physics_v4:structure_table_v4:surface_decision_v2:layered_adoption_v5:NSHHE002-3fe0293c8a340e38`,
 covering the [structure table](#structure-table), surface decision, refinement
 adapter and checksum-pinned H/He resource.
 Its availability is process-local and fixed by the table's `OnceLock`: installing
@@ -2209,21 +2209,26 @@ budget, local data or error path.
   the protected secondaries, as in the layered solve), water, then the
   accessible secondary volatiles (N₂, CO₂, CH₄, O₂, Ar) counted as water.
   The outer radius is the table's for the whole stack: its mass, metal share
-  of the refractory mass, water share and the water's temperature. Inside it,
-  each region's volume is its mass share of the table's pure body of the same
-  total mass, a display split and not a solved boundary. Above 20 Earth masses
-  the radius continues as `R(20) (M/20)^0.2` (labelled).
+  of the refractory mass, water share and the water's temperature. The top of
+  the metal and of the rock, and the pressures there and at the centre, are
+  the same cells' [layer boundaries](#structure-table); water and condensed
+  volatiles share the shell above the rock by mass. Above 20 Earth masses the
+  radius continues as `R(20) (M/20)^0.2` (labelled).
 - **H/He envelope**, when present: the table's one-bar radius, limited by the
   thin-column support radius
   ([supply check](#light-envelopes-and-the-giant-transition)). The condensed
   stack beneath it shrinks to the table's under-envelope core radius as the gas
   at its base goes from one bar to ten, so the radius stays continuous down to
-  complete stripping. Sub-bar gas is represented as one isothermal scale height
-  (capped at the condensed radius) above a condensed reference.
-- **Profiles:** uniform density per condensed region; gas density falling
-  linearly to zero at its top. Pressures integrate hydrostatically from zero at
-  the top; inertia uses the same profiles. A full linear-profile sphere has
-  inertia factor 0.267, close to Jupiter's 0.254.
+  complete stripping. Its layers are the core-under-load grid's, for the
+  body's own core, scaled to that radius; their pressures sit above the
+  tabulated base pressure. Sub-bar gas is represented as one isothermal scale
+  height (capped at the condensed radius) above a condensed reference.
+- **Profiles:** condensed pressures are the table's, above whatever presses
+  on the body's surface; only regions without tabulated values (the water and
+  volatile shell, frost, sub-bar gas) integrate a prescribed density: uniform
+  when condensed, scaled onto the table's pressure at the top of the rock, and
+  falling linearly to zero at its top for gas. Inertia uses the prescribed
+  profiles and is then replaced by the table's where it has one.
 - A positive trace constituent can add less than one radius ulp, leaving
   coincident boundaries. Keep its inventory and use the zero-thickness shell
   limits `I=2mR²/3` and `ΔP=Gm(M_inner+m/2)/(4πR⁴)`, with a limitation note,
@@ -2240,7 +2245,13 @@ budget, local data or error path.
   intrinsic trend as the layered envelope, on the tabulated gravity).
 - **Surface:** `envelope` at a one-bar reference, else `rock` (nominal boundary,
   not certified solid phase or landing permission),
-  `unresolved water`, `unresolved volatiles` or, on a decided surface, `frost`.
+  `unresolved water`, `unresolved volatiles` or, on a decided surface, `frost`
+  or the water phase at its top (`ice`, `ocean`, `deep ice`, ...).
+- **Table quality:** where a lookup reads filled cells or leaves the grid,
+  the record is `extrapolated` and carries one limitation line starting
+  `Structure table:` with the knot count and the cells' reasons, for example
+  "3 of the 16 knots read hold a fill where the layered solver refuses (cold
+  dense gas outside the H/He data)". This replaces a per-planet refusal.
 
 Checks (`structure/fallback/tests.rs`, in `check.sh`): an Earth twin within 5%
 of Earth's radius with inertia factor 0.30–0.36; a Jupiter twin at 9–13 Earth
@@ -2254,10 +2265,7 @@ and monotone non-negative pressures. The coverage report also checks every
 census refusal's fallback record.
 
 Limitations: no separate secondary atmosphere (the partition below adds one),
-phase, thermal structure or greenhouse. The inertia of an enveloped body is
-still the prescribed profile's, 7% from the layered value at the median and up
-to 58%, so its flattening can shift when the layers arrive. A decided condensed
-surface takes the table's inertia and stays within 0.8%.
+water phase, thermal structure or greenhouse until the surface is decided.
 
 ### Structure table
 
@@ -2270,11 +2278,12 @@ the build of the table needs.
 
 | Grid | Axes (knots) | Value |
 | --- | --- | --- |
-| Condensed | mass 10⁻⁴ to 20 M⊕ (41, log), metal share of the refractory (9), water share (19), water temperature 20 to 623.15 K (21) | ln radius, inertia factor |
-| Core under an envelope | mass 10⁻⁴ to 1,200 M⊕ (55, log), the same metal and water axes, load on its surface 0.01 bar to 10,000 Mbar (15, log) | ln radius, inertia factor |
+| Condensed | mass 10⁻⁴ to 20 M⊕ (41, log), metal share of the refractory (9), water share (19), water temperature 20 to 623.15 K (21) | ln radius, inertia factor, five layer boundary values |
+| Core under an envelope | mass 10⁻⁴ to 1,200 M⊕ (55, log), the same metal and water axes, load on its surface 0.01 bar to 10,000 Mbar (15, log) | ln radius, inertia factor, five layer boundary values |
 | Envelope | total mass 0.05 to 1,200 M⊕ (48, log), H/He share 10⁻⁷ to 0.99 (40, dense above 0.9), equilibrium temperature 20 to 2,000 K (17), intrinsic temperature 20 to 200 K (10) | unloaded reference core radius over one-bar radius, ln pressure where the gas meets the core, the gas's inertia factor |
 
-Lookups are multilinear, and total for any positive mass.
+Lookups are multilinear, and total for any positive mass. Every cell also
+carries a one-byte reason: solved, or why the solver refused it.
 
 - **Condensed cells** are `dry::solve`, or `water::solve` under no load when
   frozen and just above saturation when liquid. Temperature knots are dense
@@ -2310,9 +2319,40 @@ Lookups are multilinear, and total for any positive mass.
   that load on its mass and radius, plus the gas's on its mass and the
   one-bar radius. `fallback::prescribed` and `partition::close` both install
   it in place of the display layers' uniform one.
-- **Refused cells** are filled and flagged, so a lookup that touches one
-  reports `approximate`. Condensed and core cells take their line's solved
-  neighbours. Envelope cells take the retired closed form
+- **Layer boundaries** (`Solid::boundaries`) are on both solid grids: the
+  top of the metal and the top of the rock, and the pressure at the centre
+  and at each of those two.
+  - Radii are stored as shares of the body's *volume*, which follow the mass
+    shares almost linearly where a radius would bend as a cube root.
+  - Pressures are stored above the load on the surface, as the logarithm of
+    the central one and the other two as shares of it. A condensed lookup
+    returns them above whatever presses on its surface; a core lookup adds
+    the load it was given.
+  - Pressure across a sphere goes as its radius squared, so beneath a layer
+    that almost vanishes it bends as that layer's share to the two thirds.
+    The lookup bends the last water interval (towards all water) for the
+    pressure at the top of the metal and the centre, and the first metal
+    interval (towards no metal) for the centre. The pressure at a vanishing
+    layer's own top is read unbent.
+  - Volumes and pressure shares take 16 bits each (pressure shares as square
+    roots), 12 bytes a cell with the central pressure.
+  - Water phase layers are not stored: water is at one temperature, so each
+    phase change is at a pressure generation can find from that temperature
+    between the surface and the tabulated top of the rock. Not yet read by
+    generation: see the [plan](../plans/planet-generation.md).
+- **Outside the grids.** Below either mass range a body keeps the edge
+  cell's density for its own metal share, water share and temperature:
+  radius as mass to the one third, layers at the same shares of the volume,
+  pressures as mass to the two thirds. Ice stays about 1.5 times the radius
+  of rock of the same mass. Porosity and irregular shape, which matter below
+  a few hundred kilometres, are not modelled. Above the range the radius
+  continues as mass to the 0.2 and pressures follow. Other axes take their
+  edge. All of these set `Quality::outside`.
+- **Refused cells** are filled and labelled. A lookup returns a `Quality`:
+  how many of the knots it read, how many of those were filled, the
+  solver's reasons for them, and whether it left a grid. `approximate` is
+  any of these. Condensed and core cells take their line's solved
+  neighbours, for the boundary values too. Envelope cells take the retired closed form
   ([below](#light-envelopes-and-the-giant-transition)), shifted to meet their
   solved neighbours exactly, with the shift halving per cell beyond the first.
   Along both temperature axes a filled cell is never more compact than its
@@ -2327,19 +2367,36 @@ the H/He resource or a grid changes, and commit the resource with the change.
 It runs `prepare_structure_table` (nine minutes on 16 threads; it uses half the machine's unless `NS_TABLE_THREADS` says otherwise,
 writing `data/tmp/structure-table.md` and the envelope cells as a TSV) and then
 `structure_table_accuracy`, which compares lookups with fresh solves at 20,000
-points between the knots of each grid:
+points between the knots of each grid. The build report tabulates each
+refusal reason against the span of every axis it touches:
 
 | Grid | Cells solved | Radius error, p50 / p95 / p99 / max |
 | --- | ---: | --- |
 | Condensed | 146,318 of 147,231 (99.4%) | 0.03% / 0.11% / 0.20% / 0.82% |
 | Condensed, inertia factor | | 0.15% / 0.44% / 0.73% / 1.5% |
-| Core under an envelope | 109,982 of 141,075 (78.0%) | not sampled separately |
+| Core under an envelope | 109,982 of 141,075 (78.0%) | 0.08% / 0.39% / 0.59% / 1.8% |
+| Core under an envelope, inertia factor | | 0.14% / 0.50% / 1.6% / 4.4% |
 | Envelope, all cells solved | 212,583 of 326,400 (65.1%) | 0.03% / 0.38% / 1.6% / 9.4% |
 | Envelope, inertia factor | | 0.08% / 0.78% / 3.7% / over 100% |
 | Envelope, own core | | 0.73% / 4.2% / 8.1% / 28% |
 | Envelope, own core, inertia factor | | 1.4% / 7.8% / 15% / 60% |
 
-The resource is 6.3 MB. Refused core cells are loads far above what the
+Layer boundaries, where every cell read was solved. Radii are errors over the
+body's radius, pressures are relative and above the surface load:
+
+| Boundary | Condensed, p50 / p95 / p99 / max | Core under an envelope |
+| --- | --- | --- |
+| Top of the metal, radius | 0.11% / 0.27% / 0.38% / 0.74% | 0.09% / 0.30% / 0.97% / 3.9% |
+| Top of the rock, radius | 0.04% / 0.19% / 0.32% / 0.44% | 0.07% / 0.33% / 0.54% / 1.8% |
+| Central pressure | 0.27% / 4.3% / 17% / 35% | 0.33% / 3.2% / 9.5% / 23% |
+| Pressure at the top of the metal | 0.20% / 2.2% / 5.1% / 16% | 0.43% / 2.6% / 4.5% / 24% |
+| Pressure at the top of the rock | 0.17% / 2.0% / 6.8% / 20% | 0.58% / 2.9% / 4.9% / 7.0% |
+
+The pressure tails are bodies of more than nine tenths water around a small
+dense centre, where the last water interval is too coarse even bent. Read
+unbent, the central pressure's 95th percentile was 11% and 9.5%.
+
+The resource is 10.3 MB (6.3 MB before the boundaries and reason bytes). Refused core cells are loads far above what the
 core's own gravity makes (a hundredth of an Earth mass under megabars), which
 no envelope in the grid produces, and a few cores above 200 M⊕. The inertia
 factor's worst case is gas that barely reaches one bar, where its mass is
@@ -2463,11 +2520,25 @@ ideal column and its greenhouse balance (Venus-like and steam worlds), notes
 it, and the layered solve refuses it as `DenseGasUnsupported`. The decided
 facts then stand.
 
-**Decided record.** Layers are metal, rock (with protected secondaries),
-condensed water, `frost`, then one finite `atmosphere` region. It carries
-`greenhouse_optical_depth` and `blowoff_kg`, which refinement copies forward.
-Water phase is not decided here; it follows from the decided temperature in
-the layered solve.
+**Decided record.** Layers are metal and rock (with protected secondaries)
+from the table, the water's phase layers, `frost`, then one finite
+`atmosphere` region. It carries `greenhouse_optical_depth` and `blowoff_kg`,
+which refinement copies forward.
+
+**Water phases** (`fallback/phases.rs`). The layered thin solve holds water at
+the surface temperature, so its phase changes at pressures fixed by that
+isotherm. `water::Isotherm` is the solver's own list of water models and the
+pressures where one hands over to the next. Generation walks it once, inwards
+from the tabulated surface under the column and frost load, integrating
+radius and enclosed mass against pressure (RK4, eight steps a phase) until the
+water's mass is used up. That fixes each phase's thickness, the pressure at
+its base and the top of the rock; the table's metal boundary and deeper
+pressures move with the rock top. Adjacent models of one phase make one layer;
+the thickest takes the walk's roundoff so water is conserved exactly. Where
+the models have no answer on that isotherm, or the body is all water, the
+water stays one `water_compression` layer, labelled. Water layers state the
+surface temperature; metal and rock state none. A decided `ice` or `ocean`
+surface now reports `SolidPhase` or `Liquid` knowledge at generation.
 
 **Reference-partition results** (`Envelope` and `Refused`) keep the reference partition
 below, at the equilibrium temperature. An `Envelope` decision whose boundary
@@ -2494,8 +2565,13 @@ no H/He envelope carries a bulk-composition label, that decided surfaces agree
 within 1% in raw radius, and that every layered result installs with the same
 atmosphere record, optical column, radii, gravity, pressure, temperature,
 inertia and reservoir split. Envelope radii have regression bounds only
-(median under 1%, 95th percentile under 5%). The retention grid
-test asserts the decision is total and conserving.
+(median under 1%, 95th percentile under 5%). Its `## Layers` section compares
+generation's layer list with the layered solve's, per route: surface text
+must match exactly, thin-route layer kinds may differ on at most 1% of planets,
+and thin-route metal and rock boundaries must sit within 1% of the radius.
+The retention grid test asserts the decision is total and conserving.
+`fallback/tests.rs` checks the phase walk against the water solver directly:
+same phases, rock top within 0.2% of the water's thickness.
 
 An optional `generation_one_percent_threshold_probe` samples H/He shares
 `0.01 ± 1e-8` before retention. Of 126 mass/water/temperature pairs, 20 switch
@@ -2532,10 +2608,22 @@ by its small thickness; the column keeps its pre-shrink pressure normalisation.
   Inertia integrates the same spherical-isothermal or explicitly unresolved
   exponential profile, normalised by mass. The finite support uses the current
   column cutoff; it is not a material edge or independent visibility detection.
-- A one-bar reference keeps one prescribed bulk `envelope` region, with secondary
-  gas included in its inventory. The optical column samples it, not an additional
-  atmosphere mass. The bulk profile and deep pressure remain the labelled
-  thinning prescription, not an isothermal extrapolation to the core.
+- A one-bar reference splits its gas there. Above it, an `atmosphere` region
+  holds what one bar supports on the atmosphere record's own isothermal column
+  (at most half the gas); below it, the `envelope` runs from the core to the
+  reference radius. The pressure at the envelope's base is the table's; below
+  1% H/He it blends towards the gas's own thin-shell weight,
+  `1 bar + G M_core m_gas / (4π r_core³ R_1bar)` (full weight below 0.1%), since
+  the table knows the H/He alone and not the secondary gas mixed into it. The
+  bulk profile inside the envelope is the labelled thinning prescription.
+- **Suspended condensate** (`fallback::decide::suspend`): where the envelope's
+  secondary gases can condense on its prescribed thermal profile, each gas
+  layer's condensate is the local saturation split
+  (`materials::suspended::State`) averaged over its pressure range. It is
+  stated as phase allocations, as the layered envelope states its own, and
+  marks the boundary as prescribed so optics and drag keep the decided column.
+  Where the model refuses (near-critical or out of range) no split is stated
+  and the record says so.
 - Boundary gravity retains fallback's total-mass central-field approximation;
   atmospheric self-gravity is not newly solved. Weak-binding pressure retains the
   explicit planar approximation even though inertia uses a normalised finite

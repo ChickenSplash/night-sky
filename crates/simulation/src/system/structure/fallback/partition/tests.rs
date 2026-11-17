@@ -143,9 +143,26 @@ fn cold_trapping_and_bulk_envelopes_do_not_double_count_gas() {
                 .iter()
                 .filter(|r| matches!(r.kind, Kind::Atmosphere | Kind::Envelope))
                 .count();
-            assert_eq!(gas_regions, usize::from(solved.atmosphere.is_some()));
-            if initial.reference == RadiusReference::OneBar {
-                assert_eq!(solved.fallback.regions.last().unwrap().kind, Kind::Envelope);
+            // A one-bar reference splits the gas there: the envelope
+            // beneath, the atmosphere record's own column above.
+            let one_bar = initial.reference == RadiusReference::OneBar;
+            assert_eq!(
+                gas_regions,
+                usize::from(solved.atmosphere.is_some()) * (1 + usize::from(one_bar))
+            );
+            if one_bar {
+                let [envelope, above] = solved.fallback.regions.last_chunk().unwrap();
+                assert_eq!(
+                    [envelope.kind, above.kind],
+                    [Kind::Envelope, Kind::Atmosphere]
+                );
+                assert_eq!(envelope.outer_radius_m, solved.fallback.radius_m);
+                assert_eq!(above.inner_radius_m, solved.fallback.radius_m);
+                assert_eq!(
+                    [envelope.outer_pressure_pa, above.inner_pressure_pa],
+                    [1e5; 2]
+                );
+                assert!(above.inventory.total_mass_kg() <= envelope.inventory.total_mass_kg());
                 assert_eq!(solved.atmosphere.unwrap().pressure_pa(), 1e5);
             }
         }

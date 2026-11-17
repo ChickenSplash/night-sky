@@ -134,13 +134,22 @@ impl Policy {
             return self.bound(shape, 0.0, false);
         };
         let gas = GasAtmosphere::try_from(data).map_err(|e| format!("Invalid atmosphere: {e}"))?;
+        // A boundary column generation prescribes carries the drag whatever
+        // the deep layers' local phase detail, as it does the optics.
         if planet.initial_result.as_ref().is_some_and(|result| {
-            result.record.layers.iter().any(|layer| {
-                layer
-                    .phase_allocations
-                    .iter()
-                    .any(|p| p.condensate_kg > 0.0)
-            })
+            let prescribed = result
+                .record
+                .physical
+                .approximations
+                .iter()
+                .any(|m| m == super::physical::PRESCRIBED_BOUNDARY_MODEL_ID);
+            !prescribed
+                && result.record.layers.iter().any(|layer| {
+                    layer
+                        .phase_allocations
+                        .iter()
+                        .any(|p| p.condensate_kg > 0.0)
+                })
         }) {
             return Err("Suspended-condensate drag clearance is unresolved".into());
         }

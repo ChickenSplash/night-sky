@@ -437,6 +437,7 @@ fn exact_one_bar_at_gas_base_is_valid_and_sub_bar_cannot_claim_that_level() {
     sub_bar.record.physical.radius_reference = RadiusReference::SolidSurface;
     sub_bar.surface_knowledge = SurfaceKnowledge::Unresolved;
     sub_bar.record.layers[0].inner_pressure_pa = 0.5e5;
+    sub_bar.record.layers[0].outer_pressure_pa = None;
     sub_bar.record.layers[1].outer_pressure_pa = Some(0.5e5);
     sub_bar.record.one_bar_radius_m = None;
     round_trip(&sub_bar);

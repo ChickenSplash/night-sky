@@ -3,7 +3,7 @@
 //! The layered solve receives these and adds no escape of its own.
 use super::*;
 use crate::system::{
-    atmosphere::{AtmosphereError, GasAtmosphere, ONE_BAR_PA, greenhouse},
+    atmosphere::{AtmosphereError, GasAtmosphere, greenhouse},
     structure::{
         coupled::{self, escape, surface},
         prototype::{self, Decision},
@@ -12,14 +12,19 @@ use crate::system::{
 
 pub const NOTES: &[&str] = &[
     "Fallback: radius read from the layered solver's table, not a hydrostatic solve of this body",
-    "Uniform condensed layers and a finite isothermal boundary column; the condensed body's inertia is the layered solver's tabulated value",
+    "Condensed layer boundaries, their pressures and the condensed body's inertia are interpolated from the same table; the boundary column is finite and isothermal",
     "Surface decision: the layered column's partition, grey greenhouse balance, frost and blow-off rules on the tabulated radius",
     "All water and unprotected secondaries exchange with the column; protected secondaries stay in the rock",
-    "Water phase is not decided here: it follows from the decided temperature in the layered solve",
     "Greenhouse: grey Eddington fit to Earth, Mars and Venus; the coolest balance warming up from equilibrium",
     "Blow-off strips the lightest gases of an unbound column entirely, with no escape rate",
     "Frost is one even global layer of fixed solid density",
 ];
+
+pub const PHASES_NOTE: &str = "Water phases follow the layered solver's water models along the decided isotherm, walked inwards from the tabulated surface; one temperature, not a thermal profile";
+pub const UNRESOLVED_NOTE: &str = "Water phase is not decided: the layered solver's water models have no answer on this isotherm, or the body has no rock beneath its water";
+pub const SUSPENDED_NOTE: &str = "Suspended condensate is the local saturation split averaged over each gas layer along the envelope's prescribed thermal profile; no settling, rain-out or cloud opacity";
+
+pub const UNSUSPENDED_NOTE: &str = "Secondary gases fall outside the suspended-condensate model on this profile: no condensate split is stated, and the envelope's radius is the table's for H/He alone";
 
 pub const DENSE_NOTE: &str = "Dense column: ideal gas beyond the layered solver's density mask, so no layered result replaces it";
 
@@ -54,6 +59,9 @@ pub fn decide(
         let mut atmosphere = partitioned.atmosphere;
         if decision == Decision::Envelope {
             reference_one_bar(&mut fallback, &mut atmosphere)?;
+        }
+        if fallback.reference == RadiusReference::OneBar {
+            suspend(&mut fallback, environment);
         }
         Ok(Decided {
             fallback,
@@ -143,43 +151,53 @@ pub fn decide(
     )
     .map_err(|_| invalid())?;
 
-    let mut extrapolated = false;
-    let mut regions = condensed_regions(
-        decided_stack(&state.host),
+    let stack = decided_stack(&state.host);
+    let mut quality = Quality::default();
+    let interior = Interior::bare(&stack, state.temperature_k, &mut quality).ok_or_else(invalid)?;
+    let condensed_radius_m = interior.radius_m;
+    let frost = (state.frost.total_mass_kg() > 0.0).then(|| {
+        Region::new(
+            Kind::Frost,
+            state.frost,
+            condensed_radius_m,
+            state.surface_radius_m,
+        )
+    });
+    let host_kg: f64 = stack.iter().map(|(_, i)| i.total_mass_kg()).sum();
+    // What presses on the water: the column, and any frost under it.
+    let load_pa = state
+        .atmosphere
+        .as_ref()
+        .map_or(0.0, |air| air.pressure_pa())
+        + frost
+            .as_ref()
+            .map_or(0.0, |region| Shell::new(region, host_kg).pressure_drop_pa());
+    let phases = phases::walk(
         state.temperature_k,
-        &mut extrapolated,
+        load_pa,
+        host_kg,
+        condensed_radius_m,
+        state.host.mass_kg(Material::Water),
+        interior.refractory_pa,
     );
-    let condensed_radius_m = regions.last().ok_or_else(invalid)?.outer_radius_m;
-    let solid = regions
-        .last()
-        .is_some_and(|r| matches!(r.kind, Kind::Core | Kind::Mantle));
-    let frost = state.frost.total_mass_kg() > 0.0;
-    if frost {
-        regions.push(Region {
-            kind: Kind::Frost,
-            inventory: state.frost,
-            inner_radius_m: condensed_radius_m,
-            outer_radius_m: state.surface_radius_m,
-            inner_pressure_pa: 0.0,
-            outer_pressure_pa: 0.0,
-        });
-    }
+    let resolved = phases.is_some();
+    let mut regions = lay(stack, &interior, phases);
+    regions.extend(frost);
     let radius_m = state.surface_radius_m;
     let gm = GRAVITATIONAL_CONSTANT * (state.host.total_mass_kg() + state.frost.total_mass_kg());
     let mut one_bar_radius_m = None;
     if let Some(air) = &state.atmosphere {
-        regions.push(Region {
-            kind: Kind::Atmosphere,
-            inventory: state.gas,
-            inner_radius_m: radius_m,
-            outer_radius_m: radius_m + air.column(gm, radius_m)?.extent_m,
-            inner_pressure_pa: 0.0,
-            outer_pressure_pa: 0.0,
-        });
+        regions.push(Region::new(
+            Kind::Atmosphere,
+            state.gas,
+            radius_m,
+            radius_m + air.column(gm, radius_m)?.extent_m,
+        ));
         one_bar_radius_m = air
             .pressure_level_altitude_m(ONE_BAR_PA, gm, radius_m)?
             .map(|altitude| radius_m + altitude);
     }
+    let extrapolated = quality.approximate();
     let mut fallback = Fallback {
         reason: None,
         source: initial.source,
@@ -188,11 +206,7 @@ pub fn decide(
         regions,
         radius_m,
         condensed_radius_m,
-        reference: if solid && !frost {
-            RadiusReference::SolidSurface
-        } else {
-            RadiusReference::UnresolvedVolatileBoundary
-        },
+        reference: RadiusReference::UnresolvedVolatileBoundary,
         one_bar_radius_m,
         surface_temperature_k: state.temperature_k,
         surface_pressure_pa: 0.0,
@@ -201,8 +215,17 @@ pub fn decide(
         optical_depth: Some(state.optical_depth),
         blowoff: stripped.escaped,
         extrapolated,
+        quality,
         notes: NOTES.to_vec(),
     };
+    fallback.reference = fallback.condensed_reference();
+    if state.host.mass_kg(Material::Water) > 0.0 {
+        fallback.notes.push(if resolved {
+            PHASES_NOTE
+        } else {
+            UNRESOLVED_NOTE
+        });
+    }
     if extrapolated {
         fallback.notes.push(CLAMPED_NOTE);
     }
@@ -271,18 +294,27 @@ fn reference_one_bar(
     else {
         return Ok(());
     };
+    let radius_m = fallback.radius_m + altitude;
     let Some(gas) = fallback
         .regions
         .iter_mut()
         .find(|r| r.kind == Kind::Atmosphere)
+        .filter(|gas| radius_m < gas.outer_radius_m)
     else {
         return Ok(());
     };
-    let radius_m = fallback.radius_m + altitude;
-    if radius_m >= gas.outer_radius_m {
-        return Ok(());
-    }
+    // The whole column presses on the surface: its own pressure, above the
+    // one bar at the level its upper part now starts from.
+    let over = (air.pressure_pa() - ONE_BAR_PA).max(0.0);
     gas.kind = Kind::Envelope;
+    gas.tabulated_pa = Some([over, 0.0]);
+    for region in &mut fallback.regions {
+        if region.kind != Kind::Envelope
+            && let Some(tabulated) = &mut region.tabulated_pa
+        {
+            *tabulated = tabulated.map(|pressure| pressure + over);
+        }
+    }
     fallback.radius_m = radius_m;
     fallback.one_bar_radius_m = Some(radius_m);
     fallback.reference = RadiusReference::OneBar;
@@ -294,7 +326,115 @@ fn reference_one_bar(
         None,
     )?;
     *atmosphere = Some(level);
+    partition::split_at_one_bar(fallback, &level, gm)?;
     partition::close(fallback, Some(&level), gm, radius_m)?;
     fallback.surface_pressure_pa = ONE_BAR_PA;
     Ok(())
+}
+
+/// Share of each secondary gas that is condensed and carried in an
+/// envelope's layers. The layered envelope reports the same split from its
+/// own profile; here it is the local saturation state averaged over each
+/// layer's pressures, which is where a hydrostatic layer keeps its mass.
+fn suspend(fallback: &mut Fallback, environment: &PlanetEnvironment) {
+    use crate::system::{
+        materials::{hhe_mixture::SECONDARIES, molecular, suspended},
+        structure::{dry, envelope},
+    };
+    const SAMPLES: usize = 24;
+    /// The envelope's own top, a hundredth of a bar.
+    const TOP_PA: f64 = 1e3;
+    let mass_kg = fallback.mass_kg();
+    let equilibrium_k = environment.equilibrium_temperature_k.max(MIN_TEMPERATURE_K);
+    let age = if environment.age_gyr.is_finite() && environment.age_gyr > 0.0 {
+        environment.age_gyr
+    } else {
+        return;
+    };
+    let intrinsic_k = envelope::intrinsic_k(mass_kg, age);
+    let Ok(thermal) = envelope::Thermal::new(
+        equilibrium_k,
+        intrinsic_k,
+        GRAVITATIONAL_CONSTANT * mass_kg / fallback.radius_m.powi(2),
+    ) else {
+        return;
+    };
+    let coldest_k = (equilibrium_k.powi(4) + 0.5 * intrinsic_k.powi(4)).powf(0.25);
+    let mut found = false;
+    let mut condensates = Vec::new();
+    for region in &fallback.regions {
+        let mut condensate = Inventory::default();
+        if matches!(region.kind, Kind::Envelope | Kind::Atmosphere) {
+            // The envelope's prescribed trace water takes no part in its
+            // gas density or this split.
+            let Ok(gas) = Inventory::new(&Material::ALL.map(|m| {
+                (
+                    m,
+                    if m == Material::Water {
+                        0.0
+                    } else {
+                        region.inventory.mass_kg(m)
+                    },
+                )
+            })) else {
+                return;
+            };
+            let total = gas.total_mass_kg();
+            let light = gas.mass_kg(Material::Hydrogen) + gas.mass_kg(Material::Helium);
+            if light.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+                || (total - light) / total <= dry::protected::MAX_TRACE_FRACTION
+                || !suspended::cold_composition(&gas, coldest_k)
+            {
+                return;
+            }
+            let low = region.outer_pressure_pa.max(TOP_PA);
+            let high = region.inner_pressure_pa.min(molecular::MAX_PRESSURE_PA);
+            let mut share = [0.0; 5];
+            if high > low {
+                // Even steps in the logarithm of pressure, each weighted by
+                // the pressure it spans.
+                let step = (high / low).ln() / SAMPLES as f64;
+                for sample in 0..SAMPLES {
+                    let pressure = low * ((sample as f64 + 0.5) * step).exp();
+                    let Ok(temperature) = thermal.temperature_k(pressure) else {
+                        fallback.notes.push(UNSUSPENDED_NOTE);
+                        return;
+                    };
+                    // Above its range every secondary is past condensing.
+                    if temperature > 625.0 {
+                        continue;
+                    }
+                    let Ok(state) = suspended::State::new(&gas, pressure, temperature, 1.0) else {
+                        fallback.notes.push(UNSUSPENDED_NOTE);
+                        return;
+                    };
+                    for (i, m) in SECONDARIES.into_iter().enumerate() {
+                        if gas.mass_kg(m) > 0.0 {
+                            share[i] += state.condensate.mass_kg(m) / (gas.mass_kg(m) / total)
+                                * pressure
+                                * step;
+                        }
+                    }
+                }
+            }
+            // Mass below `low` or above `high` holds no condensate here.
+            let span = region.inner_pressure_pa - region.outer_pressure_pa;
+            let Ok(result) = Inventory::new(&std::array::from_fn::<_, 5, _>(|i| {
+                let m = SECONDARIES[i];
+                (m, gas.mass_kg(m) * (share[i] / span).clamp(0.0, 1.0))
+            })) else {
+                return;
+            };
+            found |= result.total_mass_kg() > 0.0;
+            condensate = result;
+        }
+        condensates.push(condensate);
+    }
+    if !found {
+        return;
+    }
+    for (region, condensate) in fallback.regions.iter_mut().zip(condensates) {
+        region.condensate = condensate;
+    }
+    fallback.notes.push(SUSPENDED_NOTE);
 }

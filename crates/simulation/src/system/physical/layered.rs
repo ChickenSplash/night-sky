@@ -348,7 +348,13 @@ pub(super) fn receive_boundary(record: &mut LayeredPlanet, initial: &LayeredPlan
     p.reference_gravity_m_s2 = initial.physical.reference_gravity_m_s2;
     p.inertia_factor = initial.physical.inertia_factor;
     p.h_he_mass_fraction = initial.physical.h_he_mass_fraction;
-    p.approximations.push(PRESCRIBED_BOUNDARY_MODEL_ID.into());
+    if !p
+        .approximations
+        .iter()
+        .any(|m| m == PRESCRIBED_BOUNDARY_MODEL_ID)
+    {
+        p.approximations.push(PRESCRIBED_BOUNDARY_MODEL_ID.into());
+    }
     record.surface_pressure_pa = initial.surface_pressure_pa;
     record.surface_temperature_k = initial.surface_temperature_k;
     record.one_bar_radius_m = initial.one_bar_radius_m;
@@ -410,41 +416,109 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
     };
     let mass = f.mass_kg();
     let radius = f.radius_m;
-    let layers = f
+    let one_bar = f.reference == RadiusReference::OneBar;
+    let layers: Vec<Layer> = f
         .regions
         .iter()
         .rev()
         .map(|r| {
             let envelope = r.kind == fallback::Kind::Envelope;
             let atmosphere = r.kind == fallback::Kind::Atmosphere;
+            let mut limitations = vec![
+                match r.kind {
+                    fallback::Kind::Atmosphere if one_bar => {
+                        "Isothermal column above the one-bar level, holding the gas one bar supports there"
+                    }
+                    fallback::Kind::Atmosphere => {
+                        "Finite mass-normalised isothermal gas column; weak-binding pressure remains approximate"
+                    }
+                    fallback::Kind::Frost => {
+                        "Even global frost layer of fixed solid density; phase unresolved"
+                    }
+                    fallback::Kind::Envelope if r.tabulated_pa.is_some() => {
+                        "H/He envelope from the tabulated base to the tabulated one-bar radius; prescribed thermal profile, no cooling evolution"
+                    }
+                    fallback::Kind::Envelope => {
+                        "Gas to the one-bar level of its own column; prescribed thinning density profile"
+                    }
+                    fallback::Kind::Core | fallback::Kind::Mantle => {
+                        "Boundary and pressures interpolated from the layered solver's table; cold compression proxy, temperature, mineralogy and phase unresolved"
+                    }
+                    fallback::Kind::Water => {
+                        "Water-rich layer inside the tabulated boundaries; phase unresolved"
+                    }
+                    fallback::Kind::Volatiles => {
+                        "Condensed volatiles as a water-density proxy inside the tabulated radius; phase unresolved"
+                    }
+                    _ => {
+                        "Phase boundary from the layered solver's water models on the decided isotherm; one prescribed temperature, not a thermal evolution solution"
+                    }
+                }
+                .to_owned(),
+            ];
+            let condensed = r.condensate.total_mass_kg() > 0.0;
+            if condensed {
+                limitations.push(fallback::decide::SUSPENDED_NOTE.into());
+            }
             Layer {
                 materials: materials(&r.inventory),
-                phase_allocations: Vec::new(),
+                phase_allocations: if condensed {
+                    Material::ALL
+                        .into_iter()
+                        .filter(|&m| r.inventory.mass_kg(m) > 0.0)
+                        .map(|m| space_shared::PhaseAllocation {
+                            material: m.id().into(),
+                            vapour_kg: r.inventory.mass_kg(m) - r.condensate.mass_kg(m),
+                            condensate_kg: r.condensate.mass_kg(m),
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                },
                 model_fidelity: fidelity,
-                model_limitations: vec![
-                    if atmosphere {
-                        "Finite mass-normalised isothermal gas column; weak-binding pressure remains approximate"
-                    } else if r.kind == fallback::Kind::Frost {
-                        "Even global frost layer of fixed solid density; phase unresolved"
-                    } else if envelope {
-                        "H/He envelope to the tabulated one-bar radius; prescribed thinning density profile"
-                    } else {
-                        "Uniform layer inside the tabulated radius; phase and temperature unresolved"
-                    }
-                    .into(),
-                ],
+                model_limitations: limitations,
                 kind: r.kind.id().into(),
                 material: dominant(&r.inventory).into(),
                 inner_radius_m: r.inner_radius_m,
                 outer_radius_m: r.outer_radius_m,
                 mass_kg: r.inventory.total_mass_kg(),
                 inner_pressure_pa: r.inner_pressure_pa,
-                outer_pressure_pa: (!envelope).then_some(r.outer_pressure_pa),
-                temperature_k: (envelope || atmosphere).then_some(f.surface_temperature_k),
+                // An envelope that is the outermost layer has no stated top.
+                outer_pressure_pa: (!envelope || r.outer_pressure_pa > 0.0)
+                    .then_some(r.outer_pressure_pa),
+                temperature_k: (envelope
+                    || atmosphere
+                    || r.kind == fallback::Kind::Frost
+                    || (r.kind.is_water() && r.kind != fallback::Kind::Water))
+                    .then_some(f.surface_temperature_k),
                 model: fallback::MODEL_ID.into(),
             }
         })
         .collect();
+    let mut limitations = strings(&f.notes);
+    if f.quality.filled > 0 {
+        limitations.push(format!(
+            "Structure table: {} of the {} knots read hold a fill where the layered solver refuses ({})",
+            f.quality.filled,
+            f.quality.corners,
+            f.quality
+                .reasons()
+                .map(|r| r.label())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if f.quality.outside {
+        limitations.push(
+            "Structure table: outside its tabulated range, on an edge or a continuation law".into(),
+        );
+    }
+    let mut approximations = vec![fallback::MODEL_ID.to_owned()];
+    // The deep phase detail does not move the boundary column generation
+    // prescribes, which optics and drag read.
+    if layers.iter().any(|l| !l.phase_allocations.is_empty()) {
+        approximations.push(PRESCRIBED_BOUNDARY_MODEL_ID.into());
+    }
     let in_kind = |m: Material, kinds: &[fallback::Kind]| -> f64 {
         f.regions
             .iter()
@@ -457,7 +531,7 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
         model: fallback::MODEL_ID.into(),
         fallback_reason: f.reason.as_ref().map(ToString::to_string),
         model_fidelity: fidelity,
-        model_limitations: strings(&f.notes),
+        model_limitations: limitations,
         physical: PlanetPhysical {
             materials: Material::ALL
                 .into_iter()
@@ -467,7 +541,19 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
                     retained_kg: f.retained.mass_kg(m),
                     escaped_kg: f.escaped.mass_kg(m),
                     interior_kg: in_kind(m, &[K::Core, K::Mantle]),
-                    condensed_kg: in_kind(m, &[K::Water, K::Volatiles, K::Frost]),
+                    condensed_kg: in_kind(
+                        m,
+                        &[
+                            K::Water,
+                            K::Ocean,
+                            K::Ice,
+                            K::DeepIce,
+                            K::HotWater,
+                            K::Coexistence,
+                            K::Volatiles,
+                            K::Frost,
+                        ],
+                    ),
                     gas_kg: in_kind(m, &[K::Envelope, K::Atmosphere]),
                 })
                 .collect(),
@@ -481,7 +567,7 @@ pub fn fallback(f: &Fallback) -> LayeredPlanet {
                 / mass,
             inertia_factor: f.inertia_kg_m2 / (mass * radius.powi(2)),
             radius_reference: f.reference,
-            approximations: vec![fallback::MODEL_ID.into()],
+            approximations,
         },
         surface: f.surface().into(),
         surface_temperature_k: f.surface_temperature_k,

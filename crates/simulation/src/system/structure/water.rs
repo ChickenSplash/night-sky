@@ -151,6 +151,227 @@ impl WaterStructure {
     }
 }
 
+/// The water models the solver uses along one isotherm, and the pressures
+/// where one hands over to the next. Generation walks the same list to place
+/// its phase layers, so both name the same phases.
+pub(crate) struct Isotherm {
+    temperature_k: f64,
+    /// Deepest first. Branch `i` holds from `boundaries[i]` up to
+    /// `boundaries[i - 1]`; the last branch reaches the surface.
+    boundaries: Vec<f64>,
+    branches: Vec<(PhaseKnowledge, &'static str)>,
+}
+
+impl Isotherm {
+    pub(crate) fn new(temperature_k: f64, outer_pressure_pa: f64) -> Result<Self, SolveError> {
+        let deep_boundary = eos::deep_ice::prototype_boundary_pressure_pa(temperature_k).ok();
+        let hot = temperature_k > eos::MAX_TEMPERATURE_K;
+        let cold_path = eos::cold_ice::supports_temperature(temperature_k);
+        // Below the API's 250 K floor the surface model replaces the top Ih branch.
+        let frozen = cold_path && temperature_k < eos::MIN_TEMPERATURE_K;
+        // Below its 1 kPa floor the surface model takes over the top API branch.
+        let thin = !frozen && outer_pressure_pa < eos::MIN_PRESSURE_PA;
+        let subfreezing_path = !cold_path && temperature_k > 251.165 && temperature_k < 273.15;
+        let mut boundaries = Vec::new();
+        let mut branches = Vec::new();
+        let liquid = PhaseKnowledge::Water(eos::Phase::Liquid);
+        let ih = PhaseKnowledge::Water(eos::Phase::IceIh);
+        let effective_ice = PhaseKnowledge::EffectiveHighPressureIce;
+        if hot {
+            boundaries.push(eos::hot::DEEP_BOUNDARY_PA);
+            branches.extend([
+                (effective_ice, eos::deep_ice::WARM_MODEL_ID),
+                (PhaseKnowledge::UnresolvedHotWater, eos::hot::MODEL_ID),
+            ]);
+        } else if cold_path {
+            boundaries.extend([
+                eos::cold_ice::DEEP_BOUNDARY_PA,
+                eos::cold_ice::IH_BOUNDARY_PA,
+                eos::MAX_PRESSURE_PA,
+            ]);
+            branches.extend([
+                (effective_ice, eos::deep_ice::MODEL_ID),
+                (effective_ice, eos::cold_ice::INTERMEDIATE_MODEL_ID),
+                (ih, eos::cold_ice::IH_MODEL_ID),
+                (
+                    ih,
+                    if frozen {
+                        eos::surface::MODEL_ID
+                    } else {
+                        eos::MODEL_ID
+                    },
+                ),
+            ]);
+        } else if subfreezing_path {
+            let low = eos::melting_pressure_ih_pa(temperature_k).map_err(SolveError::Water)?;
+            let high = eos::subfreezing_liquid::high_boundary_pa(temperature_k)
+                .map_err(SolveError::Water)?;
+            boundaries.extend([eos::cold_ice::DEEP_BOUNDARY_PA, high, low]);
+            branches.extend([
+                (effective_ice, eos::deep_ice::MODEL_ID),
+                (effective_ice, eos::cold_ice::INTERMEDIATE_MODEL_ID),
+                (liquid, eos::subfreezing_liquid::MODEL_ID),
+            ]);
+            if low > eos::MAX_PRESSURE_PA {
+                boundaries.push(eos::MAX_PRESSURE_PA);
+                branches.push((ih, eos::cold_ice::IH_MODEL_ID));
+            }
+            branches.push((ih, eos::MODEL_ID));
+        } else {
+            if let Some(p) = deep_boundary {
+                boundaries.push(p);
+                branches.push((
+                    effective_ice,
+                    if temperature_k > 300.0 {
+                        eos::deep_ice::WARM_MODEL_ID
+                    } else {
+                        eos::deep_ice::MODEL_ID
+                    },
+                ));
+            }
+            if temperature_k >= 273.15 && temperature_k.is_finite() {
+                boundaries.push(eos::MAX_PRESSURE_PA);
+                let model = if temperature_k >= eos::dense_liquid::MIN_TEMPERATURE_K {
+                    eos::dense_liquid::MODEL_ID
+                } else {
+                    eos::subfreezing_liquid::MODEL_ID
+                };
+                branches.push((liquid, model));
+            }
+            if let Some(p) = eos::melting_pressure_ih_pa(temperature_k).ok().filter(|p| {
+                temperature_k >= 273.15 && *p >= eos::MIN_PRESSURE_PA && *p <= eos::MAX_PRESSURE_PA
+            }) {
+                boundaries.push(p);
+                branches.push((liquid, eos::MODEL_ID));
+                branches.push((ih, eos::MODEL_ID));
+            } else {
+                let phase = if outer_pressure_pa >= eos::MAX_PRESSURE_PA && temperature_k >= 273.15
+                {
+                    // Used only for the liquid branches. The explicit deep-ice branch
+                    // takes precedence where available; density validation follows below.
+                    eos::Phase::Liquid
+                } else {
+                    eos::phase(outer_pressure_pa.max(eos::MIN_PRESSURE_PA), temperature_k)
+                        .map_err(SolveError::Water)?
+                };
+                // At a coexistence outer boundary, the inward one-sided limit is liquid,
+                // as under a saturated steam column. No zero-mass ice skin, vapour
+                // film or mixture is introduced.
+                let phase = if matches!(
+                    phase,
+                    eos::Phase::IceIhLiquidCoexistence | eos::Phase::LiquidVapourCoexistence
+                ) {
+                    eos::Phase::Liquid
+                } else {
+                    phase
+                };
+                branches.push((PhaseKnowledge::Water(phase), eos::MODEL_ID));
+            }
+        }
+        if thin && !hot {
+            *branches.last_mut().unwrap() = (
+                PhaseKnowledge::Water(eos::surface::phase(temperature_k)),
+                eos::surface::MODEL_ID,
+            );
+        }
+        Ok(Self {
+            temperature_k,
+            boundaries,
+            branches,
+        })
+    }
+
+    pub(crate) fn boundaries(&self) -> &[f64] {
+        &self.boundaries
+    }
+
+    pub(crate) fn branch_at(&self, pressure_pa: f64) -> usize {
+        self.boundaries.partition_point(|p| pressure_pa < *p)
+    }
+
+    pub(crate) fn phase(&self, branch: usize) -> PhaseKnowledge {
+        self.branches[branch].0
+    }
+
+    pub(crate) fn model(&self, branch: usize) -> &'static str {
+        self.branches[branch].1
+    }
+
+    /// One-sided density of `branch`, whatever phase the pressure itself
+    /// would select.
+    pub(crate) fn density_kg_m3(
+        &self,
+        pressure: f64,
+        branch: usize,
+        work: &mut Work,
+        limit: usize,
+    ) -> Result<f64, SolveError> {
+        let model = self.model(branch);
+        if model == eos::hot::MODEL_ID {
+            return eos::hot::density_kg_m3(pressure, self.temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::deep_ice::WARM_MODEL_ID {
+            return eos::deep_ice::warm_density_kg_m3(pressure, self.temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::deep_ice::MODEL_ID {
+            return eos::deep_ice::density_kg_m3(pressure, self.temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if matches!(
+            model,
+            eos::cold_ice::INTERMEDIATE_MODEL_ID | eos::cold_ice::IH_MODEL_ID
+        ) {
+            return eos::cold_ice::density_kg_m3(pressure, self.temperature_k, model)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::subfreezing_liquid::MODEL_ID {
+            return eos::subfreezing_liquid::density_kg_m3(pressure, self.temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::surface::MODEL_ID {
+            return eos::surface::density_kg_m3(pressure, self.temperature_k)
+                .map_err(SolveError::Water);
+        }
+        if model == eos::dense_liquid::MODEL_ID {
+            let result = eos::dense_liquid::liquid_limit_with_budget(
+                pressure,
+                self.temperature_k,
+                limit - work.eos_evaluations,
+            );
+            work.eos_evaluations += match &result {
+                Ok(s) => s.eos_evaluations,
+                Err(e) => e.eos_evaluations,
+            };
+            return result.map(|s| s.state.density_kg_m3).map_err(|e| {
+                if e.reason == eos::dense_liquid::Failure::EvaluationLimit {
+                    SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations)
+                } else {
+                    SolveError::DenseWater(e)
+                }
+            });
+        }
+        let expected = match self.phase(branch) {
+            PhaseKnowledge::Water(p) => p,
+            _ => unreachable!(),
+        };
+        let actual = eos::phase(pressure, self.temperature_k).map_err(SolveError::Water)?;
+        let one_sided = actual == eos::Phase::IceIhLiquidCoexistence
+            || (actual == eos::Phase::LiquidVapourCoexistence && expected == eos::Phase::Liquid);
+        if actual != expected && !one_sided {
+            return Err(SolveError::WaterPhaseCrossing {
+                pressure_pa: pressure,
+                expected,
+                actual,
+            });
+        }
+        Ok(eos::condensed_state(pressure, self.temperature_k, expected)
+            .map_err(SolveError::Water)?
+            .density_kg_m3)
+    }
+}
+
 /// Projection of a unified envelope radial integration, not a second interior
 /// solve. Water uses explicitly unresolved pressure-only effective compression.
 pub(super) fn envelope_interior(
@@ -266,128 +487,10 @@ fn solve_with_volume_factor(
     if !super::in_domain(mass / EARTH_MASS_KG, 0.0001, 20.0) {
         return Err(SolveError::OutsideMassDomain(mass));
     }
-    let deep_boundary = eos::deep_ice::prototype_boundary_pressure_pa(water_temperature_k).ok();
-    let hot = water_temperature_k > eos::MAX_TEMPERATURE_K;
-    let cold_path = eos::cold_ice::supports_temperature(water_temperature_k);
-    // Below the API's 250 K floor the surface model replaces the top Ih branch.
-    let frozen = cold_path && water_temperature_k < eos::MIN_TEMPERATURE_K;
-    // Below its 1 kPa floor the surface model takes over the top API branch.
-    let thin = !frozen && outer_pressure_pa < eos::MIN_PRESSURE_PA;
-    let subfreezing_path =
-        !cold_path && water_temperature_k > 251.165 && water_temperature_k < 273.15;
-    let mut boundaries = Vec::new();
-    let mut branches = Vec::new();
-    let liquid = PhaseKnowledge::Water(eos::Phase::Liquid);
-    let ih = PhaseKnowledge::Water(eos::Phase::IceIh);
-    let effective_ice = PhaseKnowledge::EffectiveHighPressureIce;
-    if hot {
-        boundaries.push(eos::hot::DEEP_BOUNDARY_PA);
-        branches.extend([
-            (effective_ice, eos::deep_ice::WARM_MODEL_ID),
-            (PhaseKnowledge::UnresolvedHotWater, eos::hot::MODEL_ID),
-        ]);
-    } else if cold_path {
-        boundaries.extend([
-            eos::cold_ice::DEEP_BOUNDARY_PA,
-            eos::cold_ice::IH_BOUNDARY_PA,
-            eos::MAX_PRESSURE_PA,
-        ]);
-        branches.extend([
-            (effective_ice, eos::deep_ice::MODEL_ID),
-            (effective_ice, eos::cold_ice::INTERMEDIATE_MODEL_ID),
-            (ih, eos::cold_ice::IH_MODEL_ID),
-            (
-                ih,
-                if frozen {
-                    eos::surface::MODEL_ID
-                } else {
-                    eos::MODEL_ID
-                },
-            ),
-        ]);
-    } else if subfreezing_path {
-        let low = eos::melting_pressure_ih_pa(water_temperature_k).map_err(SolveError::Water)?;
-        let high = eos::subfreezing_liquid::high_boundary_pa(water_temperature_k)
-            .map_err(SolveError::Water)?;
-        boundaries.extend([eos::cold_ice::DEEP_BOUNDARY_PA, high, low]);
-        branches.extend([
-            (effective_ice, eos::deep_ice::MODEL_ID),
-            (effective_ice, eos::cold_ice::INTERMEDIATE_MODEL_ID),
-            (liquid, eos::subfreezing_liquid::MODEL_ID),
-        ]);
-        if low > eos::MAX_PRESSURE_PA {
-            boundaries.push(eos::MAX_PRESSURE_PA);
-            branches.push((ih, eos::cold_ice::IH_MODEL_ID));
-        }
-        branches.push((ih, eos::MODEL_ID));
-    } else {
-        if let Some(p) = deep_boundary {
-            boundaries.push(p);
-            branches.push((
-                effective_ice,
-                if water_temperature_k > 300.0 {
-                    eos::deep_ice::WARM_MODEL_ID
-                } else {
-                    eos::deep_ice::MODEL_ID
-                },
-            ));
-        }
-        if water_temperature_k >= 273.15 && water_temperature_k.is_finite() {
-            boundaries.push(eos::MAX_PRESSURE_PA);
-            let model = if water_temperature_k >= eos::dense_liquid::MIN_TEMPERATURE_K {
-                eos::dense_liquid::MODEL_ID
-            } else {
-                eos::subfreezing_liquid::MODEL_ID
-            };
-            branches.push((liquid, model));
-        }
-        if let Some(p) = eos::melting_pressure_ih_pa(water_temperature_k)
-            .ok()
-            .filter(|p| {
-                water_temperature_k >= 273.15
-                    && *p >= eos::MIN_PRESSURE_PA
-                    && *p <= eos::MAX_PRESSURE_PA
-            })
-        {
-            boundaries.push(p);
-            branches.push((liquid, eos::MODEL_ID));
-            branches.push((ih, eos::MODEL_ID));
-        } else {
-            let phase =
-                if outer_pressure_pa >= eos::MAX_PRESSURE_PA && water_temperature_k >= 273.15 {
-                    // Used only for the liquid branches. The explicit deep-ice branch
-                    // takes precedence where available; density validation follows below.
-                    eos::Phase::Liquid
-                } else {
-                    eos::phase(
-                        outer_pressure_pa.max(eos::MIN_PRESSURE_PA),
-                        water_temperature_k,
-                    )
-                    .map_err(SolveError::Water)?
-                };
-            // At a coexistence outer boundary, the inward one-sided limit is liquid,
-            // as under a saturated steam column. No zero-mass ice skin, vapour
-            // film or mixture is introduced.
-            let phase = if matches!(
-                phase,
-                eos::Phase::IceIhLiquidCoexistence | eos::Phase::LiquidVapourCoexistence
-            ) {
-                eos::Phase::Liquid
-            } else {
-                phase
-            };
-            branches.push((PhaseKnowledge::Water(phase), eos::MODEL_ID));
-        }
-    }
-    if thin && !hot {
-        *branches.last_mut().unwrap() = (
-            PhaseKnowledge::Water(eos::surface::phase(water_temperature_k)),
-            eos::surface::MODEL_ID,
-        );
-    }
-    let branch_at = |pressure: f64| boundaries.partition_point(|p| pressure < *p);
-    let branch_phase = |branch: usize| branches[branch].0;
-    let branch_model = |branch: usize| branches[branch].1;
+    let isotherm = Isotherm::new(water_temperature_k, outer_pressure_pa)?;
+    let branch_at = |pressure: f64| isotherm.branch_at(pressure);
+    let branch_phase = |branch: usize| isotherm.phase(branch);
+    let branch_model = |branch: usize| isotherm.model(branch);
     let density = |material, pressure, side, work: &mut Work, limit| {
         if material != Material::Water {
             return cold::density_kg_m3(material, pressure).map_err(SolveError::Eos);
@@ -396,71 +499,7 @@ fn solve_with_volume_factor(
             radial::DensitySide::Branch(i) => i,
             radial::DensitySide::Equilibrium => branch_at(pressure),
         };
-        let model = branch_model(branch);
-        if model == eos::hot::MODEL_ID {
-            return eos::hot::density_kg_m3(pressure, water_temperature_k)
-                .map_err(SolveError::Water);
-        }
-        if model == eos::deep_ice::WARM_MODEL_ID {
-            return eos::deep_ice::warm_density_kg_m3(pressure, water_temperature_k)
-                .map_err(SolveError::Water);
-        }
-        if model == eos::deep_ice::MODEL_ID {
-            return eos::deep_ice::density_kg_m3(pressure, water_temperature_k)
-                .map_err(SolveError::Water);
-        }
-        if matches!(
-            model,
-            eos::cold_ice::INTERMEDIATE_MODEL_ID | eos::cold_ice::IH_MODEL_ID
-        ) {
-            return eos::cold_ice::density_kg_m3(pressure, water_temperature_k, model)
-                .map_err(SolveError::Water);
-        }
-        if model == eos::subfreezing_liquid::MODEL_ID {
-            return eos::subfreezing_liquid::density_kg_m3(pressure, water_temperature_k)
-                .map_err(SolveError::Water);
-        }
-        if model == eos::surface::MODEL_ID {
-            return eos::surface::density_kg_m3(pressure, water_temperature_k)
-                .map_err(SolveError::Water);
-        }
-        if model == eos::dense_liquid::MODEL_ID {
-            let result = eos::dense_liquid::liquid_limit_with_budget(
-                pressure,
-                water_temperature_k,
-                limit - work.eos_evaluations,
-            );
-            work.eos_evaluations += match &result {
-                Ok(s) => s.eos_evaluations,
-                Err(e) => e.eos_evaluations,
-            };
-            return result.map(|s| s.state.density_kg_m3).map_err(|e| {
-                if e.reason == eos::dense_liquid::Failure::EvaluationLimit {
-                    SolveError::WorkBudgetExhausted(WorkLimit::EosEvaluations)
-                } else {
-                    SolveError::DenseWater(e)
-                }
-            });
-        }
-        let expected = match branch_phase(branch) {
-            PhaseKnowledge::Water(p) => p,
-            _ => unreachable!(),
-        };
-        let actual = eos::phase(pressure, water_temperature_k).map_err(SolveError::Water)?;
-        let one_sided = actual == eos::Phase::IceIhLiquidCoexistence
-            || (actual == eos::Phase::LiquidVapourCoexistence && expected == eos::Phase::Liquid);
-        if actual != expected && !one_sided {
-            return Err(SolveError::WaterPhaseCrossing {
-                pressure_pa: pressure,
-                expected,
-                actual,
-            });
-        }
-        Ok(
-            eos::condensed_state(pressure, water_temperature_k, expected)
-                .map_err(SolveError::Water)?
-                .density_kg_m3,
-        )
+        isotherm.density_kg_m3(pressure, branch, work, limit)
     };
     // All parcel mass gravitates and displaces volume during integration. The
     // audit-only factor changes density, not host masks, event pressures or work.
@@ -488,7 +527,8 @@ fn solve_with_volume_factor(
         // Absolute pressure error scale, including the refractory interior.
         // Do not let a large central pressure weaken shallow-shell accuracy.
         pressure_error_scale_pa: Some(eos::MAX_PRESSURE_PA),
-        interfaces: boundaries
+        interfaces: isotherm
+            .boundaries
             .iter()
             .map(|p| radial::PressureInterface {
                 material: Material::Water,
